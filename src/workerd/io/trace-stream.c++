@@ -1,5 +1,4 @@
 #include <workerd/api/global-scope.h>
-#include <workerd/api/trace.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-interface.h>
@@ -84,6 +83,7 @@ namespace {
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
+  V(TRIGGER, "trigger")                                                                            \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
@@ -378,12 +378,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     obj.set(js, SCRIPTVERSION_STR, vobj);
   }
 
-  // TODO(o11y): Provide top-level span ID.
-  /*if (isPredictableModeForTest()) {
-    obj.set(js, SPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
-  } else {
-    obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
-  }*/
+  KJ_IF_SOME(trigger, onset.trigger) {
+    auto tobj = js.obj();
+    tobj.set(js, TRACEID_STR, js.str(trigger.traceId.toGoString()));
+    tobj.set(js, INVOCATIONID_STR, js.str(trigger.invocationId.toGoString()));
+    tobj.set(js, SPANID_STR, js.str(trigger.spanId.toGoString()));
+    obj.set(js, TRIGGER_STR, tobj);
+  }
 
   KJ_SWITCH_ONEOF(onset.info) {
     KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
@@ -630,22 +631,23 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   return kj::none;
 }
 
-kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events, bool isST) {
-  // TODO: It is trivial to splice events into multiple traces as needed in the next step.
-  // => might not be needed, each tracer only maps to one trace.
-  kj::Vector<kj::Own<Trace>> traces;
+// Given a list of trace events, creates a single trace object that combines all the data from the
+// events.
+kj::Own<Trace> assembleTrace(kj::Vector<tracing::TailEvent>& events, bool isSpanTracing) {
+  // Trace object. Will be non-null after onset event.
+  kj::Maybe<kj::Own<Trace>> t;
 
   for (auto& event: events) {
     KJ_SWITCH_ONEOF(event.event) {
       KJ_CASE_ONEOF(onset, tracing::Onset) {
         KJ_SWITCH_ONEOF(onset.info) {
-          KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {}
+          KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+            //TODO: Set trace.url, after checking if size limit is exceeded.
+          }
           KJ_CASE_ONEOF_DEFAULT {}
         }
-        //auto& info = onset.info;
-        auto& workerInfo = onset.workerInfo;
-        //trace->eventTimestamp = event.timestamp;
 
+        auto& workerInfo = onset.workerInfo;
         kj::Array<kj::String> scriptTags = nullptr;
         KJ_IF_SOME(sc, workerInfo.scriptTags) {
           scriptTags = kj::mv(sc);
@@ -658,139 +660,113 @@ kj::Array<kj::Own<Trace>> assembleTraces(kj::Vector<tracing::TailEvent>& events,
         trace->eventInfo = kj::mv(onset.info);
 
         trace->eventTimestamp = event.timestamp;
-        traces.add(kj::mv(trace));
+        t = kj::mv(trace);
       }
       KJ_CASE_ONEOF(log, tracing::Log) {
-
-        if (traces[0]->exceededLogLimit) {
+        auto& trace = KJ_ASSERT_NONNULL(t);
+        if (trace->exceededLogLimit) {
           continue;
         }
         constexpr kj::LiteralStringConst logSizeExceeded =
             "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
 
-/*if (pipelineLogLevel == PipelineLogLevel::NONE) {
-          continue;
-        }*/
 #define MAX_TRACE_BYTES (128 * 1024)
-        size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Log) + log.message.size();
+        size_t newSize = trace->bytesUsed + sizeof(tracing::Log) + log.message.size();
         if (newSize > MAX_TRACE_BYTES) {
-          traces[0]->exceededLogLimit = true;
-          traces[0]->truncated = true;
+          trace->exceededLogLimit = true;
+          trace->truncated = true;
           // We use a JSON encoded array/string to match other console.log() recordings:
-          traces[0]->logs.add(log.timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
+          trace->logs.add(log.timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
           continue;
         }
-        traces[0]->bytesUsed = newSize;
+        trace->bytesUsed = newSize;
 
-        traces[0]->logs.add(log.clone());
+        trace->logs.add(kj::mv(log));
       }
       KJ_CASE_ONEOF(exception, tracing::Exception) {
-        if (traces[0]->exceededExceptionLimit) {
+        auto& trace = KJ_ASSERT_NONNULL(t);
+        if (trace->exceededExceptionLimit) {
           continue;
         }
-        size_t newSize = traces[0]->bytesUsed + sizeof(tracing::Exception) + exception.name.size() +
+        size_t newSize = trace->bytesUsed + sizeof(tracing::Exception) + exception.name.size() +
             exception.message.size();
         KJ_IF_SOME(s, exception.stack) {
           newSize += s.size();
         }
         if (newSize > MAX_TRACE_BYTES) {
-          traces[0]->exceededExceptionLimit = true;
-          traces[0]->truncated = true;
-          traces[0]->exceptions.add(exception.timestamp, kj::str("Error"),
+          trace->exceededExceptionLimit = true;
+          trace->truncated = true;
+          trace->exceptions.add(exception.timestamp, kj::str("Error"),
               kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."),
               kj::none);
           continue;
         }
-        traces[0]->exceptions.add(exception.clone());
+        trace->exceptions.add(kj::mv(exception));
       }
       KJ_CASE_ONEOF(diag, tracing::DiagnosticChannelEvent) {
-        traces[0]->diagnosticChannelEvents.add(diag.clone());
+        auto& trace = KJ_ASSERT_NONNULL(t);
+        trace->diagnosticChannelEvents.add(kj::mv(diag));
       }
       KJ_CASE_ONEOF(r, tracing::Return) {
+        auto& trace = KJ_ASSERT_NONNULL(t);
         KJ_IF_SOME(info, r.info) {
-          traces[0]->fetchResponseInfo = kj::mv(info);
+          trace->fetchResponseInfo = kj::mv(info);
         }
       }
       KJ_CASE_ONEOF(r, Link) {}
-      KJ_CASE_ONEOF(r, tracing::CustomInfo) {
-        // array of span tags
-        // TODO: Apply these to the right span, not whatever the latest span is.
-        auto& trace = traces[0];
-        for (auto& tag: r) {
-          // TODO: Synthesize top-level worker span?
-          auto keyPtr = tag.name.asPtr();
-          trace->spans[trace->spans.size() - 1].tags.upsert(kj::ConstString(kj::str(tag.name)),
-              kj::mv(tag.value[0]),
-              [keyPtr](Span::TagValue& existingValue, Span::TagValue&& newValue) {
-            // This is a programming error, but not a serious one. We could alternatively just emit
-            // duplicate tags and leave the Jaeger UI in charge of warning about them.
-            [[maybe_unused]] static auto logged = [keyPtr]() {
-              KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
-              return true;
-            }();
-            existingValue = kj::mv(newValue);
-          });
-        }
-      }
       KJ_CASE_ONEOF(outcome, tracing::Outcome) {
-        traces[0]->outcome = outcome.outcome;
-        // TODO: Should we synthesize a worker span or try to make it accessible instead?
+        auto& trace = KJ_ASSERT_NONNULL(t);
+        trace->outcome = outcome.outcome;
+        // TODO
+        // trace->cpuTime = outcome.cpuTime;
+        // trace->wallTime = outcome.wallTime;
       }
-      // TODO: Handle remaining event types.
       KJ_CASE_ONEOF(outcome, tracing::Hibernate) {}
-      KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
-        auto& trace = traces[0];
-        //CompleteSpan a(kj::ConstString(kj::str(spanOpen.operationName)), event.timestamp);
-        CompleteSpan a(kj::ConstString(kj::str(spanOpen.operationName)), kj::UNIX_EPOCH);
-        a.spanId = event.spanId;
-        // TODO: Provide parent span ID.
-        a.parentSpanId = event.spanId;
-        trace->spans.add(kj::mv(a));
-      }
+      // Spans are delivered via CompleteSpan instead of (SpanOpen|CustomInfo|SpanClose) so far.
+      KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {}
       KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {}
+      KJ_CASE_ONEOF(attributes, tracing::CustomInfo) {}
       KJ_CASE_ONEOF(span, CompleteSpan) {
-        auto& trace = traces[0];
+        auto& trace = KJ_ASSERT_NONNULL(t);
         trace->spans.add(kj::mv(span));
       }
     }
   }
-  if (isST) {
+  if (isSpanTracing) {
     // Span tracing is enabled. Need to synthesize top-level worker span.
-    auto& trace = traces[0];
-    CompleteSpan a(kj::ConstString("worker"_kjc), kj::UNIX_EPOCH);
-    a.spanId = 0x2a2a2a2a2a2a2a2a;
-    a.parentSpanId = 0;
-    a.tags.upsert(kj::ConstString("colo_id"_kjc), kj::str("xyz01"));
-    a.tags.upsert(kj::ConstString("faas.invoked_region"_kjc), kj::str(""_kj));
+    // TODO: Get rid of this and update tests accordingly, worker span is mostly relevant for user
+    // tracing within LTW model which will not be supported anymore.
+    auto& trace = KJ_ASSERT_NONNULL(t);
+    CompleteSpan s("worker"_kjc, kj::UNIX_EPOCH);
+    s.spanId = 0x2a2a2a2a2a2a2a2a;
+    s.parentSpanId = 0;
+    s.tags.upsert("colo_id"_kjc, kj::str("xyz01"));
+    s.tags.upsert("faas.invoked_region"_kjc, kj::str(""_kj));
 
     KJ_IF_SOME(scriptId, trace->scriptId) {
-      a.tags.upsert(kj::ConstString("script_id"_kjc), kj::str(scriptId));
+      s.tags.upsert("script_id"_kjc, kj::str(scriptId));
     }
-    a.tags.upsert(kj::ConstString("ownerId"_kjc), kj::str(1212));
-    a.tags.upsert(kj::ConstString("zoneId"_kjc), kj::str("test-zone"));
-    //a.tags.upsert(kj::ConstString("deployment_Id"_kjc), kj::str(scriptId));
+    s.tags.upsert("ownerId"_kjc, kj::str(1212));
+    s.tags.upsert("zoneId"_kjc, kj::str("test-zone"));
     KJ_IF_SOME(stableId, trace->stableId) {
-      a.tags.upsert(kj::ConstString("stable_Id"_kjc), kj::str(stableId));
+      s.tags.upsert("stable_Id"_kjc, kj::str(stableId));
     }
-    trace->spans.add(kj::mv(a));
+    trace->spans.add(kj::mv(s));
   }
 
-  return traces.releaseAsArray();
+  return kj::mv(KJ_ASSERT_NONNULL(t));
 }
 
 class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
   TailStreamTarget(IoContext& ioContext,
       Frankenvalue props,
-      bool isFirst,
-      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller,
-      kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer)
+      bool isLegacyStream,
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : weakIoContext(ioContext.getWeakRef()),
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)),
-        pipelineTracer(kj::mv(pipelineTracer)),
-        isFirst(isFirst) {
-  }
+        isLegacyStream(isLegacyStream) {}
 
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
@@ -826,14 +802,28 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         event.timestamp = ioContext.now();
       }
 
-      // Make tracer no-op if it turns out it is not needed.
+      // Make tracer no-op if it turns out it we are using STW and it is not needed.
       // Only one pseudo-LTW is needed, move this out
-      if ((isLegacy && (pipelineTracer == kj::none)) ||
-          // First tracer, but using STW
-          // TODO: This really needs to check if all tracers are STW, only then should we actually shut this down.
-          (!isLegacy && isFirst)) {
+      if (isLegacy && !isLegacyStream) {
         rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
-        this->pipelineTracer = kj::none;
+        results.setStop(true);
+        doneFulfiller->fulfill();
+        return kj::READY_NOW;
+      }
+      // TODO(perf): If we know that all tail workers are STW, we could shut down the legacy stream
+      // entirely. Additionally, if we know that there is just a single tail worker set up, we could
+      // opt to only create a single stream which will be legacy/streaming.
+
+      // The first tracer always functions as pseudo-STW. It is not based on any actual worker, but
+      // since it is constructed using a stage taken from the logging parameter which might happen
+      // to be a STW, we still need it to function as legacy.
+      if (!isLegacy && isLegacyStream) {
+        isLegacy = true;
+      }
+
+      // STW even though STW support is not enabled, shut down the event.
+      if (!isLegacy && !util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKER)) {
+        rpc::TailStreamTarget::TailStreamResults::Builder results = reportContext.initResults();
         results.setStop(true);
         doneFulfiller->fulfill();
         return kj::READY_NOW;
@@ -842,8 +832,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
       // We will only dispatch the remaining events if a handler is returned.
-      //KJ_LOG(WARNING, "got event", events[0].event.is<tracing::Onset>(),
-      //    events[0].event.is<tracing::Outcome>(), isLegacy, events.size());
       auto result = ([&]() -> kj::Promise<void> {
         if (isLegacy) {
           return handleLegacy(
@@ -895,27 +883,20 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       IoContext& ioContext,
       kj::ArrayPtr<tracing::TailEvent> events,
       rpc::TailStreamTarget::TailStreamResults::Builder results) {
-    // TODO: Keep track of trace size. If it surpasses the maximum, return stop to the incoming
-    // stream (or a different signal to indicate no more data that would increase trace size should
-    // be sent)
-    bool isOutcome = events[events.size() - 1].event.is<tracing::Outcome>();
+    // TODO(perf): Keep track of trace size. If it surpasses the maximum, return stop to the
+    // incoming stream (or a different signal to indicate no more data that would increase trace
+    // size should be sent)
+    bool isOutcome = events.back().event.is<tracing::Outcome>();
     for (auto& event: events) {
       this->events.add(kj::mv(event));
     }
     if (isOutcome) {
-      kj::Array<kj::Own<Trace>> assembledTraces = assembleTraces(this->events,
+      kj::Own<Trace> assembledTrace = assembleTrace(this->events,
           lock.getWorker().getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans());
-      auto& pipelineTracer = KJ_ASSERT_NONNULL(this->pipelineTracer);
-
-      pipelineTracer->addTracesFromChild(assembledTraces, 1);
-      this->pipelineTracer = kj::none;
+      assembledTrace->copyTo(results.getCompletedTrace());
       results.setStop(true);
       doneFulfiller->fulfill();
-      return kj::READY_NOW;
     }
-    // TODO: An alternative approach could try to not create a separate WorkerInterface/custom
-    // event for the LTW, but instead call the equivalent of lock.getGlobalScope().sendTraces(traces, lock, handler)
-    // here to dispatch traces.
     return kj::READY_NOW;
   }
   // Handles the very first (onset) event in the tail stream. This will cause
@@ -1153,8 +1134,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // onset event.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
 
-  kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer;
-  bool isFirst;
+  bool isLegacyStream;
   kj::Vector<tracing::TailEvent> events;
 };
 }  // namespace
@@ -1169,9 +1149,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
 
   bool isLegacy =
       !ioContext.getWorker().getIsolate().getApi().getFeatureFlags().getStreamingTailWorker();
-  // Do not trace when only using the streaming tail event to transmit events to the legacy handler
-  // instead of as a handler on its own.
-  if (!isLegacy) {
+  // Do not trace when only using the tail stream to transmit events to the legacy handler instead
+  // of as a handler on its own.
+  if (!isLegacy && util::Autogate::isEnabled(util::AutogateKey::STREAMING_TAIL_WORKER)) {
     KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
       t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
           TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
@@ -1179,8 +1159,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   }
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(props), isFirst, kj::mv(doneFulfiller), kj::mv(pipelineTracer)));
+  capFulfiller->fulfill(
+      kj::heap<TailStreamTarget>(ioContext, kj::mv(props), isLegacyStream, kj::mv(doneFulfiller)));
 
   // What is happening here? I'm glad you asked! When this method is called we are
   // starting a tail stream session. Our TailStreamTarget created above is an RPC
@@ -1218,6 +1198,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   });
 
   auto req = dispatcher.tailStreamSessionRequest();
+  req.setIsLegacyStream(isLegacyStream);
   auto sent = req.send();
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();
@@ -1310,8 +1291,15 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
     onsetEvent.copyTo(eventsBuilder[0]);
     auto result = co_await builder.send();
     if (result.getStop()) {
-      // If our call to send returns a stop signal, then we'll clear
-      // the capability and be done.
+      // If our call to send returns a stop signal, then we'll clear the capability and be done. For
+      // the LTW case, we'll receive a trace and submit it.
+      if (result.hasCompletedTrace()) {
+        auto& p = KJ_ASSERT_NONNULL(pipelineTracer);
+        auto traces = kj::arr(kj::refcounted<Trace>(result.getCompletedTrace()));
+        p->addTracesFromChild(kj::mv(traces), 1);
+        pipelineTracer = kj::none;
+      }
+
       current->queue.clear();
       current->capability = kj::none;
       co_return;
@@ -1341,6 +1329,12 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
     // been added to the queue or exit this loop if there are no additional
     // events waiting to be sent.
     if (result.getStop()) {
+      if (result.hasCompletedTrace()) {
+        auto& p = KJ_ASSERT_NONNULL(pipelineTracer);
+        auto traces = kj::arr(kj::refcounted<Trace>(result.getCompletedTrace()));
+        p->addTracesFromChild(kj::mv(traces), 1);
+        pipelineTracer = kj::none;
+      }
       current->queue.clear();
       current->capability = kj::none;
       co_return;
@@ -1352,22 +1346,23 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
 // to that collection of tail workers.
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> tailWorkers,
-    bool isProcessSandbox,
+    bool hasLegacyStream,
     kj::TaskSet& waitUntilTasks,
-    kj::Maybe<kj::Rc<PipelineTracer>> pipelineTracer) {
+    kj::Rc<PipelineTracer> pipelineTracer) {
   if (tailWorkers.size() == 0) {
     return kj::none;
   }
 
-  auto state = kj::heap<TailStreamWriterState>(kj::mv(tailWorkers), waitUntilTasks);
+  auto state =
+      kj::heap<TailStreamWriterState>(kj::mv(tailWorkers), waitUntilTasks, kj::mv(pipelineTracer));
 
-  return kj::heap<tracing::TailStreamWriter>(
+  return kj::refcounted<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lambda holds a bare
       // reference while the instance is attached to the kj::Own below.
-      [&state = *state, &waitUntilTasks, isProcessSandbox, pipelineTracer = kj::mv(pipelineTracer)](
-          tracing::TailEvent&& event) mutable {
+      [&state = *state, hasLegacyStream = hasLegacyStream, &waitUntilTasks](
+          TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state.inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received either
@@ -1383,13 +1378,11 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
         // Transitions into the active state by grabbing the pending client capability.
 
-        // The first tail worker is special: If there are LTWs, it acts as the pseudo-STW for all of them.
-        // To play that role, it gets the pipelineTracer.
-        int isFirst = !isProcessSandbox;
+        // The first tail worker will be configured as a legacy stream (and not actually map to a
+        // STW, providiing tail events to any LTWs. This is only used if hasLegacyStream is set.
         state.inner = KJ_MAP(wi, pending) {
-          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>(
-              isFirst, isFirst ? mapAddRef(pipelineTracer) : kj::none);
-          isFirst = 0;
+          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>(hasLegacyStream);
+          hasLegacyStream = false;
           auto result = customEvent->getCap();
           auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
 
@@ -1401,8 +1394,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
                                  .ignoreResult());
           return active;
         };
-        // Relinquish copy of pipelineTracer.
-        pipelineTracer = kj::none;
 
         // At this point our writer state is "active", which means the state
         // consists of one or more streaming tail worker client stubs to which
@@ -1429,8 +1420,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     // acquire the timestamps used in the tail stream events. Ideally this will
     // use the same timesource that backs `IoContext::now()` and includes the
     // same spectre mitigations.
-    // TODO: +1 to get test to pass
-    return kj::UNIX_EPOCH + kj::SECONDS;
+    return kj::UNIX_EPOCH;
   }).attach(kj::mv(state));
 }
 

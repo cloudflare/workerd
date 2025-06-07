@@ -90,6 +90,12 @@ interface ScriptVersion {
   readonly message?: string;
 }
 
+interface Trigger {
+  readonly traceId: string;
+  readonly invocationId: string;
+  readonly spanId: string;
+}
+
 interface Onset {
   readonly type: "onset";
   readonly dispatchNamespace?: string;
@@ -98,6 +104,7 @@ interface Onset {
   readonly scriptName?: string;
   readonly scriptTags?: string[];
   readonly scriptVersion?: ScriptVersion;
+  readonly trigger?: Trigger;
   readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
                  AlarmEventInfo | QueueEventInfo | EmailEventInfo |
                  TraceEventInfo | HibernatableWebSocketEventInfo |

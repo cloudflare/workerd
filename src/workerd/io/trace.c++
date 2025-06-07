@@ -1171,7 +1171,13 @@ kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& r
   }
   return kj::none;
 }
-
+kj::Maybe<tracing::Onset::TriggerContext> getTriggerContextFromReader(
+    const rpc::Trace::Onset::Reader& reader) {
+  if (!reader.hasTrigger()) return kj::none;
+  auto trigger = reader.getTrigger();
+  return tracing::Onset::TriggerContext(tracing::TraceId::fromCapnp(trigger.getTraceId()),
+      tracing::TraceId::fromCapnp(trigger.getInvocationId()), tracing::SpanId(trigger.getSpanId()));
+}
 tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
   return tracing::Onset::WorkerInfo{
     .executionModel = reader.getExecutionModel(),
@@ -1185,16 +1191,17 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
 }
 }  // namespace
 
-tracing::Onset::Onset(
-    tracing::Onset::Info&& info, tracing::Onset::WorkerInfo&& workerInfo, SpanId spanId)
+tracing::Onset::Onset(tracing::Onset::Info&& info,
+    tracing::Onset::WorkerInfo&& workerInfo,
+    kj::Maybe<TriggerContext> maybeTrigger)
     : info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
-      spanId(spanId) {}
+      trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
     : info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
-      spanId(reader.getSpanId()) {}
+      trigger(getTriggerContextFromReader(reader)) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   builder.setExecutionModel(workerInfo.executionModel);
@@ -1219,7 +1226,12 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   KJ_IF_SOME(e, workerInfo.entrypoint) {
     builder.setEntryPoint(e);
   }
-  builder.setSpanId(spanId);
+  KJ_IF_SOME(t, trigger) {
+    auto ctx = builder.initTrigger();
+    t.traceId.toCapnp(ctx.initTraceId());
+    t.invocationId.toCapnp(ctx.getInvocationId());
+    ctx.setSpanId(t.spanId.getId());
+  }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
 }
@@ -1274,7 +1286,9 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
 }
 
 tracing::Onset tracing::Onset::clone() const {
-  return Onset(cloneEventInfo(info), workerInfo.clone(), spanId);
+  return Onset(cloneEventInfo(info), workerInfo.clone(), trigger.map([](const TriggerContext& ctx) {
+    return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
+  }));
 }
 
 tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)

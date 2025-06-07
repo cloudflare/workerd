@@ -484,8 +484,7 @@ KJ_TEST("Read/Write Onset works") {
       {
         .scriptName = kj::str("foo"),
       },
-      //TODO
-      SpanId((uint64_t)0x2a));
+      tracing::Onset::TriggerContext(trigger));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -495,8 +494,11 @@ KJ_TEST("Read/Write Onset works") {
   KJ_ASSERT(fetchInfo2.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo2.url == "https://example.com"_kj);
   KJ_ASSERT(info2.workerInfo.executionModel == ExecutionModel::STATELESS);
-  // TODO
-  KJ_ASSERT(SpanId((uint64_t)0x2a) == info2.spanId);
+
+  auto& triggerCtx = KJ_ASSERT_NONNULL(info2.trigger);
+  KJ_ASSERT(triggerCtx.traceId == trigger.getTraceId());
+  KJ_ASSERT(triggerCtx.invocationId == trigger.getInvocationId());
+  KJ_ASSERT(triggerCtx.spanId == trigger.getSpanId());
 
   tracing::Onset info3 = info.clone();
   tracing::FetchEventInfo& fetchInfo3 =

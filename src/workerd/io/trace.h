@@ -717,7 +717,22 @@ struct Onset final {
     WorkerInfo clone() const;
   };
 
-  explicit Onset(Info&& info, WorkerInfo&& workerInfo, SpanId spanId);
+  struct TriggerContext final {
+    TraceId traceId;
+    TraceId invocationId;
+    SpanId spanId;
+
+    TriggerContext(TraceId traceId, TraceId invocationId, SpanId spanId)
+        : traceId(kj::mv(traceId)),
+          invocationId(kj::mv(invocationId)),
+          spanId(kj::mv(spanId)) {}
+
+    TriggerContext(const InvocationSpanContext& ctx)
+        : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
+  };
+
+  explicit Onset(
+      Info&& info, WorkerInfo&& workerInfo, kj::Maybe<TriggerContext> maybeTrigger = kj::none);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
@@ -726,7 +741,7 @@ struct Onset final {
 
   Info info;
   WorkerInfo workerInfo;
-  SpanId spanId;
+  kj::Maybe<TriggerContext> trigger;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;

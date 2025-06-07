@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
+class TailStreamWriter final: public kj::Refcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -70,8 +70,7 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
-      bool isProcessSandbox);
+      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
 
   // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
   // to the host where tracing was initiated.
@@ -81,9 +80,12 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces, bool isLevel = false);
 
+  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
+
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 
   friend class WorkerTracer;
 };
@@ -187,7 +189,6 @@ class WorkerTracer: public BaseTracer {
 
   // own an instance of the pipeline to make sure it doesn't get destroyed
   // before we're finished tracing
-  // TODO: Do we need this?
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
