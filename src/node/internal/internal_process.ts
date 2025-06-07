@@ -366,7 +366,6 @@ interface Process extends EventEmitter {
   execArgv: typeof execArgv;
   arch: typeof arch;
   platform: typeof platform;
-  release: typeof release;
   config: typeof config;
   pid: typeof pid;
   ppid: typeof ppid;
@@ -393,7 +392,6 @@ const process = {
   execArgv,
   arch,
   platform,
-  release,
   config,
   pid,
   ppid,

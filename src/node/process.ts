@@ -14,7 +14,6 @@ export {
   execArgv,
   arch,
   platform,
-  release,
   config,
   pid,
   ppid,
