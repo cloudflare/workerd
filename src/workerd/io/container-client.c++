@@ -19,7 +19,7 @@
 namespace workerd::io {
 
 template <typename T>
-typename T::Builder decodeJsonResponse(kj::String response) {
+typename T::Builder decodeJsonResponse(kj::StringPtr response) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<T>();
   capnp::MallocMessageBuilder message;
@@ -92,20 +92,13 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 
 kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(
     kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body) {
-  kj::HttpHeaderTable::Builder builder;
-  const auto userAgent = builder.add("User-Agent");
-  const auto accept = builder.add("Accept");
-  const auto contentType = builder.add("Content-Type");
-  const auto contentLength = builder.add("Content-Length");
-  auto headerTable = builder.build();
-  kj::HttpHeaders headers(*headerTable);
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
   headers.set(kj::HttpHeaderId::HOST, "localhost");
-  headers.set(userAgent, "workerd/1.0");
-  headers.set(accept, "*/*");
 
   KJ_IF_SOME(requestBody, body) {
-    headers.set(contentType, "application/json");
-    headers.set(contentLength, kj::str(requestBody.size()));
+    headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
 
     auto req = httpClient->request(method, endpoint, headers, requestBody.size());
     {
@@ -136,8 +129,7 @@ kj::Promise<kj::Tuple<bool, kj::HashMap<uint16_t, uint16_t>>> ContainerClient::i
   }
   JSG_REQUIRE(response.statusCode == 200, Error, "Container inspect failed");
   // Parse JSON response
-  auto jsonRoot =
-      decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(kj::mv(response.body));
+  auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerInspectResponse>(response.body);
   kj::HashMap<uint16_t, uint16_t> portMappings;
   for (auto portMapping: jsonRoot.getNetworkSettings().getPorts().getObject()) {
     auto port = portMapping.getName();
@@ -283,8 +275,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     JSG_REQUIRE(response.statusCode == 200, Error,
         "Monitoring container failed with: ", response.statusCode, response.body);
     // Parse JSON response
-    auto jsonRoot =
-        decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(kj::mv(response.body));
+    auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
     JSG_REQUIRE(
         statusCode == 0, Error, "Container exited with unexpected exit code ", kj::str(statusCode));
