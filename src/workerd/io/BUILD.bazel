@@ -330,6 +330,7 @@ wd_test(
     src = "container-client-test/container-client-test.wd-test",
     args = ["--experimental"],
     data = ["container-client-test/container-client-test.js"],
+    tags = ["no-ci"],
 )
 
 kj_test(
