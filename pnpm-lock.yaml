@@ -5,9 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  capnp-es:
-    hash: 2d54c5cd0c32a86ea84f3afe41379c2131ddab9c292b6d2c643edf010a239dc2
-    path: patches/capnp-es.patch
+  capnp-es@0.0.11:
+    hash: b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172
+    path: patches/capnp-es@0.0.11.patch
 
 importers:
 
@@ -30,8 +30,8 @@ importers:
         specifier: ^22.15.3
         version: 22.15.3
       capnp-es:
-        specifier: ^0.0.9
-        version: 0.0.9(patch_hash=2d54c5cd0c32a86ea84f3afe41379c2131ddab9c292b6d2c643edf010a239dc2)(typescript@5.8.3)
+        specifier: ^0.0.11
+        version: 0.0.11(patch_hash=b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172)(typescript@5.8.3)
       chrome-remote-interface:
         specifier: ^0.33.3
         version: 0.33.3
@@ -369,8 +369,8 @@ packages:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
     engines: {node: '>=6'}
 
-  capnp-es@0.0.9:
-    resolution: {integrity: sha512-7koFtiNT/JfNcEapwb+4vFrbr0uzTityZ0Gnmt1G0kGE8agq31pIalw+vc0lYvMCEdBuBBLpxSs94AdqF4n/cw==}
+  capnp-es@0.0.11:
+    resolution: {integrity: sha512-/M2sGcTIjA2UQC6mnqidCUcfGdVmXGV8DDmNRXMU0ZdiK7TmALjxzJwlLc0UQb/YNy3/xu5OgKktLede69fsnw==}
     hasBin: true
     peerDependencies:
       typescript: ^5.7.3
@@ -1005,7 +1005,7 @@ snapshots:
 
   callsites@3.1.0: {}
 
-  capnp-es@0.0.9(patch_hash=2d54c5cd0c32a86ea84f3afe41379c2131ddab9c292b6d2c643edf010a239dc2)(typescript@5.8.3):
+  capnp-es@0.0.11(patch_hash=b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172)(typescript@5.8.3):
     optionalDependencies:
       typescript: 5.8.3
 

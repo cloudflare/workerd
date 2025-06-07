@@ -13,7 +13,7 @@
     "@eslint/js": "^9.25.1",
     "@types/debug": "^4.1.12",
     "@types/node": "^22.15.3",
-    "capnp-es": "^0.0.9",
+    "capnp-es": "^0.0.11",
     "chrome-remote-interface": "^0.33.3",
     "esbuild": "^0.25.3",
     "eslint": "^9.25.1",
@@ -25,7 +25,7 @@
       "esbuild"
     ],
     "patchedDependencies": {
-      "capnp-es": "patches/capnp-es.patch"
+      "capnp-es@0.0.11": "patches/capnp-es@0.0.11.patch"
     }
   },
   "packageManager": "pnpm@10.10.0"
