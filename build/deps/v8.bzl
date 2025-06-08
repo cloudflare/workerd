@@ -29,6 +29,8 @@ PATCHES = [
     "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
     "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
     "0023-Add-more-sandbox-APIs.patch",
+    "0024-bazel-Port-concurrent-mksnapshot-support.patch",
+    "0025-bazel-Port-V8_USE_ZLIB-support.patch",
 ]
 
 # V8 and its dependencies
