@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 8 Jun 2025 15:55:56 -0400
+Subject: Add dummy MODULE.bazel
+
+
+diff --git a/MODULE.bazel b/MODULE.bazel
+new file mode 100644
+index 0000000000000000000000000000000000000000..3611da399064ef179d4924a67c3bbdda5a765d15
+--- /dev/null
++++ b/MODULE.bazel
+@@ -0,0 +1,10 @@
++# dummy file used to support bzlmod
++module(
++    name = "zlib",
++    version = "0.0.0",
++    compatibility_level = 1,
++)
++
++bazel_dep(name = "platforms", version = "1.0.0")
++bazel_dep(name = "rules_cc", version = "0.1.1")
++bazel_dep(name = "bazel_skylib", version = "1.7.1")
