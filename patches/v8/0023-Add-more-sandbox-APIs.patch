@@ -20,10 +20,10 @@ index 1d93457628cf0c41db510c4c06fd6a4e683a52dd..3e64ece5debda3951e7ca328762ab670
       *
       * Caller takes ownership, i.e. the returned object needs to be freed using
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index bc8fa4ded82d7746a05c4af495dbab93886b0f25..97c086e8c4b04e541daac6ef7f2d73dbfd56cef2 100644
+index 6344e3bcb39f8c6658bd14ad5d3ef9db595a1fc6..2aea8bfc81ecda32e0774794390826341efecce7 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -255,6 +255,17 @@ class V8_EXPORT IsolateGroup {
+@@ -253,6 +253,17 @@ class V8_EXPORT IsolateGroup {
      return !operator==(other);
    }
  
@@ -42,10 +42,10 @@ index bc8fa4ded82d7746a05c4af495dbab93886b0f25..97c086e8c4b04e541daac6ef7f2d73db
    friend class Isolate;
    friend class ArrayBuffer::Allocator;
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 62e5a7ee737523bc5c97a30678eb5570ce806729..15ac28f35942a3a4ffc6ac74ac4c888c24bf05bb 100644
+index 7620d3765563c54883aedc345475c81b28efae46..2a2e3d59f6e1be026e46f4c43c85342e4ea3c146 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -9198,6 +9198,19 @@ std::unique_ptr<v8::BackingStore> v8::ArrayBuffer::NewBackingStore(
+@@ -9167,6 +9167,19 @@ std::unique_ptr<v8::BackingStore> v8::ArrayBuffer::NewBackingStore(
        static_cast<v8::BackingStore*>(backing_store.release()));
  }
  
@@ -66,10 +66,10 @@ index 62e5a7ee737523bc5c97a30678eb5570ce806729..15ac28f35942a3a4ffc6ac74ac4c888c
      void* data, size_t byte_length, v8::BackingStore::DeleterCallback deleter,
      void* deleter_data) {
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 59f5e7ffc05ac1edefdde2d541fde35c3bc48a66..56b17c28d72e6ad65db06fb311bd24b20204f80f 100644
+index 90adbf2a0b12c79710d8c6f4ae28f8fe92c2991d..ad57bcb167426a1d2c2ba465d5006d8cb2e1c84a 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
-@@ -13825,7 +13825,106 @@ UNINITIALIZED_TEST(TwoIsolateGroups) {
+@@ -13556,7 +13556,106 @@ UNINITIALIZED_TEST(TwoIsolateGroups) {
    TestAllocateAndNewForTwoIsolateGroups(create_params_1, create_params_2,
                                          groups[0], groups[1]);
  }

@@ -257,3 +257,13 @@ cc_library(
         "@platforms//cpu:aarch64": [":zlib_arm_crc32"],
     }),
 )
+
+# Chromium zlib includes some custom compression utils that are not present in mainline zlib but
+# used by V8.
+cc_library(
+    name = "compression_utils_portable",
+    srcs = ["google/compression_utils_portable.cc"],
+    hdrs = ["google/compression_utils_portable.h"],
+    visibility = ["//visibility:public"],
+    deps = [":zlib"],
+)
