@@ -292,7 +292,11 @@ jsg::Ref<WritableStream> WritableStream::constructor(jsg::Lock& js,
       "To use the new WritableStream() constructor, enable the "
       "streams_enable_constructors compatibility flag. "
       "Refer to the docs for more information: https://developers.cloudflare.com/workers/platform/compatibility-dates/#compatibility-flags");
-  auto stream = js.alloc<WritableStream>(newWritableStreamJsController());
+  auto controller = newWritableStreamJsController();
+  // We account for the memory usage of the WritableStream and its controller together because their
+  // lifetimes are identical and memory accounting itself has a memory overhead.
+  auto stream = js.allocAccounted<WritableStream>(
+      sizeof(WritableStream) + controller->jsgGetMemorySelfSize(), kj::mv(controller));
   stream->getController().setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
   return kj::mv(stream);
 }
