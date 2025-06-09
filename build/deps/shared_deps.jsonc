@@ -85,6 +85,16 @@
       "repo_mapping": {
         "@crates.io": "@crates_vendor"
       }
+    },
+    {
+      "name": "kj-rs",
+      "type": "github_tarball",
+      "owner": "capnproto",
+      "branch": "main",
+      "repo": "kj-rs",
+      "repo_mapping": {
+        "@crates.io": "@crates_vendor"
+      }
     }
   ]
 }
