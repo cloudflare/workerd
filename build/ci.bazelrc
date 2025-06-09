@@ -89,6 +89,11 @@ test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
 
-# Enable reporting for WPT tests
-test:ci-test --test_env=GEN_TEST_REPORT=1
-test:ci-test --test_env=GEN_TEST_STATS=1
+# Enable reporting whenever WPT tests are run
+test:ci-test --config=wpt-test
+test:wpt-test --test_env=GEN_TEST_REPORT=1
+test:wpt-test --test_env=GEN_TEST_STATS=1
+
+# Config to produce a full WPT report (also disables test caching)
+test:wpt-report --config=wpt-test
+test:wpt-report --cache_test_results=no

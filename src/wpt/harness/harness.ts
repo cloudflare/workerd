@@ -534,7 +534,7 @@ class WPTSubtestResult {
   public isExpectedFailure?: true;
 
   public constructor(result: Test) {
-    this.name = result.name;
+    this.name = sanitize_unpaired_surrogates(result.name);
     if (result.error instanceof Error) {
       this.message = result.error.message;
       // TODO(soon): This is true in main, but not necessarily if you run a report in local dev

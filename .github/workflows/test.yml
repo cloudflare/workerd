@@ -84,7 +84,7 @@ jobs:
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
-      run_wpt_report: true
+      upload_test_logs: true
       upload_binary: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
@@ -217,3 +217,11 @@ jobs:
         run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+  wpt-report:
+    needs: [test-linux]
+    uses: ./.github/workflows/_wpt.yml
+    with:
+      image: 'ubuntu-22.04'
+      logs_artifact: 'test-logs-linux-X64.zip'
+      report_artifact: 'wpt-report-linux-X64.json'

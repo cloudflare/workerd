@@ -8,8 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-
-LOGS_DIR = Path("bazel-testlogs/src/wpt")
+from xml.etree import ElementTree
 
 
 @dataclass
@@ -24,9 +23,11 @@ def main() -> None:
     cmd.add_argument("--update-config", action="store_true")
     cmd.add_argument("--write-report", type=Path)
     cmd.add_argument("--print-stats", action="store_true")
+    cmd.add_argument("logs_dir", type=Path)
+
     args = cmd.parse_args()
     options = Options(args.update_config, bool(args.write_report), args.print_stats)
-    logs = parse_logs(LOGS_DIR, options)
+    logs = parse_logs(args.logs_dir, options)
 
     if args.print_stats:
         print(stats_table(logs))
@@ -37,8 +38,9 @@ def main() -> None:
         time_interval = TimeInterval(now, now)
 
         report = wpt_report(logs, time_interval)
-        with args.write_report.open("w") as fp:
-            json.dump(report, fp, indent=2)
+        if report:
+            with args.write_report.open("w") as fp:
+                json.dump(report, fp, indent=2)
 
     # TODO(soon): Implement the config option to update test configs
 
@@ -64,13 +66,15 @@ class Log:
 def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
     return [
         parse_log(log_file, options)
-        for log_file in sorted(logs_dir.glob("**/test.log"))
+        for log_file in sorted(logs_dir.glob("**/test.xml"))
     ]
 
 
-def parse_log(log_file: Path, options: Options) -> list[Log]:
+def parse_log(log_file: Path, options: Options) -> Log:
     log = Log()
-    text = log_file.read_text()
+    parser = ElementTree.XMLParser(encoding="utf-8")
+    root = ElementTree.parse(log_file, parser=parser)
+    text = root.find("testsuite").find("system-out").text
 
     start_log = re.search(r"\[ TEST \] .*:zzz_results\n", text)
     if not start_log:
@@ -100,7 +104,23 @@ def parse_log(log_file: Path, options: Options) -> list[Log]:
 
 
 def stats_table(logs: list[Log]) -> str:
-    table = """## WPT statistics
+    cells = []
+
+    for log in logs:
+        if not log.stats:
+            continue
+
+        cells.append(
+            [f"<td>{log.stats[0]}</td>"]
+            + [f"<td align='right'>{value}</td>" for value in log.stats[1:]]
+        )
+
+    if not cells:
+        return ""
+
+    cells_html = "\n".join(f"<tr>{' '.join(row)}</tr>" for row in cells)
+
+    return f"""## WPT statistics
 
 <table>
     <tr>
@@ -119,20 +139,11 @@ def stats_table(logs: list[Log]) -> str:
         <th>Disabled</th>
         <th>Total</th>
         <th>% Pass</th>
-    </tr>"""
-
-    for log in logs:
-        if not log.stats:
-            continue
-
-        cells = " ".join(f"<td align='right'>{value}</td>" for value in log.stats[1:])
-        table += f"<tr><td>{log.stats[0]}</td>{cells}</tr>\n"
-
-    table += """
+    </tr>
+    {cells_html}
 </table>
 
 This table shows how workerd performs for each listed [Web Platform Tests](https://github.com/web-platform-tests/wpt) module."""
-    return table
 
 
 def cmd_output(cmd: list[str]) -> str:
@@ -156,6 +167,13 @@ def get_os() -> str:
 
 
 def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
+    all_results = [
+        result for log in logs if log.report for result in log.report["results"]
+    ]
+
+    if not all_results:
+        return {}
+
     return {
         "time_start": time_interval.start,
         "time_end": time_interval.end,
@@ -166,9 +184,7 @@ def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
             "revision": cmd_output(["git", "rev-parse", "HEAD"]),
             "os": get_os(),
         },
-        "results": [
-            result for log in logs if log.report for result in log.report["results"]
-        ],
+        "results": all_results,
     }
 
 
