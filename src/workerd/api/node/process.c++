@@ -93,11 +93,8 @@ namespace {
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
   auto versions = js.obj();
   // Node.js version - represents the most current Node.js version supported
-  // by the platform and will change as Node.js release updates ship
+  // by the platform, as defined in node-version.h
   versions.set(js, "node"_kj, js.str(nodeVersion));
-
-  // Get ICU version dynamically from the ICU library
-  versions.set(js, "icu"_kj, js.str(i18n::getIcuVersion()));
 
   return versions;
 }

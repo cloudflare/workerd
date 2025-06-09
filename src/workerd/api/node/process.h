@@ -17,12 +17,28 @@ class ProcessModule final: public jsg::Object {
 
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
+#ifdef _WIN32
+  static constexpr kj::StringPtr processPlatform = "win32"_kj;
+#elif defined(__linux__)
+  static constexpr kj::StringPtr processPlatform = "linux"_kj;
+#elif defined(__APPLE__)
+  static constexpr kj::StringPtr processPlatform = "darwin"_kj;
+#else
+  static constexpr kj::StringPtr processPlatform = "unsupported-platform"_kj;
+#endif
+
   // This is used in the implementation of process.exit(...). Contrary
   // to what the name suggests, it does not actually exit the process.
   // Instead, it will cause the IoContext, if any, and will stop javascript
   // from further executing in that request. If there is no active IoContext,
   // then it becomes a non-op.
   void processExitImpl(jsg::Lock& js, int code);
+
+  // IMPORTANT: This function will always return "linux" on production.
+  // This is only added for Node.js compatibility and running OS specific tests
+  kj::StringPtr getProcessPlatform() const {
+    return processPlatform;
+  }
 
   jsg::JsObject getEnvObject(jsg::Lock& js);
 
@@ -33,6 +49,7 @@ class ProcessModule final: public jsg::Object {
     JSG_METHOD(getBuiltinModule);
     JSG_METHOD(processExitImpl);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(versions, getVersions);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(processPlatform, getProcessPlatform);
   }
 };
 

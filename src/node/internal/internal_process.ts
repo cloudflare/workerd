@@ -34,7 +34,7 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
-export const platform = 'linux';
+export const platform = processImpl.processPlatform;
 
 export const config = {
   target_defaults: {},
