@@ -34,7 +34,7 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
-export const platform = processImpl.processPlatform;
+export const platform = 'linux';
 
 export const config = {
   target_defaults: {},
@@ -44,10 +44,12 @@ export const config = {
 export const pid = 1;
 export const ppid = 0;
 
+// On the virtual filesystem, we only support group 0
 export function getegid(): number {
   return 0;
 }
 
+// On the virtual filesystem, we only support user 0
 export function geteuid(): number {
   return 0;
 }

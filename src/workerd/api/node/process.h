@@ -15,8 +15,6 @@ class ProcessModule final: public jsg::Object {
   ProcessModule() = default;
   ProcessModule(jsg::Lock&, const jsg::Url&) {}
 
-  static constexpr kj::StringPtr processPlatform = "linux"_kj;
-
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
   // This is used in the implementation of process.exit(...). Contrary
@@ -26,32 +24,14 @@ class ProcessModule final: public jsg::Object {
   // then it becomes a non-op.
   void processExitImpl(jsg::Lock& js, int code);
 
-  // IMPORTANT: This function will always return "linux" on production.
-  // This is only added for Node.js compatibility and running OS specific tests
-  kj::StringPtr getProcessPlatform() const {
-    return processPlatform;
-  }
-
   jsg::JsObject getEnvObject(jsg::Lock& js);
 
-  // Version getters
-  jsg::JsObject getVersions(jsg::Lock& js) const {
-    auto versions = js.obj();
-    // Node.js version - represents the most current Node.js version supported
-    // by the platform and will change as Node.js release updates ship
-    versions.set(js, "node"_kj, js.str(workerd::api::node::nodeVersion));
-
-    // Get ICU version dynamically from the ICU library
-    versions.set(js, "icu"_kj, js.str(i18n::getIcuVersion()));
-
-    return versions;
-  }
+  jsg::JsObject getVersions(jsg::Lock& js) const;
 
   JSG_RESOURCE_TYPE(ProcessModule) {
     JSG_METHOD(getEnvObject);
     JSG_METHOD(getBuiltinModule);
     JSG_METHOD(processExitImpl);
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(processPlatform, getProcessPlatform);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(versions, getVersions);
   }
 };
