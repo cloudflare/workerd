@@ -126,7 +126,7 @@ def stats_table(logs: list[Log]) -> str:
             continue
 
         cells = " ".join(f"<td align='right'>{value}</td>" for value in log.stats[1:])
-        table += f"<tr><td>{log.stats[0]}</th>{cells}</tr>\n"
+        table += f"<tr><td>{log.stats[0]}</td>{cells}</tr>\n"
 
     table += """
 </table>
