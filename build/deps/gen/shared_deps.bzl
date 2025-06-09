@@ -5,6 +5,7 @@ load("@workerd//build/deps:gen/dep_buildifier_darwin_arm64.bzl", "dep_buildifier
 load("@workerd//build/deps:gen/dep_buildifier_linux_amd64.bzl", "dep_buildifier_linux_amd64")
 load("@workerd//build/deps:gen/dep_buildifier_linux_arm64.bzl", "dep_buildifier_linux_arm64")
 load("@workerd//build/deps:gen/dep_buildifier_windows_amd64.bzl", "dep_buildifier_windows_amd64")
+load("@workerd//build/deps:gen/dep_kj_rs.bzl", "dep_kj_rs")
 load("@workerd//build/deps:gen/dep_ruff_darwin_arm64.bzl", "dep_ruff_darwin_arm64")
 load("@workerd//build/deps:gen/dep_ruff_linux_amd64.bzl", "dep_ruff_linux_amd64")
 load("@workerd//build/deps:gen/dep_ruff_linux_arm64.bzl", "dep_ruff_linux_arm64")
@@ -22,3 +23,4 @@ def deps_gen():
     dep_ruff_linux_amd64()
     dep_wpt()
     dep_workerd_cxx()
+    dep_kj_rs()
