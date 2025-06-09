@@ -15,8 +15,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: 
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/bazel-disk-cache
+          key: bazel-disk-cache-linux-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
+          # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
+          # ends up with a larger cache at the end when starting with an available cache entry,
+          # resulting in a snowballing cache size and cache download/upload times.
+
+      - name: Setup Linux
+        # Install dependencies, including clang through the LLVM APT repository. We drop the
+        # install step so we can install just the packages we need.
+        # libunwind, libc++abi1 and libc++1 should be automatically installed as dependencies of
+        # libc++, but this appears to cause errors so they are also being explicitly installed.
+        # Since the GitHub runner image comes with a number of preinstalled packages, we don't need
+        # to use APT much otherwise.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          wget https://apt.llvm.org/llvm.sh
+          sed -i '/apt-get install/d' llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 19
+          # keep in sync with build/ci.bazelrc
+          sudo apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev libclang-rt-19-dev llvm-19
+          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-19/bin/llvm-symbolizer%" .bazelrc
+
       - name: Generate WPT report
         run: tools/cross/wpt_logs.py --report=wpt-report.json --stats=$GITHUB_STEP_SUMMARY
+        env:
+          BAZEL_ARGS: "--config=ci --config=ci-linux --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev"
+
       - name: Upload WPT report as artifact
         uses: actions/upload-artifact@v4
         with:

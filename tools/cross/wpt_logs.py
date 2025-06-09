@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,7 +49,8 @@ class TimeInterval:
 
 
 def run_tests(test_target: str, options: Options) -> TimeInterval:
-    cmd = ["bazel", "test", "--config", "ci-test", test_target]
+    extra_args = os.environ.get("BAZEL_ARGS").split(" ")
+    cmd = ["bazel", "test", *extra_args, test_target]
 
     if options.config:
         cmd.append("--test_env=GEN_TEST_CONFIG=1")
