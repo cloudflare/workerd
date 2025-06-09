@@ -84,6 +84,7 @@ jobs:
       os_name: linux
       suffix: ''
       extra_bazel_args: '--config=ci-test'
+      run_wpt_report: true
       upload_binary: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}

@@ -88,3 +88,7 @@ build:ci-windows-debug --config=debug
 test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
+
+# Enable reporting for WPT tests
+test:ci-test --test_env=GEN_TEST_REPORT=1
+test:ci-test --test_env=GEN_TEST_STATS=1

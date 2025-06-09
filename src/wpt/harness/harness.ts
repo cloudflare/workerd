@@ -574,9 +574,8 @@ class Stats {
     this.moduleBase = moduleBase;
   }
 
-  public toString(): string {
-    const entries = [this.moduleBase, this.coverage, this.pass].join(' | ');
-    return `| ${entries} |`;
+  public toList(): unknown[] {
+    return [this.moduleBase, ...this.coverage.toList(), ...this.pass.toList()];
   }
 }
 class CoverageStats {
@@ -591,13 +590,8 @@ class CoverageStats {
     return (this.ok / this.total) * 100;
   }
 
-  public toString(): string {
-    return [
-      this.ok,
-      this.disabled,
-      this.total,
-      this.ok_percent.toFixed() + ' %',
-    ].join(' / ');
+  public toList(): unknown[] {
+    return [this.ok, this.disabled, this.total, this.ok_percent.toFixed(0)];
   }
 }
 
@@ -614,14 +608,14 @@ class PassStats {
     return (this.pass / this.total) * 100;
   }
 
-  public toString(): string {
+  public toList(): unknown[] {
     return [
       this.pass,
       this.fail,
       this.disabled,
       this.total,
-      this.pass_percent.toFixed() + ' %',
-    ].join(' / ');
+      this.pass_percent.toFixed(0),
+    ];
   }
 }
 
@@ -654,5 +648,5 @@ function generateStats(moduleBase: string, config: TestRunnerConfig): string {
     }
   }
 
-  return stats.toString();
+  return JSON.stringify(stats.toList());
 }

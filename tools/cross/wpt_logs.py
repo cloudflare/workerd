@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -10,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-TEST_TARGET = "//src/wpt/..."
 LOGS_DIR = Path("bazel-testlogs/src/wpt")
 
 
@@ -23,20 +21,23 @@ class Options:
 
 def main() -> None:
     cmd = argparse.ArgumentParser()
-    cmd.add_argument("--config", action="store_true")
-    cmd.add_argument("--report", type=Path)
-    cmd.add_argument("--stats", type=Path)
+    cmd.add_argument("--update-config", action="store_true")
+    cmd.add_argument("--write-report", type=Path)
+    cmd.add_argument("--print-stats", action="store_true")
     args = cmd.parse_args()
-    options = Options(args.config, bool(args.report), bool(args.stats))
-    time_interval = run_tests(TEST_TARGET, options)
+    options = Options(args.update_config, bool(args.write_report), args.print_stats)
     logs = parse_logs(LOGS_DIR, options)
 
-    if args.stats:
-        args.stats.write_text(stats_table(logs))
+    if args.print_stats:
+        print(stats_table(logs))
 
-    if args.report:
+    if args.write_report:
+        # TODO(soon): Elapsed time will not be accurate. Figure out if it matters to us, and how to fix.
+        now = int(time.time())
+        time_interval = TimeInterval(now, now)
+
         report = wpt_report(logs, time_interval)
-        with args.report.open("w") as fp:
+        with args.write_report.open("w") as fp:
             json.dump(report, fp, indent=2)
 
     # TODO(soon): Implement the config option to update test configs
@@ -48,25 +49,6 @@ class TimeInterval:
     end: int = 0
 
 
-def run_tests(test_target: str, options: Options) -> TimeInterval:
-    extra_args = os.environ.get("BAZEL_ARGS").split(" ")
-    cmd = ["bazel", "test", *extra_args, test_target]
-
-    if options.config:
-        cmd.append("--test_env=GEN_TEST_CONFIG=1")
-
-    if options.report:
-        cmd.append("--test_env=GEN_TEST_REPORT=1")
-
-    if options.stats:
-        cmd.append("--test_env=GEN_TEST_STATS=1")
-
-    interval = TimeInterval(int(time.time()))
-    subprocess.run(cmd)
-    interval.end = int(time.time())
-    return interval
-
-
 @dataclass
 class Log:
     # TypeScript test config used to configure WPT tests
@@ -75,12 +57,15 @@ class Log:
     # JSON report in WPT's format
     report: Optional[dict[str, Any]] = None
 
-    # Markdown table row for human-readable stats
-    stats: Optional[str] = None
+    # Summary stats in JSON
+    stats: Optional[list[Any]] = None
 
 
 def parse_logs(logs_dir: Path, options: Options) -> list[Log]:
-    return [parse_log(log_file, options) for log_file in logs_dir.glob("*/test.log")]
+    return [
+        parse_log(log_file, options)
+        for log_file in sorted(logs_dir.glob("**/test.log"))
+    ]
 
 
 def parse_log(log_file: Path, options: Options) -> list[Log]:
@@ -109,21 +94,44 @@ def parse_log(log_file: Path, options: Options) -> list[Log]:
         log.report = json.loads(items.pop(0))
 
     if options.stats:
-        log.stats = items.pop(0).strip()
+        log.stats = json.loads(items.pop(0))
 
     return log
 
 
 def stats_table(logs: list[Log]) -> str:
-    table = """
-| Module   | Coverage (ok/disabled/total/% ok) | Pass (pass/fail/disabled/total/% pass) |
-|----------|-----------------------------------|----------------------------------------|
-"""
+    table = """## WPT statistics
+
+<table>
+    <tr>
+        <th>Module</th>
+        <th colspan="4">Coverage</th>
+        <th colspan="5">Pass</th>
+    </tr>
+    <tr>
+        <th></th>
+        <th>OK</th>
+        <th>Disabled</th>
+        <th>Total</th>
+        <th>% OK</th>
+        <th>Pass</th>
+        <th>Fail</th>
+        <th>Disabled</th>
+        <th>Total</th>
+        <th>% Pass</th>
+    </tr>"""
 
     for log in logs:
-        if log.stats:
-            table += log.stats + "\n"
+        if not log.stats:
+            continue
 
+        cells = " ".join(f"<td align='right'>{value}</td>" for value in log.stats[1:])
+        table += f"<tr><td>{log.stats[0]}</td>{cells}</tr>\n"
+
+    table += """
+</table>
+
+This table shows how workerd performs for each listed [Web Platform Tests](https://github.com/web-platform-tests/wpt) module."""
     return table
 
 
@@ -154,7 +162,7 @@ def wpt_report(logs: list[Log], time_interval: TimeInterval) -> dict[str, Any]:
         "run_info": {
             "product": "workerd",
             "browser_channel": "experimental",
-            "browser_version": cmd_output(["git", "describe", "--tags"]),
+            "browser_version": cmd_output(["git", "describe", "--tags", "--always"]),
             "revision": cmd_output(["git", "rev-parse", "HEAD"]),
             "os": get_os(),
         },
