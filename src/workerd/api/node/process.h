@@ -17,7 +17,10 @@ class ProcessModule final: public jsg::Object {
 
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
-#ifdef _WIN32
+// We will always set platform: 'linux' for edgeworker
+#ifdef EW_APPLICATION_NAME
+  static constexpr kj::StringPtr processPlatform = "linux"_kj;
+#elif defined(_WIN32)
   static constexpr kj::StringPtr processPlatform = "win32"_kj;
 #elif defined(__linux__)
   static constexpr kj::StringPtr processPlatform = "linux"_kj;
