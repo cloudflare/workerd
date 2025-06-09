@@ -50,6 +50,9 @@ class TimeInterval:
 def run_tests(test_target: str, options: Options) -> TimeInterval:
     cmd = ["bazel", "test", "--config", "ci-test", test_target]
 
+    if sys.platform == "linux":
+        cmd.append("--config=ci-linux")
+
     if options.config:
         cmd.append("--test_env=GEN_TEST_CONFIG=1")
 

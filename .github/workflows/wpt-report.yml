@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: 
+          fetch-tags: true
+          fetch-depth: 0
       - name: Generate WPT report
         run: tools/cross/wpt_logs.py --report=wpt-report.json --stats=$GITHUB_STEP_SUMMARY
       - name: Upload WPT report as artifact
