@@ -21,6 +21,10 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "test-workerd"_kj;
     case AutogateKey::V8_FAST_API:
       return "v8-fast-api"_kj;
+    case AutogateKey::STREAMING_TAIL_WORKER:
+      return "streaming-tail-worker"_kj;
+    case AutogateKey::TAIL_STREAM_REFACTOR:
+      return "tail-stream-refactor"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
