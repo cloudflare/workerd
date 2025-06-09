@@ -8,7 +8,7 @@ This previously-deprecated API was removed in 7cd2b0c434bd5ea7bd253a97958c734855
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/include/v8-traced-handle.h b/include/v8-traced-handle.h
-index 28fe6cf5ae3ad0dadafcc0942bda6d9148d5d58f..0e39bdf79ab0770df0fac97ee95c2ba2effdb874 100644
+index 3eb8e7835d74e7946fb2cff6c816415cc84ceec4..b6b958d426b92aa96727b08d79216cb0d0824644 100644
 --- a/include/v8-traced-handle.h
 +++ b/include/v8-traced-handle.h
 @@ -134,6 +134,17 @@ class BasicTracedReference : public TracedReferenceBase {
