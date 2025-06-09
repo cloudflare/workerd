@@ -839,14 +839,21 @@ export class ERR_ENOENT extends NodeSyscallError {
 
 export class ERR_EBADF extends NodeSyscallError {
   constructor(options: { syscall: string }) {
-    super('EBADF', `Bad file descriptor`, options.syscall);
+    super('EBADF', 'Bad file descriptor', options.syscall);
     this.errno = -9; // EBADF
   }
 }
 
 export class ERR_EINVAL extends NodeSyscallError {
   constructor(options: { syscall: string }) {
-    super('EINVAL', `Invalid argument`, options.syscall);
+    super('EINVAL', 'Invalid argument', options.syscall);
     this.errno = -22; // EINVAL
+  }
+}
+
+export class ERR_EEXIST extends NodeSyscallError {
+  constructor(options: { syscall: string }) {
+    super('EEXIST', 'file already exists', options.syscall);
+    this.errno = -17; // EEXIST
   }
 }

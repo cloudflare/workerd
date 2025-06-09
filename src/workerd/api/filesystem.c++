@@ -270,12 +270,16 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
             // If we got here, then followSymLinks was set to false. We cannot
             // truncate a symbolic link.
             throwUVException(js, UV_EINVAL, "ftruncate"_kj);
+            return;
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             // If we got here, then the path was not found.
             throwFsError(js, err, "ftruncate"_kj);
+            return;
           }
         }
+      } else {
+        throwUVException(js, UV_ENOENT, "ftruncate"_kj);
       }
     }
     KJ_CASE_ONEOF(fd, int) {
@@ -293,11 +297,13 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             throwUVException(js, UV_EINVAL, "ftruncate"_kj);
+            return;
           }
         }
         KJ_UNREACHABLE;
       } else {
         throwUVException(js, UV_EBADF, "ftruncate"_kj);
+        return;
       }
     }
   }
