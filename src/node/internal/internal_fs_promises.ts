@@ -39,7 +39,6 @@ import type {
   ReadFileSyncOptions,
   ReadLinkSyncOptions,
   StatOptions,
-  WriteSyncOptions,
 } from 'node-internal:internal_fs_sync';
 import {
   kBadge,
@@ -50,6 +49,7 @@ import {
   type SymlinkType,
   type FilePath,
   type ReadDirOptions,
+  type WriteSyncOptions,
 } from 'node-internal:internal_fs_utils';
 import { Buffer } from 'node-internal:internal_buffer';
 import { type Dir } from 'node-internal:internal_fs';

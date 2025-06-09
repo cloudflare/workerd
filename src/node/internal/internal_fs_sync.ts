@@ -28,7 +28,6 @@ import {
   stringToFlags,
   getValidatedFd,
   validateBufferArray,
-  validateStringAfterArrayBufferView,
   normalizePath,
   getDate,
   Stats,
@@ -38,6 +37,7 @@ import {
   type RawTime,
   type SymlinkType,
   type ReadDirOptions,
+  type WriteSyncOptions,
   validatePosition,
   validateAccessArgs,
   validateChownArgs,
@@ -47,9 +47,11 @@ import {
   validateRmArgs,
   validateRmDirArgs,
   validateReaddirArgs,
+  validateReadArgs,
+  validateWriteArgs,
+  validateWriteFileArgs,
 } from 'node-internal:internal_fs_utils';
 import {
-  validateInteger,
   parseFileMode,
   validateBoolean,
   validateObject,
@@ -63,8 +65,10 @@ import {
   ERR_ENOENT,
   ERR_EBADF,
   ERR_EINVAL,
+  ERR_EEXIST,
+  ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
-import { isArrayBufferView } from 'node-internal:internal_types';
+
 import {
   F_OK,
   X_OK,
@@ -74,6 +78,7 @@ import {
   O_APPEND,
   O_EXCL,
   COPYFILE_EXCL,
+  COPYFILE_FICLONE,
   COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
 import { type Dir, Dirent } from 'node-internal:internal_fs';
@@ -172,8 +177,20 @@ export function closeSync(fd: number): void {
 export function copyFileSync(
   src: FilePath,
   dest: FilePath,
-  _mode: number
+  mode: number = 0
 ): void {
+  validateOneOf(mode, 'mode', [
+    0,
+    COPYFILE_EXCL,
+    COPYFILE_FICLONE_FORCE,
+    COPYFILE_FICLONE,
+  ]);
+  if (mode & COPYFILE_FICLONE_FORCE) {
+    throw new ERR_UNSUPPORTED_OPERATION();
+  }
+  if (mode & COPYFILE_EXCL && existsSync(dest)) {
+    throw new ERR_EEXIST({ syscall: 'copyFile' });
+  }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
 }
 
@@ -569,71 +586,18 @@ export function readSync(
   length?: number,
   position: Position = null
 ): number {
-  fd = getValidatedFd(fd);
-
-  // Great fun with polymorphism here. We're going to normalize the arguments
-  // to match the first signature (fd, buffer, offset, length, position).
-  //
-  // If the third argument is an object, then we will pull the offset, length,
-  // and position from it, ignoring the remaining arguments. If the third
-  // argument is a number, then we will use it as the offset and pull the
-  // length and position from the fourth and fifth arguments. If the third
-  // position is any other type, then we will throw an error.
-
-  if (!isArrayBufferView(buffer)) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'buffer',
-      ['Buffer', 'TypedArray', 'DataView'],
-      buffer
-    );
-  }
-
-  let actualOffset = buffer.byteOffset;
-  let actualLength = buffer.byteLength;
-  let actualPosition = position;
-
-  // Handle the case where the third argument is an options object
-  if (offsetOrOptions != null && typeof offsetOrOptions === 'object') {
-    const {
-      offset = 0,
-      length = buffer.byteLength - offset,
-      position = null,
-    } = offsetOrOptions;
-    actualOffset = offset;
-    actualLength = length;
-    actualPosition = position;
-  }
-  // Handle the case where the third argument is a number (offset)
-  else if (typeof offsetOrOptions === 'number') {
-    actualOffset = offsetOrOptions;
-    actualLength = length ?? buffer.byteLength - actualOffset;
-    actualPosition = position;
-  } else {
-    throw new ERR_INVALID_ARG_TYPE(
-      'offset',
-      ['number', 'object'],
-      offsetOrOptions
-    );
-  }
-
-  validateUint32(actualOffset, 'offset');
-  validateUint32(actualLength, 'length');
-  validatePosition(actualPosition, 'position');
-
-  // The actualOffset plus actualLength must not exceed the buffer's byte length.
-  if (actualOffset + actualLength > buffer.byteLength) {
-    throw new ERR_INVALID_ARG_VALUE('offset', actualOffset, 'out of bounds');
-  }
+  const {
+    fd: validatedFd,
+    buffer: actualBuffer,
+    length: actualLength,
+    position: actualPosition,
+  } = validateReadArgs(fd, buffer, offsetOrOptions, length, position);
 
   if (actualLength === 0 || buffer.byteLength === 0) {
     return 0;
   }
 
-  return readvSync(
-    fd,
-    [Buffer.from(buffer.buffer, actualOffset, actualLength)],
-    actualPosition
-  );
+  return readvSync(validatedFd, actualBuffer, actualPosition);
 }
 
 export function readvSync(
@@ -782,64 +746,15 @@ export function writeFileSync(
   data: string | ArrayBufferView,
   options: BufferEncoding | null | WriteFileOptions = {}
 ): number {
-  if (typeof path === 'number') {
-    path = getValidatedFd(path);
-  } else {
-    path = normalizePath(path);
-  }
-
-  if (typeof options === 'string' || options == null) {
-    options = { encoding: options as BufferEncoding | null };
-  }
-
-  validateObject(options, 'options');
   const {
-    encoding = 'utf8',
-    mode = 0o666,
-    flag = 'w',
-    flush = false,
-  } = options;
-  validateEncoding(encoding, 'options.encoding');
-  validateBoolean(flush, 'options.flush');
-  parseFileMode(mode, 'options.mode', 0o666);
-  const newFlag = stringToFlags(flag as string);
+    path: validatedPath,
+    data: actualData,
+    append,
+    exclusive,
+  } = validateWriteFileArgs(path, data, options);
 
-  const append = Boolean(newFlag & O_APPEND);
-  const write = Boolean(newFlag & O_WRONLY || newFlag & O_RDWR) || append;
-  const exclusive = Boolean(newFlag & O_EXCL);
-
-  if (!write) {
-    throw new ERR_INVALID_ARG_VALUE(
-      'flag',
-      flag,
-      'must be indicate write or append'
-    );
-  }
-
-  // We're not currently implementing the exclusive flag. We're validating
-  // it here just to use it so the compiler doesn't complain.
-  validateBoolean(exclusive, 'options.exclusive');
-
-  if (typeof data === 'string') {
-    data = Buffer.from(data, encoding);
-  }
-
-  if (!isArrayBufferView(data)) {
-    throw new ERR_INVALID_ARG_TYPE(
-      'data',
-      ['string', 'Buffer', 'TypedArray', 'DataView'],
-      data
-    );
-  }
-
-  return cffs.writeAll(path, data, { append, exclusive });
+  return cffs.writeAll(validatedPath, actualData, { append, exclusive });
 }
-
-export type WriteSyncOptions = {
-  offset?: number | undefined;
-  length?: number | undefined;
-  position?: Position | undefined;
-};
 
 export function writeSync(
   fd: number,
@@ -848,50 +763,13 @@ export function writeSync(
   length?: number | BufferEncoding | null,
   position?: Position
 ): number {
-  fd = getValidatedFd(fd);
+  const {
+    fd: validatedFd,
+    buffer: actualBuffer,
+    position: actualPosition,
+  } = validateWriteArgs(fd, buffer, offsetOrOptions, length, position);
 
-  let offset: number | undefined | null = offsetOrOptions as number;
-  if (isArrayBufferView(buffer)) {
-    if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
-      ({
-        offset = 0,
-        length = buffer.byteLength - offset,
-        position = null,
-      } = (offsetOrOptions as WriteSyncOptions | null) || {});
-    }
-    position ??= null;
-    offset ??= buffer.byteOffset;
-
-    validateInteger(offset, 'offset', 0);
-
-    length ??= buffer.byteLength - offset;
-
-    validateInteger(length, 'length', 0);
-
-    // Validate that the offset + length do not exceed the buffer's byte length.
-    if (offset + length > buffer.byteLength) {
-      throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
-    }
-
-    return writevSync(
-      fd,
-      [Buffer.from(buffer.buffer, offset, length)],
-      position
-    );
-  }
-
-  validateStringAfterArrayBufferView(buffer, 'buffer');
-
-  // In this case, offsetOrOptions must either be a number, bigint, or null.
-  validatePosition(offsetOrOptions, 'position');
-  position = offsetOrOptions;
-
-  // In this instance, buffer is a string and the length arg specifies
-  // the encoding to use.
-  validateEncoding(buffer, length as string);
-  buffer = Buffer.from(buffer, length as string /* encoding */);
-
-  return writevSync(fd, [buffer], position);
+  return writevSync(validatedFd, actualBuffer, actualPosition);
 }
 
 export function writevSync(
@@ -953,23 +831,23 @@ export function writevSync(
 // [x][x][2][x][x] fs.mkdtempSync(prefix[, options])
 // [x][x][2][x][x] fs.rmdirSync(path[, options])
 // [x][x][2][x][x] fs.rmSync(path[, options])
+// [x][x][2][x][x] fs.ftruncateSync(fd[, len])
+// [x][x][2][x][x] fs.truncateSync(path[, len])
+// [x][x][2][x][x] fs.openSync(path[, flags[, mode]])
+// [x][x][2][x][x] fs.readdirSync(path[, options])
+// [x][x][2][x][x] fs.readFileSync(path[, options])
+// [x][x][2][x][x] fs.readSync(fd, buffer, offset, length[, position])
+// [x][x][2][x][x] fs.readSync(fd, buffer[, options])
+// [x][x][2][x][x] fs.readvSync(fd, buffers[, position])
+// [x][x][2][x][x] fs.renameSync(oldPath, newPath)
+// [x][x][2][x][x] fs.writeFileSync(file, data[, options])
+// [x][x][2][x][x] fs.writeSync(fd, buffer, offset[, length[, position]])
+// [x][x][2][x][x] fs.writeSync(fd, buffer[, options])
+// [x][x][2][x][x] fs.writeSync(fd, string[, position[, encoding]])
+// [x][x][2][x][x] fs.writevSync(fd, buffers[, position])
+// [x][x][2][x][x] fs.appendFileSync(path, data[, options])
+// [x][x][2][x][x] fs.copyFileSync(src, dest[, mode])
 //
-// [x][x][1][ ][ ] fs.appendFileSync(path, data[, options])
-// [x][x][1][ ][ ] fs.copyFileSync(src, dest[, mode])
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
-// [x][x][1][ ][ ] fs.ftruncateSync(fd[, len])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
 // [x][ ][ ][ ][ ] fs.opendirSync(path[, options])
-// [x][x][1][ ][ ] fs.openSync(path[, flags[, mode]])
-// [x][x][1][ ][ ] fs.readdirSync(path[, options])
-// [x][x][1][ ][ ] fs.readFileSync(path[, options])
-// [x][x][1][ ][ ] fs.readSync(fd, buffer, offset, length[, position])
-// [x][x][1][ ][ ] fs.readSync(fd, buffer[, options])
-// [x][x][1][ ][ ] fs.readvSync(fd, buffers[, position])
-// [x][x][1][ ][ ] fs.renameSync(oldPath, newPath)
-// [x][x][1][ ][ ] fs.truncateSync(path[, len])
-// [x][x][1][ ][ ] fs.writeFileSync(file, data[, options])
-// [x][x][1][ ][ ] fs.writeSync(fd, buffer, offset[, length[, position]])
-// [x][x][1][ ][ ] fs.writeSync(fd, buffer[, options])
-// [x][x][1][ ][ ] fs.writeSync(fd, string[, position[, encoding]])
-// [x][x][1][ ][ ] fs.writevSync(fd, buffers[, position])
