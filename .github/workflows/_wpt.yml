@@ -15,6 +15,11 @@ on:
         required: true
         type: string
 
+permissions:
+  # Read repo
+  contents: read
+  # Read/write artifacts
+  actions: write
 jobs:
   wpt-report:
     runs-on: ${{ inputs.image }}
@@ -33,6 +38,3 @@ jobs:
         with:
           name: ${{ inputs.report_artifact }}
           path: wpt-report.json
-
-
-
