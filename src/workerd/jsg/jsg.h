@@ -1813,7 +1813,7 @@ class JsContext {
   JsContext(v8::Local<v8::Context> handle,
       Ref<T> object,
       kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
-      : handle(handle->GetIsolate(), handle),
+      : handle(v8::Isolate::GetCurrent(), handle),
         object(kj::mv(object)),
         maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
 
