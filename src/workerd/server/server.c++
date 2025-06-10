@@ -1490,8 +1490,11 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
-      : tracer(kj::mv(tracer)) {}
+  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer,
+      kj::TaskSet& waitUntilTasks,
+      SpanParent userSpanParent)
+      : tracer(kj::mv(tracer)),
+        userRequestSpan(userSpanParent.newChild("worker"_kjc)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
@@ -1601,11 +1604,45 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     }
   }
 
+  virtual SpanParent getUserSpan() override {
+    return this->userRequestSpan;
+  }
+
  private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
   kj::uint fetchStatus = 0;
+  // The root span for the new tracing format.
+  SpanBuilder userRequestSpan;
+};
+
+class WorkerTracerSpanObserver: public SpanObserver,
+                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+ public:
+  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+      : workerTracer(kj::mv(workerTracer)) {}
+
+  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
+    return addRefToThis().toOwn();
+  }
+
+  void report(const Span& span) override {
+    KJ_IF_SOME(tracer, this->workerTracer) {
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
+
+      for (const auto& tag: span.tags) {
+        tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      }
+
+      CompleteSpan completeSpan(0, 0, kj::ConstString(kj::str(span.operationName)), span.startTime,
+          span.endTime, kj::mv(tags));
+      tracer->addSpan(kj::mv(completeSpan));
+    }
+  }
+
+ private:
+  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -1939,7 +1976,13 @@ class Server::WorkerService final: public Service,
       })));
     }
 
-    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+    SpanParent userSpanParent(nullptr);
+    if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
+      auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
+      userSpanParent = SpanParent(kj::mv(tracerSpanObserver));
+    }
+    observer = kj::refcounted<RequestObserverWithTracer>(
+        mapAddRef(workerTracer), waitUntilTasks, kj::mv(userSpanParent));
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
