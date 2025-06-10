@@ -51,12 +51,12 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
 
   // When arbitrary type unwrapping is supported, keep this test as it is.
   int32_t processObject(v8::Local<v8::Object> obj) {
-    auto isolate = v8::Isolate::GetCurrent();
-    auto context = isolate->GetCurrentContext();
-    auto testKey = v8::String::NewFromUtf8(isolate, "test").ToLocalChecked();
+    auto& js = jsg::Lock::current();
+    auto context = js.v8Context();
+    auto testKey = v8::String::NewFromUtf8(js.v8Isolate, "test").ToLocalChecked();
     v8::Local<v8::Value> value;
     if (obj->Get(context, testKey).ToLocal(&value)) {
-      v8::String::Utf8Value type(isolate, value->TypeOf(isolate));
+      v8::String::Utf8Value type(js.v8Isolate, value->TypeOf(js.v8Isolate));
       KJ_ASSERT(value->IsInt32(), "Received ", *type);
       return value.As<v8::Int32>()->Value();
     }
