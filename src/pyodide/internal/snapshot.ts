@@ -499,8 +499,7 @@ export function maybeCollectSnapshot(Module: Module): void {
     ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
     const snapshot = makeLinearMemorySnapshot(Module);
-    // TODO(soon): Get rid of this type coercion.
-    DiskCache.put('snapshot.bin', snapshot as unknown as ArrayBuffer);
+    DiskCache.put('snapshot.bin', snapshot);
   }
 }
 
