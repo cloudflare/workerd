@@ -94,33 +94,5 @@ BENCHMARK_F(FastMethodFixture, SlowAPIWithLock)(benchmark::State& state) {
   });
 }
 
-// Benchmark the fast method with Lock& parameter
-BENCHMARK_F(FastMethodFixture, FastAPIWithLock)(benchmark::State& state) {
-  FastMethodIsolate isolate(system, kj::heap<jsg::IsolateObserver>(), {});
-  auto code =
-      "var result = 0; for (let i = 0; i < 10000; i++) { result += fastAddWithLock(2, 3); } result"_kj;
-
-  isolate.runInLockScope([&](FastMethodIsolate::Lock& isolateLock) {
-    auto context = isolateLock.newContext<FastMethodContext>();
-
-    return JSG_WITHIN_CONTEXT_SCOPE(
-        isolateLock, context.getHandle(isolateLock), [&](jsg::Lock& js) {
-      v8::Local<v8::String> source = jsg::v8Str(js.v8Isolate, code);
-
-      // Compile the source code.
-      v8::Local<v8::Script> script;
-      KJ_ASSERT(v8::Script::Compile(js.v8Context(), source).ToLocal(&script));
-
-      // Run the script to get the result.
-      for (auto _: state) {
-        v8::Local<v8::Value> result;
-        KJ_ASSERT(script->Run(js.v8Context()).ToLocal(&result));
-        v8::String::Utf8Value value(js.v8Isolate, result);
-        KJ_ASSERT(*value == "50000"_kj, *value);
-      }
-    });
-  });
-}
-
 }  // namespace
 }  // namespace workerd
