@@ -489,7 +489,7 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
-  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  v8::Isolate* isolate = context->GetIsolate();
   IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
   return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
 }
@@ -497,13 +497,13 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
   // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
+      static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
 }
 
 bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
   IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
+      static_cast<IsolateBase*>(context->GetIsolate()->GetData(SET_DATA_ISOLATE_BASE));
   return self->jspiEnabled;
 }
 

@@ -521,8 +521,7 @@ void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception
 
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
   auto& jsgIsolate = *reinterpret_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  auto& js = Lock::from(isolate);
-  return jsgIsolate.unwrapException(js, isolate->GetCurrentContext(), exception);
+  return jsgIsolate.unwrapException(isolate->GetCurrentContext(), exception);
 }
 
 kj::Exception Lock::exceptionToKj(Value&& exception) {
@@ -572,7 +571,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
 void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
   if (value->IsArray()) {
     // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
+    v8::HandleScope scope(context->GetIsolate());
     auto arr = value.As<v8::Array>();
 
     for (auto i: kj::zeroTo(arr->Length())) {
@@ -581,7 +580,7 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
 
     check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
   } else if (value->IsObject()) {
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
+    v8::HandleScope scope(context->GetIsolate());
     auto obj = value.As<v8::Object>();
     auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
         v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));

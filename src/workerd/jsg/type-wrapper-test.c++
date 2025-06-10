@@ -39,17 +39,15 @@ class TestExtension {
     return "TestExtensionTypeName";
   }
 
-  v8::Local<v8::Number> wrap(Lock& js,
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Number> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       TestExtensionType value) {
-    return v8::Number::New(js.v8Isolate, value.value);
+    return v8::Number::New(context->GetIsolate(), value.value);
   }
 
   v8::Local<v8::Context> newContext(v8::Isolate* isolate, TestExtensionType value) = delete;
 
-  kj::Maybe<TestExtensionType> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<TestExtensionType> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       TestExtensionType*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {

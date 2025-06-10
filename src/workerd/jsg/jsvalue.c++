@@ -699,7 +699,7 @@ void JsMessage::addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines) {
     }
   } else {
     for (auto i: kj::zeroTo(trace->GetFrameCount())) {
-      auto frame = trace->GetFrame(js.v8Isolate, i);
+      auto frame = trace->GetFrame(context->GetIsolate(), i);
       kj::StringTree locationStr;
 
       auto scriptName = frame->GetScriptName();
