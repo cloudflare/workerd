@@ -295,11 +295,10 @@ kj::Promise<void> ContainerClient::startContainer() {
   // We have to send an empty body since docker API will throw an error if we don't.
   kj::StringPtr body = "";
   auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
-  // statusCode 204 refers to "no error"
   // statusCode 304 refers to "container already started"
-  // Both are fine to ignore.
-  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 304, Error,
-      "Starting container failed with: ", response.body);
+  JSG_REQUIRE(response.statusCode != 304, Error, "Container already started");
+  // statusCode 204 refers to "no error"
+  JSG_REQUIRE(response.statusCode == 204, Error, "Starting container failed with: ", response.body);
 }
 
 kj::Promise<void> ContainerClient::stopContainer() {

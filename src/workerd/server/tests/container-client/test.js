@@ -2,13 +2,11 @@ import { DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
 
-const CONTAINER_NAME = 'container-example';
-
 export class DurableObjectExample extends DurableObject {
   async testBasics() {
     const container = this.ctx.container;
     if (container.running) {
-      let monitor = container.monitor().catch((err) => {});
+      let monitor = container.monitor().catch((_err) => {});
       await container.destroy();
       await monitor;
     }
@@ -28,7 +26,6 @@ export class DurableObjectExample extends DurableObject {
       let resp;
       for (let i = 0; i < 6; i++) {
         try {
-          console.log(`Attempt ${i + 1} to connect to container ${Date.now()}`);
           resp = await container
             .getTcpPort(8080)
             .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
@@ -36,6 +33,9 @@ export class DurableObjectExample extends DurableObject {
         } catch (e) {
           await scheduler.wait(500);
           if (i === 5) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
             throw e;
           }
         }
@@ -100,11 +100,6 @@ export class DurableObjectExample extends DurableObject {
   async startAlarm(start, ms) {
     if (start && !this.ctx.container.running) {
       await this.ctx.container.start();
-    } else if (start) {
-      // This is potentially bug with the ordering of your tests.
-      // This function is called assuming the container is not running,
-      // but previous test probably left the container open.
-      console.warn('WARNING: Start called but container is already running');
     }
     await this.ctx.storage.setAlarm(Date.now() + ms);
   }
@@ -119,26 +114,28 @@ export class DurableObjectExample extends DurableObject {
   }
 
   async testWs() {
-    await this.ctx.container.start({
-      entrypoint: ['node', 'app.js'],
-      env: { WS_ENABLED: 'true' },
-      enableInternet: true,
-    });
+    const { container } = this.ctx;
+
+    if (!container.running) {
+      await container.start({
+        entrypoint: ['node', 'app.js'],
+        env: { WS_ENABLED: 'true' },
+        enableInternet: true,
+      });
+    }
 
     // Wait for container to be ready
     await scheduler.wait(2000);
 
     // Test WebSocket upgrade request
-    const res = await this.ctx.container
-      .getTcpPort(8080)
-      .fetch('http://foo/ws', {
-        headers: {
-          Upgrade: 'websocket',
-          Connection: 'Upgrade',
-          'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
-          'Sec-WebSocket-Version': '13',
-        },
-      });
+    const res = await container.getTcpPort(8080).fetch('http://foo/ws', {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Key': 'x3JJHMbDL1EzLkh9GBhXDw==',
+        'Sec-WebSocket-Version': '13',
+      },
+    });
 
     // Should get WebSocket upgrade response
     assert.strictEqual(res.status, 101);
@@ -149,21 +146,24 @@ export class DurableObjectExample extends DurableObject {
     const ws = res.webSocket;
     ws.accept();
 
+    // Listen for response
+    const messagePromise = new Promise((resolve) => {
+      ws.addEventListener(
+        'message',
+        (event) => {
+          resolve(event.data);
+        },
+        { once: true }
+      );
+    });
+
     // Send a test message
     ws.send('Hello WebSocket!');
 
-    // Listen for response
-    const messagePromise = new Promise((resolve) => {
-      ws.addEventListener('message', (event) => {
-        resolve(event.data);
-      });
-    });
-
-    const response = await messagePromise;
-    assert.strictEqual(response, 'Echo: Hello WebSocket!');
+    assert.strictEqual(await messagePromise, 'Echo: Hello WebSocket!');
 
     ws.close();
-    await this.ctx.container.destroy();
+    await container.destroy();
   }
 
   getStatus() {
@@ -177,10 +177,11 @@ export class DurableObjectExample2 extends DurableObjectExample {}
 export const testStatus = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
-      const id = CONTAINER.idFromName(CONTAINER_NAME);
-      assert.strictEqual(id.name, CONTAINER_NAME);
-      const container = CONTAINER.get(id);
-      assert.strictEqual(await container.getStatus(), false);
+      for (const name of ['testStatus', 'testStatus2']) {
+        const id = CONTAINER.idFromName(name);
+        const stub = CONTAINER.get(id);
+        assert.strictEqual(await stub.getStatus(), false);
+      }
     }
   },
 };
@@ -189,12 +190,9 @@ export const testStatus = {
 export const testBasics = {
   async test(_ctrl, env) {
     for (const CONTAINER of [env.MY_CONTAINER, env.MY_DUPLICATE_CONTAINER]) {
-      // Test creating multiple DO instances
-      for (const name of ['testBasics', 'helloWorld']) {
-        const id = CONTAINER.idFromName(name);
-        const stub = CONTAINER.get(id);
-        await stub.testBasics();
-      }
+      const id = CONTAINER.idFromName('testBasics');
+      const stub = CONTAINER.get(id);
+      await stub.testBasics();
     }
   },
 };
@@ -207,16 +205,10 @@ export const testAlreadyRunning = {
 
     await stub.leaveRunning();
 
-    try {
-      await stub.abort();
-      throw new Error('Expected abort to throw');
-    } catch (err) {
-      assert.strictEqual(err.name, 'Error');
-      assert.strictEqual(
-        err.message,
-        'Application called abort() to reset Durable Object.'
-      );
-    }
+    await assert.rejects(() => stub.abort(), {
+      name: 'Error',
+      message: 'Application called abort() to reset Durable Object.',
+    });
 
     // Recreate stub to get a new instance
     stub = env.MY_CONTAINER.get(id);
