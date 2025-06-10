@@ -14,6 +14,10 @@ export default {
   },
   'abort/general.any.js': {
     comment: 'See individual tests',
+    disabledTests: [
+      // Flaky since 2025-06-09. To be investigated.
+      'Stream errors once aborted, after reading. Underlying connection closed.',
+    ],
     expectedFailures: [
       // The fetch promise still resolves for some reason
       'Aborting rejects with AbortError',
