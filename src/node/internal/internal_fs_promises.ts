@@ -25,7 +25,6 @@
 
 // TODO(node-fs): These will be remove as development continues.
 /* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-confusing-void-expression */
@@ -140,19 +139,13 @@ class FileHandle {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
 
-    // TODO(node-fs): Proper type checking here later.
     let options: any;
-    if (
-      bufferOrOptions != null &&
-      typeof bufferOrOptions === 'object' &&
-      !isArrayBufferView(bufferOrOptions)
-    ) {
+    if (isArrayBufferView(bufferOrOptions)) {
       if (typeof offsetOrOptions === 'number') {
         options = {
           buffer: bufferOrOptions,
           offset: offsetOrOptions,
-          length:
-            length ?? (bufferOrOptions as NodeJS.ArrayBufferView).byteLength,
+          length: length ?? bufferOrOptions.byteLength,
           position: position ?? null,
         };
       } else {

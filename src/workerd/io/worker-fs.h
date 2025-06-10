@@ -460,6 +460,8 @@ class FsMap;
 // The virtual file system interface. This is the main entry point for accessing the vfs.
 class VirtualFileSystem {
  public:
+  virtual ~VirtualFileSystem() noexcept(false) {}
+
   // The observer interface is used to allow the runtime to observe opening
   // or closing of file descriptors in order to allow the runtime to keep
   // an eye on the number of open file descriptors and take action if needed.
@@ -585,6 +587,13 @@ class VirtualFileSystem {
   // Using an int fd is not super nice but it is the most compatible with the node:fs
   // API and posix in general.
   virtual void closeFd(jsg::Lock& js, int fd) const = 0;
+
+  // Returns an opaque RAII handle that wraps a file descriptor.
+  // When it is dropped, the file descriptor will be closed. The handle
+  // holds a weak reference to the VirtualFileSystem so that, on the off
+  // chance the VirtualFileSystem is destroyed while the handle is still
+  // alive, destruction of the handle will become a no-op.
+  virtual kj::Own<void> wrapFd(jsg::Lock& js, int fd) const KJ_WARN_UNUSED_RESULT = 0;
 
   // Attempts to get the opened file, directory, or symlink for the given file descriptor.
   // Returns kj::none if the fd is not opened/known.
