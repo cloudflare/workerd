@@ -2230,7 +2230,6 @@ export const urlParseInvalidInput = {
       // characters.
       assert(badIDNA.includes('℀'));
       assert(badIDNA.includes('＠'));
-
       for (const badCodePoint of badIDNA) {
         const badURL = `http://fail${badCodePoint}fail.com/`;
         assert.throws(
@@ -2241,7 +2240,6 @@ export const urlParseInvalidInput = {
           `parsing ${badURL}`
         );
       }
-
       assert.throws(
         () => {
           url.parse('http://\u00AD/bad.com/');
