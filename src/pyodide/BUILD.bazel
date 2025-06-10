@@ -16,6 +16,19 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# In case we have a runner which doesn't support building pyodide.capnp.bin we
+# want to use a pre-built/cross-compiled artifact. This is just a bazel alias
+# serving as a redirect when referenced by other targets instead of changing
+# the output filename.
+alias(
+    name = "pyodide.capnp.bin_cross",
+    actual = select({
+        "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/pyodide/pyodide.capnp.bin.aarch64-linux-gnu",
+        "//conditions:default": "pyodide.capnp.bin",
+    }),
+    visibility = ["//visibility:public"],
+)
+
 alias(
     name = "pyodide.capnp.bin@rule",
     actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
