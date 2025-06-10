@@ -1,0 +1,20 @@
+name: Experimental Workflow
+on:
+  workflow_dispatch:
+
+# You can modify this workflow in order to verify your changes to Github Actions on a branch.
+# DO NOT MERGE THESE CHANGES TO MAIN
+# This workflow exists to work around a limitation in Github Actions. You can only use 
+# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
+# your branch and make sure changes work.
+
+permissions:
+  contents: none
+
+jobs:
+  experiment:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Hello World
+        shell: bash
+        run: echo Hello World
