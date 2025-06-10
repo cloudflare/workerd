@@ -376,7 +376,7 @@ void Wrappable::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
 
 v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
     v8::Local<v8::Context> context, bool needsGcTracing) {
-  auto isolate = v8::Isolate::GetCurrent();
+  auto isolate = context->GetIsolate();
   auto object =
       jsg::check(IsolateBase::getOpaqueTemplate(isolate)->InstanceTemplate()->NewInstance(context));
   attachWrapper(isolate, object, needsGcTracing);

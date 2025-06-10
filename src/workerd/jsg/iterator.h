@@ -135,7 +135,7 @@ class GeneratorImpl {
   static kj::Maybe<Signature> tryGetFunction(
       v8::Isolate* isolate, v8::Local<v8::Object> object, kj::StringPtr name, auto& wrapper) {
     auto context = isolate->GetCurrentContext();
-    return wrapper.tryUnwrap(Lock::from(isolate), isolate->GetCurrentContext(),
+    return wrapper.tryUnwrap(isolate->GetCurrentContext(),
         check(object->Get(context, v8StrIntern(isolate, name))), (Signature*)nullptr, object);
   }
 
@@ -542,34 +542,30 @@ class GeneratorWrapper {
 
   template <typename T>
   v8::Local<v8::Object> wrap(
-      Lock& js, v8::Local<v8::Context>, kj::Maybe<v8::Local<v8::Object>>, Generator<T>&&) = delete;
+      v8::Local<v8::Context>, kj::Maybe<v8::Local<v8::Object>>, Generator<T>&&) = delete;
 
   template <typename T>
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context>,
-      kj::Maybe<v8::Local<v8::Object>>,
-      AsyncGenerator<T>&&) = delete;
+  v8::Local<v8::Object> wrap(
+      v8::Local<v8::Context>, kj::Maybe<v8::Local<v8::Object>>, AsyncGenerator<T>&&) = delete;
 
   template <typename T>
-  v8::Local<v8::Object> wrap(Lock& js,
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Object> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>>,
       GeneratorNext<T>&& next) = delete;
   // Generator, AsyncGenerator, and GeneratorNext instances should never be
   // passed back out into JavaScript. Use Iterators for that.
 
   template <typename T>
-  kj::Maybe<GeneratorNext<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<GeneratorNext<T>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       GeneratorNext<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = js.v8Isolate;
+      auto isolate = context->GetIsolate();
       auto& typeWrapper = TypeWrapper::from(isolate);
       auto object = handle.template As<v8::Object>();
 
-      bool done = typeWrapper.template unwrap<bool>(js, context,
+      bool done = typeWrapper.template unwrap<bool>(context,
           check(object->Get(context, v8StrIntern(isolate, "done"_kj))), TypeErrorContext::other());
 
       auto value = check(object->Get(context, v8StrIntern(isolate, "value"_kj)));
@@ -591,18 +587,19 @@ class GeneratorWrapper {
         } else {
           return GeneratorNext<T>{
             .done = true,
-            .value = typeWrapper.tryUnwrap(js, context, value, (T*)nullptr, parentObject),
+            .value = typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject),
           };
         }
       }
 
-      KJ_IF_SOME(v, typeWrapper.tryUnwrap(js, context, value, (T*)nullptr, parentObject)) {
+      KJ_IF_SOME(v, typeWrapper.tryUnwrap(context, value, (T*)nullptr, parentObject)) {
         return GeneratorNext<T>{
           .done = false,
           .value = kj::mv(v),
         };
       } else {
-        throwTypeError(js.v8Isolate, TypeErrorContext::other(), TypeWrapper::getName((T*)nullptr));
+        throwTypeError(
+            context->GetIsolate(), TypeErrorContext::other(), TypeWrapper::getName((T*)nullptr));
       }
     }
 
@@ -610,13 +607,12 @@ class GeneratorWrapper {
   }
 
   template <typename T>
-  kj::Maybe<Generator<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<Generator<T>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Generator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = js.v8Isolate;
+      auto isolate = context->GetIsolate();
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
       if (iter->IsFunction()) {
@@ -631,13 +627,12 @@ class GeneratorWrapper {
   }
 
   template <typename T>
-  kj::Maybe<AsyncGenerator<T>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<AsyncGenerator<T>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       AsyncGenerator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (handle->IsObject()) {
-      auto isolate = js.v8Isolate;
+      auto isolate = context->GetIsolate();
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));
       // If there is no async iterator, let's try a sync iterator
@@ -679,43 +674,39 @@ class SequenceWrapper {
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       jsg::Sequence<U> sequence) {
-    v8::Isolate* isolate = js.v8Isolate;
+    v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
-  v8::Local<v8::Value> wrap(jsg::Lock& js,
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       jsg::Sequence<U>& sequence) {
-    v8::Isolate* isolate = js.v8Isolate;
+    v8::Isolate* isolate = context->GetIsolate();
     v8::EscapableHandleScope handleScope(isolate);
     v8::LocalVector<v8::Value> items(isolate, sequence.size());
     for (auto i: kj::indices(sequence)) {
-      items[i] = static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::mv(sequence[i]));
+      items[i] = static_cast<TypeWrapper*>(this)->wrap(context, creator, kj::mv(sequence[i]));
     }
     return handleScope.Escape(v8::Array::New(isolate, items.data(), items.size()));
   }
 
   template <typename U>
-  kj::Maybe<Sequence<U>> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<Sequence<U>> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       Sequence<U>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    auto isolate = js.v8Isolate;
+    auto isolate = context->GetIsolate();
     auto& typeWrapper = TypeWrapper::from(isolate);
-    KJ_IF_SOME(gen,
-        typeWrapper.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
+    KJ_IF_SOME(gen, typeWrapper.tryUnwrap(context, handle, (Generator<U>*)nullptr, parentObject)) {
       kj::Vector<U> items;
       // We intentionally ignore the forEach return value.
       gen.forEach(Lock::from(isolate), [&items](Lock&, U item, auto&) { items.add(kj::mv(item)); });

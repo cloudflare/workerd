@@ -1079,8 +1079,8 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseRejectCallback([](v8::PromiseRejectMessage message) {
       // TODO(cleanup): IoContext doesn't really need to be involved here. We are trying to call
       // a method of ServiceWorkerGlobalScope, which is the context object. So we should be able to
-      // do something like unwrap(lock, isolate->GetCurrentContext()).emitPromiseRejection().
-      // However, JSG doesn't currently provide an easy way to do this.
+      // do something like unwrap(isolate->GetCurrentContext()).emitPromiseRejection(). However, JSG
+      // doesn't currently provide an easy way to do this.
       if (IoContext::hasCurrent()) {
         try {
           IoContext::current().getCurrentLock().reportPromiseRejectEvent(message);
@@ -1102,8 +1102,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     lock->v8Isolate->SetPromiseCrossContextCallback(
         [](v8::Local<v8::Context> context, v8::Local<v8::Promise> promise,
             v8::Local<v8::Object> tag) -> v8::MaybeLocal<v8::Promise> {
-      auto& js = jsg::Lock::current();
       try {
+        auto& js = jsg::Lock::from(context->GetIsolate());
+
         // Generally this condition is only going to happen when using dynamic imports.
         // It should not be common.
         JSG_REQUIRE(IoContext::hasCurrent(), Error,
@@ -1128,7 +1129,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       } catch (...) {
         auto ex = kj::getCaughtExceptionAsKj();
         KJ_LOG(ERROR, "Setting promise cross context follower failed unexpectedly", ex);
-        jsg::throwInternalError(js.v8Isolate, kj::mv(ex));
+        jsg::throwInternalError(context->GetIsolate(), kj::mv(ex));
         return v8::MaybeLocal<v8::Promise>();
       }
     });

@@ -468,22 +468,20 @@ class BufferSourceWrapper {
     return "BufferSource";
   }
 
-  v8::Local<v8::Value> wrap(Lock& js,
-      v8::Local<v8::Context> context,
+  v8::Local<v8::Value> wrap(v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       BufferSource bufferSource) {
-    return bufferSource.getHandle(js);
+    return bufferSource.getHandle(Lock::from(context->GetIsolate()));
   }
 
-  kj::Maybe<BufferSource> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
+  kj::Maybe<BufferSource> tryUnwrap(v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
       BufferSource*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     if (!handle->IsArrayBuffer() && !handle->IsArrayBufferView()) {
       return kj::none;
     }
-    return BufferSource(js, handle);
+    return BufferSource(Lock::from(context->GetIsolate()), handle);
   }
 };
 
