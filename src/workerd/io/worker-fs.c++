@@ -1,6 +1,7 @@
 #include "worker-fs.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/weak-refs.h>
 
 #include <algorithm>
 
@@ -749,13 +750,32 @@ class FileImpl final: public File {
 using ReadableDirectory = DirectoryBase<false>;
 using WritableDirectory = DirectoryBase<true>;
 
+class VirtualFileSystemImpl;
+
+class FdHandle final {
+ public:
+  FdHandle(kj::Rc<WeakRef<VirtualFileSystemImpl>> weakFs, int fd): weakFs(kj::mv(weakFs)), fd(fd) {}
+
+  ~FdHandle() noexcept(false);
+
+ private:
+  kj::Rc<WeakRef<VirtualFileSystemImpl>> weakFs;
+  int fd;
+};
+
 class VirtualFileSystemImpl final: public VirtualFileSystem {
  public:
   VirtualFileSystemImpl(
       kj::Own<FsMap> fsMap, kj::Rc<Directory>&& root, kj::Own<VirtualFileSystem::Observer> observer)
       : fsMap(kj::mv(fsMap)),
         root(kj::mv(root)),
-        observer(kj::mv(observer)) {}
+        observer(kj::mv(observer)),
+        weakThis(
+            kj::rc<WeakRef<VirtualFileSystemImpl>>(kj::Badge<VirtualFileSystemImpl>(), *this)) {}
+
+  ~VirtualFileSystemImpl() noexcept(false) override {
+    weakThis->invalidate();
+  }
 
   kj::Rc<Directory> getRoot(jsg::Lock& js) const override {
     return root.addRef();
@@ -875,8 +895,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   }
 
   void closeFd(jsg::Lock& js, int fd) const override {
-    openedFiles.erase(fd);
-    observer->onClose(openedFiles.size(), nextFd);
+    closeFdWithoutExplicitLock(fd);
   }
 
   kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(jsg::Lock& js, int fd) const override {
@@ -886,16 +905,36 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return kj::none;
   }
 
+  kj::Own<void> wrapFd(jsg::Lock& js, int fd) const override {
+    return kj::heap<FdHandle>(weakThis.addRef(), fd);
+  }
+
  private:
+  // All operations on the VFS are expected to be performed while holding the
+  // isolate lock even tho the VFS itself does not depend directly on the
+  // lock. This is to ensure that the VFS operations are thread-safe without
+  // incurring additional locking overhead.
   kj::Own<FsMap> fsMap;
   mutable kj::Rc<Directory> root;
   kj::Own<VirtualFileSystem::Observer> observer;
+  mutable kj::Rc<WeakRef<VirtualFileSystemImpl>> weakThis;
+  friend class FdHandle;
 
   // The next file descriptor to be used for the next file opened.
   mutable int nextFd = 0;
 
   mutable kj::HashMap<int, kj::Rc<OpenedFile>> openedFiles;
+
+  void closeFdWithoutExplicitLock(int fd) const {
+    openedFiles.erase(fd);
+    observer->onClose(openedFiles.size(), nextFd);
+  }
 };
+
+FdHandle::~FdHandle() noexcept(false) {
+  weakFs->runIfAlive([&](VirtualFileSystemImpl& vfs) { vfs.closeFdWithoutExplicitLock(fd); });
+}
+
 }  // namespace
 
 kj::OneOf<FsError, jsg::JsString> File::readAllText(jsg::Lock& js) {

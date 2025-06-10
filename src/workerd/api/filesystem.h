@@ -28,15 +28,13 @@ struct Stat {
   Stat(const workerd::Stat& stat);
 };
 
+// A simple RAII handle for a file descriptor. When the instance is
+// destroyed, the file descriptor is closed if it hasn't already
+// been closed.
 class FileFdHandle final: public jsg::Object {
  public:
-  // A simple RAII handle for a file descriptor. When the instance is
-  // destroyed, the file descriptor is closed if it hasn't already
-  // been closed.
-  FileFdHandle(const workerd::VirtualFileSystem& vfs, int fd): vfs(vfs), fd(fd) {}
-  ~FileFdHandle() noexcept {
-    // TODO(node-fs): Should call close on destroy.
-  }
+  FileFdHandle(jsg::Lock& js, const workerd::VirtualFileSystem& vfs, int fd);
+  ~FileFdHandle() noexcept;
 
   static jsg::Ref<FileFdHandle> constructor(jsg::Lock& js, int fd);
 
@@ -47,8 +45,7 @@ class FileFdHandle final: public jsg::Object {
   }
 
  private:
-  kj::Maybe<const workerd::VirtualFileSystem&> vfs;
-  kj::Maybe<int> fd;
+  kj::Maybe<kj::Own<void>> fdHandle;
 };
 
 class FileSystemModule final: public jsg::Object {

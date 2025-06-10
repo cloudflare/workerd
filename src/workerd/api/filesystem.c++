@@ -1227,15 +1227,41 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
 jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
   auto& vfs = JSG_REQUIRE_NONNULL(
       workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
-  return js.alloc<FileFdHandle>(vfs, fd);
+  return js.alloc<FileFdHandle>(js, vfs, fd);
 }
 
+FileFdHandle::FileFdHandle(jsg::Lock& js, const workerd::VirtualFileSystem& vfs, int fd)
+    : fdHandle(vfs.wrapFd(js, fd)) {}
+
 void FileFdHandle::close(jsg::Lock& js) {
-  auto& fs = JSG_REQUIRE_NONNULL(vfs, Error, "No current virtual file system");
-  KJ_IF_SOME(val, fd) {
-    fs.closeFd(js, val);
-    fd = kj::none;
-    vfs = kj::none;
+  fdHandle = kj::none;
+}
+
+FileFdHandle::~FileFdHandle() noexcept {
+  if (fdHandle != kj::none) {
+    // We can safely close the file descriptor without an explicit lock
+    // because we are in the destructor of a jsg::Object which should
+    // only be destroyed when the isolate lock is held per the rules of
+    // the jsg::Ref<T> holder and the deferred destruction queue.
+    fdHandle = kj::none;
+
+    // In Node.js, closing the file descriptor on destruction is an
+    // error (it has been a deprecated behavior for a long time and
+    // is being upgraded to a catchable error in Node.js moving
+    // forward). However, throwing an error in our implementation is
+    // of questionable value since it's not clear exactly what the
+    // user is supposed to do about it beyond making sure to explicitly
+    // close the file descriptor before the object is destroyed.
+    // If we have an active IoContext, then we'll go ahead and log
+    // a warning.
+    // In preview, let's try to warn the developer about the problem.
+    if (IoContext::hasCurrent()) {
+      IoContext::current().logWarning(
+          kj::str("A FileHandle was destroyed without being closed. This is "
+                  "not recommended and may lead to file descriptors being held "
+                  "far longer than necessary. Please make sure to explicitly close "
+                  "the FileHandle object explicitly before it is destroyed."));
+    }
   }
 }
 
