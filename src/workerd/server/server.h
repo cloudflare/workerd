@@ -9,7 +9,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/server/alarm-scheduler.h>
 #include <workerd/server/workerd.capnp.h>
-#include <workerd/util/sqlite.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
@@ -102,6 +101,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
     kj::String uniqueKey;
     bool isEvictable;
     bool enableSql;
+    kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
   };
   struct Ephemeral {
     bool isEvictable;

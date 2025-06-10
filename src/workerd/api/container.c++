@@ -121,7 +121,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // We don't support TLS.
     JSG_REQUIRE(parsedUrl.scheme != "https", Error,
-        "Connencting to a container using HTTPS is not currently supported; use HTTP instead. "
+        "Connecting to a container using HTTPS is not currently supported; use HTTP instead. "
         "TLS is unnecessary anyway, as the connection is already secure by default.");
 
     // Schemes other than http: and https: should have been rejected earlier, but let's verify.

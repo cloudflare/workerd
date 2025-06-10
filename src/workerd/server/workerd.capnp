@@ -601,6 +601,18 @@ struct Worker {
     # workerd uses SQLite to back all Durable Objects, but the SQL API is hidden by default to
     # emulate behavior of traditional DO namespaces on Cloudflare that aren't SQLite-backed. This
     # flag should be enabled when testing code that will run on a SQLite-backed namespace.
+
+    container @5 :ContainerOptions;
+    # If present, Durable Objects in this namespace have attached containers.
+    # workerd will talk to the configured container engine to start containers for each
+    # Durable Object based on the given image. The Durable Object can access the container via the
+    # ctx.container API. TODO(CloudChamber): add link to docs.
+
+    struct ContainerOptions {
+      imageName @0 :Text;
+      # Image name to be used to create the container using supported provider.
+      # By default, we pull the "latest" tag of this image.
+    }
   }
 
   durableObjectUniqueKeyModifier @8 :Text;
@@ -651,6 +663,20 @@ struct Worker {
   streamingTails @15 :List(ServiceDesignator);
   # List of streaming tail worker services that should receive tail events for this worker.
   # NOTE: This will be deleted in a future refactor, do not depend on this.
+
+  containerEngine :union {
+    none @16 :Void;
+    # No container engine configured. Container operations will not be available.
+
+    localDocker @17 :DockerConfiguration;
+    # Use local Docker daemon for container operations.
+    # Only used for local development and testing purposes.
+  }
+
+  struct DockerConfiguration {
+    socketPath @0 :Text;
+    # Path to the Docker socket.
+  }
 }
 
 struct ExternalServer {
