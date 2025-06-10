@@ -88,10 +88,10 @@ export default {
       });
     }
 
-    const reqContentType = request.headers.get("content-type");
+    const reqContentType = request.headers.get('content-type');
 
     let data = {};
-    if (reqContentType === "application/json") {
+    if (reqContentType === 'application/json') {
       data = await request.json();
     } else {
       data = {
@@ -131,7 +131,7 @@ export default {
       return Response.json(
         {
           inputs: {},
-          options: {...data.options},
+          options: { ...data.options },
           requestUrl: request.url,
         },
         {

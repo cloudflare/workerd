@@ -100,7 +100,7 @@ export const tests = {
 
     {
       // Test one readable stream input
-      const arr = [1,2,3];
+      const arr = [1, 2, 3];
       const resp = await env.ai.run('readableStreamIputs', {
         audio: {
           body: new ReadableStream({
@@ -112,20 +112,21 @@ export const tests = {
               controller.close();
             },
           }),
-          contentType: "audio/wav"
-        }
+          contentType: 'audio/wav',
+        },
       });
 
       assert.deepStrictEqual(resp, {
         inputs: {},
         options: { userInputs: '{}', version: '3' },
-        requestUrl: 'https://workers-binding.ai/run?version=3&userInputs=%7B%7D',
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%7D',
       });
     }
 
     {
       // Test one readable stream input with additional parameters
-      const arr = [1,2,3];
+      const arr = [1, 2, 3];
       const resp = await env.ai.run('readableStreamIputs', {
         audio: {
           body: new ReadableStream({
@@ -137,23 +138,27 @@ export const tests = {
               controller.close();
             },
           }),
-          contentType: "audio/wav"
+          contentType: 'audio/wav',
         },
         detect_language: true,
-        prompt: "test prompt"
+        prompt: 'test prompt',
       });
 
       assert.deepStrictEqual(resp, {
         inputs: {},
-        options: { userInputs: '{"detect_language":true,"prompt":"test prompt"}', version: '3' },
-        requestUrl: 'https://workers-binding.ai/run?version=3&userInputs=%7B%22detect_language%22%3Atrue%2C%22prompt%22%3A%22test+prompt%22%7D',
+        options: {
+          userInputs: '{"detect_language":true,"prompt":"test prompt"}',
+          version: '3',
+        },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%22detect_language%22%3Atrue%2C%22prompt%22%3A%22test+prompt%22%7D',
       });
     }
 
     {
       // Test errors from one readable stream input without content-type
       try {
-        const arr = [1,2,3];
+        const arr = [1, 2, 3];
         const resp = await env.ai.run('readableStreamIputs', {
           audio: {
             body: new ReadableStream({
@@ -165,7 +170,7 @@ export const tests = {
                 controller.close();
               },
             }),
-          }
+          },
         });
       } catch (e) {
         assert.deepEqual(
@@ -186,24 +191,24 @@ export const tests = {
     {
       // Test errors from two readable stream inputs
       try {
-        const arr = [1,2,3];
+        const arr = [1, 2, 3];
         const stream = new ReadableStream({
-              start(controller) {
-                const encoder = new TextEncoder();
-                for (const ele of arr) {
-                  controller.enqueue(encoder.encode(ele));
-                }
-                controller.close();
-              },
-            });
+          start(controller) {
+            const encoder = new TextEncoder();
+            for (const ele of arr) {
+              controller.enqueue(encoder.encode(ele));
+            }
+            controller.close();
+          },
+        });
         const resp = await env.ai.run('readableStreamIputs', {
           audio: {
             body: stream,
-            contentType: "audio/wav"
+            contentType: 'audio/wav',
           },
           image: {
             body: stream,
-            contentType: "image/png"
+            contentType: 'image/png',
           },
         });
       } catch (e) {

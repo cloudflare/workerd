@@ -37,7 +37,7 @@ export type AiOptions = {
 export type AiInputReadableStream = {
   body: ReadableStream;
   contentType: string;
-}
+};
 
 export type ConversionResponse = {
   name: string;
@@ -111,7 +111,9 @@ async function blobToBase64(blob: Blob): Promise<string> {
 export function isReadableStream(value: any): boolean {
   return (
     value instanceof ReadableStream ||
-    (value && typeof value?.getReader === "function" && typeof value?.locked === "boolean")
+    (value &&
+      typeof value?.getReader === 'function' &&
+      typeof value?.locked === 'boolean')
   );
 }
 
@@ -121,7 +123,10 @@ export function isReadableStream(value: any): boolean {
 function findReadableStreamKeys(inputs: Record<string, object>): Array<string> {
   const readableStreamKeys = [];
   for (const [key, value] of Object.entries(inputs)) {
-    if (isReadableStream((value as AiInputReadableStream)?.body) || isReadableStream(value)) {
+    if (
+      isReadableStream((value as AiInputReadableStream)?.body) ||
+      isReadableStream(value)
+    ) {
       readableStreamKeys.push(key);
     }
   }
@@ -160,7 +165,7 @@ export class Ai {
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
     this.options = options;
     this.lastRequestId = '';
- 
+
     // This removes some unwanted options from getting sent in the body
     const cleanedOptions = (({
       prefix,
@@ -182,7 +187,7 @@ export class Ai {
         inputs,
         options: cleanedOptions,
       });
-   
+
       const fetchOptions = {
         method: 'POST',
         body: body,
@@ -194,21 +199,24 @@ export class Ai {
           'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
         },
       };
-   
+
       let endpointUrl = 'https://workers-binding.ai/run?version=3';
       if (options.gateway?.id) {
         endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
       }
-   
-      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
 
+      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
     } else if (streamKeys.length > 1) {
-      throw new AiInternalError(`Muliple ReadableStreams [${streamKeys}] are not supported`);
+      throw new AiInternalError(
+        `Muliple ReadableStreams [${streamKeys}] are not supported`
+      );
     } else {
       // Make sure user has supplied the Content-Type
       // This allows AI binding to treat the ReadableStream correctly
-      if(!(inputs[streamKeys[0]!] as AiInputReadableStream)?.contentType) {
-        throw new AiInternalError('Content-Type is required with ReadableStream inputs');
+      if (!(inputs[streamKeys[0]!] as AiInputReadableStream)?.contentType) {
+        throw new AiInternalError(
+          'Content-Type is required with ReadableStream inputs'
+        );
       }
 
       // Pass single ReadableStream in request body
@@ -218,7 +226,8 @@ export class Ai {
         headers: {
           ...this.options.sessionOptions?.extraHeaders,
           ...this.options.extraHeaders,
-          'content-type': (inputs[streamKeys[0]!] as AiInputReadableStream)?.contentType,
+          'content-type': (inputs[streamKeys[0]!] as AiInputReadableStream)
+            ?.contentType,
           'cf-consn-sdk-version': '2.0.0',
           'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
         },
@@ -229,12 +238,17 @@ export class Ai {
 
       // Construct query params
       // Append inputs with ai.run options that are passed to the inference request
-      const query: any = { ...cleanedOptions, userInputs: JSON.stringify({...inputs}) };
+      const query: any = {
+        ...cleanedOptions,
+        userInputs: JSON.stringify({ ...inputs }),
+      };
       const queryParams = new URLSearchParams(query).toString();
 
       let endpointUrl = `https://workers-binding.ai/run?version=3&${queryParams}`;
       if (options.gateway?.id) {
-        throw new AiInternalError("AI Gateway does not support ReadableStreams yet.");
+        throw new AiInternalError(
+          'AI Gateway does not support ReadableStreams yet.'
+        );
       }
       res = await this.fetcher.fetch(endpointUrl, fetchOptions);
     }
