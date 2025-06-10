@@ -219,7 +219,8 @@ export const tests = {
           },
           {
             name: 'AiInternalError',
-            message: 'Muliple ReadableStreams [audio,image] are not supported',
+            message:
+              'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
           }
         );
         // Test request internal status code is present

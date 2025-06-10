@@ -120,16 +120,26 @@ export function isReadableStream(value: any): boolean {
 /**
  * Find keys in inputs that have a ReadableStream
  * */
-function findReadableStreamKeys(inputs: Record<string, object>): Array<string> {
-  const readableStreamKeys = [];
+function findReadableStreamKeys(
+  inputs: Record<string, unknown>
+): Array<string> {
+  const readableStreamKeys: Array<string> = [];
+
   for (const [key, value] of Object.entries(inputs)) {
-    if (
-      isReadableStream((value as AiInputReadableStream)?.body) ||
-      isReadableStream(value)
-    ) {
+    // Check if value has a body property that's a ReadableStream
+    const hasReadableStreamBody =
+      value &&
+      typeof value === 'object' &&
+      'body' in value &&
+      isReadableStream((value as AiInputReadableStream).body);
+
+    const isDirectReadableStream = isReadableStream(value);
+
+    if (hasReadableStreamBody || isDirectReadableStream) {
       readableStreamKeys.push(key);
     }
   }
+
   return readableStreamKeys;
 }
 
@@ -160,7 +170,7 @@ export class Ai {
 
   public async run(
     model: string,
-    inputs: Record<string, object>,
+    inputs: Record<string, unknown>,
     options: AiOptions = {}
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
     this.options = options;
@@ -208,7 +218,7 @@ export class Ai {
       res = await this.fetcher.fetch(endpointUrl, fetchOptions);
     } else if (streamKeys.length > 1) {
       throw new AiInternalError(
-        `Muliple ReadableStreams [${streamKeys}] are not supported`
+        `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
       );
     } else {
       // Make sure user has supplied the Content-Type
@@ -233,14 +243,14 @@ export class Ai {
         },
       };
 
-      // Remove the stream body
-      delete inputs[streamKeys[0]!];
+      // Fetch the additional input params
+      const { [streamKeys[0]!]: streamInput, ...userInputs } = inputs;
 
       // Construct query params
       // Append inputs with ai.run options that are passed to the inference request
       const query: any = {
         ...cleanedOptions,
-        userInputs: JSON.stringify({ ...inputs }),
+        userInputs: JSON.stringify({ ...userInputs }),
       };
       const queryParams = new URLSearchParams(query).toString();
 
