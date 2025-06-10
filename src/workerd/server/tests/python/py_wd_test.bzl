@@ -11,7 +11,7 @@ def _py_wd_test_helper(
         name,
         src,
         python_flag,
-        snapshot,
+        make_snapshot,
         *,
         args = [],
         **kwargs):
@@ -32,7 +32,7 @@ def _py_wd_test_helper(
         src = templated_src,
         name = name_flag + "@",
         args = args,
-        python_snapshot_test = snapshot,
+        python_snapshot_test = make_snapshot,
         **kwargs
     )
 
@@ -80,7 +80,7 @@ def py_wd_test(
             name,
             src,
             python_flag,
-            snapshot = make_snapshot,
+            make_snapshot = make_snapshot,
             data = data,
             args = args,
             size = size,
