@@ -109,6 +109,7 @@ wd_cc_library(
         ":actor-id-impl",
         ":alarm-scheduler",
         ":bundle-fs",
+        ":container-client",
         ":fallback-service",
         ":workerd_capnp",
         "//deps/rust:runtime",
@@ -129,6 +130,24 @@ wd_cc_library(
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
         "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_capnp_library(src = "docker-api.capnp")
+
+wd_cc_library(
+    name = "container-client",
+    srcs = ["container-client.c++"],
+    hdrs = ["container-client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":docker-api_capnp",
+        "//src/workerd/io:container_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp/compat:http-over-capnp",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
