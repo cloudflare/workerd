@@ -12,6 +12,14 @@ function base64ToBlob(base64, mimeType) {
   return new Blob([bytes], { type: mimeType });
 }
 
+export function extractQueryParams(params) {
+  const query = {};
+  for (const [key, value] of params) {
+    query[key] = value;
+  }
+  return query;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -80,7 +88,17 @@ export default {
       });
     }
 
-    const data = await request.json();
+    const reqContentType = request.headers.get("content-type");
+
+    let data = {};
+    if (reqContentType === "application/json") {
+      data = await request.json();
+    } else {
+      data = {
+        inputs: request.body,
+        options: extractQueryParams(url.searchParams),
+      };
+    }
 
     const modelName = request.headers.get('cf-consn-model-id');
 
@@ -101,6 +119,19 @@ export default {
       return Response.json(
         {
           ...data,
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
+    }
+
+    if (modelName === 'readableStreamIputs') {
+      return Response.json(
+        {
+          inputs: {},
+          options: {...data.options},
           requestUrl: request.url,
         },
         {

@@ -121,7 +121,7 @@ export function isReadableStream(value: any): boolean {
 function findReadableStreamKeys(inputs: Record<string, object>): Array<string> {
   const readableStreamKeys = [];
   for (const [key, value] of Object.entries(inputs)) {
-    if (isReadableStream((value as AiInputReadableStream)?.body) || isReadableStream(value instanceof ReadableStream)) {
+    if (isReadableStream((value as AiInputReadableStream)?.body) || isReadableStream(value)) {
       readableStreamKeys.push(key);
     }
   }
@@ -229,9 +229,8 @@ export class Ai {
 
       // Construct query params
       // Append inputs with ai.run options that are passed to the inference request
-      const query: any = Object.assign({}, {...cleanedOptions}, {userInputs: JSON.stringify({...inputs})});
+      const query: any = { ...cleanedOptions, userInputs: JSON.stringify({...inputs}) };
       const queryParams = new URLSearchParams(query).toString();
-      console.log(queryParams);
 
       let endpointUrl = `https://workers-binding.ai/run?version=3&${queryParams}`;
       if (options.gateway?.id) {
