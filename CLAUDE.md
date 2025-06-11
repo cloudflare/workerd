@@ -77,15 +77,20 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - Sample configurations in `samples/` directory
 - Configuration uses capability-based security model
 
+## Backward Compatibility
+- Strong backwards compatibility commitment - features cannot be removed or changed once deployed
+- We use compatibility-date.capnp to introduce feature flags when we need to change the behavior
+
+## Risky Changes
+- We use autogates (defined in `src/workerd/util/autogate.*`) flags to make risky changes conditional for testing/slow rollout.
+
 ## Development Workflow
 
 ### Code Style & Formatting
 - Automatic formatting via clang-format (enforced in CI)
 - Run `just format` before committing
-- Uses KJ C++ style guide (see Cap'n Proto project)
 
 ### Contributing
-- Strong backwards compatibility commitment - features cannot be removed once deployed
 - High bar for non-standard APIs; prefer implementing web standards
 - Run tests with `just test` before submitting PRs
 
