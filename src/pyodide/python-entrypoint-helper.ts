@@ -24,11 +24,13 @@ const pyodide_entrypoint_helper: any = {};
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
   cloudflareWorkers: any,
-  cloudflareSockets: any
+  cloudflareSockets: any,
+  workerEntrypoint: any
 ): void {
   pyodide_entrypoint_helper.doAnImport = func;
   pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
   pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
+  pyodide_entrypoint_helper.workerEntrypoint = workerEntrypoint;
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
@@ -414,6 +416,17 @@ export async function initPython(): Promise<PythonInitResult> {
   const introspectionMod = await getIntrospectionMod();
   pythonEntrypointClasses =
     introspectionMod.collect_entrypoint_classes(mainModule);
+
+  for (const cls of pythonEntrypointClasses.workerEntrypoints) {
+    if (cls.className == 'default') {
+      console.log(cls, pyodide_entrypoint_helper.workerEntrypoint);
+      handlers['default'] = makeEntrypointClass(
+        'default',
+        pyodide_entrypoint_helper.workerEntrypoint,
+        cls.methodNames
+      );
+    }
+  }
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }
