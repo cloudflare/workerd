@@ -545,7 +545,7 @@ interface DurableObjectNamespace<
     jurisdiction: DurableObjectJurisdiction,
   ): DurableObjectNamespace<T>;
 }
-type DurableObjectJurisdiction = "eu" | "fedramp";
+type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
@@ -4517,7 +4517,7 @@ type AiModelListType = Record<string, any>;
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<Name extends keyof AiModelList, Options extends AiOptions>(
     model: Name,
     inputs: AiModelList[Name]["inputs"],
@@ -4669,6 +4669,7 @@ declare abstract class AiGateway {
 interface AutoRAGInternalError extends Error {}
 interface AutoRAGNotFoundError extends Error {}
 interface AutoRAGUnauthorizedError extends Error {}
+interface AutoRAGNameNotSetError extends Error {}
 type ComparisonFilter = {
   key: string;
   type: "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
@@ -4713,10 +4714,20 @@ type AutoRagSearchResponse = {
   has_more: boolean;
   next_page: string | null;
 };
+type AutoRagListResponse = {
+  id: string;
+  enable: boolean;
+  type: string;
+  source: string;
+  vectorize_name: string;
+  paused: boolean;
+  status: string;
+}[];
 type AutoRagAiSearchResponse = AutoRagSearchResponse & {
   response: string;
 };
 declare abstract class AutoRAG {
+  list(): Promise<AutoRagListResponse>;
   search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse>;
   aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
   aiSearch(params: AutoRagAiSearchRequest): Promise<AutoRagAiSearchResponse>;
@@ -6450,6 +6461,7 @@ declare module "cloudflare:workers" {
     | number;
   export type WorkflowDelayDuration = WorkflowSleepDuration;
   export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+  export type WorkflowRetentionDuration = WorkflowSleepDuration;
   export type WorkflowBackoff = "constant" | "linear" | "exponential";
   export type WorkflowStepConfig = {
     retries?: {
@@ -7064,6 +7076,18 @@ declare abstract class Workflow<PARAMS = unknown> {
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
   ): Promise<WorkflowInstance[]>;
 }
+type WorkflowDurationLabel =
+  | "second"
+  | "minute"
+  | "hour"
+  | "day"
+  | "week"
+  | "month"
+  | "year";
+type WorkflowSleepDuration =
+  | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+  | number;
+type WorkflowRetentionDuration = WorkflowSleepDuration;
 interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
   /**
    * An id for your Workflow instance. Must be unique within the Workflow.
@@ -7073,6 +7097,14 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * The event payload the Workflow instance is triggered with
    */
   params?: PARAMS;
+  /**
+   * The retention policy for Workflow instance.
+   * Defaults to the maximum retention period available for the owner's account.
+   */
+  retention?: {
+    successRetention?: WorkflowRetentionDuration;
+    errorRetention?: WorkflowRetentionDuration;
+  };
 }
 type InstanceStatus = {
   status:

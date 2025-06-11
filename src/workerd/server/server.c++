@@ -5,6 +5,7 @@
 #include "server.h"
 
 #include "bundle-fs.h"
+#include "container-client.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -16,6 +17,7 @@
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/compatibility-date.h>
+#include <workerd/io/container.capnp.h>
 #include <workerd/io/hibernation-manager.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/request-tracker.h>
@@ -1732,7 +1734,9 @@ class Server::WorkerService final: public Service,
       kj::HashSet<kj::String> actorClassEntrypoints,
       const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
-      AbortActorsCallback abortActorsCallback)
+      AbortActorsCallback abortActorsCallback,
+      kj::Network& network,
+      kj::Maybe<kj::String> dockerPath)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1740,12 +1744,14 @@ class Server::WorkerService final: public Service,
         namedEntrypoints(kj::mv(namedEntrypoints)),
         actorClassEntrypoints(kj::mv(actorClassEntrypoints)),
         waitUntilTasks(*this),
-        abortActorsCallback(kj::mv(abortActorsCallback)) {
+        abortActorsCallback(kj::mv(abortActorsCallback)),
+        network(network),
+        dockerPath(kj::mv(dockerPath)) {
 
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
-      auto ns =
-          kj::heap<ActorNamespace>(*this, entry.key, entry.value, threadContext.getUnsafeTimer());
+      auto ns = kj::heap<ActorNamespace>(*this, entry.key, entry.value,
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory());
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -1950,11 +1956,13 @@ class Server::WorkerService final: public Service,
     ActorNamespace(WorkerService& service,
         kj::StringPtr className,
         const ActorConfig& config,
-        kj::Timer& timer)
+        kj::Timer& timer,
+        capnp::ByteStreamFactory& byteStreamFactory)
         : service(service),
           className(className),
           config(config),
-          timer(timer) {
+          timer(timer),
+          byteStreamFactory(byteStreamFactory) {
       if (!service.actorClassEntrypoints.contains(className)) {
         KJ_LOG(WARNING,
             kj::str("A DurableObjectNamespace in the config referenced the class \"", className,
@@ -1984,12 +1992,17 @@ class Server::WorkerService final: public Service,
     // the DO is evicted, otherwise we cancel the eviction task.
     class ActorContainer final: public RequestTracker::Hooks, public kj::Refcounted {
      public:
-      ActorContainer(kj::String key, Worker::Actor::Id id, ActorNamespace& parent, kj::Timer& timer)
+      ActorContainer(kj::String key,
+          Worker::Actor::Id id,
+          ActorNamespace& parent,
+          kj::Timer& timer,
+          capnp::ByteStreamFactory& byteStreamFactory)
           : key(kj::mv(key)),
             id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             parent(parent),
             timer(timer),
+            byteStreamFactory(byteStreamFactory),
             lastAccess(timer.now()) {}
 
       ~ActorContainer() noexcept(false) {
@@ -2113,6 +2126,7 @@ class Server::WorkerService final: public Service,
       kj::Own<RequestTracker> tracker;
       ActorNamespace& parent;
       kj::Timer& timer;
+      capnp::ByteStreamFactory& byteStreamFactory;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
@@ -2243,9 +2257,14 @@ class Server::WorkerService final: public Service,
         };
 
         bool enableSql = true;
+        kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader>
+            containerOptions = kj::none;
+        kj::Maybe<kj::StringPtr> uniqueKey;
         KJ_SWITCH_ONEOF(parent.config) {
           KJ_CASE_ONEOF(c, Durable) {
             enableSql = c.enableSql;
+            containerOptions = c.containerOptions;
+            uniqueKey = c.uniqueKey;
           }
           KJ_CASE_ONEOF(c, Ephemeral) {
             enableSql = c.enableSql;
@@ -2267,10 +2286,31 @@ class Server::WorkerService final: public Service,
         // work for local development we need to pass an event type.
         static constexpr uint16_t hibernationEventTypeId = 8;
 
+        kj::Maybe<rpc::Container::Client> containerClient = kj::none;
+        KJ_IF_SOME(config, containerOptions) {
+          auto& dockerPathRef = KJ_ASSERT_NONNULL(service.dockerPath,
+              "dockerPath needs to be defined in order enable containers on this durable object.");
+          KJ_ASSERT(config.hasImageName(), "Image name is required");
+          auto imageName = config.getImageName();
+          kj::String containerId;
+          KJ_SWITCH_ONEOF(id) {
+            KJ_CASE_ONEOF(globalId, kj::Own<ActorIdFactory::ActorId>) {
+              containerId = globalId->toString();
+            }
+            KJ_CASE_ONEOF(existingId, kj::String) {
+              containerId = kj::str(existingId);
+            }
+          }
+          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer, service.network,
+              kj::str(dockerPathRef),
+              kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
+              kj::str(imageName));
+        }
+
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
             Worker::Actor::cloneId(id), true, kj::mv(makeActorCache), parent.className,
             kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::refcounted<ActorObserver>(),
-            tryGetManagerRef(), hibernationEventTypeId));
+            tryGetManagerRef(), hibernationEventTypeId, kj::mv(containerClient)));
         onBrokenTask = monitorOnBroken(actorRef);
       }
     };
@@ -2291,7 +2331,8 @@ class Server::WorkerService final: public Service,
 
       return actors
           .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(kj::mv(key), kj::mv(id), *this, timer);
+        auto container = kj::refcounted<ActorContainer>(
+            kj::mv(key), kj::mv(id), *this, timer, byteStreamFactory);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
@@ -2315,6 +2356,7 @@ class Server::WorkerService final: public Service,
     kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>> actors;
     kj::Maybe<kj::Promise<void>> cleanupTask;
     kj::Timer& timer;
+    capnp::ByteStreamFactory& byteStreamFactory;
 
     // Removes actors from `actors` after 70 seconds of last access.
     kj::Promise<void> cleanupLoop() {
@@ -2436,6 +2478,8 @@ class Server::WorkerService final: public Service,
   kj::HashMap<kj::StringPtr, kj::Own<ActorNamespace>> actorNamespaces;
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
+  kj::Network& network;
+  kj::Maybe<kj::String> dockerPath;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -3359,10 +3403,20 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     return result;
   };
 
+  kj::Maybe<kj::String> dockerPath = kj::none;
+  switch (conf.getContainerEngine().which()) {
+    case config::Worker::ContainerEngine::NONE:
+      // No container engine configured
+      break;
+    case config::Worker::ContainerEngine::LOCAL_DOCKER:
+      dockerPath = kj::str(conf.getContainerEngine().getLocalDocker().getSocketPath());
+      break;
+  }
+
   return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), localActorConfigs, kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors));
+      KJ_BIND_METHOD(*this, abortAllActors), network, kj::mv(dockerPath));
 }
 
 // =======================================================================================
@@ -3916,7 +3970,8 @@ void Server::startServices(jsg::V8System& v8System,
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
                 Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
                   .isEvictable = !ns.getPreventEviction(),
-                  .enableSql = ns.getEnableSql()});
+                  .enableSql = ns.getEnableSql(),
+                  .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none});
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {

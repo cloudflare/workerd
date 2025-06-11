@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v7.2.1"
-URL = "https://github.com/simdutf/simdutf/releases/download/v7.2.1/singleheader.zip"
+TAG_NAME = "v7.3.0"
+URL = "https://github.com/simdutf/simdutf/releases/download/v7.3.0/singleheader.zip"
 STRIP_PREFIX = ""
-SHA256 = "f8b856395b6d9b8f7fbc38796ba291fe73d73b9dfed341959ad67e7705cee786"
+SHA256 = "512374f8291d3daf102ccd0ad223b1a8318358f7c1295efd4d9a3abbb8e4b6ff"
 TYPE = "zip"
 
 def dep_simdutf():

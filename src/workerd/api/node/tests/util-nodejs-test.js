@@ -25,15 +25,22 @@
 
 import assert from 'node:assert';
 import { mock } from 'node:test';
-import util, { inspect } from 'node:util';
+import util, {
+  inspect,
+  callbackify,
+  inherits,
+  promisify,
+  stripVTControlCharacters,
+  styleText,
+} from 'node:util';
 
 const remainingMustCallErrors = new Set();
 function commonMustCall(f) {
   const error = new Error('Expected function to be called');
   remainingMustCallErrors.add(error);
-  return (...args) => {
+  return function (...args) {
     remainingMustCallErrors.delete(error);
-    return f(...args);
+    return f.call(this, ...args);
   };
 }
 function assertCalledMustCalls() {
@@ -42,6 +49,28 @@ function assertCalledMustCalls() {
   } finally {
     remainingMustCallErrors.clear();
   }
+}
+
+function invalidArgTypeHelper(input) {
+  if (input == null) {
+    return ` Received ${input}`;
+  }
+  if (typeof input === 'function') {
+    return ` Received function ${input.name}`;
+  }
+  if (typeof input === 'object') {
+    if (input.constructor?.name) {
+      return ` Received an instance of ${input.constructor.name}`;
+    }
+    return ` Received ${inspect(input, { depth: -1 })}`;
+  }
+
+  let inspected = inspect(input, { colors: false });
+  if (inspected.length > 28) {
+    inspected = `${inspected.slice(inspected, 0, 25)}...`;
+  }
+
+  return ` Received type ${typeof input} (${inspected})`;
 }
 
 export const utilInspect = {
@@ -192,7 +221,7 @@ export const utilInspect = {
         Object.assign(new String('hello'), { [Symbol('foo')]: 123 }),
         { showHidden: true }
       ),
-      "[String: 'hello'] { [length]: 5, [Symbol(foo)]: 123 }"
+      "[String: 'hello'] { [length]: 5, Symbol(foo): 123 }"
     );
 
     {
@@ -799,14 +828,14 @@ export const utilInspect = {
     // Note: Symbols are not supported by `Error#toString()` which is called by
     // accessing the `stack` property.
     [
-      [404, '404: foo', '[404]'],
-      [0, '0: foo', '[RangeError: foo]'],
-      [0n, '0: foo', '[RangeError: foo]'],
+      [404, '404 [RangeError]: foo', '[404]'],
+      [0, '0 [RangeError]: foo', '[RangeError: foo]'],
+      [0n, '0 [RangeError]: foo', '[RangeError: foo]'],
       [null, 'null: foo', '[RangeError: foo]'],
       [undefined, 'RangeError: foo', '[RangeError: foo]'],
-      [false, 'false: foo', '[RangeError: foo]'],
+      [false, 'false [RangeError]: foo', '[RangeError: foo]'],
       ['', 'foo', '[RangeError: foo]'],
-      [[1, 2, 3], '1,2,3: foo', '[1,2,3]'],
+      [[1, 2, 3], '1,2,3 [RangeError]: foo', '[[\n  1,\n  2,\n  3\n]]'],
     ].forEach(([value, outputStart, stack]) => {
       let err = new RangeError('foo');
       err.name = value;
@@ -855,7 +884,7 @@ export const utilInspect = {
         util
           .inspect(x)
           .includes(
-            '[Symbol(nodejs.util.inspect.custom)]: [Function: inspect] {\n'
+            'Symbol(nodejs.util.inspect.custom): [Function: inspect] {\n'
           )
       );
     }
@@ -1093,7 +1122,7 @@ export const utilInspect = {
       const UIC = 'nodejs.util.inspect.custom';
       assert.strictEqual(
         util.inspect(subject),
-        `{\n  a: 123,\n  [Symbol(${UIC})]: [Function: [${UIC}]]\n}`
+        `{\n  a: 123,\n  Symbol(${UIC}): [Function: [${UIC}]]\n}`
       );
     }
 
@@ -1203,20 +1232,20 @@ export const utilInspect = {
 
       subject[Symbol('sym\nbol')] = 42;
 
-      assert.strictEqual(util.inspect(subject), '{ [Symbol(sym\\nbol)]: 42 }');
+      assert.strictEqual(util.inspect(subject), '{ Symbol(sym\\nbol): 42 }');
       assert.strictEqual(
         util.inspect(subject, options),
-        '{ [Symbol(sym\\nbol)]: 42 }'
+        '{ Symbol(sym\\nbol): 42 }'
       );
 
       Object.defineProperty(subject, Symbol(), {
         enumerable: false,
         value: 'non-enum',
       });
-      assert.strictEqual(util.inspect(subject), '{ [Symbol(sym\\nbol)]: 42 }');
+      assert.strictEqual(util.inspect(subject), '{ Symbol(sym\\nbol): 42 }');
       assert.strictEqual(
         util.inspect(subject, options),
-        "{ [Symbol(sym\\nbol)]: 42, [Symbol()]: 'non-enum' }"
+        "{ Symbol(sym\\nbol): 42, [Symbol()]: 'non-enum' }"
       );
 
       subject = [1, 2, 3];
@@ -1224,7 +1253,7 @@ export const utilInspect = {
 
       assert.strictEqual(
         util.inspect(subject),
-        '[ 1, 2, 3, [Symbol(symbol)]: 42 ]'
+        '[ 1, 2, 3, Symbol(symbol): 42 ]'
       );
     }
 
@@ -1727,7 +1756,7 @@ export const utilInspect = {
       const obj = { [util.inspect.custom]: 'fhqwhgads' };
       assert.strictEqual(
         util.inspect(obj),
-        "{ [Symbol(nodejs.util.inspect.custom)]: 'fhqwhgads' }"
+        "{ Symbol(nodejs.util.inspect.custom): 'fhqwhgads' }"
       );
     }
 
@@ -1736,7 +1765,7 @@ export const utilInspect = {
       const obj = { [Symbol.toStringTag]: 'a' };
       assert.strictEqual(
         util.inspect(obj),
-        "{ [Symbol(Symbol.toStringTag)]: 'a' }"
+        "{ Symbol(Symbol.toStringTag): 'a' }"
       );
       Object.defineProperty(obj, Symbol.toStringTag, {
         value: 'a',
@@ -2490,7 +2519,7 @@ export const utilInspect = {
       value[Symbol('foo')] = 'yeah';
       res = util.inspect(value);
       assert.notStrictEqual(res, expectedWithoutProto);
-      assert.match(res, /\[Symbol\(foo\)]: 'yeah'/);
+      assert.match(res, /Symbol\(foo\): 'yeah'/);
     });
 
     assert.strictEqual(inspect(1n), '1n');
@@ -2511,7 +2540,7 @@ export const utilInspect = {
       Object.defineProperty(obj, 'Non\nenumerable\tkey', { value: true });
       assert.strictEqual(
         util.inspect(obj, { showHidden: true }),
-        '{ [Non\\nenumerable\\tkey]: true }'
+        "{ ['Non\\nenumerable\\tkey']: true }"
       );
     }
 
@@ -2610,7 +2639,7 @@ export const utilInspect = {
       arr[Symbol('a')] = false;
       assert.strictEqual(
         inspect(arr, { sorted: true }),
-        '[ 3, 2, 1, [Symbol(a)]: false, [Symbol(b)]: true, a: 1, b: 2, c: 3 ]'
+        '[ 3, 2, 1, Symbol(a): false, Symbol(b): true, a: 1, b: 2, c: 3 ]'
       );
     }
 
@@ -3475,8 +3504,136 @@ export const utilInspect = {
             throw new Error();
           },
         }),
-        '{ [Symbol(Symbol.iterator)]: [Getter] }'
+        '{ Symbol(Symbol.iterator): [Getter] }'
       );
+    }
+
+    {
+      const sym = Symbol('bar()');
+      const o = {
+        foo: 0,
+        'Symbol(foo)': 0,
+        [Symbol('foo')]: 0,
+        [Symbol('foo()')]: 0,
+        [sym]: 0,
+      };
+      Object.defineProperty(o, sym, { enumerable: false });
+
+      assert.strictEqual(
+        util.inspect(o, { showHidden: true }),
+        '{\n' +
+          '  foo: 0,\n' +
+          "  'Symbol(foo)': 0,\n" +
+          '  Symbol(foo): 0,\n' +
+          '  Symbol(foo()): 0,\n' +
+          '  [Symbol(bar())]: 0\n' +
+          '}'
+      );
+    }
+
+    {
+      const o = {};
+      const { prototype: BuiltinPrototype } = Object;
+      const desc = Reflect.getOwnPropertyDescriptor(
+        BuiltinPrototype,
+        'constructor'
+      );
+      Object.defineProperty(BuiltinPrototype, 'constructor', {
+        get: () => BuiltinPrototype,
+        configurable: true,
+      });
+      assert.strictEqual(util.inspect(o), '{}');
+      Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+    }
+
+    {
+      const o = { f() {} };
+      const { prototype: BuiltinPrototype } = Function;
+      const desc = Reflect.getOwnPropertyDescriptor(
+        BuiltinPrototype,
+        'constructor'
+      );
+      Object.defineProperty(BuiltinPrototype, 'constructor', {
+        get: () => BuiltinPrototype,
+        configurable: true,
+      });
+      assert.strictEqual(util.inspect(o), '{ f: [Function: f] }');
+      Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+    }
+    {
+      const prototypes = [
+        Array.prototype,
+        ArrayBuffer.prototype,
+        Buffer.prototype,
+        Function.prototype,
+        Map.prototype,
+        Object.prototype,
+        Reflect.getPrototypeOf(Uint8Array.prototype),
+        Set.prototype,
+        Uint8Array.prototype,
+      ];
+      const descriptors = new Map();
+      const buffer = Buffer.from('Hello');
+      const o = {
+        arrayBuffer: new ArrayBuffer(),
+        buffer,
+        typedArray: Uint8Array.from(buffer),
+        array: [],
+        func() {},
+        set: new Set([1]),
+        map: new Map(),
+      };
+      for (const BuiltinPrototype of prototypes) {
+        descriptors.set(
+          BuiltinPrototype,
+          Reflect.getOwnPropertyDescriptor(BuiltinPrototype, 'constructor')
+        );
+        Object.defineProperty(BuiltinPrototype, 'constructor', {
+          get: () => BuiltinPrototype,
+          configurable: true,
+        });
+      }
+      assert.strictEqual(
+        util.inspect(o),
+        '{\n' +
+          '  arrayBuffer: ArrayBuffer { [Uint8Contents]: <>, byteLength: 0 },\n' +
+          '  buffer: <Buffer 48 65 6c 6c 6f>,\n' +
+          '  typedArray: TypedArray(5) [Uint8Array] [ 72, 101, 108, 108, 111 ],\n' +
+          '  array: [],\n' +
+          '  func: [Function: func],\n' +
+          '  set: Set(1) { 1 },\n' +
+          '  map: Map(0) {}\n' +
+          '}'
+      );
+      for (const [BuiltinPrototype, desc] of descriptors) {
+        Object.defineProperty(BuiltinPrototype, 'constructor', desc);
+      }
+    }
+
+    {
+      function f() {}
+      Object.defineProperty(f, 'name', { value: Symbol('f') });
+
+      assert.strictEqual(util.inspect(f), '[Function: Symbol(f)]');
+    }
+
+    {
+      const error = new EvalError();
+      const re = /a/g;
+      error.name = re;
+      assert.strictEqual(error.name, re);
+      assert.strictEqual(
+        util.inspect(error),
+        `${re} [EvalError]
+${error.stack.split('\n').slice(1).join('\n')}`
+      );
+    }
+
+    {
+      const error = new Error();
+      error.stack = [Symbol('foo')];
+
+      assert.strictEqual(inspect(error), '[[\n  Symbol(foo)\n]]');
     }
 
     assertCalledMustCalls();
@@ -4366,9 +4523,95 @@ export const getCallSitesTest = {
 };
 
 export const isDeepStrictEqual = {
+  // https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-isDeepStrictEqual.js
   test() {
-    util.isDeepStrictEqual(1, 1);
-    util.isDeepStrictEqual(['hello', 'world'], ['hello', 'world']);
+    function utilIsDeepStrict(a, b) {
+      assert.strictEqual(util.isDeepStrictEqual(a, b), true);
+      assert.strictEqual(util.isDeepStrictEqual(b, a), true);
+    }
+
+    function notUtilIsDeepStrict(a, b) {
+      assert.strictEqual(util.isDeepStrictEqual(a, b), false);
+      assert.strictEqual(util.isDeepStrictEqual(b, a), false);
+    }
+
+    // Handle boxed primitives
+    {
+      const boxedString = new String('test');
+      const boxedSymbol = Object(Symbol());
+      notUtilIsDeepStrict(new Boolean(true), Object(false));
+      notUtilIsDeepStrict(Object(true), new Number(1));
+      notUtilIsDeepStrict(new Number(2), new Number(1));
+      notUtilIsDeepStrict(boxedSymbol, Object(Symbol()));
+      notUtilIsDeepStrict(boxedSymbol, {});
+      utilIsDeepStrict(boxedSymbol, boxedSymbol);
+      utilIsDeepStrict(Object(true), Object(true));
+      utilIsDeepStrict(Object(2), Object(2));
+      utilIsDeepStrict(boxedString, Object('test'));
+      boxedString.slow = true;
+      notUtilIsDeepStrict(boxedString, Object('test'));
+      boxedSymbol.slow = true;
+      notUtilIsDeepStrict(boxedSymbol, {});
+      utilIsDeepStrict(Object(BigInt(1)), Object(BigInt(1)));
+      notUtilIsDeepStrict(Object(BigInt(1)), Object(BigInt(2)));
+
+      const booleanish = new Boolean(true);
+      Object.defineProperty(booleanish, Symbol.toStringTag, {
+        value: 'String',
+      });
+      Object.setPrototypeOf(booleanish, String.prototype);
+      notUtilIsDeepStrict(booleanish, new String('true'));
+
+      const numberish = new Number(42);
+      Object.defineProperty(numberish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(numberish, String.prototype);
+      notUtilIsDeepStrict(numberish, new String('42'));
+
+      const stringish = new String('0');
+      Object.defineProperty(stringish, Symbol.toStringTag, { value: 'Number' });
+      Object.setPrototypeOf(stringish, Number.prototype);
+      notUtilIsDeepStrict(stringish, new Number(0));
+
+      const bigintish = new Object(BigInt(42));
+      Object.defineProperty(bigintish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(bigintish, String.prototype);
+      notUtilIsDeepStrict(bigintish, new String('42'));
+
+      const symbolish = new Object(Symbol('fhqwhgads'));
+      Object.defineProperty(symbolish, Symbol.toStringTag, { value: 'String' });
+      Object.setPrototypeOf(symbolish, String.prototype);
+      notUtilIsDeepStrict(symbolish, new String('fhqwhgads'));
+    }
+
+    // Handle symbols (enumerable only)
+    {
+      const symbol1 = Symbol();
+      const obj1 = { [symbol1]: 1 };
+      const obj2 = { [symbol1]: 1 };
+      const obj3 = { [Symbol()]: 1 };
+      const obj4 = {};
+      // Add a non enumerable symbol as well. It is going to be ignored!
+      Object.defineProperty(obj2, Symbol(), { value: 1 });
+      Object.defineProperty(obj4, symbol1, { value: 1 });
+      notUtilIsDeepStrict(obj1, obj3);
+      utilIsDeepStrict(obj1, obj2);
+      notUtilIsDeepStrict(obj1, obj4);
+      // TypedArrays have a fast path. Test for this as well.
+      const a = new Uint8Array(4);
+      const b = new Uint8Array(4);
+      a[symbol1] = true;
+      b[symbol1] = false;
+      notUtilIsDeepStrict(a, b);
+      b[symbol1] = true;
+      utilIsDeepStrict(a, b);
+      // The same as TypedArrays is valid for boxed primitives
+      const boxedStringA = new String('test');
+      const boxedStringB = new String('test');
+      boxedStringA[symbol1] = true;
+      notUtilIsDeepStrict(boxedStringA, boxedStringB);
+      boxedStringA[symbol1] = true;
+      utilIsDeepStrict(a, b);
+    }
   },
 };
 
@@ -4678,5 +4921,869 @@ export const testTypes = {
       // where this would be useful, but hey, let's test it anyway.
       assert.ok(!isExternal({}));
     }
+  },
+};
+
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-inspect-getters-accessing-this.js
+export const testInspectGetters = {
+  async test() {
+    // This test ensures that util.inspect logs getters
+    // which access this.
+    {
+      class X {
+        constructor() {
+          this._y = 123;
+        }
+
+        get y() {
+          return this._y;
+        }
+      }
+
+      const result = inspect(new X(), {
+        getters: true,
+        showHidden: true,
+      });
+
+      assert.strictEqual(result, 'X { _y: 123, [y]: [Getter: 123] }');
+    }
+
+    // Regression test for https://github.com/nodejs/node/issues/37054
+    {
+      class A {
+        constructor(B) {
+          this.B = B;
+        }
+        get b() {
+          return this.B;
+        }
+      }
+
+      class B {
+        constructor() {
+          this.A = new A(this);
+        }
+        get a() {
+          return this.A;
+        }
+      }
+
+      const result = inspect(new B(), {
+        depth: 1,
+        getters: true,
+        showHidden: true,
+      });
+
+      assert.strictEqual(
+        result,
+        '<ref *1> B {\n' +
+          '  A: A { B: [Circular *1], [b]: [Getter] [Circular *1] },\n' +
+          '  [a]: [Getter] A { B: [Circular *1], [b]: [Getter] [Circular *1] }\n' +
+          '}'
+      );
+    }
+  },
+};
+
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-callbackify.js
+export const testCallbackify = {
+  async test() {
+    const values = [
+      'hello world',
+      null,
+      undefined,
+      false,
+      0,
+      {},
+      { key: 'value' },
+      Symbol('I am a symbol'),
+      function ok() {},
+      ['array', 'with', 4, 'values'],
+      new Error('boo'),
+    ];
+
+    {
+      // Test that the resolution value is passed as second argument to callback
+      for (const value of values) {
+        // Test and `async function`
+        async function asyncFn() {
+          return value;
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        cbAsyncFn(
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        // Test Promise factory
+        function promiseFn() {
+          return Promise.resolve(value);
+        }
+
+        const cbPromiseFn = callbackify(promiseFn);
+        cbPromiseFn(
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        // Test Thenable
+        function thenableFn() {
+          return {
+            then(onRes, onRej) {
+              onRes(value);
+            },
+          };
+        }
+
+        const cbThenableFn = callbackify(thenableFn);
+        cbThenableFn(
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+          })
+        );
+      }
+    }
+
+    {
+      // Test that rejection reason is passed as first argument to callback
+      for (const value of values) {
+        // Test an `async function`
+        async function asyncFn() {
+          return Promise.reject(value);
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        assert.strictEqual(cbAsyncFn.length, 1);
+        assert.strictEqual(cbAsyncFn.name, 'asyncFnCallbackified');
+        cbAsyncFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+
+        // Test a Promise factory
+        function promiseFn() {
+          return Promise.reject(value);
+        }
+        const obj = {};
+        Object.defineProperty(promiseFn, 'name', {
+          value: obj,
+          writable: false,
+          enumerable: false,
+          configurable: true,
+        });
+
+        const cbPromiseFn = callbackify(promiseFn);
+        assert.strictEqual(promiseFn.name, obj);
+        cbPromiseFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+
+        // Test Thenable
+        function thenableFn() {
+          return {
+            then(onRes, onRej) {
+              onRej(value);
+            },
+          };
+        }
+
+        const cbThenableFn = callbackify(thenableFn);
+        cbThenableFn(
+          commonMustCall((err, ret) => {
+            assert.strictEqual(ret, undefined);
+            if (err instanceof Error) {
+              if ('reason' in err) {
+                assert(!value);
+                assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+                assert.strictEqual(err.reason, value);
+              } else {
+                assert.strictEqual(String(value).endsWith(err.message), true);
+              }
+            } else {
+              assert.strictEqual(err, value);
+            }
+          })
+        );
+      }
+    }
+
+    await new Promise((resolve) => queueMicrotask(resolve));
+
+    {
+      // Test that arguments passed to callbackified function are passed to original
+      for (const value of values) {
+        async function asyncFn(arg) {
+          assert.strictEqual(arg, value);
+          return arg;
+        }
+
+        const cbAsyncFn = callbackify(asyncFn);
+        assert.strictEqual(cbAsyncFn.length, 2);
+        assert.notStrictEqual(
+          Object.getPrototypeOf(cbAsyncFn),
+          Object.getPrototypeOf(asyncFn)
+        );
+        assert.strictEqual(
+          Object.getPrototypeOf(cbAsyncFn),
+          Function.prototype
+        );
+        cbAsyncFn(
+          value,
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+          })
+        );
+
+        function promiseFn(arg) {
+          assert.strictEqual(arg, value);
+          return Promise.resolve(arg);
+        }
+        const obj = {};
+        Object.defineProperty(promiseFn, 'length', {
+          value: obj,
+          writable: false,
+          enumerable: false,
+          configurable: true,
+        });
+
+        const cbPromiseFn = callbackify(promiseFn);
+        assert.strictEqual(promiseFn.length, obj);
+        cbPromiseFn(
+          value,
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+          })
+        );
+      }
+    }
+
+    {
+      // Test that `this` binding is the same for callbackified and original
+      for (const value of values) {
+        const iAmThis = {
+          fn(arg) {
+            assert.strictEqual(this, iAmThis);
+            return Promise.resolve(arg);
+          },
+        };
+        iAmThis.cbFn = callbackify(iAmThis.fn);
+        iAmThis.cbFn(
+          value,
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+            assert.strictEqual(this, iAmThis);
+          })
+        );
+
+        const iAmThat = {
+          async fn(arg) {
+            assert.strictEqual(this, iAmThat);
+            return arg;
+          },
+        };
+        iAmThat.cbFn = callbackify(iAmThat.fn);
+        iAmThat.cbFn(
+          value,
+          commonMustCall(function (err, ret) {
+            assert.ifError(err);
+            assert.strictEqual(ret, value);
+            assert.strictEqual(this, iAmThat);
+          })
+        );
+      }
+    }
+
+    {
+      // Verify that non-function inputs throw.
+      ['foo', null, undefined, false, 0, {}, Symbol(), []].forEach((value) => {
+        assert.throws(
+          () => {
+            callbackify(value);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+            message:
+              'The "original" argument must be of type function.' +
+              invalidArgTypeHelper(value),
+          }
+        );
+      });
+    }
+
+    {
+      async function asyncFn() {
+        return 42;
+      }
+
+      const cb = callbackify(asyncFn);
+      const args = [];
+
+      // Verify that the last argument to the callbackified function is a function.
+      ['foo', null, undefined, false, 0, {}, Symbol(), []].forEach((value) => {
+        args.push(value);
+        assert.throws(
+          () => {
+            cb(...args);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+            name: 'TypeError',
+            message:
+              'The last argument must be of type function.' +
+              invalidArgTypeHelper(value),
+          }
+        );
+      });
+    }
+
+    {
+      // Test Promise factory
+      function promiseFn(value) {
+        return Promise.reject(value);
+      }
+
+      const cbPromiseFn = callbackify(promiseFn);
+
+      cbPromiseFn(null, (err) => {
+        assert.strictEqual(
+          err.message,
+          'Promise was rejected with falsy value'
+        );
+        assert.strictEqual(err.code, 'ERR_FALSY_VALUE_REJECTION');
+        assert.strictEqual(err.reason, null);
+        // const stack = err.stack.split(/[\r\n]+/);
+        // assert.match(stack[1], /at process\.processTicksAndRejections/);
+      });
+    }
+
+    await new Promise((resolve) => queueMicrotask(resolve));
+
+    assertCalledMustCalls();
+  },
+};
+
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-inherits.js
+export const testInherits = {
+  async test() {
+    // Super constructor
+    function A() {
+      this._a = 'a';
+    }
+    A.prototype.a = function () {
+      return this._a;
+    };
+
+    // One level of inheritance
+    function B(value) {
+      A.call(this);
+      this._b = value;
+    }
+    inherits(B, A);
+    B.prototype.b = function () {
+      return this._b;
+    };
+
+    assert.deepStrictEqual(Object.getOwnPropertyDescriptor(B, 'super_'), {
+      value: A,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+
+    const b = new B('b');
+    assert.strictEqual(b.a(), 'a');
+    assert.strictEqual(b.b(), 'b');
+    assert.strictEqual(b.constructor, B);
+
+    // Two levels of inheritance
+    function C() {
+      B.call(this, 'b');
+      this._c = 'c';
+    }
+    inherits(C, B);
+    C.prototype.c = function () {
+      return this._c;
+    };
+    C.prototype.getValue = function () {
+      return this.a() + this.b() + this.c();
+    };
+
+    assert.strictEqual(C.super_, B);
+
+    const c = new C();
+    assert.strictEqual(c.getValue(), 'abc');
+    assert.strictEqual(c.constructor, C);
+
+    // Inherits can be called after setting prototype properties
+    function D() {
+      C.call(this);
+      this._d = 'd';
+    }
+
+    D.prototype.d = function () {
+      return this._d;
+    };
+    inherits(D, C);
+
+    assert.strictEqual(D.super_, C);
+
+    const d = new D();
+    assert.strictEqual(d.c(), 'c');
+    assert.strictEqual(d.d(), 'd');
+    assert.strictEqual(d.constructor, D);
+
+    // ES6 classes can inherit from a constructor function
+    class E {
+      constructor() {
+        D.call(this);
+        this._e = 'e';
+      }
+      e() {
+        return this._e;
+      }
+    }
+    inherits(E, D);
+
+    assert.strictEqual(E.super_, D);
+
+    const e = new E();
+    assert.strictEqual(e.getValue(), 'abc');
+    assert.strictEqual(e.d(), 'd');
+    assert.strictEqual(e.e(), 'e');
+    assert.strictEqual(e.constructor, E);
+
+    // Should throw with invalid arguments
+    assert.throws(
+      () => {
+        inherits(A, {});
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "superCtor.prototype" property must be of type object. ' +
+          'Received undefined',
+      }
+    );
+
+    assert.throws(
+      () => {
+        inherits(A, null);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "superCtor" argument must be of type function. ' +
+          'Received null',
+      }
+    );
+
+    assert.throws(
+      () => {
+        inherits(null, A);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message: 'The "ctor" argument must be of type function. Received null',
+      }
+    );
+  },
+};
+
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-promisify.js
+export const testPromisify = {
+  async test() {
+    // TODO(soon): expectWarning only possible with process.on('warning')
+    // {
+    //   const warningHandler = commonMustNotCall();
+    //   process.on('warning', warningHandler);
+    //   function foo() {}
+    //   foo.constructor = (async () => {}).constructor;
+    //   promisify(foo);
+    //   process.off('warning', warningHandler);
+    // }
+    //
+    // commonExpectWarning(
+    //   'DeprecationWarning',
+    //   'Calling promisify on a function that returns a Promise is likely a mistake.',
+    //   'DEP0174');
+    // promisify(async (callback) => { callback(); })().then(mustCall(() => {
+    //   // We must add the second `expectWarning` call in the `.then` handler, when
+    //   // the first warning has already been triggered.
+    //   commonExpectWarning(
+    //     'DeprecationWarning',
+    //     'Calling promisify on a function that returns a Promise is likely a mistake.',
+    //     'DEP0174');
+    //   promisify(async () => {})().then(commonMustNotCall());
+    // }));
+
+    // TODO(soon): Enable once fs supported
+    // const stat = promisify(fs.stat);
+
+    // {
+    //   const promise = stat(__filename);
+    //   assert(promise instanceof Promise);
+    //   promise.then(mustCall((value) => {
+    //     assert.deepStrictEqual(value, fs.statSync(__filename));
+    //   }));
+    // }
+
+    // {
+    //   const promise = stat('/dontexist');
+    //   promise.catch(mustCall((error) => {
+    //     assert(error.message.includes('ENOENT: no such file or directory, stat'));
+    //   }));
+    // }
+
+    {
+      function fn() {}
+
+      function promisifedFn() {}
+      fn[promisify.custom] = promisifedFn;
+      assert.strictEqual(promisify(fn), promisifedFn);
+      assert.strictEqual(promisify(promisify(fn)), promisifedFn);
+    }
+
+    {
+      function fn() {}
+
+      function promisifiedFn() {}
+
+      // util.promisify.custom is a shared symbol which can be accessed
+      // as `Symbol.for("nodejs.util.promisify.custom")`.
+      const kCustomPromisifiedSymbol = Symbol.for(
+        'nodejs.util.promisify.custom'
+      );
+      fn[kCustomPromisifiedSymbol] = promisifiedFn;
+
+      assert.strictEqual(kCustomPromisifiedSymbol, promisify.custom);
+      assert.strictEqual(promisify(fn), promisifiedFn);
+      assert.strictEqual(promisify(promisify(fn)), promisifiedFn);
+    }
+
+    {
+      function fn() {}
+      fn[promisify.custom] = 42;
+      assert.throws(() => promisify(fn), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      });
+    }
+
+    // TODO(soon): customPromisifyArgs unsupported
+    // {
+    //   const firstValue = 5;
+    //   const secondValue = 17;
+
+    //   function fn(callback) {
+    //     callback(null, firstValue, secondValue);
+    //   }
+
+    //   fn[customPromisifyArgs] = ['first', 'second'];
+
+    //   promisify(fn)().then(mustCall((obj) => {
+    //     assert.deepStrictEqual(obj, { first: firstValue, second: secondValue });
+    //   }));
+    // }
+
+    // vm unsupported
+    // {
+    //   const fn = vm.runInNewContext('(function() {})');
+    //   assert.notStrictEqual(Object.getPrototypeOf(promisify(fn)),
+    //                         Function.prototype);
+    // }
+
+    {
+      function fn(callback) {
+        callback(null, 'foo', 'bar');
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, 'foo');
+        })
+      );
+    }
+
+    {
+      function fn(callback) {
+        callback(null);
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, undefined);
+        })
+      );
+    }
+
+    {
+      function fn(callback) {
+        callback();
+      }
+      promisify(fn)().then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, undefined);
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+      promisify(fn)(null, 42).then(
+        commonMustCall((value) => {
+          assert.strictEqual(value, 42);
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+      promisify(fn)(new Error('oops'), null).catch(
+        commonMustCall((err) => {
+          assert.strictEqual(err.message, 'oops');
+        })
+      );
+    }
+
+    {
+      function fn(err, val, callback) {
+        callback(err, val);
+      }
+
+      (async () => {
+        const value = await promisify(fn)(null, 42);
+        assert.strictEqual(value, 42);
+      })().then(commonMustCall());
+    }
+
+    {
+      const o = {};
+      const fn = promisify(function (cb) {
+        cb(null, this === o);
+      });
+
+      o.fn = fn;
+
+      o.fn().then(commonMustCall((val) => assert(val)));
+    }
+
+    {
+      const err = new Error(
+        'Should not have called the callback with the error.'
+      );
+      const stack = err.stack;
+
+      const fn = promisify(function (cb) {
+        cb(null);
+        cb(err);
+      });
+
+      (async () => {
+        await fn();
+        await Promise.resolve();
+        return assert.strictEqual(stack, err.stack);
+      })().then(commonMustCall());
+    }
+
+    {
+      function c() {}
+      const a = promisify(function () {});
+      const b = promisify(a);
+      assert.notStrictEqual(c, a);
+      assert.strictEqual(a, b);
+    }
+
+    {
+      let errToThrow;
+      const thrower = promisify(function (a, b, c, cb) {
+        errToThrow = new Error();
+        throw errToThrow;
+      });
+      thrower(1, 2, 3)
+        .then(assert.fail)
+        .then(assert.fail, (e) => assert.strictEqual(e, errToThrow));
+    }
+
+    {
+      const err = new Error();
+
+      const a = promisify((cb) => cb(err))();
+      const b = promisify(() => {
+        throw err;
+      })();
+
+      await Promise.all([
+        a.then(assert.fail, function (e) {
+          assert.strictEqual(err, e);
+        }),
+        b.then(assert.fail, function (e) {
+          assert.strictEqual(err, e);
+        }),
+      ]);
+    }
+
+    [undefined, null, true, 0, 'str', {}, [], Symbol()].forEach((input) => {
+      assert.throws(() => promisify(input), {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+        message:
+          'The "original" argument must be of type function.' +
+          invalidArgTypeHelper(input),
+      });
+    });
+  },
+};
+
+// https://github.com/nodejs/node/blob/2be863be08ff9f16eae6bb907388c354c55c3bfc/test/parallel/test-util-stripvtcontrolcharacters.js
+export const testStripVtControlCharacters = {
+  async test() {
+    // Ref: https://github.com/chalk/ansi-regex/blob/main/test.js
+    const tests = [
+      // [before, expected]
+      [
+        '\u001B[0m\u001B[4m\u001B[42m\u001B[31mfoo\u001B[39m\u001B[49m\u001B[24mfoo\u001B[0m',
+        'foofoo',
+      ], // Basic ANSI
+      ['\u001B[0;33;49;3;9;4mbar\u001B[0m', 'bar'], // Advanced colors
+      ['foo\u001B[0gbar', 'foobar'], // Clear tabs
+      ['foo\u001B[Kbar', 'foobar'], // Clear line
+      ['foo\u001B[2Jbar', 'foobar'], // Clear screen
+    ];
+
+    for (const ST of ['\u0007', '\u001B\u005C', '\u009C']) {
+      tests.push(
+        [`\u001B]8;;mailto:no-replay@mail.com${ST}mail\u001B]8;;${ST}`, 'mail'],
+        [
+          `\u001B]8;k=v;https://example-a.com/?a_b=1&c=2#tit%20le${ST}click\u001B]8;;${ST}`,
+          'click',
+        ]
+      );
+    }
+
+    for (const [before, expected] of tests) {
+      assert.strictEqual(stripVTControlCharacters(before), expected);
+    }
+  },
+};
+
+export const testStyleText = {
+  async test() {
+    const styled = '\u001b[31mtest\u001b[39m';
+    const noChange = 'test';
+
+    [undefined, null, false, 5n, 5, Symbol(), () => {}, {}].forEach(
+      (invalidOption) => {
+        assert.throws(
+          () => {
+            styleText(invalidOption, 'test');
+          },
+          {
+            code: 'ERR_INVALID_ARG_VALUE',
+          }
+        );
+        assert.throws(
+          () => {
+            styleText('red', invalidOption);
+          },
+          {
+            code: 'ERR_INVALID_ARG_TYPE',
+          }
+        );
+      }
+    );
+
+    assert.throws(
+      () => {
+        styleText('invalid', 'text');
+      },
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+      }
+    );
+
+    assert.strictEqual(
+      styleText('red', 'test', { validateStream: false }),
+      '\u001b[31mtest\u001b[39m'
+    );
+
+    assert.strictEqual(
+      styleText(['bold', 'red'], 'test', { validateStream: false }),
+      '\u001b[1m\u001b[31mtest\u001b[39m\u001b[22m'
+    );
+
+    assert.strictEqual(
+      styleText(['bold', 'red'], 'test', { validateStream: false }),
+      styleText('bold', styleText('red', 'test', { validateStream: false }), {
+        validateStream: false,
+      })
+    );
+
+    assert.throws(
+      () => {
+        styleText(['invalid'], 'text');
+      },
+      {
+        code: 'ERR_INVALID_ARG_VALUE',
+      }
+    );
+
+    assert.throws(
+      () => {
+        styleText('red', 'text', { stream: {} });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    // does not throw
+    styleText('red', 'text', { stream: {}, validateStream: false });
+
+    assert.strictEqual(
+      styleText('red', 'test', { validateStream: false }),
+      styled
+    );
+
+    assert.strictEqual(styleText('none', 'test'), 'test');
   },
 };

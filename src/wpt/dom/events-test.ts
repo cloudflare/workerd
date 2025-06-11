@@ -23,7 +23,7 @@ export default {
   },
   'Event-constructors.any.js': {
     comment: 'TODO this is triggering a harness bug',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'Event-dispatch-listener-order.window.js': {
     comment: 'document is not defined',
@@ -55,7 +55,7 @@ export default {
   },
   'event-global-extra.window.js': {
     comment: 'ReferenceError: document is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'event-global-set-before-handleEvent-lookup.window.js': {
     comment: 'window is not defined',
@@ -63,7 +63,7 @@ export default {
   },
   'event-global.worker.js': {
     comment: 'ReferenceError: importScripts is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'legacy-pre-activation-behavior.window.js': {
     comment: 'ReferenceError: document is not defined',
@@ -71,14 +71,14 @@ export default {
   },
   'relatedTarget.window.js': {
     comment: 'ReferenceError: document is not defined',
-    skipAllTests: true,
+    disabledTests: true,
   },
   'scrolling/scroll_support.js': {
     comment: 'Only used by HTML files',
-    skipAllTests: true,
+    omittedTests: true,
   },
   'scrolling/scrollend-user-scroll-common.js': {
     comment: 'Only used by HTML files',
-    skipAllTests: true,
+    omittedTests: true,
   },
 } satisfies TestRunnerConfig;

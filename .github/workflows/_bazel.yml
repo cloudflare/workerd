@@ -18,6 +18,14 @@ on:
         type: boolean
         required: false
         default: true
+      test_target:
+        type: string
+        required: false
+        default: //...
+      run_wpt_report:
+        type: boolean
+        required: false
+        default: false
       extra_bazel_args:
         type: string
         required: false
@@ -26,6 +34,11 @@ on:
         type: boolean
         required: false
         default: false
+
+      fetch_depth:
+        type: number
+        required: false
+        default: 1
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -39,6 +52,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           show-progress: false
+          fetch-depth: ${{ inputs.fetch_depth }}
       - name: Cache
         id: cache
         uses: actions/cache@v4
@@ -103,7 +117,17 @@ jobs:
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test ${{ inputs.extra_bazel_args }} --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //...
+          bazel test ${{ inputs.extra_bazel_args }} --config=ci --config=ci-${{ inputs.os_name }}${{ inputs.suffix }} --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev ${{ inputs.test_target }}
+      - name: WPT report
+        if: inputs.run_wpt_report
+        run: |
+          tools/cross/wpt_logs.py --print-stats --write-report=wpt-report.json >> $GITHUB_STEP_SUMMARY
+      - name: Upload WPT report
+        if: inputs.run_wpt_report
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-report-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}.json
+          path: wpt-report.json
       - name: Report disk usage (in MB)
         if: always()
         shell: bash

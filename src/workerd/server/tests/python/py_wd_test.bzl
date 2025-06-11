@@ -3,7 +3,7 @@ load("//:build/wd_test.bzl", "wd_test")
 
 FEATURE_FLAGS = {
     "0.26.0a2": [],
-    "0.27.5": ["python_workers_20250116"],
+    "0.27.7": ["python_workers_20250116"],
     "development": ["python_workers_development", "python_external_packages"],
 }
 
@@ -11,7 +11,7 @@ def _py_wd_test_helper(
         name,
         src,
         python_flag,
-        snapshot,
+        make_snapshot,
         *,
         args = [],
         **kwargs):
@@ -32,7 +32,7 @@ def _py_wd_test_helper(
         src = templated_src,
         name = name_flag + "@",
         args = args,
-        python_snapshot_test = snapshot,
+        python_snapshot_test = make_snapshot,
         **kwargs
     )
 
@@ -80,7 +80,7 @@ def py_wd_test(
             name,
             src,
             python_flag,
-            snapshot = make_snapshot,
+            make_snapshot = make_snapshot,
             data = data,
             args = args,
             size = size,

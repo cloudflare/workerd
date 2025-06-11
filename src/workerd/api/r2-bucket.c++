@@ -60,16 +60,6 @@ enum class OptionalMetadata : uint16_t {
   Custom = static_cast<uint8_t>(R2ListRequest::IncludeField::CUSTOM),
 };
 
-namespace {
-void logIfMismatchedChecksumLength(
-    size_t expectedLength, capnp::Data::Reader checksum, R2HeadResponse::Reader responseReader) {
-  if (checksum.size() != expectedLength) {
-    KJ_LOG(WARNING, "NOSENTRY Checksum is of unexpected length", expectedLength, checksum.size(),
-        responseReader.getName(), responseReader.getVersion());
-  }
-}
-}  // namespace
-
 template <typename T>
 concept HeadResultT = std::is_base_of_v<R2Bucket::HeadResult, T>;
 
@@ -145,29 +135,23 @@ static jsg::Ref<T> parseObjectMetadata(jsg::Lock& js,
   if (responseReader.hasChecksums()) {
     R2Checksums::Reader checksumsBuilder = responseReader.getChecksums();
     if (checksumsBuilder.hasMd5()) {
-      auto md5 = checksumsBuilder.getMd5();
-      logIfMismatchedChecksumLength(16, md5, responseReader);
-      checksums->md5 = kj::heapArray(md5);
+      // Note that we don't check the length of checksums in here. We know
+      // that some artifact were stored with truncated checksums (e.g. 8 bytes
+      // instead of 16 for some). We're not validating the checksum lengths
+      // here and instead we're just passing them through.
+      checksums->md5 = kj::heapArray(checksumsBuilder.getMd5());
     }
     if (checksumsBuilder.hasSha1()) {
-      auto sha1 = checksumsBuilder.getSha1();
-      logIfMismatchedChecksumLength(20, sha1, responseReader);
-      checksums->sha1 = kj::heapArray(sha1);
+      checksums->sha1 = kj::heapArray(checksumsBuilder.getSha1());
     }
     if (checksumsBuilder.hasSha256()) {
-      auto sha256 = checksumsBuilder.getSha256();
-      logIfMismatchedChecksumLength(32, sha256, responseReader);
-      checksums->sha256 = kj::heapArray(sha256);
+      checksums->sha256 = kj::heapArray(checksumsBuilder.getSha256());
     }
     if (checksumsBuilder.hasSha384()) {
-      auto sha384 = checksumsBuilder.getSha384();
-      logIfMismatchedChecksumLength(48, sha384, responseReader);
-      checksums->sha384 = kj::heapArray(sha384);
+      checksums->sha384 = kj::heapArray(checksumsBuilder.getSha384());
     }
     if (checksumsBuilder.hasSha512()) {
-      auto sha512 = checksumsBuilder.getSha512();
-      logIfMismatchedChecksumLength(64, sha512, responseReader);
-      checksums->sha512 = kj::heapArray(sha512);
+      checksums->sha512 = kj::heapArray(checksumsBuilder.getSha512());
     }
   }
 

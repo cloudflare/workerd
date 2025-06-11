@@ -31,7 +31,7 @@ interface API {
     stdout?: (a: string) => void,
     stderr?: (a: string) => void
   ) => void;
-  version: '0.26.0a2' | '0.27.5';
+  version: '0.26.0a2' | '0.27.7';
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
@@ -96,6 +96,12 @@ interface Module {
   setUnsafeEval(mod: typeof import('internal:unsafe-eval').default): void;
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
+  ): void;
+  setSetTimeout(
+    st: typeof setTimeout,
+    ct: typeof clearTimeout,
+    si: typeof setInterval,
+    ci: typeof clearInterval
   ): void;
   getMemory(size: number): number;
   getMemoryPatched(

@@ -20,6 +20,8 @@
 
 #include <capnp/dynamic.h>
 
+#include <unordered_set>
+
 namespace workerd::api::node {
 
 // To be exposed only as an internal module for use by other built-ins.
@@ -65,6 +67,8 @@ bool isNodeJsCompatEnabled(auto featureFlags) {
   return featureFlags.getNodeJsCompat() || featureFlags.getNodeJsCompatV2();
 }
 
+bool isExperimentalNodeJsCompatModule(kj::StringPtr name);
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -83,9 +87,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
     // node:fs and node:http will be considered experimental until they are completed,
     // so unless the experimental flag is enabled, don't register them.
-    auto name = module.getName();
-    if (name == "node:fs"_kj || name == "node:http"_kj || name == "node:_http_common"_kj ||
-        name == "node:_http_outgoing") {
+    if (isExperimentalNodeJsCompatModule(module.getName())) {
       return featureFlags.getWorkerdExperimental();
     }
 
@@ -157,4 +159,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES,           \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES\
+      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES

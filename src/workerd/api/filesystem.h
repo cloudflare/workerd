@@ -10,6 +10,237 @@ namespace workerd::api {
 class Blob;
 class File;
 
+class URL;  // Legacy URL class impl
+namespace url {
+class URL;
+}  // namespace url
+
+// Metadata about a file, directory, or link.
+struct Stat {
+  kj::StringPtr type;  // One of either "file", "directory", or "symlink"
+  uint32_t size;
+  uint64_t lastModified;
+  uint64_t created;
+  bool writable;
+  bool device;
+  JSG_STRUCT(type, size, lastModified, created, writable, device);
+
+  Stat(const workerd::Stat& stat);
+};
+
+// A simple RAII handle for a file descriptor. When the instance is
+// destroyed, the file descriptor is closed if it hasn't already
+// been closed.
+class FileFdHandle final: public jsg::Object {
+ public:
+  FileFdHandle(jsg::Lock& js, const workerd::VirtualFileSystem& vfs, int fd);
+  ~FileFdHandle() noexcept;
+
+  static jsg::Ref<FileFdHandle> constructor(jsg::Lock& js, int fd);
+
+  void close(jsg::Lock&);
+
+  JSG_RESOURCE_TYPE(FileFdHandle) {
+    JSG_METHOD(close);
+  }
+
+ private:
+  kj::Maybe<kj::Own<void>> fdHandle;
+};
+
+class FileSystemModule final: public jsg::Object {
+ public:
+  using FilePath = kj::OneOf<jsg::Ref<URL>, jsg::Ref<url::URL>>;
+
+  struct StatOptions {
+    jsg::Optional<bool> followSymlinks;
+    JSG_STRUCT(followSymlinks);
+  };
+
+  kj::Maybe<Stat> stat(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options);
+  void setLastModified(
+      jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options);
+  void truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size);
+
+  struct ReadLinkOptions {
+    // The readLink method is used for both realpath and readlink. The readlink
+    // API will throw an error if the path is not a symlink. The realpath API
+    // will return the resolved path either way.
+    bool failIfNotSymlink = false;
+    JSG_STRUCT(failIfNotSymlink);
+  };
+  kj::String readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options);
+
+  struct LinkOptions {
+    bool symbolic;
+    JSG_STRUCT(symbolic);
+  };
+
+  void link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options);
+
+  void unlink(jsg::Lock& js, FilePath path);
+
+  struct OpenOptions {
+    // File is opened to supprt reads.
+    bool read;
+    // File is opened to support writes.
+    bool write;
+    // File is opened in append mode. Ignored if write is false.
+    bool append;
+    // If the exclusive option is set, throw if the file already exists.
+    bool exclusive;
+    // If the followSymlinks option is set, follow symbolic links.
+    bool followSymlinks = true;
+    JSG_STRUCT(read, write, append, exclusive, followSymlinks);
+  };
+
+  int open(jsg::Lock& js, FilePath path, OpenOptions options);
+  void close(jsg::Lock& js, int fd);
+
+  struct WriteOptions {
+    kj::Maybe<uint64_t> position;
+    JSG_STRUCT(position);
+  };
+
+  uint32_t write(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+  uint32_t read(jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options);
+
+  jsg::BufferSource readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd);
+
+  struct WriteAllOptions {
+    bool exclusive;
+    bool append;
+    JSG_STRUCT(exclusive, append);
+  };
+
+  uint32_t writeAll(jsg::Lock& js,
+      kj::OneOf<int, FilePath> pathOrFd,
+      jsg::BufferSource data,
+      WriteAllOptions options);
+
+  struct RenameOrCopyOptions {
+    bool copy;
+    JSG_STRUCT(copy);
+  };
+
+  void renameOrCopy(jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options);
+
+  struct MkdirOptions {
+    bool recursive = false;
+    // When temp is true, the directory name will be augmented with an
+    // additional random string to make it unique and the directory name
+    // will be returned.
+    bool tmp = false;
+    JSG_STRUCT(recursive, tmp);
+  };
+  jsg::Optional<kj::String> mkdir(jsg::Lock& js, FilePath path, MkdirOptions options);
+
+  struct RmOptions {
+    bool recursive = false;
+    bool force = false;
+    bool dironly = false;
+    JSG_STRUCT(recursive, force, dironly);
+  };
+  void rm(jsg::Lock& js, FilePath path, RmOptions options);
+
+  struct DirEntHandle {
+    kj::String name;
+    kj::String parentPath;
+    int type;
+    JSG_STRUCT(name, parentPath, type);
+  };
+  struct ReadDirOptions {
+    bool recursive = false;
+    JSG_STRUCT(recursive);
+  };
+  kj::Array<DirEntHandle> readdir(jsg::Lock& js, FilePath path, ReadDirOptions options);
+
+  FileSystemModule() = default;
+  FileSystemModule(jsg::Lock&, const jsg::Url&) {}
+
+  jsg::Ref<FileFdHandle> getFdHandle(jsg::Lock& js, int fd) {
+    return FileFdHandle::constructor(js, fd);
+  }
+
+  JSG_RESOURCE_TYPE(FileSystemModule) {
+    JSG_METHOD(stat);
+    JSG_METHOD(setLastModified);
+    JSG_METHOD(truncate);
+    JSG_METHOD(readLink);
+    JSG_METHOD(link);
+    JSG_METHOD(unlink);
+    JSG_METHOD(open);
+    JSG_METHOD(close);
+    JSG_METHOD(write);
+    JSG_METHOD(read);
+    JSG_METHOD(readAll);
+    JSG_METHOD(writeAll);
+    JSG_METHOD(renameOrCopy);
+    JSG_METHOD(mkdir);
+    JSG_METHOD(rm);
+    JSG_METHOD(readdir);
+    JSG_METHOD(getFdHandle);
+  }
+
+ private:
+  // Rather than relying on random generation of temp directory names we
+  // use a simple counter. Once the counter reaches the max value we will
+  // refuse to create any more temp directories. This is a bit of a hack
+  // to allow temp dirs to be created outside of an IoContext.
+  uint32_t tmpFileCounter = 0;
+};
+
+// Create a Node.js-style "UVException". The UVException is an
+// ordinary Error object with additional properties like code,
+// syscall, path, and destination properties. It is primarily
+// used to represent file system API errors.
+jsg::JsValue createUVException(jsg::Lock& js,
+    int errorno,
+    kj::StringPtr syscall,
+    kj::StringPtr message = nullptr,
+    kj::StringPtr path = nullptr,
+    kj::StringPtr dest = nullptr);
+
+// Throw a Node.js-style "UVException". The UVException is an
+// ordinary Error object with additional properties like code,
+// syscall, path, and destination properties. It is primarily
+// used to represent file system API errors.
+[[noreturn]] void throwUVException(jsg::Lock& js,
+    int errorno,
+    kj::StringPtr syscall,
+    kj::StringPtr message = nullptr,
+    kj::StringPtr path = nullptr,
+    kj::StringPtr dest = nullptr);
+
+// This is an intentionally truncated list of the error codes that Node.js/libuv
+// uses. We won't need all of the error codes that libuv uses.
+#define UV_ERRNO_MAP(XX)                                                                           \
+  XX(EACCES, "permission denied")                                                                  \
+  XX(EBADF, "bad file descriptor")                                                                 \
+  XX(EEXIST, "file already exists")                                                                \
+  XX(EFBIG, "file too large")                                                                      \
+  XX(EINVAL, "invalid argument")                                                                   \
+  XX(EISDIR, "illegal operation on a directory")                                                   \
+  XX(ELOOP, "too many symbolic links encountered")                                                 \
+  XX(EMFILE, "too many open files")                                                                \
+  XX(ENAMETOOLONG, "name too long")                                                                \
+  XX(ENFILE, "file table overflow")                                                                \
+  XX(ENOBUFS, "no buffer space available")                                                         \
+  XX(ENODEV, "no such device")                                                                     \
+  XX(ENOENT, "no such file or directory")                                                          \
+  XX(ENOMEM, "not enough memory")                                                                  \
+  XX(ENOSPC, "no space left on device")                                                            \
+  XX(ENOSYS, "function not implemented")                                                           \
+  XX(ENOTDIR, "not a directory")                                                                   \
+  XX(ENOTEMPTY, "directory not empty")                                                             \
+  XX(EPERM, "operation not permitted")                                                             \
+  XX(EMLINK, "too many links")                                                                     \
+  XX(EIO, "input/output error")
+
+#define XX(code, _) constexpr int UV_##code = -code;
+UV_ERRNO_MAP(XX)
+#undef XX
+
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
 // All of the classes in this part of the impl are defined by the spec.
@@ -67,10 +298,12 @@ class FileSystemFileHandle: public FileSystemHandle {
     JSG_STRUCT(keepExistingData);
   };
 
-  jsg::Promise<jsg::Ref<File>> getFile(jsg::Lock& js);
+  jsg::Promise<jsg::Ref<File>> getFile(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
-  jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(
-      jsg::Lock& js, jsg::Optional<FileSystemCreateWritableOptions> options);
+  jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
+      jsg::Optional<FileSystemCreateWritableOptions> options,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
   jsg::Promise<jsg::Ref<FileSystemSyncAccessHandle>> createSyncAccessHandle(jsg::Lock& js);
 
@@ -293,10 +526,14 @@ class FileSystemWritableFileStream: public WritableStream {
     JSG_STRUCT(type, size, position, data);
   };
 
-  jsg::Promise<void> write(
-      jsg::Lock& js, kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data);
-  jsg::Promise<void> seek(jsg::Lock& js, uint32_t position);
-  jsg::Promise<void> truncate(jsg::Lock& js, uint32_t size);
+  jsg::Promise<void> write(jsg::Lock& js,
+      kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> seek(jsg::Lock& js,
+      uint32_t position,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+  jsg::Promise<void> truncate(
+      jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
   JSG_RESOURCE_TYPE(FileSystemWritableFileStream) {
     JSG_INHERIT(WritableStream);
@@ -320,10 +557,14 @@ class FileSystemSyncAccessHandle final: public jsg::Object {
 
   uint32_t read(
       jsg::Lock& js, jsg::BufferSource buffer, jsg::Optional<FileSystemReadWriteOptions> options);
-  uint32_t write(
-      jsg::Lock& js, jsg::BufferSource buffer, jsg::Optional<FileSystemReadWriteOptions> options);
+  uint32_t write(jsg::Lock& js,
+      jsg::BufferSource buffer,
+      jsg::Optional<FileSystemReadWriteOptions> options,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
-  void truncate(jsg::Lock& js, uint32_t newSize);
+  void truncate(jsg::Lock& js,
+      uint32_t newSize,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
   uint32_t getSize(jsg::Lock& js);
   void flush(jsg::Lock& js);
   void close(jsg::Lock& js);
@@ -369,5 +610,16 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::EntryIterator::Next,                                \
       workerd::api::FileSystemDirectoryHandle::KeyIterator::Next,                                  \
       workerd::api::FileSystemDirectoryHandle::ValueIterator::Next
+
+#define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
+  workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
+      workerd::api::FileSystemModule::ReadLinkOptions,                                             \
+      workerd::api::FileSystemModule::LinkOptions, workerd::api::FileSystemModule::OpenOptions,    \
+      workerd::api::FileSystemModule::WriteOptions,                                                \
+      workerd::api::FileSystemModule::WriteAllOptions,                                             \
+      workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
+      workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
+      workerd::api::FileSystemModule::DirEntHandle,                                                \
+      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle
 
 }  // namespace workerd::api

@@ -168,7 +168,7 @@ export const queryAndFragment = {
   },
 };
 
-// We do not currently support import assertions/attributes. Per the recommendation
+// We do not currently support import attributes. Per the recommendation
 // in the spec, we throw an error when they are encountered.
 export const importAssertionsFail = {
   async test() {
@@ -230,7 +230,7 @@ export const wasmModuleTest = {
 //   * [x] Querys and fragments resolve new instances of known modules
 //   * [x] URL resolution works correctly
 //   * [x] Invalid URLs are correctly reported as errors
-// * [x] Import assertions should be rejected
+// * [x] Import attributes should be rejected
 // * [x] require(...) Works in CommonJs Modules
 // * [x] require(...) correctly handles node: modules with/without the node: prefix
 // * [x] Circular dependencies are correctly handled

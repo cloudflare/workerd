@@ -717,6 +717,8 @@ struct MembersBuilder {
   inline void registerInstanceProperty() {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    prop.setSetterFastApiCompatible(isFastApiCompatible<Setter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -726,6 +728,7 @@ struct MembersBuilder {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setReadonly(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -764,6 +767,8 @@ struct MembersBuilder {
     auto prop = members[memberIndex++].initProperty();
     prop.setName(name);
     prop.setPrototype(true);
+    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
+    prop.setSetterFastApiCompatible(isFastApiCompatible<Setter>);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
@@ -801,6 +806,8 @@ struct MembersBuilder {
     auto method = members[memberIndex++].initMethod();
 
     method.setName(name);
+    method.setFastApiCompatible(isFastApiCompatible<Method>);
+
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;
@@ -823,6 +830,8 @@ struct MembersBuilder {
 
     method.setName(name);
     method.setStatic(true);
+    method.setFastApiCompatible(isFastApiCompatible<Method>);
+
     using Traits = FunctionTraits<Method>;
     BuildRtti<Configuration, typename Traits::ReturnType>::build(method.initReturnType(), rtti);
     using Args = typename Traits::ArgsTuple;

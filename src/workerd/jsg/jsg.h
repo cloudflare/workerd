@@ -262,6 +262,29 @@ namespace workerd::jsg {
     registry.template registerAsyncIterable<NAME, decltype(&Self::method), &Self::method>();       \
   } while (false)
 
+// JSG_DISPOSE and JSG_ASYNC_DISPOSE are used to make an object compatible with the
+// JavaScript using and await using keywords (respectively). These allow variables to
+// be defined in such a way that they will have their disposer functions automatically
+// called when the variable goes out of scope, for instance:
+//
+// class Foo { [Symbol.dispose]() { console.log('...'); }}
+// { using foo = new Foo(); }
+//
+// When the containing block exits, the [Symbol.dispose] function will be called on
+// the object, allowing cleanup actions to be performed.
+//
+// There are a number of guidelines that should be followed when implementing
+// disposer methods:
+//
+// 1. Always prefer Symbol.dispose over Symbol.asyncDispose, avoid defining both.
+// 2. Always assume that if the resource needs to be disposed, it's being disposed
+//    in an exception case. Clean disposal should always be explicit.
+// 3. At least for the time being, the exception will not be available to the
+//    disposer, so it will not be able to propagate the error
+// 4. Always implement disposal as an idempotent operation and remember that
+//    users can call the disposer methods directly as many times as they want.
+// 5. Remember that errors thrown from within the disposer will mask the original
+//    error using a SupressedError.
 #define JSG_DISPOSE(method)                                                                        \
   do {                                                                                             \
     static const char NAME[] = #method;                                                            \
@@ -1790,7 +1813,7 @@ class JsContext {
   JsContext(v8::Local<v8::Context> handle,
       Ref<T> object,
       kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
-      : handle(handle->GetIsolate(), handle),
+      : handle(v8::Isolate::GetCurrent(), handle),
         object(kj::mv(object)),
         maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
 
@@ -2269,7 +2292,8 @@ class ExternalMemoryAdjustment;
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted {
+class ExternalMemoryTarget: public kj::AtomicRefcounted,
+                            public kj::EnableAddRefToThis<ExternalMemoryTarget> {
  public:
   ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
@@ -2306,7 +2330,7 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted {
 // The allocation amount can be adjusted up or down during the lifetime of an object.
 class ExternalMemoryAdjustment final {
  public:
-  ExternalMemoryAdjustment(kj::Own<const ExternalMemoryTarget> externalMemory, size_t amount);
+  ExternalMemoryAdjustment(kj::Arc<const ExternalMemoryTarget> externalMemory, size_t amount);
   ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other);
   ExternalMemoryAdjustment& operator=(ExternalMemoryAdjustment&& other);
   KJ_DISALLOW_COPY(ExternalMemoryAdjustment);
@@ -2324,7 +2348,7 @@ class ExternalMemoryAdjustment final {
   }
 
  private:
-  kj::Own<const ExternalMemoryTarget> externalMemory;
+  kj::Arc<const ExternalMemoryTarget> externalMemory;
   size_t amount = 0;
 
   // If the isolate is locked, adjust the external memory immediately.
@@ -2369,6 +2393,13 @@ class Lock {
     // tracking of objects created while under lock. As such, all instances of jsg::alloc<T>(...)
     // are to be replaced by js.alloc<T>(...). For now, these are functionally equivalent.
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...));
+  }
+
+  // Like alloc() but attaches an external memory adjustment of size indicated by `accountedSize`.
+  template <typename T, typename... Params>
+  Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
+    return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
+                      .attach(getExternalMemoryAdjustment(accountedSize)));
   }
 
   // Returns a kj::String with an external memory adjustment attached.
@@ -2439,7 +2470,7 @@ class Lock {
   // Used to save a reference to an isolate that is responsible for external memory usage.
   // getAdjustment() can be invoked at any time to create a new RAII adjustment object
   // pointing to this isolate
-  kj::Own<const ExternalMemoryTarget> getExternalMemoryTarget();
+  kj::Arc<const ExternalMemoryTarget> getExternalMemoryTarget();
 
   Value parseJson(kj::ArrayPtr<const char> data);
   Value parseJson(v8::Local<v8::String> text);
@@ -2682,6 +2713,8 @@ class Lock {
   void setCaptureThrowsAsRejections(bool capture);
 
   void setNodeJsCompatEnabled();
+  void setThrowOnUnrecognizedImportAssertion();
+  bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
   void disableTopLevelAwait();
 

@@ -167,7 +167,7 @@ class DurableObjectNamespace: public jsg::Object {
 
     JSG_STRUCT(jurisdiction);
 
-    JSG_STRUCT_TS_DEFINE(type DurableObjectJurisdiction = "eu" | "fedramp");
+    JSG_STRUCT_TS_DEFINE(type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high");
     // Possible values from https://developers.cloudflare.com/workers/runtime-apis/durable-objects/#restricting-objects-to-a-jurisdiction
     JSG_STRUCT_TS_OVERRIDE({
       jurisdiction?: DurableObjectJurisdiction;

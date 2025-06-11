@@ -322,6 +322,15 @@ kj::Maybe<Url> Url::tryResolve(kj::ArrayPtr<const char> input) const {
   return tryParse(input, getHref());
 }
 
+Url::Relative Url::getRelative() const {
+  auto base = KJ_ASSERT_NONNULL(tryResolve("."_kj));
+  auto pos = KJ_ASSERT_NONNULL(getPathname().findLast('/'));
+  return {
+    .base = kj::mv(base),
+    .name = kj::str(getPathname().slice(pos + 1)),
+  };
+}
+
 kj::uint Url::hashCode() const {
   return kj::hashCode(getHref());
 }

@@ -396,8 +396,7 @@ namespace {
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<kj::Own<Trace>> traces) {
   return KJ_MAP(t, traces) -> tracing::TraceEventInfo::TraceItem {
-    return tracing::TraceEventInfo::TraceItem(
-        t->scriptName.map([](auto& scriptName) { return kj::str(scriptName); }));
+    return tracing::TraceEventInfo::TraceItem(mapCopyString(t->scriptName));
   };
 }
 
@@ -440,7 +439,7 @@ void tracing::TraceEventInfo::TraceItem::copyTo(
 }
 
 tracing::TraceEventInfo::TraceItem tracing::TraceEventInfo::TraceItem::clone() const {
-  return TraceItem(scriptName.map([](auto& name) { return kj::str(name); }));
+  return TraceItem(mapCopyString(scriptName));
 }
 
 tracing::DiagnosticChannelEvent::DiagnosticChannelEvent(
@@ -709,8 +708,7 @@ void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
 }
 
 tracing::Exception tracing::Exception::clone() const {
-  return Exception(timestamp, kj::str(name), kj::str(message),
-      stack.map([](auto& stack) { return kj::str(stack); }));
+  return Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack));
 }
 
 void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel) {
@@ -851,44 +849,20 @@ tracing::Hibernate tracing::Hibernate::clone() const {
   return Hibernate();
 }
 
-tracing::Attribute::Attribute(kj::String name, Value&& value)
+tracing::Attribute::Attribute(kj::ConstString name, Value&& value)
     : name(kj::mv(name)),
       value(kj::arr(kj::mv(value))) {}
 
-tracing::Attribute::Attribute(kj::String name, Values&& value)
+tracing::Attribute::Attribute(kj::ConstString name, Values&& value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
 
 namespace {
 kj::Array<tracing::Attribute::Value> readValues(const rpc::Trace::Attribute::Reader& reader) {
-  static auto readValue =
-      [](rpc::Trace::Attribute::Value::Reader reader) -> tracing::Attribute::Value {
-    auto inner = reader.getInner();
-    switch (inner.which()) {
-      case rpc::Trace::Attribute::Value::Inner::TEXT: {
-        return kj::str(inner.getText());
-      }
-      case rpc::Trace::Attribute::Value::Inner::BOOL: {
-        return inner.getBool();
-      }
-      case rpc::Trace::Attribute::Value::Inner::FLOAT: {
-        return inner.getFloat();
-      }
-      case rpc::Trace::Attribute::Value::Inner::INT: {
-        return static_cast<int64_t>(inner.getInt());
-      }
-    }
-    KJ_UNREACHABLE;
-  };
-
   // There should always be a value and it always have at least one entry in the list.
   KJ_ASSERT(reader.hasValue());
   auto value = reader.getValue();
-  kj::Vector<tracing::Attribute::Value> values(value.size());
-  for (auto v: value) {
-    values.add(readValue(v));
-  }
-  return values.releaseAsArray();
+  return KJ_MAP(v, value) { return deserializeTagValue(v); };
 }
 }  // namespace
 
@@ -897,49 +871,15 @@ tracing::Attribute::Attribute(rpc::Trace::Attribute::Reader reader)
       value(readValues(reader)) {}
 
 void tracing::Attribute::copyTo(rpc::Trace::Attribute::Builder builder) const {
-  static auto writeValue = [](auto builder, const auto& value) mutable {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        builder.initInner().setText(str.asPtr());
-      }
-      KJ_CASE_ONEOF(b, bool) {
-        builder.initInner().setBool(b);
-      }
-      KJ_CASE_ONEOF(f, double) {
-        builder.initInner().setFloat(f);
-      }
-      KJ_CASE_ONEOF(i, int64_t) {
-        builder.initInner().setInt(i);
-      }
-    }
-  };
   builder.setName(name.asPtr());
   auto vec = builder.initValue(value.size());
   for (size_t n = 0; n < value.size(); n++) {
-    writeValue(vec[n], value[n]);
+    serializeTagValue(vec[n], value[n]);
   }
 }
 
 tracing::Attribute tracing::Attribute::clone() const {
-  constexpr auto cloneValue = [](const Value& value) -> Value {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(str, kj::String) {
-        return kj::str(str);
-      }
-      KJ_CASE_ONEOF(b, bool) {
-        return b;
-      }
-      KJ_CASE_ONEOF(f, double) {
-        return f;
-      }
-      KJ_CASE_ONEOF(i, int64_t) {
-        return i;
-      }
-    }
-    KJ_UNREACHABLE;
-  };
-
-  return Attribute(kj::str(name), KJ_MAP(v, value) { return cloneValue(v); });
+  return Attribute(kj::ConstString(kj::str(name)), KJ_MAP(v, value) { return spanTagClone(v); });
 }
 
 tracing::Return::Return(kj::Maybe<tracing::FetchResponseInfo> info): info(kj::mv(info)) {}
@@ -993,11 +933,7 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
     }
     case rpc::Trace::SpanOpen::Info::CUSTOM: {
       auto custom = info.getCustom();
-      kj::Vector<tracing::Attribute> attrs(custom.size());
-      for (size_t n = 0; n < custom.size(); n++) {
-        attrs.add(tracing::Attribute(custom[n]));
-      }
-      return kj::Maybe(attrs.releaseAsArray());
+      return kj::Maybe(KJ_MAP(a, custom) { return tracing::Attribute(a); });
     }
   }
   KJ_UNREACHABLE;
@@ -1042,11 +978,7 @@ tracing::SpanOpen tracing::SpanOpen::clone() const {
           return jsrpc.clone();
         }
         KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
-          kj::Vector<tracing::Attribute> attrs(custom.size());
-          for (size_t n = 0; n < custom.size(); n++) {
-            attrs.add(custom[n].clone());
-          }
-          return attrs.releaseAsArray();
+          return KJ_MAP(attr, custom) { return attr.clone(); };
         }
       }
       KJ_UNREACHABLE;
@@ -1116,8 +1048,7 @@ void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) const {
 }
 
 tracing::Link tracing::Link::clone() const {
-  return Link(
-      label.map([](const kj::String& str) { return kj::str(str); }), traceId, invocationId, spanId);
+  return Link(mapCopyString(label), traceId, invocationId, spanId);
 }
 
 tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
@@ -1308,13 +1239,13 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
   return WorkerInfo{
     .executionModel = executionModel,
-    .scriptName = scriptName.map([](auto& str) { return kj::str(str); }),
+    .scriptName = mapCopyString(scriptName),
     .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
-    .dispatchNamespace = dispatchNamespace.map([](auto& str) { return kj::str(str); }),
+    .dispatchNamespace = mapCopyString(dispatchNamespace),
     .scriptId = mapCopyString(scriptId),
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
-    .entrypoint = entrypoint.map([](auto& str) { return kj::str(str); }),
+    .entrypoint = mapCopyString(entrypoint),
   };
 }
 

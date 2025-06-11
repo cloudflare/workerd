@@ -15,6 +15,11 @@ namespace workerd::util {
 enum class AutogateKey {
   TEST_WORKERD,
   V8_FAST_API,
+  // Enables support for the streaming tail worker. Note that this is currently also guarded behind
+  // an experimental compat flag.
+  STREAMING_TAIL_WORKER,
+  // Enable refactor used to consolidate the different tail worker stream implementations.
+  TAIL_STREAM_REFACTOR,
   NumOfKeys  // Reserved for iteration.
 };
 

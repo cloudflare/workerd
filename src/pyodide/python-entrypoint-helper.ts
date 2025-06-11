@@ -118,6 +118,7 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
       await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
+    await injectSitePackagesModule(pyodide, '_workers', '_workers');
     await injectSitePackagesModule(pyodide, 'workers', 'workers');
 
     // Install patches as needed

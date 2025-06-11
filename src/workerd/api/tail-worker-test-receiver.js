@@ -21,7 +21,7 @@ export const test = {
   async test() {
     // HACK: The prior tests terminates once the scheduled() invocation has returned a response, but
     // propagating the outcome of the invocation may take longer. Wait briefly so this can go ahead.
-    await scheduler.wait(100);
+    await scheduler.wait(50);
 
     // The shared tail worker we configured only produces onset and outcome events, so every trace is identical here.
     // Number of traces based on how often main tail worker is invoked from previous tests

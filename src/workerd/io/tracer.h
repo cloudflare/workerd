@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final: public kj::Refcounted {
+class TailStreamWriter final {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -80,17 +80,11 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
-  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& traces);
-
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
 
   friend class WorkerTracer;
-
- public:
-  // tail stream writers for worker stages in the given pipeline.
-  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 };
 
 // An abstract class that defines shares functionality for tracers that have different
@@ -126,12 +120,13 @@ class BaseTracer: public kj::Refcounted {
       kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(
-      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&&) = 0;
+  virtual void setEventInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      tracing::EventInfo&& info) = 0;
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
-  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&&) = 0;
+  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&& info) = 0;
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
@@ -150,9 +145,7 @@ class BaseTracer: public kj::Refcounted {
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
-// Tracer are released, its Trace is considered complete and ready for submission. If the Trace to
-// write to isn't provided (that already exists in a PipelineTracer), the trace must by extracted
-// via extractTrace.
+// Tracer are released, its Trace is considered complete and ready for submission.
 class WorkerTracer: public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
@@ -178,19 +171,9 @@ class WorkerTracer: public BaseTracer {
       kj::Array<kj::byte> message) override;
   void setEventInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
-      tracing::EventInfo&&) override;
-  void setFetchResponseInfo(tracing::FetchResponseInfo&&) override;
+      tracing::EventInfo&& info) override;
+  void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
-
-  // Used only for a Trace in a process sandbox. Copies the content of this tracer's trace to the
-  // builder.
-  void extractTrace(rpc::Trace::Builder builder);
-
-  // Sets the main trace of this Tracer to match the content of `reader`. This is used in the
-  // parent process after receiving a trace from a process sandbox.
-  void setTrace(rpc::Trace::Reader reader);
-
-  kj::Maybe<kj::Own<tracing::TailStreamWriter>>& getTailStreamWriter();
 
  private:
   PipelineLogLevel pipelineLogLevel;

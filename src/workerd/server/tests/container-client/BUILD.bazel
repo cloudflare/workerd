@@ -1,0 +1,9 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+wd_test(
+    size = "enormous",
+    src = "test.wd-test",
+    args = ["--experimental"],
+    data = ["test.js"],
+    tags = ["off-by-default"],
+)

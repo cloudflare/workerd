@@ -6,6 +6,10 @@ def rust_cxx_include(name, visibility = [], include_prefix = None):
         outs = ["cxx.h"],
         cmd = "$(location @workerd-cxx//:codegen) --header > \"$@\"",
         tools = ["@workerd-cxx//:codegen"],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     native.cc_library(
@@ -13,6 +17,10 @@ def rust_cxx_include(name, visibility = [], include_prefix = None):
         hdrs = ["cxx.h"],
         include_prefix = include_prefix,
         visibility = visibility,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
 def rust_cxx_bridge(
@@ -32,6 +40,10 @@ def rust_cxx_bridge(
         ],
         cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["@workerd-cxx//:codegen"],
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     native.cc_library(
@@ -46,6 +58,10 @@ def rust_cxx_bridge(
         }),
         deps = deps,
         visibility = visibility,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
 def wd_rust_crate(
@@ -110,6 +126,10 @@ def wd_rust_crate(
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
+        target_compatible_with = select({
+            "@//build/config:no_build": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
     )
 
     rust_test(

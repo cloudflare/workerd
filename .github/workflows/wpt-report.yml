@@ -1,0 +1,27 @@
+name: WPT report
+
+on:
+  # Trigger when a release is published
+  release:
+    types: [published]
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04
+      os_name: linux
+      suffix: ''
+      extra_bazel_args: '--config=ci-test'
+      run_wpt_report: true
+      test_target: '//src/wpt/...'
+      fetch_depth: 0
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+

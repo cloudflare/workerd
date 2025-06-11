@@ -124,6 +124,15 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "account-limits",
+    hdrs = ["account-limits.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "sqlite",
     srcs = [
         "sqlite.c++",
@@ -141,6 +150,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":account-limits",
         ":sentry",
         "@capnp-cpp//src/kj:kj-async",
     ],

@@ -463,9 +463,10 @@ export class ERR_MISSING_ARGS extends NodeTypeError {
   }
 }
 
+export type Falsy = false | 0 | -0 | 0n | '' | null | undefined | typeof NaN;
 export class ERR_FALSY_VALUE_REJECTION extends NodeError {
-  reason: string;
-  constructor(reason: string) {
+  reason: Falsy;
+  constructor(reason: Falsy) {
     super('ERR_FALSY_VALUE_REJECTION', 'Promise was rejected with falsy value');
     this.reason = reason;
   }
@@ -815,5 +816,44 @@ export class ERR_INVALID_CHAR extends NodeTypeError {
       msg += ` ["${field}"]`;
     }
     super('ERR_INVALID_CHAR', msg);
+  }
+}
+
+export class NodeSyscallError extends NodeError {
+  syscall: string;
+  errno?: number;
+  constructor(code: string, message: string, syscall: string) {
+    super(code, message);
+    this.syscall = syscall;
+  }
+}
+
+export class ERR_ENOENT extends NodeSyscallError {
+  path: string;
+  constructor(path: string, options: { syscall: string }) {
+    super('ENOENT', `No such file or directory: ${path}`, options.syscall);
+    this.path = path;
+    this.errno = -2; // ENOENT
+  }
+}
+
+export class ERR_EBADF extends NodeSyscallError {
+  constructor(options: { syscall: string }) {
+    super('EBADF', 'Bad file descriptor', options.syscall);
+    this.errno = -9; // EBADF
+  }
+}
+
+export class ERR_EINVAL extends NodeSyscallError {
+  constructor(options: { syscall: string }) {
+    super('EINVAL', 'Invalid argument', options.syscall);
+    this.errno = -22; // EINVAL
+  }
+}
+
+export class ERR_EEXIST extends NodeSyscallError {
+  constructor(options: { syscall: string }) {
+    super('EEXIST', 'file already exists', options.syscall);
+    this.errno = -17; // EEXIST
   }
 }
