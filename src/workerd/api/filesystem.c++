@@ -264,18 +264,15 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
             throwUVException(js, UV_EISDIR, "ftruncate"_kj);
-            return;
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             // If we got here, then followSymLinks was set to false. We cannot
             // truncate a symbolic link.
             throwUVException(js, UV_EINVAL, "ftruncate"_kj);
-            return;
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             // If we got here, then the path was not found.
             throwFsError(js, err, "ftruncate"_kj);
-            return;
           }
         }
       } else {
@@ -293,17 +290,14 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
           }
           KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
             throwUVException(js, UV_EISDIR, "ftruncate"_kj);
-            return;
           }
           KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
             throwUVException(js, UV_EINVAL, "ftruncate"_kj);
-            return;
           }
         }
         KJ_UNREACHABLE;
       } else {
         throwUVException(js, UV_EBADF, "ftruncate"_kj);
-        return;
       }
     }
   }
@@ -618,6 +612,8 @@ jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePa
             throwFsError(js, err, "readAll"_kj);
           }
         }
+      } else {
+        throwUVException(js, UV_ENOENT, "readAll"_kj);
       }
     }
     KJ_CASE_ONEOF(fd, int) {
@@ -1319,7 +1315,7 @@ jsg::JsValue createUVException(jsg::Lock& js,
   return obj;
 }
 
-void throwUVException(jsg::Lock& js,
+[[noreturn]] void throwUVException(jsg::Lock& js,
     int errorno,
     kj::StringPtr syscall,
     kj::StringPtr message,
