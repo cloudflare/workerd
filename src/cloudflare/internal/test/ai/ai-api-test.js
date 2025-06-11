@@ -224,7 +224,6 @@ export const tests = {
           }
         );
         // Test request internal status code is present
-        assert.deepEqual;
         assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
       }
     }
