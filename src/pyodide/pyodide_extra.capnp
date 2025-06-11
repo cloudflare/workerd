@@ -33,6 +33,8 @@ struct PythonSnapshotRelease @0x89c66fb883cb6975 {
   # For example "2024-02-18".
   backport @3 :Int64;
   # A number that is incremented each time we need to backport a fix to an existing Python release.
+  baselineSnapshot @7 :Text;
+  # Name of the baseline snapshot file for this release in r2
   baselineSnapshotHash @4 :Text;
   # A sha256 checksum hash of the baseline/universal memory snapshot to use for Python Workers using
   # this release.
