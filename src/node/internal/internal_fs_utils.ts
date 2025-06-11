@@ -75,6 +75,7 @@ import type {
   CopyOptions,
   CopySyncOptions,
   MakeDirectoryOptions,
+  OpenDirOptions,
   ReadSyncOptions,
   RmDirOptions,
   RmOptions,
@@ -309,6 +310,29 @@ export function validateReaddirArgs(
     path: normalizePath(path),
     encoding,
     withFileTypes,
+    recursive,
+  };
+}
+
+export function validateOpendirArgs(
+  path: FilePath,
+  options: OpenDirOptions
+): {
+  path: URL;
+  encoding: BufferEncoding | null | 'buffer';
+  recursive: boolean;
+} {
+  validateObject(options, 'options');
+  const { encoding = 'utf8', bufferSize = 32, recursive = false } = options;
+  validateEncoding(encoding, 'options.encoding');
+
+  // We don't implement the bufferSize option in any meaningful way but we
+  // do at least validate it.
+  validateUint32(bufferSize, 'options.bufferSize');
+  validateBoolean(recursive, 'options.recursive');
+  return {
+    path: normalizePath(path),
+    encoding: encoding as BufferEncoding,
     recursive,
   };
 }

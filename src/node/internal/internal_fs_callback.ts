@@ -40,6 +40,7 @@ import {
   validateChmodArgs,
   validateStatArgs,
   validateMkDirArgs,
+  validateOpendirArgs,
   validateRmArgs,
   validateRmDirArgs,
   validateReaddirArgs,
@@ -523,7 +524,19 @@ export function opendir(
   } else {
     options = optionsOrCallback;
   }
-  callWithSingleArgCallback(() => fssync.opendirSync(path, options), callback);
+
+  const {
+    path: validatedPath,
+    encoding,
+    recursive,
+  } = validateOpendirArgs(path, options);
+
+  callWithSingleArgCallback(() => {
+    return fssync.opendirSync(validatedPath, {
+      encoding: encoding as BufferEncoding,
+      recursive,
+    });
+  }, callback);
 }
 
 // read has a complex polymorphic signature so this is a bit gnarly.
@@ -1305,6 +1318,7 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.write(fd, string[, position[, encoding]], callback)
 // [x][x][x][x] fs.writeFile(file, data[, options], callback)
 // [x][x][x][x] fs.writev(fd, buffers[, position], callback)//
+// [x][x][x][x] fs.opendir(path[, options], callback)
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
@@ -1314,4 +1328,3 @@ export function createWriteStream(): void {
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])
-// [x][x][ ][ ] fs.opendir(path[, options], callback)
