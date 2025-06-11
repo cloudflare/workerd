@@ -108,13 +108,20 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-export function isReadableStream(value: any): boolean {
-  return (
-    value instanceof ReadableStream ||
-    (value &&
-      typeof value?.getReader === 'function' &&
-      typeof value?.locked === 'boolean')
-  );
+export function isReadableStream(value: unknown): boolean {
+  if (value instanceof ReadableStream) {
+    return true;
+  }
+
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return (
+      typeof obj['getReader'] === 'function' &&
+      typeof obj['locked'] === 'boolean'
+    );
+  }
+
+  return false;
 }
 
 /**
@@ -221,9 +228,14 @@ export class Ai {
         `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
       );
     } else {
+      const streamKey = streamKeys[0] ?? '';
+      const stream = streamKey ? inputs[streamKey] : null;
+      const body = (stream as AiInputReadableStream).body;
+      const contentType = (stream as AiInputReadableStream).contentType;
+
       // Make sure user has supplied the Content-Type
       // This allows AI binding to treat the ReadableStream correctly
-      if (!(inputs[streamKeys[0]!] as AiInputReadableStream)?.contentType) {
+      if (!contentType) {
         throw new AiInternalError(
           'Content-Type is required with ReadableStream inputs'
         );
@@ -232,29 +244,28 @@ export class Ai {
       // Pass single ReadableStream in request body
       const fetchOptions = {
         method: 'POST',
-        body: (inputs[streamKeys[0]!] as AiInputReadableStream)?.body,
+        body: body,
         headers: {
           ...this.options.sessionOptions?.extraHeaders,
           ...this.options.extraHeaders,
-          'content-type': (inputs[streamKeys[0]!] as AiInputReadableStream)
-            ?.contentType,
+          'content-type': contentType,
           'cf-consn-sdk-version': '2.0.0',
           'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
         },
       };
 
       // Fetch the additional input params
-      const { [streamKeys[0]!]: streamInput, ...userInputs } = inputs;
+      const { [streamKey]: streamInput, ...userInputs } = inputs;
 
       // Construct query params
       // Append inputs with ai.run options that are passed to the inference request
-      const query: any = {
+      const query = {
         ...cleanedOptions,
         userInputs: JSON.stringify({ ...userInputs }),
       };
       const queryParams = new URLSearchParams(query).toString();
 
-      let endpointUrl = `https://workers-binding.ai/run?version=3&${queryParams}`;
+      const endpointUrl = `https://workers-binding.ai/run?version=3&${queryParams}`;
       if (options.gateway?.id) {
         throw new AiInternalError(
           'AI Gateway does not support ReadableStreams yet.'
