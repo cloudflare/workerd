@@ -49,9 +49,11 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 
 ### Core Directory Structure (`src/workerd/`)
 - **`api/`** - Runtime APIs (HTTP, crypto, streams, WebSocket, etc.)
-  - Contains both C++ implementations and TypeScript definitions
+  - Contains both C++ implementations
   - Node.js compatibility layer in `api/node/`
   - Tests in `api/tests/` and `api/node/tests/`
+  - TypeScript definitions are derived from C++ (which can have some annotations). This generation is handled by code in `types/` directory.
+
 - **`io/`** - I/O subsystem, actor storage, threading, worker lifecycle
   - Actor storage and caching (`actor-cache.c++`, `actor-sqlite.c++`)
   - Request tracking and limits (`request-tracker.c++`, `limit-enforcer.h`)
@@ -68,7 +70,6 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust integration components
 
-- TypeScript definitions generated in `types/` directory
 
 ### Configuration System
 - Uses **Cap'n Proto** for configuration files (`.capnp` format)
