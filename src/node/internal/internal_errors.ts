@@ -857,3 +857,9 @@ export class ERR_EEXIST extends NodeSyscallError {
     this.errno = -17; // EEXIST
   }
 }
+
+export class ERR_DIR_CLOSED extends NodeError {
+  constructor() {
+    super('ERR_DIR_CLOSED', 'Directory is closed');
+  }
+}

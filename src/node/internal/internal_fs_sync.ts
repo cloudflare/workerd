@@ -50,6 +50,7 @@ import {
   validateReadArgs,
   validateWriteArgs,
   validateWriteFileArgs,
+  validateOpendirArgs,
 } from 'node-internal:internal_fs_utils';
 import {
   parseFileMode,
@@ -81,7 +82,7 @@ import {
   COPYFILE_FICLONE,
   COPYFILE_FICLONE_FORCE,
 } from 'node-internal:internal_fs_constants';
-import { type Dir, Dirent } from 'node-internal:internal_fs';
+import { Dir, Dirent } from 'node-internal:internal_fs';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 
 import { Buffer } from 'node-internal:internal_buffer';
@@ -442,14 +443,14 @@ export function mkdtempSync(
 }
 
 export function opendirSync(path: FilePath, options: OpenDirOptions = {}): Dir {
-  validateObject(options, 'options');
-  const { encoding = 'utf8', bufferSize = 32, recursive = false } = options;
-  validateEncoding(encoding, 'options.encoding');
-  validateUint32(bufferSize, 'options.bufferSize');
-  validateBoolean(recursive, 'options.recursive');
-  path = normalizePath(path);
-  // TODO(node-fs): Need implementation
-  throw new Error('Not implemented');
+  const {
+    path: validatedPath,
+    encoding,
+    recursive,
+  } = validateOpendirArgs(path, options);
+
+  const handles = cffs.readdir(validatedPath, { recursive });
+  return new Dir(handles, path, { encoding });
 }
 
 export function openSync(
@@ -864,7 +865,7 @@ export function globSync(
 // [x][x][2][x][x] fs.writevSync(fd, buffers[, position])
 // [x][x][2][x][x] fs.appendFileSync(path, data[, options])
 // [x][x][2][x][x] fs.copyFileSync(src, dest[, mode])
+// [x][x][2][x][x] fs.opendirSync(path[, options])
 //
 // [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])
-// [x][ ][ ][ ][ ] fs.opendirSync(path[, options])
