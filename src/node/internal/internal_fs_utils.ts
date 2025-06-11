@@ -24,11 +24,9 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
-  AbortError,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_INCOMPATIBLE_OPTION_PAIR,
-  ERR_OUT_OF_RANGE,
 } from 'node-internal:internal_errors';
 import {
   validateAbortSignal,
@@ -41,7 +39,7 @@ import {
   validateEncoding,
   parseFileMode,
 } from 'node-internal:validators';
-import { isDate, isArrayBufferView } from 'node-internal:internal_types';
+import { isArrayBufferView } from 'node-internal:internal_types';
 import {
   F_OK,
   W_OK,
@@ -92,6 +90,7 @@ export const kBadge = Symbol('kBadge');
 export type RawTime = string | number | bigint;
 export type SymlinkType = 'dir' | 'file' | 'junction' | null | undefined;
 
+// Normalizes the input time to a Date object.
 export function getDate(time: RawTime | Date): Date {
   if (typeof time === 'number') {
     return new Date(time);
@@ -109,6 +108,7 @@ export function getDate(time: RawTime | Date): Date {
   );
 }
 
+// Normalizes the input file path to a URL object.
 export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // We treat all of our virtual file system paths as file URLs
   // as a way of normalizing them. Because our file system is
@@ -130,40 +130,6 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   }
   throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
 }
-
-// The access modes can be any of F_OK, R_OK, W_OK or X_OK. Some might not be
-// available on specific systems. They can be used in combination as well
-// (F_OK | R_OK | W_OK | X_OK).
-export const kMinimumAccessMode = Math.min(F_OK, W_OK, R_OK, X_OK);
-export const kMaximumAccessMode = F_OK | W_OK | R_OK | X_OK;
-
-export const kDefaultCopyMode = 0;
-// The copy modes can be any of COPYFILE_EXCL, COPYFILE_FICLONE or
-// COPYFILE_FICLONE_FORCE. They can be used in combination as well
-// (COPYFILE_EXCL | COPYFILE_FICLONE | COPYFILE_FICLONE_FORCE).
-export const kMinimumCopyMode = Math.min(
-  kDefaultCopyMode,
-  COPYFILE_EXCL,
-  COPYFILE_FICLONE,
-  UV_FS_COPYFILE_FICLONE_FORCE
-);
-export const kMaximumCopyMode =
-  COPYFILE_EXCL | COPYFILE_FICLONE | UV_FS_COPYFILE_FICLONE_FORCE;
-
-// Most platforms don't allow reads or writes >= 2 GiB.
-// See https://github.com/libuv/libuv/pull/1501.
-export const kIoMaxLength = 2 ** 31 - 1;
-
-// Use 64kb in case the file type is not a regular file and thus do not know the
-// actual file size. Increasing the value further results in more frequent over
-// allocation for small files and consumes CPU time and memory that should be
-// used else wise.
-// Use up to 512kb per read otherwise to partition reading big files to prevent
-// blocking other threads in case the available threads are all in use.
-export const kReadFileUnknownBufferLength = 64 * 1024;
-export const kReadFileBufferLength = 512 * 1024;
-
-export const kWriteFileMaxChunkSize = 512 * 1024;
 
 export const kMaxUserId = 2 ** 32 - 1;
 
@@ -559,17 +525,28 @@ export function validateReadArgs(
 // a given range. If the mode is not provided, the default value is used.
 // Throws ERR_INVALID_ARG_TYPE if the mode is not a valid integer, or
 // ERR_OUT_OF_RANGE if the mode is outside the valid range.
-export function validateMode(
+function validateMode(
   mode: number | undefined,
   type: 'copyFile' | 'access' = 'access'
 ): number {
-  let min = kMinimumAccessMode;
-  let max = kMaximumAccessMode;
+  // The access modes can be any of F_OK, R_OK, W_OK or X_OK. Some might not be
+  // available on specific systems. They can be used in combination as well
+  // (F_OK | R_OK | W_OK | X_OK).
+  let min = Math.min(F_OK, W_OK, R_OK, X_OK);
+  let max = F_OK | W_OK | R_OK | X_OK;
   let def = F_OK;
   if (type === 'copyFile') {
-    min = kMinimumCopyMode;
-    max = kMaximumCopyMode;
-    def = mode || kDefaultCopyMode;
+    // The copy modes can be any of COPYFILE_EXCL, COPYFILE_FICLONE or
+    // COPYFILE_FICLONE_FORCE. They can be used in combination as well
+    // (COPYFILE_EXCL | COPYFILE_FICLONE | COPYFILE_FICLONE_FORCE).
+    min = Math.min(
+      0,
+      COPYFILE_EXCL,
+      COPYFILE_FICLONE,
+      UV_FS_COPYFILE_FICLONE_FORCE
+    );
+    max = COPYFILE_EXCL | COPYFILE_FICLONE | UV_FS_COPYFILE_FICLONE_FORCE;
+    def = mode || 0;
   } else {
     strictEqual(type, 'access');
   }
@@ -578,7 +555,7 @@ export function validateMode(
   return mode;
 }
 
-export function assertEncoding(encoding: unknown): asserts encoding is string {
+function assertEncoding(encoding: unknown): asserts encoding is string {
   if (encoding && !Buffer.isEncoding(encoding as string)) {
     const reason = 'is invalid encoding';
     throw new ERR_INVALID_ARG_VALUE('encoding', encoding, reason);
@@ -608,12 +585,6 @@ export function getOptions(
   }
 
   return options;
-}
-
-export function copyObject<T>(source: Record<string, T>): Record<string, T> {
-  const target: Record<string, T> = {};
-  for (const key in source) target[key] = source[key] as T;
-  return target;
 }
 
 const defaultCpOptions: CopyOptions = {
@@ -647,29 +618,6 @@ export function validateCpOptions(
     validateFunction(options.filter, 'options.filter');
   }
   return options;
-}
-
-// converts Date or number to a fractional UNIX timestamp
-export function toUnixTimestamp(
-  time: string | number | Date,
-  name: string = 'time'
-): string | number | Date {
-  // @ts-expect-error TS2367 number to string comparison error.
-  if (typeof time === 'string' && +time == time) {
-    return +time;
-  }
-  if (Number.isFinite(time)) {
-    // @ts-expect-error TS2365 Number.isFinite does not assert correctly.
-    if (time < 0) {
-      return Date.now() / 1000;
-    }
-    return time;
-  }
-  if (isDate(time)) {
-    // Convert to 123.456 UNIX timestamp
-    return time.getTime() / 1000;
-  }
-  throw new ERR_INVALID_ARG_TYPE(name, ['Date', 'Time in seconds'], time);
 }
 
 export function stringToFlags(
@@ -731,12 +679,6 @@ export function stringToFlags(
   throw new ERR_INVALID_ARG_VALUE('flags', flags);
 }
 
-export function checkAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw new AbortError(undefined, { cause: signal.reason });
-  }
-}
-
 const defaultRmdirOptions: RmDirOptions = {
   retryDelay: 100,
   maxRetries: 0,
@@ -777,22 +719,6 @@ export function validatePosition(
   }
 }
 
-export function validateOffsetLengthRead(
-  offset: number,
-  length: number,
-  bufferLength: number
-): void {
-  if (offset < 0) {
-    throw new ERR_OUT_OF_RANGE('offset', '>= 0', offset);
-  }
-  if (length < 0) {
-    throw new ERR_OUT_OF_RANGE('length', '>= 0', length);
-  }
-  if (offset + length > bufferLength) {
-    throw new ERR_OUT_OF_RANGE('length', `<= ${bufferLength - offset}`, length);
-  }
-}
-
 export function getValidatedFd(fd: number, propName: string = 'fd'): number {
   if (Object.is(fd, -0)) {
     return 0;
@@ -818,7 +744,7 @@ export function validateBufferArray(
   return buffers as ArrayBufferView[];
 }
 
-export function validateStringAfterArrayBufferView(
+function validateStringAfterArrayBufferView(
   buffer: unknown,
   name: string
 ): void {
@@ -829,26 +755,6 @@ export function validateStringAfterArrayBufferView(
       buffer
     );
   }
-}
-
-export function validateOffsetLengthWrite(
-  offset: number,
-  length: number,
-  byteLength: number
-): void {
-  if (offset > byteLength) {
-    throw new ERR_OUT_OF_RANGE('offset', `<= ${byteLength}`, offset);
-  }
-
-  if (length > byteLength - offset) {
-    throw new ERR_OUT_OF_RANGE('length', `<= ${byteLength - offset}`, length);
-  }
-
-  if (length < 0) {
-    throw new ERR_OUT_OF_RANGE('length', '>= 0', length);
-  }
-
-  validateInt32(length, 'length', 0);
 }
 
 // Our implementation of the Stats class differs a bit from Node.js' in that
