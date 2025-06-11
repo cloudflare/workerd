@@ -96,4 +96,3 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 
 - Uses **pnpm** for TypeScript/JavaScript dependencies
 - Root package.json contains development dependencies
-- Platform-specific npm packages in `npm/` directory
