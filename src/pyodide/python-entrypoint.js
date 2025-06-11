@@ -30,7 +30,12 @@ async function doAnImport(name) {
 }
 
 // Pass the import function to the helper
-setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
+setDoAnImport(
+  doAnImport,
+  cloudflareWorkersModule,
+  cloudflareSocketsModule,
+  WorkerEntrypoint
+);
 
 function makeEntrypointClassFromNames(classes, baseClass) {
   return classes.map(({ className, methodNames }) => [
