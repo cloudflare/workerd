@@ -50,7 +50,7 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 ### Core Directory Structure (`src/workerd/`)
 - **`api/`** - Runtime APIs (HTTP, crypto, streams, WebSocket, etc.)
   - Contains both C++ implementations
-  - Node.js compatibility layer in `api/node/`
+  - C++ portions of the Node.js compatibility layer are in `api/node/`, while the JavaScript and TypeScript implementations live in `src/node/`
   - Tests in `api/tests/` and `api/node/tests/`
   - TypeScript definitions are derived from C++ (which can have some annotations). This generation is handled by code in `types/` directory.
 
