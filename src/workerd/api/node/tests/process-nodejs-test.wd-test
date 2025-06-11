@@ -11,7 +11,8 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2024-12-28",
         compatibilityFlags = [
           "nodejs_compat",
-          "nodejs_compat_populate_process_env"
+          "nodejs_compat_populate_process_env",
+          "experimental"
         ],
         bindings = [
           (name = "FOO", text = "BAR"),

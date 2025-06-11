@@ -10,7 +10,10 @@
 import { validateObject } from 'node-internal:validators';
 
 import {
+  ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
+  ERR_OUT_OF_RANGE,
+  ERR_UNSUPPORTED_OPERATION,
   NodeError,
 } from 'node-internal:internal_errors';
 
@@ -19,6 +22,9 @@ import {
   _initialized as eventsInitialized,
   default as EventEmitter,
 } from 'node-internal:events';
+import type { Buffer } from 'node:buffer';
+import { readFileSync } from 'node-internal:internal_fs_sync';
+import { parseEnv } from 'node-internal:internal_utils';
 
 export const versions = processImpl.versions;
 
@@ -113,28 +119,34 @@ export function emitWarning(
   let ctor: ErrorConstructor | undefined;
 
   // Handle different overloads
-  if (typeof options === 'object') {
+  if (typeof options === 'object' && !Array.isArray(options)) {
     // emitWarning(warning, options)
     if (options.type) name = options.type;
     if (options.code) code = options.code;
     if (options.detail) detail = options.detail;
     ctor = options.ctor;
-  } else {
-    if (typeof options === 'string') {
-      // emitWarning(warning, type, ...)
-      name = options;
-      if (typeof codeOrCtor === 'string') {
-        // emitWarning(warning, type, code, ctor)
-        code = codeOrCtor;
-        if (typeof maybeCtor === 'function') ctor = maybeCtor;
-      } else if (typeof codeOrCtor === 'function') {
-        // emitWarning(warning, type, ctor)
-        ctor = codeOrCtor;
+  } else if (typeof options === 'string') {
+    // emitWarning(warning, type, ...)
+    name = options;
+    if (typeof codeOrCtor === 'string') {
+      // emitWarning(warning, type, code, ctor)
+      code = codeOrCtor;
+      if (typeof maybeCtor === 'function') {
+        ctor = maybeCtor;
+      } else if ((maybeCtor as unknown) !== undefined) {
+        throw new ERR_INVALID_ARG_TYPE('ctor', 'function', maybeCtor);
       }
-    } else if (typeof options === 'function') {
-      // emitWarning(warning, ctor)
-      ctor = options;
+    } else if (typeof codeOrCtor === 'function') {
+      // emitWarning(warning, type, ctor)
+      ctor = codeOrCtor;
+    } else if ((codeOrCtor as unknown) !== undefined) {
+      throw new ERR_INVALID_ARG_TYPE('ctor', 'function', codeOrCtor);
     }
+  } else if (typeof options === 'function') {
+    // emitWarning(warning, ctor)
+    ctor = options;
+  } else if (options !== undefined) {
+    throw new ERR_INVALID_ARG_TYPE('options', 'object', options);
   }
 
   // Convert string warning to Error
@@ -143,12 +155,14 @@ export function emitWarning(
     const ErrorConstructor = ctor || Error;
     err = new ErrorConstructor(warning);
     err.name = name;
-  } else {
+  } else if (warning instanceof Error) {
     err = warning;
     // Override name if provided
     if (name && name !== 'Warning') {
       err.name = name;
     }
+  } else {
+    throw new ERR_INVALID_ARG_TYPE('warning', 'string or Error', warning);
   }
 
   // Add code if provided
@@ -157,7 +171,7 @@ export function emitWarning(
   }
 
   // Add detail if provided
-  if (detail) {
+  if (detail && typeof detail === 'string') {
     (err as ErrorWithDetail).detail = detail;
   }
 
@@ -284,6 +298,8 @@ export const env = new Proxy(getInitialEnv(), {
   // configurable, and enumerable using just a falsy check. Getters and setters
   // are not permitted.
   set(obj: object, prop: PropertyKey, value: unknown): boolean {
+    if (typeof prop === 'symbol' || typeof value === 'symbol')
+      throw new TypeError(`Cannot convert a symbol value to a string`);
     return Reflect.set(obj, prop, `${value}`);
   },
   defineProperty(
@@ -321,6 +337,8 @@ export const env = new Proxy(getInitialEnv(), {
       );
     }
     if (Reflect.has(descriptor, 'value')) {
+      if (typeof prop === 'symbol' || typeof descriptor.value === 'symbol')
+        throw new TypeError(`Cannot convert a symbol value to a string`);
       Reflect.set(descriptor, 'value', `${descriptor.value}`);
     } else {
       throw new ERR_INVALID_ARG_VALUE(
@@ -329,6 +347,8 @@ export const env = new Proxy(getInitialEnv(), {
         'process.env value must be specified explicitly'
       );
     }
+    if (typeof prop === 'symbol')
+      throw new TypeError(`Cannot convert a symbol value to a string`);
     return Reflect.defineProperty(obj, prop, descriptor);
   },
 });
@@ -339,6 +359,62 @@ export function getBuiltinModule(id: string): object {
 
 export function exit(code: number): void {
   processImpl.processExitImpl(code);
+}
+
+export function kill(_pid: number, _signal?: string | number): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export function ref(_maybeRefable: unknown): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export function unref(_maybeRefable: unknown): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export const hrtime: {
+  (time?: [number, number]): [number, number];
+  bigint(): bigint;
+} = function hrtime(time?: [number, number]): [number, number] {
+  if (time !== undefined) {
+    if (!Array.isArray(time))
+      throw new ERR_INVALID_ARG_TYPE('time', 'tuple of integers', time);
+    else if ((time as number[]).length !== 2)
+      throw new ERR_OUT_OF_RANGE('time', '2', time);
+  }
+  const nanoTime = BigInt(Date.now()) * 1_000_000n;
+  const nanosBigint = nanoTime % 1_000_000_000n;
+  let seconds = Number((nanoTime - nanosBigint) / 1_000_000_000n);
+  let nanos = Number(nanosBigint);
+  if (time) {
+    const [prevSeconds, prevNanos] = time;
+    seconds -= prevSeconds;
+    nanos -= prevNanos;
+    // Handle nanosecond underflow
+    if (nanos < 0) {
+      seconds -= 1;
+      nanos += 1e9;
+    }
+  }
+  return [seconds, nanos];
+};
+hrtime.bigint = function (): bigint {
+  return BigInt(Date.now()) * 1_000_000n;
+};
+
+export function uptime(): number {
+  return 0;
+}
+
+// TODO(soon): Support proper process.cwd()
+export function loadEnvFile(
+  path: string | URL | Buffer = '/bundle/.env'
+): void {
+  const parsed = parseEnv(
+    readFileSync(path instanceof URL ? path : path.toString(), 'utf8') as string
+  );
+  Object.assign(process.env, parsed);
 }
 
 // The following features does not include deprecated or experimental flags mentioned in
@@ -383,8 +459,15 @@ interface Process extends EventEmitter {
   getBuiltinModule: typeof getBuiltinModule;
   features: typeof features;
   allowedNodeEnvironmentFlags: typeof allowedNodeEnvironmentFlags;
+  kill: typeof kill;
+  ref: typeof ref;
+  unref: typeof unref;
+  hrtime: typeof hrtime;
+  uptime: typeof uptime;
+  loadEnvFile: typeof loadEnvFile;
 }
 
+// NOTE: all properties added here must also be added on the process.ts re-exports
 const process = {
   version,
   versions,
@@ -409,6 +492,12 @@ const process = {
   getBuiltinModule,
   features,
   allowedNodeEnvironmentFlags,
+  kill,
+  ref,
+  unref,
+  hrtime,
+  uptime,
+  loadEnvFile,
 } as Process;
 
 export default process;

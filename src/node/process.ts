@@ -29,5 +29,11 @@ export {
   getBuiltinModule,
   features,
   allowedNodeEnvironmentFlags,
+  kill,
+  ref,
+  unref,
+  hrtime,
+  uptime,
+  loadEnvFile,
 } from 'node-internal:internal_process';
 export { default } from 'node-internal:internal_process';
