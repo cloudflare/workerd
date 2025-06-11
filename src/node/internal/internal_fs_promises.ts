@@ -50,14 +50,21 @@ import {
   type ReadDirOptions,
   type WriteSyncOptions,
 } from 'node-internal:internal_fs_utils';
+import type { Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
 import { type Dir } from 'node-internal:internal_fs';
-import { ERR_EBADF } from 'node-internal:internal_errors';
+import {
+  ERR_EBADF,
+  ERR_UNSUPPORTED_OPERATION,
+} from 'node-internal:internal_errors';
 import { validateUint32 } from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
 import type {
   BigIntStatsFs,
   CopySyncOptions,
+  GlobOptions,
+  GlobOptionsWithFileTypes,
+  GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadSyncOptions,
@@ -564,4 +571,18 @@ export function writeFile(
     // the promise version does not return anything when successful.
     fssync.writeFileSync(path, data, options);
   });
+}
+
+export function glob(
+  _pattern: string | readonly string[],
+  _options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes = {}
+): NodeJS.AsyncIterator<string | Dirent> {
+  // We do not yet implement the globSync function. In Node.js, this
+  // function depends heavily on the third party minimatch library
+  // which is not yet available in the workers runtime. This will be
+  // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
 }

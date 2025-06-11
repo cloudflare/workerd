@@ -466,3 +466,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/fs-filehandle-test.js"],
 )
+
+wd_test(
+    src = "tests/fs-glob-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-glob-test.js"],
+)

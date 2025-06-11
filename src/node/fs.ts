@@ -27,7 +27,7 @@ import {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,
@@ -79,7 +79,7 @@ export {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,
@@ -134,7 +134,7 @@ export default {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,

@@ -84,6 +84,9 @@ import {
 import type {
   BigIntStatsFs,
   CopySyncOptions,
+  GlobOptions,
+  GlobOptionsWithFileTypes,
+  GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadAsyncOptions,
@@ -1245,6 +1248,21 @@ export function createReadStream(): void {
 }
 export function createWriteStream(): void {
   throw new Error('Not implemented');
+}
+
+export function glob(
+  _pattern: string | readonly string[],
+  _options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes,
+  _callback: ErrorOnlyCallback
+): void {
+  // We do not yet implement the globSync function. In Node.js, this
+  // function depends heavily on the third party minimatch library
+  // which is not yet available in the workers runtime. This will be
+  // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
 // An API is considered stubbed if it is not implemented by the function
