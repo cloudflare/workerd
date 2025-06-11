@@ -18,7 +18,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Primary Build System: Bazel
 - Main build command: `bazel build //src/workerd/server:workerd`
 - Binary output: `bazel-bin/src/workerd/server/workerd`
-- Use `bazel sync --configure` or `bazel clean --expunge` to fix toolchain issues after installing dependencies
 
 ### Just Commands (recommended for development)
 - `just build` or `just b` - Build the project
@@ -29,11 +28,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just wpt-test <name>` - Run Web Platform Tests (e.g., `just wpt-test urlpattern`)
 - `just generate-types` - Generate TypeScript definitions
 - `just compile-commands` - Generate compile_commands.json for clangd support
-
-### Development Setup
-- Use `just prepare` to install required tools (gen-compile-commands)
-- Ubuntu: `just prepare-ubuntu` installs system dependencies
-- Code formatting: `just format` (uses clang-format 18.1.8 automatically via Bazel)
+- `just build-asan` - Build with AddressSanitizer
+- `just test-asan` - Run tests with AddressSanitizer
 
 ## Testing
 
@@ -44,9 +40,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
 
-### AddressSanitizer Testing
-- `just build-asan` - Build with AddressSanitizer
-- `just test-asan` - Run tests with AddressSanitizer
 
 ## Architecture
 
@@ -75,6 +68,8 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - **`src/pyodide/`** - Python runtime support via Pyodide
 - **`src/rust/`** - Rust integration components
 
+- TypeScript definitions generated in `types/` directory
+
 ### Configuration System
 - Uses **Cap'n Proto** for configuration files (`.capnp` format)
 - Main schema: `src/workerd/server/workerd.capnp`
@@ -88,12 +83,7 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 - Run `just format` before committing
 - Uses KJ C++ style guide (see Cap'n Proto project)
 
-### Language Server Support
-- Run `just compile-commands` to generate `compile_commands.json` for clangd
-- VSCode integration documented in `docs/vscode.md`
-
 ### Contributing
-- Always discuss non-trivial changes in issues/discussions first
 - Strong backwards compatibility commitment - features cannot be removed once deployed
 - High bar for non-standard APIs; prefer implementing web standards
 - Run tests with `just test` before submitting PRs
@@ -101,11 +91,9 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 ### Rust Development
 - `just update-rust <package>` - Update Rust dependencies (equivalent to `cargo update`)
 - `just clippy <package>` - Run clippy linting on Rust code
-- `just _rust-analyzer` - Generate rust-project.json for rust-analyzer
 
-## Package Management
+## NPM Package Management
 
-- Uses **pnpm** (version 10.10.0) for TypeScript/JavaScript dependencies
+- Uses **pnpm** for TypeScript/JavaScript dependencies
 - Root package.json contains development dependencies
 - Platform-specific npm packages in `npm/` directory
-- TypeScript definitions generated in `types/` directory
