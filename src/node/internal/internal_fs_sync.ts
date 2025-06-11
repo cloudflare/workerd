@@ -88,6 +88,9 @@ import { Buffer } from 'node-internal:internal_buffer';
 import type {
   BigIntStatsFs,
   CopySyncOptions,
+  GlobOptions,
+  GlobOptionsWithFileTypes,
+  GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadSyncOptions,
@@ -786,6 +789,20 @@ export function writevSync(
   }
 
   return cffs.write(fd, buffers, { position });
+}
+
+export function globSync(
+  _pattern: string | readonly string[],
+  _options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes = {}
+): string[] {
+  // We do not yet implement the globSync function. In Node.js, this
+  // function depends heavily on the third party minimatch library
+  // which is not yet available in the workers runtime. This will be
+  // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
 // An API is considered stubbed if it is not implemented by the function
