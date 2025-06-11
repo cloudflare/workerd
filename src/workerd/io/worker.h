@@ -297,6 +297,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   struct Module {
     kj::StringPtr name;
     ModuleContent content;
+
+    // Hack for tests: register this as an internal module. Not allowed in production.
+    bool treatAsInternalForTest = false;
   };
 
   // Representation of source code for a worker using Service Workers syntax (deprecated, but will
