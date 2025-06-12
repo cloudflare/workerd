@@ -518,9 +518,13 @@ export const features = Object.freeze({
 
 export const allowedNodeEnvironmentFlags = new Set();
 
-// Unsupported features - implemented as 'undefined' so they can be imported
-// statically via `import { channel } from 'node:process'` without breaking.
+// TODO(soon): Implement stdio along with TTY streams.
+export const stdin = undefined;
+export const stdout = undefined;
+export const stderr = undefined;
 
+// Unsupported features - implemented as 'undefined' so they can still be imported
+// statically via `import { channel } from 'node:process'` without breaking.
 export const exitCode = undefined,
   channel = undefined,
   connected = undefined,
@@ -541,10 +545,8 @@ export const exitCode = undefined,
   traceDeprecation = undefined,
   throwDeprecation = undefined,
   sourceMapsEnabled = undefined,
-  stdin = undefined,
-  stdout = undefined,
-  stderr = undefined,
   threadCpuUsage = undefined;
+
 interface Process extends EventEmitter {
   version: typeof version;
   versions: typeof versions;
