@@ -100,6 +100,5 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "pyodide_date": "dev",
         "id": "dev",
         "flag": "pythonWorkersDevPyodide",
-        "baseline_snapshot_hash": "92859211804cd350f9e14010afad86e584bdd017dc7acfd94709a87f3220afae",
     },
 ])

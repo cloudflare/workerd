@@ -4,7 +4,6 @@ import {
   mountWorkerFiles,
 } from 'pyodide-internal:setupPackages';
 import {
-  finishSnapshotSetup,
   maybeCollectSnapshot,
   maybeRestoreSnapshot,
   preloadDynamicLibs,
@@ -130,8 +129,6 @@ export async function loadPyodide(
       finalizeBootstrap(Module);
     }
     const pyodide = Module.API.public_api;
-
-    finishSnapshotSetup(pyodide);
 
     validatePyodideVersion(pyodide);
 

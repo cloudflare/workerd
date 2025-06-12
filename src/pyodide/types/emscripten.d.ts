@@ -35,7 +35,7 @@ interface API {
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
-  serializeHiwireState(Module: Module): SnapshotConfig;
+  serializeHiwireState(): SnapshotConfig;
 }
 
 interface LDSO {

@@ -43,6 +43,8 @@ type OldSnapshotMeta = DsoHandles & {
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
 type SnapshotMeta = {
+  // We just store importedModulesList to help with testing and introspection
+  readonly importedModulesList: ReadonlyArray<string> | undefined;
   readonly hiwire: SnapshotConfig | undefined;
   readonly dsoHandles: DsoHandles;
   readonly settings: { readonly baselineSnapshot: boolean };
@@ -68,9 +70,19 @@ type LoadedSnapshotExtras = {
 type LoadedSnapshotMeta = SnapshotMeta & LoadedSnapshotExtras;
 
 /**
+ * Constants
+ */
+// "\x00snp"
+const SNAPSHOT_MAGIC = 0x706e7300;
+const CREATE_SNAPSHOT_VERSION = 2;
+const HEADER_SIZE = 4 * 4;
+
+/**
  * Global variables for the memory snapshot.
  */
-let LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined;
+const LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined = decodeSnapshot(
+  MEMORY_SNAPSHOT_READER
+);
 const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
@@ -350,12 +362,15 @@ function memorySnapshotDoImports(Module: Module): string[] {
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(Module: Module): Uint8Array {
+function makeLinearMemorySnapshot(
+  Module: Module,
+  importedModulesList: string[]
+): Uint8Array {
   const dsoHandles = recordDsoHandles(Module);
   const hiwire =
     Module.API.version === '0.26.0a2'
       ? undefined
-      : Module.API.serializeHiwireState(Module);
+      : Module.API.serializeHiwireState();
   const settings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
   };
@@ -363,15 +378,11 @@ function makeLinearMemorySnapshot(Module: Module): Uint8Array {
     version: 1,
     dsoHandles,
     hiwire,
+    importedModulesList,
     settings,
     ...CREATED_SNAPSHOT_META,
   });
 }
-
-// "\x00snp"
-const SNAPSHOT_MAGIC = 0x706e7300;
-const CREATE_SNAPSHOT_VERSION = 2;
-const HEADER_SIZE = 4 * 4;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
@@ -396,31 +407,15 @@ function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
   return toUpload;
 }
 
-let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
-(function (): void {
-  // Lookup memory snapshot from artifact store.
-  if (!MEMORY_SNAPSHOT_READER) {
-    // snapshots are disabled or there isn't one yet
-    return;
-  }
-
-  // Simple sanity check to ensure this snapshot isn't corrupted.
-  //
-  // TODO(later): we need better detection when this is corrupted. Right now the isolate will
-  // just die.
-  const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
-  if (snapshotSize <= 100) {
-    TEST_SNAPSHOT = new Uint8Array(snapshotSize);
-    MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
-    return;
-  }
-  LOADED_SNAPSHOT_META = decodeSnapshot(MEMORY_SNAPSHOT_READER);
-})();
-
 /**
  * Decode heap and dsoJSON from the memory snapshot reader
  */
-function decodeSnapshot(reader: SnapshotReader): LoadedSnapshotMeta {
+function decodeSnapshot(
+  reader: SnapshotReader | undefined
+): LoadedSnapshotMeta | undefined {
+  if (!reader) {
+    return undefined;
+  }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
   if (header[0] !== SNAPSHOT_MAGIC) {
@@ -446,6 +441,7 @@ function decodeSnapshot(reader: SnapshotReader): LoadedSnapshotMeta {
   if (!meta?.version) {
     return {
       version: 1,
+      importedModulesList: undefined,
       dsoHandles: meta,
       hiwire: undefined,
       loadOrder: [],
@@ -477,16 +473,6 @@ export function maybeRestoreSnapshot(Module: Module): void {
   );
 }
 
-export function finishSnapshotSetup(pyodide: Pyodide): void {
-  // This is just here for our test suite. Ugly but just about the only way to test this.
-  if (TEST_SNAPSHOT) {
-    const snapshotString = new TextDecoder().decode(TEST_SNAPSHOT);
-    pyodide.registerJsModule('cf_internal_test_utils', {
-      snapshot: snapshotString,
-    });
-  }
-}
-
 export function maybeCollectSnapshot(Module: Module): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
@@ -495,10 +481,10 @@ export function maybeCollectSnapshot(Module: Module): void {
     return;
   }
   if (IS_EW_VALIDATING) {
-    const snapshot = makeLinearMemorySnapshot(Module);
+    const snapshot = makeLinearMemorySnapshot(Module, importedModulesList);
     ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    const snapshot = makeLinearMemorySnapshot(Module);
+    const snapshot = makeLinearMemorySnapshot(Module, importedModulesList);
     DiskCache.put('snapshot.bin', snapshot);
   }
 }
@@ -508,5 +494,13 @@ export function finalizeBootstrap(Module: Module): void {
     IS_CREATING_SNAPSHOT && Module.API.version !== '0.26.0a2';
   enterJaegerSpan('finalize_bootstrap', () => {
     Module.API.finalizeBootstrap(LOADED_SNAPSHOT_META?.hiwire);
+  });
+  if (IS_CREATING_SNAPSHOT) {
+    return;
+  }
+  Module.API.public_api.registerJsModule('_cf_internal_snapshot_info', {
+    loadedSnapshot: !!LOADED_SNAPSHOT_META,
+    loadedBaselineSnapshot: LOADED_SNAPSHOT_META?.settings.baselineSnapshot,
+    importedModulesList: LOADED_SNAPSHOT_META?.importedModulesList,
   });
 }
