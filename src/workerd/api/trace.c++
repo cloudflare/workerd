@@ -815,4 +815,253 @@ void TraceItem::HibernatableWebSocketEventInfo::visitForMemoryInfo(
   }
 }
 
+// Constructors for deserialization
+TraceItem::TraceItem(kj::Maybe<EventInfo> eventInfo, kj::Maybe<double> eventTimestamp,
+    kj::Array<jsg::Ref<TraceLog>> logs, kj::Array<jsg::Ref<TraceException>> exceptions,
+    kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents,
+    kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> entrypoint,
+    kj::Maybe<ScriptVersion> scriptVersion, kj::Maybe<kj::String> dispatchNamespace,
+    jsg::Optional<kj::Array<kj::String>> scriptTags, kj::String executionModel,
+    kj::Array<jsg::Ref<OTelSpan>> spans, kj::String outcome, uint cpuTime, uint wallTime, bool truncated)
+    : eventInfo(kj::mv(eventInfo)), eventTimestamp(eventTimestamp), logs(kj::mv(logs)),
+      exceptions(kj::mv(exceptions)), diagnosticChannelEvents(kj::mv(diagnosticChannelEvents)),
+      scriptName(kj::mv(scriptName)), entrypoint(kj::mv(entrypoint)), scriptVersion(kj::mv(scriptVersion)),
+      dispatchNamespace(kj::mv(dispatchNamespace)), scriptTags(kj::mv(scriptTags)),
+      executionModel(kj::mv(executionModel)), spans(kj::mv(spans)), outcome(kj::mv(outcome)),
+      cpuTime(cpuTime), wallTime(wallTime), truncated(truncated) {}
+
+TraceLog::TraceLog(double timestamp, kj::String level, jsg::V8Ref<v8::Object> message)
+    : timestamp(timestamp), level(kj::mv(level)), message(kj::mv(message)) {}
+
+TraceException::TraceException(double timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack)
+    : timestamp(timestamp), name(kj::mv(name)), message(kj::mv(message)), stack(kj::mv(stack)) {}
+
+TraceDiagnosticChannelEvent::TraceDiagnosticChannelEvent(double timestamp, kj::String channel, kj::Array<kj::byte> message)
+    : timestamp(timestamp), channel(kj::mv(channel)), message(kj::mv(message)) {}
+
+TraceItem::TailEventInfo::TailEventInfo(kj::Array<jsg::Ref<TailItem>> consumedEvents)
+    : consumedEvents(kj::mv(consumedEvents)) {}
+
+TraceItem::TailEventInfo::TailItem::TailItem(kj::Maybe<kj::String> scriptName)
+    : scriptName(kj::mv(scriptName)) {}
+
+// ========================================================================================
+// Serialization methods for TraceItem and related types
+
+void TraceItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // For now, serialize only the basic string fields that are essential for tail workers
+  // This is a minimal implementation to get RPC working
+  
+  // Skip eventInfo for now (complex kj::OneOf type)
+  serializer.writeRawUint32(0); // no eventInfo
+  
+  // Skip eventTimestamp for now
+  serializer.writeRawUint32(0); // no timestamp
+  
+  // Skip complex arrays for now
+  serializer.writeRawUint32(0); // no logs
+  serializer.writeRawUint32(0); // no exceptions  
+  serializer.writeRawUint32(0); // no diagnosticChannelEvents
+  
+  // Serialize optional strings
+  KJ_IF_SOME(sn, scriptName) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(sn);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+  
+  KJ_IF_SOME(ep, entrypoint) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(ep);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+  
+  // Skip scriptVersion (complex type)
+  serializer.writeRawUint32(0);
+  
+  KJ_IF_SOME(dn, dispatchNamespace) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(dn);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+  
+  // Skip scriptTags (complex optional array)
+  serializer.writeRawUint32(0);
+  
+  serializer.writeLengthDelimited(executionModel);
+  
+  // Skip spans (complex array)
+  serializer.writeRawUint32(0);
+  
+  serializer.writeLengthDelimited(outcome);
+  serializer.writeRawUint32(cpuTime);
+  serializer.writeRawUint32(wallTime);
+  serializer.writeRawUint32(truncated ? 1 : 0);
+}
+
+jsg::Ref<TraceItem> TraceItem::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  // Deserialize eventInfo
+  kj::Maybe<EventInfo> eventInfo = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    // For now, skip complex eventInfo deserialization
+    deserializer.readValue(js); // consume the value
+  }
+  
+  // Deserialize eventTimestamp
+  kj::Maybe<double> eventTimestamp = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    deserializer.readValue(js); // consume the value
+    // For now, skip timestamp extraction
+  }
+  
+  // Skip complex arrays for now - just consume the flags
+  deserializer.readRawUint32(); // logs
+  deserializer.readRawUint32(); // exceptions  
+  deserializer.readRawUint32(); // diagnosticChannelEvents
+  
+  // Deserialize optional strings
+  kj::Maybe<kj::String> scriptName = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    scriptName = deserializer.readLengthDelimitedString();
+  }
+  
+  kj::Maybe<kj::String> entrypoint = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    entrypoint = deserializer.readLengthDelimitedString();
+  }
+  
+  // Skip scriptVersion
+  deserializer.readRawUint32();
+  
+  kj::Maybe<kj::String> dispatchNamespace = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    dispatchNamespace = deserializer.readLengthDelimitedString();
+  }
+  
+  // Skip scriptTags
+  deserializer.readRawUint32();
+  
+  auto executionModel = deserializer.readLengthDelimitedString();
+  
+  // Skip spans
+  deserializer.readRawUint32();
+  
+  auto outcome = deserializer.readLengthDelimitedString();
+  auto cpuTime = deserializer.readRawUint32();
+  auto wallTime = deserializer.readRawUint32();
+  auto truncated = deserializer.readRawUint32() == 1;
+  
+  // Create empty arrays for the skipped fields
+  auto logs = kj::Array<jsg::Ref<TraceLog>>();
+  auto exceptions = kj::Array<jsg::Ref<TraceException>>();
+  auto diagnosticChannelEvents = kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>>();
+  auto spans = kj::Array<jsg::Ref<OTelSpan>>();
+  kj::Maybe<ScriptVersion> scriptVersion = kj::none;
+  jsg::Optional<kj::Array<kj::String>> scriptTags = kj::none;
+  
+  // Create a TraceItem using the private deserialization constructor
+  return js.alloc<TraceItem>(kj::mv(eventInfo), kj::mv(eventTimestamp), kj::mv(logs), kj::mv(exceptions),
+      kj::mv(diagnosticChannelEvents), kj::mv(scriptName), kj::mv(entrypoint), kj::mv(scriptVersion),
+      kj::mv(dispatchNamespace), kj::mv(scriptTags), kj::mv(executionModel), kj::mv(spans), 
+      kj::mv(outcome), cpuTime, wallTime, truncated);
+}
+
+void TraceLog::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Simplified serialization - just serialize as raw values
+  serializer.writeRawUint32(static_cast<uint32_t>(timestamp * 1000)); // convert to milliseconds
+  serializer.writeLengthDelimited(level);
+  // Skip message for now (complex V8Ref<v8::Object>)
+}
+
+jsg::Ref<TraceLog> TraceLog::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto timestamp = static_cast<double>(deserializer.readRawUint32()) / 1000.0; // convert back to seconds
+  auto level = deserializer.readLengthDelimitedString();
+  // Create empty V8Ref for message
+  auto message = js.v8Ref(v8::Object::New(js.v8Isolate));
+  
+  return js.alloc<TraceLog>(timestamp, kj::mv(level), kj::mv(message));
+}
+
+void TraceException::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeRawUint32(static_cast<uint32_t>(timestamp * 1000)); // convert to milliseconds
+  serializer.writeLengthDelimited(name);
+  serializer.writeLengthDelimited(message);
+  KJ_IF_SOME(s, stack) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(s);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+}
+
+jsg::Ref<TraceException> TraceException::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto timestamp = static_cast<double>(deserializer.readRawUint32()) / 1000.0;
+  auto name = deserializer.readLengthDelimitedString();
+  auto message = deserializer.readLengthDelimitedString();
+  kj::Maybe<kj::String> stack = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    stack = deserializer.readLengthDelimitedString();
+  }
+  
+  return js.alloc<TraceException>(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
+}
+
+void TraceDiagnosticChannelEvent::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  serializer.writeRawUint32(static_cast<uint32_t>(timestamp * 1000));
+  serializer.writeLengthDelimited(channel);
+  serializer.writeLengthDelimited(kj::ArrayPtr<const kj::byte>(message));
+}
+
+jsg::Ref<TraceDiagnosticChannelEvent> TraceDiagnosticChannelEvent::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto timestamp = static_cast<double>(deserializer.readRawUint32()) / 1000.0;
+  auto channel = deserializer.readLengthDelimitedString();
+  auto messageStr = deserializer.readLengthDelimitedString();
+  auto message = kj::heapArray<kj::byte>(messageStr.size());
+  memcpy(message.begin(), messageStr.begin(), messageStr.size());
+  
+  return js.alloc<TraceDiagnosticChannelEvent>(timestamp, kj::mv(channel), kj::mv(message));
+}
+
+void TraceItem::TailEventInfo::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  // Serialize array count and then each item
+  serializer.writeRawUint32(consumedEvents.size());
+  for (auto& item : consumedEvents) {
+    item->serialize(js, serializer);
+  }
+}
+
+jsg::Ref<TraceItem::TailEventInfo> TraceItem::TailEventInfo::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto count = deserializer.readRawUint32();
+  auto consumedEvents = kj::heapArrayBuilder<jsg::Ref<TailItem>>(count);
+  
+  // Deserialize individual items
+  for (auto i KJ_UNUSED: kj::zeroTo(count)) {
+    auto tailItem = TailItem::deserialize(js, tag, deserializer);
+    consumedEvents.add(kj::mv(tailItem));
+  }
+  
+  return js.alloc<TailEventInfo>(consumedEvents.finish());
+}
+
+void TraceItem::TailEventInfo::TailItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  KJ_IF_SOME(sn, scriptName) {
+    serializer.writeRawUint32(1);
+    serializer.writeLengthDelimited(sn);
+  } else {
+    serializer.writeRawUint32(0);
+  }
+}
+
+jsg::Ref<TraceItem::TailEventInfo::TailItem> TraceItem::TailEventInfo::TailItem::deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  kj::Maybe<kj::String> scriptName = kj::none;
+  if (deserializer.readRawUint32() == 1) {
+    scriptName = deserializer.readLengthDelimitedString();
+  }
+  
+  return js.alloc<TailItem>(kj::mv(scriptName));
+}
+
 }  // namespace workerd::api

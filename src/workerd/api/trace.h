@@ -179,7 +179,22 @@ class TraceItem final: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TraceItem> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_ITEM_V1);
+
+ public:
+  // Constructor for deserialization
+  TraceItem(kj::Maybe<EventInfo> eventInfo, kj::Maybe<double> eventTimestamp,
+      kj::Array<jsg::Ref<TraceLog>> logs, kj::Array<jsg::Ref<TraceException>> exceptions,
+      kj::Array<jsg::Ref<TraceDiagnosticChannelEvent>> diagnosticChannelEvents,
+      kj::Maybe<kj::String> scriptName, kj::Maybe<kj::String> entrypoint,
+      kj::Maybe<ScriptVersion> scriptVersion, kj::Maybe<kj::String> dispatchNamespace,
+      jsg::Optional<kj::Array<kj::String>> scriptTags, kj::String executionModel,
+      kj::Array<jsg::Ref<OTelSpan>> spans, kj::String outcome, uint cpuTime, uint wallTime, bool truncated);
+
  private:
+
   kj::Maybe<EventInfo> eventInfo;
   kj::Maybe<double> eventTimestamp;
   kj::Array<jsg::Ref<TraceLog>> logs;
@@ -428,7 +443,16 @@ class TraceItem::TailEventInfo final: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TailEventInfo> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_TAIL_EVENT_INFO_V1);
+
+ public:
+  // Constructor for deserialization
+  TailEventInfo(kj::Array<jsg::Ref<TailItem>> consumedEvents);
+
  private:
+
   kj::Array<jsg::Ref<TailItem>> consumedEvents;
 };
 
@@ -446,7 +470,16 @@ class TraceItem::TailEventInfo::TailItem final: public jsg::Object {
     tracker.trackField("scriptName", scriptName);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TailItem> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_TAIL_ITEM_V1);
+
+ public:
+  // Constructor for deserialization
+  TailItem(kj::Maybe<kj::String> scriptName);
+
  private:
+
   kj::Maybe<kj::String> scriptName;
 };
 
@@ -570,7 +603,16 @@ class TraceDiagnosticChannelEvent final: public jsg::Object {
     tracker.trackFieldWithSize("message", message.size());
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TraceDiagnosticChannelEvent> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_DIAGNOSTIC_CHANNEL_EVENT_V1);
+
+ public:
+  // Constructor for deserialization
+  TraceDiagnosticChannelEvent(double timestamp, kj::String channel, kj::Array<kj::byte> message);
+
  private:
+
   double timestamp;
   kj::String channel;
   kj::Array<kj::byte> message;
@@ -595,7 +637,16 @@ class TraceLog final: public jsg::Object {
     tracker.trackField("message", message);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TraceLog> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_LOG_V1);
+
+ public:
+  // Constructor for deserialization
+  TraceLog(double timestamp, kj::String level, jsg::V8Ref<v8::Object> message);
+
  private:
+
   double timestamp;
   kj::String level;
   jsg::V8Ref<v8::Object> message;
@@ -622,7 +673,16 @@ class TraceException final: public jsg::Object {
     tracker.trackField("message", message);
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<TraceException> deserialize(jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_EXCEPTION_V1);
+
+ public:
+  // Constructor for deserialization
+  TraceException(double timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack);
+
  private:
+
   double timestamp;
   kj::String name;
   kj::String message;

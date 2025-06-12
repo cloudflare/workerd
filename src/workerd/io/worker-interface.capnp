@@ -398,6 +398,22 @@ enum SerializationTag {
   # without breaking things).
 
   abortSignal @9;
+
+  traceItemV1 @10;
+  traceLogV1 @11;
+  traceExceptionV1 @12;
+  traceDiagnosticChannelEventV1 @13;
+  traceSpanV1 @14;
+  traceEventInfoV1 @15;
+  traceFetchEventInfoV1 @16;
+  traceScheduledEventInfoV1 @17;
+  traceAlarmEventInfoV1 @18;
+  traceQueueEventInfoV1 @19;
+  traceEmailEventInfoV1 @20;
+  traceTailEventInfoV1 @21;
+  traceHibernatableWebSocketEventInfoV1 @22;
+  traceCustomEventInfoV1 @23;
+  traceTailItemV1 @24;
 }
 
 enum StreamEncoding {
