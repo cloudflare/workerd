@@ -17,15 +17,23 @@ const keys = [
   'arch',
   'argv',
   'argv0',
+  'binding',
+  'channel',
   'chdir',
   'config',
+  'connected',
   'cwd',
+  'debugPort',
   'default',
+  'dlopen',
   'emitWarning',
   'env',
   'execArgv',
   'exit',
+  'exitCode',
   'features',
+  'finalization',
+  'getActiveResourcesInfo',
   'getBuiltinModule',
   'getSourceMapsSupport',
   'getegid',
@@ -33,22 +41,38 @@ const keys = [
   'getgid',
   'getgroups',
   'getuid',
+  'hasUncaughtExceptionCaptureCallback',
   'hrtime',
   'initgroups',
   'kill',
   'loadEnvFile',
+  'memoryUsage',
   'nextTick',
+  'noDeprecation',
+  'permission',
   'pid',
   'platform',
   'ppid',
   'ref',
+  'release',
+  'report',
+  'resourceUsage',
+  'send',
   'setSourceMapsEnabled',
+  'setUncaughtExceptionCaptureCallback',
   'setegid',
   'seteuid',
   'setgid',
   'setgroups',
   'setuid',
+  'sourceMapsEnabled',
+  'stderr',
+  'stdin',
+  'stdout',
+  'threadCpuUsage',
+  'throwDeprecation',
   'title',
+  'traceDeprecation',
   'umask',
   'unref',
   'uptime',
@@ -302,11 +326,6 @@ export const processVersions = {
     assert.ok(process.versions !== null);
 
     const expectedVersions = ['node'];
-
-    assert.strictEqual(
-      Object.keys(expectedVersions).length,
-      expectedVersions.length
-    );
 
     // Check that all expected versions are included and are strings
     for (const versionKey of expectedVersions) {
@@ -665,7 +684,6 @@ export const processLoadEnvFile = {
 
     // Test prep: write the basic env file and valid env file
     writeFileSync(basicValidEnvFilePath, basicValidEnv);
-    writeFileSync(validEnvFilePath, validEnv);
     writeFileSync(validEnvFilePath, validEnv);
 
     // supports passing path

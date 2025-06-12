@@ -25,7 +25,7 @@ import {
 } from 'node-internal:events';
 import type { Buffer } from 'node:buffer';
 import { parseEnv } from 'node-internal:internal_utils';
-import type * as InternalFsSync from 'node-internal:internal_fs_sync';
+import type * as NodeFS from 'node:fs';
 
 declare global {
   const Cloudflare: {
@@ -419,6 +419,10 @@ export function exit(code: number): void {
   processImpl.processExitImpl(code);
 }
 
+export function abort(): void {
+  processImpl.processExitImpl(1);
+}
+
 export function kill(_pid: number, _signal?: string | number): void {
   throw new ERR_UNSUPPORTED_OPERATION();
 }
@@ -490,11 +494,9 @@ export function loadEnvFile(
   if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
     throw new ERR_UNSUPPORTED_OPERATION();
   }
-  const { readFileSync } = process.getBuiltinModule(
-    'fs'
-  ) as typeof InternalFsSync;
+  const { readFileSync } = process.getBuiltinModule('fs') as typeof NodeFS;
   const parsed = parseEnv(
-    readFileSync(path instanceof URL ? path : path.toString(), 'utf8') as string
+    readFileSync(path instanceof URL ? path : path.toString(), 'utf8')
   );
   Object.assign(process.env, parsed);
 }
@@ -517,6 +519,33 @@ export const features = Object.freeze({
 
 export const allowedNodeEnvironmentFlags = new Set();
 
+// Unsupported features - implemented as 'undefined' so they can be imported
+// statically via `import { channel } from 'node:process'` without breaking.
+
+export const exitCode = undefined,
+  channel = undefined,
+  connected = undefined,
+  binding = undefined,
+  debugPort = undefined,
+  dlopen = undefined,
+  finalization = undefined,
+  getActiveResourcesInfo = undefined,
+  setUncaughtExceptionCaptureCallback = undefined,
+  hasUncaughtExceptionCaptureCallback = undefined,
+  memoryUsage = undefined,
+  noDeprecation = undefined,
+  permission = undefined,
+  release = undefined,
+  report = undefined,
+  resourceUsage = undefined,
+  send = undefined,
+  traceDeprecation = undefined,
+  throwDeprecation = undefined,
+  sourceMapsEnabled = undefined,
+  stdin = undefined,
+  stdout = undefined,
+  stderr = undefined,
+  threadCpuUsage = undefined;
 interface Process extends EventEmitter {
   version: typeof version;
   versions: typeof versions;
@@ -546,6 +575,7 @@ interface Process extends EventEmitter {
   emitWarning: typeof emitWarning;
   env: typeof env;
   exit: typeof exit;
+  abort: typeof abort;
   getBuiltinModule: typeof getBuiltinModule;
   features: typeof features;
   allowedNodeEnvironmentFlags: typeof allowedNodeEnvironmentFlags;
@@ -558,6 +588,30 @@ interface Process extends EventEmitter {
   hrtime: typeof hrtime;
   uptime: typeof uptime;
   loadEnvFile: typeof loadEnvFile;
+  exitCode: undefined;
+  channel: undefined;
+  connected: undefined;
+  binding: undefined;
+  debugPort: undefined;
+  dlopen: undefined;
+  finalization: undefined;
+  getActiveResourcesInfo: undefined;
+  setUncaughtExceptionCaptureCallback: undefined;
+  hasUncaughtExceptionCaptureCallback: undefined;
+  memoryUsage: undefined;
+  noDeprecation: undefined;
+  permission: undefined;
+  release: undefined;
+  report: undefined;
+  resourceUsage: undefined;
+  send: undefined;
+  traceDeprecation: undefined;
+  throwDeprecation: undefined;
+  sourceMapsEnabled: undefined;
+  stdin: undefined;
+  stdout: undefined;
+  stderr: undefined;
+  threadCpuUsage: undefined;
 }
 
 // NOTE: all properties added here must also be added on the process.ts re-exports
@@ -602,6 +656,30 @@ const process = {
   hrtime,
   uptime,
   loadEnvFile,
+  exitCode,
+  channel,
+  connected,
+  binding,
+  debugPort,
+  dlopen,
+  finalization,
+  getActiveResourcesInfo,
+  setUncaughtExceptionCaptureCallback,
+  hasUncaughtExceptionCaptureCallback,
+  memoryUsage,
+  noDeprecation,
+  permission,
+  release,
+  report,
+  resourceUsage,
+  send,
+  traceDeprecation,
+  throwDeprecation,
+  sourceMapsEnabled,
+  stdin,
+  stdout,
+  stderr,
+  threadCpuUsage,
 } as Process;
 
 export default process;
