@@ -776,6 +776,8 @@ class WritableStreamJsController final: public WritableStreamController {
 
   explicit WritableStreamJsController(StreamStates::Errored errored);
 
+  ~WritableStreamJsController() noexcept(false);
+
   KJ_DISALLOW_COPY_AND_MOVE(WritableStreamJsController);
 
   jsg::Promise<void> abort(jsg::Lock& js, jsg::Optional<v8::Local<v8::Value>> reason) override;
@@ -3231,8 +3233,30 @@ void WritableStreamDefaultController::cancelPendingWrites(jsg::Lock& js, jsg::Js
   impl.cancelPendingWrites(js, reason);
 }
 
+void WritableStreamDefaultController::clearAlgorithms() {
+  impl.algorithms.clear();
+}
+
+WritableStreamDefaultController::~WritableStreamDefaultController() noexcept(false) {
+  // Clear algorithms in destructor to break circular references
+  clearAlgorithms();
+}
+
 // ======================================================================================
 WritableStreamJsController::WritableStreamJsController(): ioContext(tryGetIoContext()) {}
+
+WritableStreamJsController::~WritableStreamJsController() noexcept(false) {
+  // Clear algorithms to break circular references during destruction
+  KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    controller->clearAlgorithms();
+  }
+  // Clear the state to break the circular reference to the controller
+  state = StreamStates::Closed();
+  // Clear owner reference
+  owner = kj::none;
+  // Clear any pending abort promise
+  maybeAbortPromise = kj::none;
+}
 
 WritableStreamJsController::WritableStreamJsController(StreamStates::Closed closed)
     : ioContext(tryGetIoContext()),
@@ -3297,6 +3321,11 @@ jsg::Promise<void> WritableStreamJsController::close(jsg::Lock& js, bool markAsH
 }
 
 void WritableStreamJsController::doClose(jsg::Lock& js) {
+  // Clear algorithms to break circular references before changing state
+  KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    controller->clearAlgorithms();
+  }
+
   state.init<StreamStates::Closed>();
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeResolvePromise(js, locked.getClosedFulfiller());
@@ -3307,6 +3336,11 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
 }
 
 void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> reason) {
+  // Clear algorithms to break circular references before changing state
+  KJ_IF_SOME(controller, state.tryGet<Controller>()) {
+    controller->clearAlgorithms();
+  }
+
   state.init<StreamStates::Errored>(js.v8Ref(reason));
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);

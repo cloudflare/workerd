@@ -580,6 +580,8 @@ class WritableStreamDefaultController: public jsg::Object {
   explicit WritableStreamDefaultController(
       jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
+  ~WritableStreamDefaultController() noexcept(false);
+
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   jsg::Promise<void> close(jsg::Lock& js);
