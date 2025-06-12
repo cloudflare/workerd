@@ -91,9 +91,9 @@ test:ci-windows --test_size_filters=
 
 # Enable reporting whenever WPT tests are run
 test:ci-test --config=wpt-test
-test:wpt-test --test_env=GEN_TEST_REPORT=1
-test:wpt-test --test_env=GEN_TEST_STATS=1
+common:wpt-test --test_env=GEN_TEST_REPORT=1
+common:wpt-test --test_env=GEN_TEST_STATS=1
 
 # Config to produce a full WPT report (also disables test caching)
-test:wpt-report --config=wpt-test
-test:wpt-report --cache_test_results=no
+common:wpt-report --config=wpt-test
+common:wpt-report --cache_test_results=no
