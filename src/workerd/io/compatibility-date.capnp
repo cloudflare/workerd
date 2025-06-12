@@ -833,8 +833,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # implementation the recommended behavior is what is implemented. With this compat flag
   # enabled, the original module registry implementation will follow the recommended behavior.
 
-  processRealPlatform @95 :Bool
-      $compatEnableFlag("enable_unsupported_process_real_platform")
+  unsupportedProcessRealPlatform @95 :Bool
+      $compatEnableFlag("unsupported_process_real_platform")
       $experimental;
   # Enables support for process.platform to expose the actual system platform
   # This will never ever be supported and is a WPT test path only.

@@ -24,8 +24,8 @@ import {
   default as EventEmitter,
 } from 'node-internal:events';
 import type { Buffer } from 'node:buffer';
-import { readFileSync } from 'node-internal:internal_fs_sync';
 import { parseEnv } from 'node-internal:internal_utils';
+import type * as InternalFsSync from 'node-internal:internal_fs_sync';
 
 declare global {
   const Cloudflare: {
@@ -490,6 +490,9 @@ export function loadEnvFile(
   if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
     throw new ERR_UNSUPPORTED_OPERATION();
   }
+  const { readFileSync } = process.getBuiltinModule(
+    'fs'
+  ) as typeof InternalFsSync;
   const parsed = parseEnv(
     readFileSync(path instanceof URL ? path : path.toString(), 'utf8') as string
   );
