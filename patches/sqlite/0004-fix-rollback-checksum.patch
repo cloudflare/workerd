@@ -1,0 +1,14 @@
+diff --git a/src/wal.c b/src/wal.c
+index d63c13ffc4..6702e5619e 100644
+--- a/src/wal.c
++++ b/src/wal.c
+@@ -4042,6 +4042,9 @@ static int walFrames(
+     }
+ 
+     iFrame++;
++    if( iFrame<pWal->iReCksum ){
++      pWal->iReCksum = iFrame;
++    }
+     assert( iOffset==walFrameOffset(iFrame, szPage) );
+     nDbSize = (isCommit && p->pDirty==0) ? nTruncate : 0;
+     rc = walWriteOneFrame(&w, p, nDbSize, iOffset);
