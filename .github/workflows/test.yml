@@ -91,6 +91,7 @@ jobs:
       extra_bazel_args: '--config=ci-test --config=ci-linux'
       upload_test_logs: true
       upload_binary: true
+      upload_types: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -106,23 +107,16 @@ jobs:
 
   check-snapshot:
     runs-on: ubuntu-22.04
+    needs: [test-linux]
     steps:
       - uses: actions/checkout@v4
         with:
           show-progress: false
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
+      - name: Download snapshot
+        uses: actions/download-artifact@v4
         with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: Setup Runner
-        uses: ./.github/actions/setup-runner
-      - name: build types
-        run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+          name: generated-snapshot
+          path: bazel-bin/types/definitions
       - name: Check snapshot diff
         run: |
           diff -r types/generated-snapshot/latest bazel-bin/types/definitions/latest > types.diff
