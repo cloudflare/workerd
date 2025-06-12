@@ -28,11 +28,11 @@ import { FilterList, UnknownFunc, TestFn, PromiseTestFn } from './common';
 declare global {
   function promise_test(
     func: PromiseTestFn,
-    name: string,
+    name?: string,
     properties?: unknown
   ): void;
-  function async_test(func: TestFn, name: string, properties?: unknown): void;
-  function test(func: TestFn, name: string, properties?: unknown): void;
+  function async_test(func: TestFn, name?: string, properties?: unknown): void;
+  function test(func: TestFn, name?: string, properties?: unknown): void;
 }
 
 type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
@@ -242,11 +242,11 @@ class PromiseTest extends Test {
 }
 
 globalThis.promise_test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new PromiseTest(name, properties);
+  const testCase = new PromiseTest(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   const promise = testCase.step(func, testCase, testCase);
@@ -293,11 +293,11 @@ class AsyncTest extends Test {
 }
 
 globalThis.async_test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new AsyncTest(name, properties);
+  const testCase = new AsyncTest(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);
@@ -315,11 +315,11 @@ globalThis.async_test = (func, name, properties): void => {
  * given file and must be invariant between runs.
  */
 globalThis.test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new Test(name, properties);
+  const testCase = new Test(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);

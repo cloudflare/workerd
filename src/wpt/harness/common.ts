@@ -106,18 +106,27 @@ export function sanitize_unpaired_surrogates(str: string): string {
   // FFFE, and FFFF".
   // See https://www.w3.org/TR/REC-xml/#NT-Char
 
-  return str.replace(
-    /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
-    function (_, low?: string, prefix?: string, high?: string) {
-      let output = prefix || ''; // prefix may be undefined
-      const string: string = low || high || ''; // only one of these alternates can match
+  return str
+    .replace(
+      /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
+      function (_, low?: string, prefix?: string, high?: string) {
+        let output = prefix || ''; // prefix may be undefined
+        const string: string = low || high || ''; // only one of these alternates can match
 
-      for (const ch of string) {
+        for (const ch of string) {
+          output += code_unit_str(ch);
+        }
+        return output;
+      }
+    )
+    .replace(/(\uffff|\ufffe)/g, function (_, invalid_chars?: string) {
+      let output = '';
+
+      for (const ch of invalid_chars || '') {
         output += code_unit_str(ch);
       }
       return output;
-    }
-  );
+    });
 }
 
 function code_unit_str(char: string): string {
