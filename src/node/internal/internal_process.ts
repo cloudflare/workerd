@@ -49,7 +49,7 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
-export const platform = compatibilityFlags.deprecated_process_real_platform
+export const platform = compatibilityFlags.unsupported_process_real_platform
   ? processImpl.processPlatform
   : 'linux';
 
