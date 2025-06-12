@@ -40,6 +40,7 @@ import {
   validateChmodArgs,
   validateStatArgs,
   validateMkDirArgs,
+  validateOpendirArgs,
   validateRmArgs,
   validateRmDirArgs,
   validateReaddirArgs,
@@ -84,6 +85,9 @@ import {
 import type {
   BigIntStatsFs,
   CopySyncOptions,
+  GlobOptions,
+  GlobOptionsWithFileTypes,
+  GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadAsyncOptions,
@@ -523,7 +527,19 @@ export function opendir(
   } else {
     options = optionsOrCallback;
   }
-  callWithSingleArgCallback(() => fssync.opendirSync(path, options), callback);
+
+  const {
+    path: validatedPath,
+    encoding,
+    recursive,
+  } = validateOpendirArgs(path, options);
+
+  callWithSingleArgCallback(() => {
+    return fssync.opendirSync(validatedPath, {
+      encoding: encoding as BufferEncoding,
+      recursive,
+    });
+  }, callback);
 }
 
 // read has a complex polymorphic signature so this is a bit gnarly.
@@ -1247,6 +1263,21 @@ export function createWriteStream(): void {
   throw new Error('Not implemented');
 }
 
+export function glob(
+  _pattern: string | readonly string[],
+  _options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes,
+  _callback: ErrorOnlyCallback
+): void {
+  // We do not yet implement the globSync function. In Node.js, this
+  // function depends heavily on the third party minimatch library
+  // which is not yet available in the workers runtime. This will be
+  // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
 // An API is considered stubbed if it is not implemented by the function
 // exists with the correct signature and throws an error if called. If
 // a function exists that does not have the correct signature, it is
@@ -1305,6 +1336,7 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.write(fd, string[, position[, encoding]], callback)
 // [x][x][x][x] fs.writeFile(file, data[, options], callback)
 // [x][x][x][x] fs.writev(fd, buffers[, position], callback)//
+// [x][x][x][x] fs.opendir(path[, options], callback)
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
@@ -1314,4 +1346,3 @@ export function createWriteStream(): void {
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])
-// [x][x][ ][ ] fs.opendir(path[, options], callback)
