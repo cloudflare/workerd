@@ -28,10 +28,12 @@ import { readFileSync } from 'node-internal:internal_fs_sync';
 import { parseEnv } from 'node-internal:internal_utils';
 
 declare global {
-  var Cloudflare: {
-    compatibilityFlags: Record<string, string>;
+  const Cloudflare: {
+    readonly compatibilityFlags: Record<string, boolean>;
   };
 }
+
+const { compatibilityFlags } = Cloudflare;
 
 export const versions = processImpl.versions;
 
@@ -47,8 +49,10 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
-// TODO(soon): hard-code 'linux' only here
-export const platform = processImpl.processPlatform;
+export const platform =
+  compatibilityFlags.enable_deprecated_process_real_platform
+    ? processImpl.processPlatform
+    : 'linux';
 
 export const config = {
   target_defaults: {},
@@ -80,24 +84,24 @@ export function getuid(): number {
   return 0;
 }
 
-export function setegid(_id: number | string): void {
-  throw new ERR_EPERM({ syscall: 'setegid' });
+export function setegid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setegid' });
 }
 
-export function setgid(_id: number | string): void {
-  throw new ERR_EPERM({ syscall: 'setgid' });
+export function setgid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setgid' });
 }
 
 export function setgroups(_groups: number[]): void {
   throw new ERR_EPERM({ syscall: 'setgroups' });
 }
 
-export function seteuid(_id: number | string): void {
-  throw new ERR_EPERM({ syscall: 'seteuid' });
+export function seteuid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'seteuid' });
 }
 
-export function setuid(_id: number | string): void {
-  throw new ERR_EPERM({ syscall: 'setuid' });
+export function setuid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setuid' });
 }
 
 export function initgroups(
@@ -109,7 +113,7 @@ export function initgroups(
 
 export function setSourceMapsEnabled(
   _enabled: boolean,
-  options?: { nodeModules: boolean; generatedCode: boolean }
+  _options?: { nodeModules: boolean; generatedCode: boolean }
 ): void {
   // no-op since we do not support disabling source maps
 }
@@ -480,7 +484,6 @@ export function uptime(): number {
 
 // TODO(soon): Support with proper process.cwd() resolution along with
 //             test in process-nodejs-test.
-const { compatibilityFlags } = globalThis.Cloudflare;
 export function loadEnvFile(
   path: string | URL | Buffer = '/bundle/.env'
 ): void {
@@ -524,10 +527,18 @@ interface Process extends EventEmitter {
   pid: typeof pid;
   ppid: typeof ppid;
   getegid: typeof getegid;
+  getgid: typeof getgid;
+  getgroups: typeof getgroups;
   geteuid: typeof geteuid;
+  getuid: typeof getuid;
   setegid: typeof setegid;
+  setgid: typeof setgid;
+  setgroups: typeof setgroups;
   seteuid: typeof seteuid;
+  setuid: typeof setuid;
+  initgroups: typeof initgroups;
   setSourceMapsEnabled: typeof setSourceMapsEnabled;
+  getSourceMapsSupport: typeof getSourceMapsSupport;
   nextTick: typeof nextTick;
   emitWarning: typeof emitWarning;
   env: typeof env;
@@ -560,10 +571,18 @@ const process = {
   pid,
   ppid,
   getegid,
+  getgid,
+  getgroups,
   geteuid,
+  getuid,
   setegid,
+  setgid,
+  setgroups,
   seteuid,
+  setuid,
+  initgroups,
   setSourceMapsEnabled,
+  getSourceMapsSupport,
   nextTick,
   emitWarning,
   env,
@@ -601,16 +620,18 @@ export function _initProcess(): void {
     if (name === 'unhandledRejection' && !addedUnhandledRejection) {
       addEventListener(
         'unhandledrejection',
-        (evt: Event & { reason: any; promise: any }) =>
-          process.emit('unhandledRejection', evt.reason, evt.promise)
+        function (evt: Event & { reason: unknown; promise: Promise<unknown> }) {
+          process.emit('unhandledRejection', evt.reason, evt.promise);
+        }
       );
       addedUnhandledRejection = true;
     }
     if (name === 'rejectionHandled' && !addedRejectionHandled) {
       addEventListener(
         'rejectionhandled',
-        (evt: Event & { reason: any; promise: any }) =>
-          process.emit('rejectionHandled', evt.promise)
+        function (evt: Event & { reason: unknown; promise: Promise<unknown> }) {
+          process.emit('rejectionHandled', evt.promise);
+        }
       );
       addedRejectionHandled = true;
     }

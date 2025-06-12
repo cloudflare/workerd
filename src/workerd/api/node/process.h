@@ -17,7 +17,9 @@ class ProcessModule final: public jsg::Object {
 
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
-// We will always set platform: 'linux' for production
+// This process.platform implementation is always gated behind the
+// 'enable_deprecated_process_real_platform' compatibility flag
+// which is ONLY used in testing environments, and requires 'experimental'.
 #ifdef _WIN32
   static constexpr kj::StringPtr processPlatform = "win32"_kj;
 #elif defined(__linux__)

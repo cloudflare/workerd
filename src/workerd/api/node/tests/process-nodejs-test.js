@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import { writeFileSync } from 'node:fs';
+import * as processMod from 'node:process';
 
 export const processPlatform = {
   test() {
@@ -9,6 +10,69 @@ export const processPlatform = {
 
 process.env.QUX = 1;
 const pEnv = { ...process.env };
+
+// Verify process keys match default keys and features
+const keys = [
+  'allowedNodeEnvironmentFlags',
+  'arch',
+  'argv',
+  'argv0',
+  'chdir',
+  'config',
+  'cwd',
+  'default',
+  'emitWarning',
+  'env',
+  'execArgv',
+  'exit',
+  'features',
+  'getBuiltinModule',
+  'getSourceMapsSupport',
+  'getegid',
+  'geteuid',
+  'getgid',
+  'getgroups',
+  'getuid',
+  'hrtime',
+  'initgroups',
+  'kill',
+  'loadEnvFile',
+  'nextTick',
+  'pid',
+  'platform',
+  'ppid',
+  'ref',
+  'setSourceMapsEnabled',
+  'setegid',
+  'seteuid',
+  'setgid',
+  'setgroups',
+  'setuid',
+  'title',
+  'umask',
+  'unref',
+  'uptime',
+  'version',
+  'versions',
+];
+export const processKeys = {
+  test() {
+    assert.deepStrictEqual(Object.keys(processMod), keys);
+    keys.splice(keys.indexOf('default'), 1);
+    assert.deepStrictEqual(
+      Object.keys(process)
+        .filter((v) => v[0] !== '_')
+        .sort(),
+      keys
+    );
+    assert.deepStrictEqual(
+      Object.keys(processMod.default)
+        .filter((v) => v[0] !== '_')
+        .sort(),
+      keys
+    );
+  },
+};
 
 export const processEnv = {
   async test(ctrl, env) {
@@ -197,8 +261,19 @@ export const processProperties = {
     // Test uid/gid functions
     assert.strictEqual(process.getegid(), 0);
     assert.strictEqual(process.geteuid(), 0);
-    process.setegid(1000); // Should be no-op
-    process.seteuid(1000); // Should be no-op
+    assert.throws(
+      () => {
+        process.setegid(1000);
+      },
+      { code: 'EPERM' }
+    );
+    assert.throws(
+      () => {
+        process.seteuid(1000);
+      },
+      { code: 'EPERM' }
+    );
+    process.setegid(0);
     assert.strictEqual(process.getegid(), 0);
     assert.strictEqual(process.geteuid(), 0);
 
