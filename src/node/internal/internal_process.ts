@@ -26,6 +26,12 @@ import type { Buffer } from 'node:buffer';
 import { readFileSync } from 'node-internal:internal_fs_sync';
 import { parseEnv } from 'node-internal:internal_utils';
 
+declare global {
+  var Cloudflare: {
+    compatibilityFlags: Record<string, string>;
+  };
+}
+
 export const versions = processImpl.versions;
 
 export const version = `v${processImpl.versions.node}`;
@@ -40,6 +46,7 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
+// TODO(soon): hard-code 'linux' only here
 export const platform = processImpl.processPlatform;
 
 export const config = {
@@ -373,6 +380,21 @@ export function unref(_maybeRefable: unknown): void {
   throw new ERR_UNSUPPORTED_OPERATION();
 }
 
+// TODO(soon): Support via experimental FS
+export function chdir(_dir: string): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+// TODO(soon): Support via experimental FS
+export function cwd(): string {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+// TODO(soon): Support via experimental FS
+export function umask(_mask: string | number): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
 export const hrtime: {
   (time?: [number, number]): [number, number];
   bigint(): bigint;
@@ -391,7 +413,9 @@ export const hrtime: {
     const [prevSeconds, prevNanos] = time;
     seconds -= prevSeconds;
     nanos -= prevNanos;
-    // Handle nanosecond underflow
+    // We don't have nanosecond-level precision, but if we
+    // did (say with the introduction of randomness), this
+    // is how we would handle nanosecond underflow
     if (nanos < 0) {
       seconds -= 1;
       nanos += 1e9;
@@ -407,10 +431,15 @@ export function uptime(): number {
   return 0;
 }
 
-// TODO(soon): Support proper process.cwd()
+// TODO(soon): Support with proper process.cwd() resolution along with
+//             test in process-nodejs-test.
+const { compatibilityFlags } = globalThis.Cloudflare;
 export function loadEnvFile(
   path: string | URL | Buffer = '/bundle/.env'
 ): void {
+  if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
+    throw new ERR_UNSUPPORTED_OPERATION();
+  }
   const parsed = parseEnv(
     readFileSync(path instanceof URL ? path : path.toString(), 'utf8') as string
   );
@@ -462,6 +491,9 @@ interface Process extends EventEmitter {
   kill: typeof kill;
   ref: typeof ref;
   unref: typeof unref;
+  chdir: typeof chdir;
+  cwd: typeof cwd;
+  umask: typeof umask;
   hrtime: typeof hrtime;
   uptime: typeof uptime;
   loadEnvFile: typeof loadEnvFile;
@@ -495,6 +527,9 @@ const process = {
   kill,
   ref,
   unref,
+  chdir,
+  cwd,
+  umask,
   hrtime,
   uptime,
   loadEnvFile,
@@ -510,6 +545,29 @@ export var _initialized = true;
 export function _initProcess(): void {
   Object.setPrototypeOf(process, EventEmitter.prototype as object);
   EventEmitter.call(process);
+
+  // We lazily attach unhandled rejection and rejection handled listeners
+  // to ensure performance optimizations remain in the no listener case
+  let addedUnhandledRejection = false,
+    addedRejectionHandled = false;
+  process.on('newListener', (name) => {
+    if (name === 'unhandledRejection' && !addedUnhandledRejection) {
+      addEventListener(
+        'unhandledrejection',
+        (evt: Event & { reason: any; promise: any }) =>
+          process.emit('unhandledRejection', evt.reason, evt.promise)
+      );
+      addedUnhandledRejection = true;
+    }
+    if (name === 'rejectionHandled' && !addedRejectionHandled) {
+      addEventListener(
+        'rejectionhandled',
+        (evt: Event & { reason: any; promise: any }) =>
+          process.emit('rejectionHandled', evt.promise)
+      );
+      addedRejectionHandled = true;
+    }
+  });
 }
 
 // If process executes first, events will call _initProcess

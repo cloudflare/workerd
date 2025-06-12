@@ -424,7 +424,7 @@ export const processTZ = {
 };
 
 export const processHrtime = {
-  test() {
+  async test() {
     // process.hrtime
     // https://github.com/nodejs/node/blob/5f7dbf45a3d3e3070d5f58f9a9c2c43dbecc8672/test/parallel/test-process-hrtime.js
     {
@@ -490,12 +490,18 @@ export const processHrtime = {
     // https://github.com/nodejs/node/blob/5f7dbf45a3d3e3070d5f58f9a9c2c43dbecc8672/test/parallel/test-process-hrtime-bigint.js
     {
       const start = process.hrtime.bigint();
-      assert.strictEqual(typeof start, 'bigint');
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       const end = process.hrtime.bigint();
       assert.strictEqual(typeof end, 'bigint');
 
       assert(end - start >= 0n);
+
+      // Ideally, this should be closer to 1000, or we could test
+      // a smaller interval, but this is to work around the
+      // test runner time accuracy.
+      assert(end - start >= 100_000_000n);
     }
   },
 };
@@ -579,7 +585,7 @@ export const processLoadEnvFile = {
   async test() {
     const basicValidEnvFilePath = '/tmp/basic-valid.env';
     const validEnvFilePath = '/tmp/valid.env';
-    const missingEnvFile =
+    const missingEnvFilePath =
       '/tmp/dir%20with unusual"chars \'åß∂ƒ©∆¬…`/non-existent-file.env';
 
     // Test prep: write the basic env file and valid env file
@@ -593,36 +599,33 @@ export const processLoadEnvFile = {
       assert.strictEqual(process.env.BASIC, 'basic');
     }
 
-    // TODO(soon): Support once FS issue resolved
     // supports not-passing a path
-    // {
-    //   // Uses `/bundle/.env` file.
-    //   try {
-    //     process.loadEnvFile();
-    //     assert.fail();
-    //   } catch (e) {
-    //     assert.strictEqual(e.code, 'ENOENT');
-    //   }
-    // }
+    {
+      // Uses `/bundle/.env` file.
+      try {
+        process.loadEnvFile();
+        assert.fail();
+      } catch (e) {
+        assert.strictEqual(e.code, 'ENOENT');
+      }
+    }
 
-    // TODO(soon): Support once FS issue resolved
     // fails on missing paths
-    // {
-    //   try {
-    //     process.loadEnvFile(missingEnvFile);
-    //   }
-    //   catch (e) {
-    //     assert.strictEqual(e.code, 'ENOENT');
-    //     assert.strictEqual(e.path, missingEnvFile);
-    //   }
-    // }
+    {
+      try {
+        process.loadEnvFile(missingEnvFilePath);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ENOENT');
+        // TODO(soon): Enable once `path` is supported on ENOENT errors
+        // assert.strictEqual(e.path, missingEnvFile);
+      }
+    }
 
-    // TODO(soon): support once FS issue resolved
     // should override
-    // {
-    //   process.loadEnvFile(basicValidEnv);
-    //   assert.strictEqual(process.env.BASIC, 'override');
-    // }
+    {
+      process.loadEnvFile(basicValidEnvFilePath);
+      assert.strictEqual(process.env.BASIC, 'overriden');
+    }
 
     // TODO(soon): Enable once process.chdir() is supported
     // The whole chdir flow here is to address a case where a developer
@@ -642,5 +645,28 @@ export const processLoadEnvFile = {
     //     process.chdir(originalCwd);
     //   }
     // }
+  },
+};
+
+export const processRejectionListeners = {
+  async test() {
+    const e = new Error();
+    const unhandledPromise = new Promise((resolve) =>
+      process.on('unhandledRejection', (reason, promise) => {
+        resolve({ reason, promise });
+      })
+    );
+    Promise.reject(e);
+    const { reason, promise } = await unhandledPromise;
+    assert.strictEqual(reason, e);
+
+    const handledPromise = new Promise((resolve) =>
+      process.on('rejectionHandled', (promise) => {
+        resolve({ promise });
+      })
+    );
+    await new Promise((resolve) => promise.catch(resolve));
+    const { promise: promise2 } = await handledPromise;
+    assert.strictEqual(promise, promise2);
   },
 };
