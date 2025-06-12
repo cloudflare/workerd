@@ -53,6 +53,9 @@ const unitTests :Workerd.Config = (
       ),
     ),
   ],
+  autogates = [
+    "workerd-autogate-streaming-tail-worker",
+  ]
 );
 
 const alarmsWorker :Workerd.Worker = (

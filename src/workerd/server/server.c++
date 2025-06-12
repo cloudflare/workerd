@@ -1913,16 +1913,16 @@ class Server::WorkerService final: public Service,
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       // Setting up legacy tail workers support, but only if we actually have tail workers
       // configured. This is done using the hasTailStream parameter.
-      auto tailStreamWriter =
+      auto tailStreamWriter = KJ_ASSERT_NONNULL(
           tracing::initializeTailStreamWriter(streamingTailWorkers.releaseAsArray(),
-              legacyTailWorkers.size() > 0, waitUntilTasks, tracer.addRef());
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
+              legacyTailWorkers.size() > 0, waitUntilTasks, tracer.addRef()));
+      auto writerRef = kj::addRef(*tailStreamWriter);
+      tracer->addTailStreamWriter(kj::mv(tailStreamWriter));
+
       workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          kj::none /* entrypoint */, kj::mv(tailStreamWriter));
+          kj::none /* entrypoint */, kj::mv(writerRef));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
