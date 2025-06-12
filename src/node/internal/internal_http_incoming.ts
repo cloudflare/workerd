@@ -3,8 +3,10 @@ import { Readable } from 'node-internal:streams_readable';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
-  #resume: VoidFunction | null = null;
+  #reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  #reading: boolean = false;
   #response: Response;
+  #resetTimers: (opts: { finished: boolean }) => void;
 
   public url: string = '';
   // @ts-expect-error TS2416 Type-inconsistencies
@@ -28,6 +30,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
     super({});
 
+    this.#resetTimers = resetTimers;
     this.#response = response;
 
     if (this._readableState) {
@@ -42,46 +45,39 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       queueMicrotask(() => this.emit('close'));
     });
 
-    const writable = new WritableStream({
-      write: (chunk): Promise<void> => {
-        resetTimers({ finished: false });
-        return new Promise((resolve, reject) => {
-          if (this.destroyed) {
-            // TODO(soon): Throw proper error here.
-            reject(new Error('Destroyed'));
-          } else if (this.push(Buffer.from(chunk))) {
-            resolve();
-          } else {
-            this.#resume = resolve;
-          }
-        });
-      },
-      close: (): void => {
-        resetTimers({ finished: true });
-        if (!this.destroyed) {
-          this.push(null);
-        }
-      },
-      abort: (err: Error): void => {
-        resetTimers({ finished: true });
-        if (!this.destroyed) {
-          this.emit('error', err);
-        }
-      },
-    });
+    this.#reader = this.#response.body?.getReader();
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this.#tryRead();
+  }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    response.body?.pipeTo(writable).catch((err: unknown) => {
-      resetTimers({ finished: true });
-      if (!this.destroyed) {
-        this.emit('error', err);
+  async #tryRead(): Promise<void> {
+    if (!this.#reader || this.#reading) return;
+
+    this.#reading = true;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      while (true) {
+        const { done, value } = await this.#reader.read();
+        if (done) {
+          break;
+        }
+        this.push(value);
       }
-    });
+    } catch (error) {
+      this.emit('error', error);
+    } finally {
+      this.#reading = false;
+      this.#resetTimers({ finished: true });
+      this.push(null);
+    }
   }
 
   public override _read(): void {
-    this.#resume?.();
-    this.#resume = null;
+    if (!this.#reading) {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      this.#tryRead();
+    }
   }
 
   public get headers(): Record<string, string> {

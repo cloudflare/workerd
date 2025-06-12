@@ -9,25 +9,24 @@ import {
 } from 'node-internal:internal_http';
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 import { ClientRequest } from 'node-internal:internal_http_client';
-
+import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
 
 const { WebSocket } = globalThis;
 
 export function request(
-  url: string | URL,
-  options: RequestOptions,
-  cb?: (req: ClientRequest) => void
+  url: string | URL | RequestOptions,
+  options?: RequestOptions | IncomingMessageCallback,
+  cb?: IncomingMessageCallback
 ): ClientRequest {
   return new ClientRequest(url, options, cb);
 }
 
 export function get(
-  url: string | URL,
-  options: RequestOptions,
-  cb?: (req: ClientRequest) => void
+  url: string | URL | RequestOptions,
+  options?: RequestOptions | IncomingMessageCallback,
+  cb?: IncomingMessageCallback
 ): ClientRequest {
-  options.method = 'GET';
   const req = request(url, options, cb);
   req.end();
   return req;
