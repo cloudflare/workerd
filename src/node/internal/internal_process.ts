@@ -49,10 +49,9 @@ export const execArgv = [];
 
 export const arch = 'x64';
 
-export const platform =
-  compatibilityFlags.enable_deprecated_process_real_platform
-    ? processImpl.processPlatform
-    : 'linux';
+export const platform = compatibilityFlags.deprecated_process_real_platform
+  ? processImpl.processPlatform
+  : 'linux';
 
 export const config = {
   target_defaults: {},

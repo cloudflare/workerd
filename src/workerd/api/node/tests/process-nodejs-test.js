@@ -700,6 +700,8 @@ export const processLoadEnvFile = {
         assert.fail();
       } catch (e) {
         assert.strictEqual(e.code, 'ENOENT');
+        // TODO(soon): Enable once `path` is supported on ENOENT
+        // assert.strictEqual(e.path, '/bundle/.env');
       }
     }
 
