@@ -136,6 +136,22 @@ export class ClientRequest extends Writable {
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.insecureHTTPParser');
     }
 
+    if (options.agent !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.agent');
+    }
+
+    if (options.createConnection !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.createConnection');
+    }
+
+    if (options.lookup !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.lookup');
+    }
+
+    if (options.socketPath !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socketPath');
+    }
+
     if (options.joinDuplicateHeaders !== undefined) {
       validateBoolean(
         options.joinDuplicateHeaders,
