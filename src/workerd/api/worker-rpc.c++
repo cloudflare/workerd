@@ -1737,14 +1737,13 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
     KJ_IF_SOME(moduleName, wrapperModule) {
       // We've been asked to apply a wrapper module to the handler. This is a builtin module whose
-      // default export is a function. The function is invoked with the argument being the DO
-      // instance, and is expected to return a new object which will be used as the root RPC
-      // target.
+      // default export is a class. The class is constructed with the constructor arguments being
+      // the ctx and env objects and the original DO instance.
 
       // This mechanism probably won't work very well on anything other than Durable Objects, so
       // block such usage for now. We could reconsider this if we have a use case in the future.
-      JSG_REQUIRE(ioCtx.getActor() != kj::none, Error,
-          "Wrapper modules can only be applied to Durable Objects.");
+      auto& actor = JSG_REQUIRE_NONNULL(
+          ioCtx.getActor(), Error, "Wrapper modules can only be applied to Durable Objects.");
 
       auto module = JSG_REQUIRE_NONNULL(
           js.resolveInternalModule(moduleName), Error, "Unknown internal module: ", moduleName);
@@ -1753,9 +1752,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
           "Internal module's default export is not a function.");
       auto func = defaultExport.As<v8::Function>();
 
-      v8::Local<v8::Value> arg = target;
+      v8::Local<v8::Value> args[3] = {actor.getCtx(js), actor.getEnv(js), target};
       auto jsContext = js.v8Context();
-      v8::Local<v8::Value> result = jsg::check(func->Call(jsContext, jsContext->Global(), 1, &arg));
+      v8::Local<v8::Value> result = jsg::check(func->NewInstance(jsContext, 3, args));
       JSG_REQUIRE(result->IsObject(), TypeError,
           "Internal module wrapper function did not return an object.");
       target = jsg::JsObject(result.As<v8::Object>());

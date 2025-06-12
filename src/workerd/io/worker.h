@@ -980,6 +980,12 @@ class Worker::Actor final: public kj::Refcounted {
   //   some more information to the place where `Actor` is created, which might be uglier than it's
   //   worth.
 
+  // Get the `ctx` object for this actor.
+  jsg::JsObject getCtx(jsg::Lock& js);
+
+  // Get the `env` object for this actor.
+  jsg::JsValue getEnv(jsg::Lock& js);
+
   // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
   // setHibernationManager() hasn't been called yet.
   kj::Maybe<HibernationManager&> getHibernationManager();

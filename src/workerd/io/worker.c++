@@ -3257,6 +3257,8 @@ struct Worker::Actor::Impl {
 
   kj::Maybe<kj::Own<ActorCacheInterface>> actorCache;
 
+  kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
+
   kj::Maybe<rpc::Container::Client> container;
 
   struct NoClass {};
@@ -3535,12 +3537,19 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       KJ_IF_SOME(c, impl->actorCache) {
         storage = impl->makeStorage(lock, worker->getIsolate().getApi(), *c);
       }
-      auto handler = info.cls(lock,
-          js.alloc<api::DurableObjectState>(js, cloneId(),
-              jsg::JsRef<jsg::JsValue>(
-                  js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-              kj::mv(storage), kj::mv(impl->container), containerRunning),
-          KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
+          jsg::JsRef<jsg::JsValue>(
+              js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+          kj::mv(storage), kj::mv(impl->container), containerRunning);
+
+      auto handler =
+          info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
+
+      // Since we JUST passed `ctx` into the class constructor, it definitely has a handle
+      // attached. Let's grab it and stash it to implement getCtx().
+      auto ctxHandle = jsg::JsObject(KJ_ASSERT_NONNULL(ctx.tryGetHandle(js)));
+      impl->ctxObject = jsg::JsRef<jsg::JsObject>(js, ctxHandle);
 
       // HACK: We set handler.env to undefined because we already passed the real env into the
       //   constructor, and we want the handler methods to act like they take just one parameter.
@@ -3870,6 +3879,14 @@ void Worker::Actor::setIoContext(kj::Own<IoContext> context) {
   impl->metricsFlushLoopTask =
       impl->metrics->flushLoop(impl->timerChannel, limitEnforcer)
           .eagerlyEvaluate([](kj::Exception&& e) { LOG_EXCEPTION("actorMetricsFlushLoop", e); });
+}
+
+jsg::JsObject Worker::Actor::getCtx(jsg::Lock& js) {
+  return KJ_REQUIRE_NONNULL(impl->ctxObject).getHandle(js);
+}
+
+jsg::JsValue Worker::Actor::getEnv(jsg::Lock& js) {
+  return jsg::JsValue(KJ_REQUIRE_NONNULL(worker->impl->env).getHandle(js));
 }
 
 kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
