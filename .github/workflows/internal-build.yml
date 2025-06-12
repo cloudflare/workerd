@@ -2,14 +2,6 @@ name: Run internal build
 
 on:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'justfile'
-      - '.devcontainer'
-      - '**/*.md'
-      - '.gitignore'
-      - '.github/*'
-      - '!.github/workflows/internal-build.yml'
 
 concurrency:
   # Cancel existing builds for the same PR.
@@ -29,14 +21,14 @@ jobs:
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           show-progress: false
-      
+
       # Fail the workflow if checkout failed (PR isn't mergeable)
       - name: Fail if PR isn't mergeable
         if: steps.checkout_merge.outcome != 'success'
         run: |
           echo "The pull request is not mergeable. Please rebase and resolve any conflicts."
           exit 1
-          
+
       - name: Get merge commit SHA
         id: get_sha
         run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
