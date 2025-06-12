@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
+import type { IncomingMessage } from 'node:http';
+
+export type IncomingMessageCallback = (req: IncomingMessage) => void;
 
 export function once<RT>(
   this: unknown,

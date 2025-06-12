@@ -157,7 +157,7 @@ export const testHttpContentLength0 = {
         response.on('end', resolve);
       }
     );
-    request.on('error', rejects);
+    request.on('error', reject);
     request.end();
     await promise;
   },

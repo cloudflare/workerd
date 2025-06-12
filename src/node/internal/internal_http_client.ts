@@ -23,9 +23,10 @@ import { addAbortSignal } from 'node-internal:streams_util';
 import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
-  RequestOptions as _RequestOptions,
+  RequestOptions,
 } from 'node:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
+import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
@@ -39,8 +40,6 @@ function validateHost(host: unknown, name: string): string {
   }
   return host as string;
 }
-
-type Callback = (req: ClientRequest) => void;
 
 export class ClientRequest extends Writable {
   public [kOutHeaders]: Record<string, { name: string; value: string }> = {};
@@ -59,9 +58,9 @@ export class ClientRequest extends Writable {
   public host: string;
 
   public constructor(
-    input: (string | URL | Record<string, unknown> | null) | _RequestOptions,
-    options?: _RequestOptions | Callback,
-    cb?: Callback
+    input: string | URL | RequestOptions | null,
+    options?: RequestOptions | IncomingMessageCallback,
+    cb?: IncomingMessageCallback
   ) {
     super();
 
@@ -71,16 +70,16 @@ export class ClientRequest extends Writable {
       // url.URL instance
       input = urlToHttpOptions(input);
     } else {
-      cb = options as Callback;
-      options = input as _RequestOptions;
+      cb = options as IncomingMessageCallback;
+      options = input as RequestOptions;
       input = null;
     }
 
     if (typeof options === 'function') {
       cb = options;
-      options = input || {};
+      options = input ?? {};
     } else {
-      options = Object.assign(input || {}, options);
+      options = Object.assign(input ?? {}, options);
     }
 
     if (options.path) {
@@ -136,14 +135,29 @@ export class ClientRequest extends Writable {
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.insecureHTTPParser');
     }
 
+    if (options.agent !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.agent');
+    }
+
+    if (options.createConnection !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.createConnection');
+    }
+
+    if (options.lookup !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.lookup');
+    }
+
+    if (options.socketPath !== undefined) {
+      throw new ERR_OPTION_NOT_IMPLEMENTED('options.socketPath');
+    }
+
     if (options.joinDuplicateHeaders !== undefined) {
       validateBoolean(
         options.joinDuplicateHeaders,
         'options.joinDuplicateHeaders'
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-      if (options.joinDuplicateHeaders === true) {
+      if (options.joinDuplicateHeaders) {
         // We do not support joinDuplicateHeaders because the underlying
         // implementation based on fetch() will handle duplicate headers.
         throw new ERR_OPTION_NOT_IMPLEMENTED('options.joinDuplicateHeaders');
@@ -261,6 +275,12 @@ export class ClientRequest extends Writable {
     const url = new URL(`http://${host}`);
     url.pathname = this.path;
 
+    // HTTP on fetch has two major design limitations.
+    //
+    // 1. Content decoding is handled automatically by fetch, but expectation is that it's not handled in http.
+    // 2. Redirects are always followed.
+    //
+    // TODO(soon): Address these concerns and limitations.
     fetch(url, {
       method: this.method,
       headers,
