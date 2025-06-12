@@ -1,5 +1,16 @@
+load("@aspect_bazel_lib//lib:base64.bzl", "base64")
+load("@aspect_bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
 load("//:build/python/packages_20250606.bzl", "PACKAGES_20250606")
+
+def _chunk(data, length):
+    return [data[i:i + length] for i in range(0, len(data), length)]
+
+def hex_to_b64(hex):
+    s = ""
+    for chunk in _chunk(hex, 2):
+        s += chr(int(chunk, 16))
+    return "sha256-" + base64.encode(s)
 
 PYODIDE_VERSIONS = [
     {
@@ -56,6 +67,8 @@ def make_bundle_version_info(versions):
         entry["feature_flags"] = [entry["flag"]]
         if "packages" in entry:
             entry["packages"] = entry["packages"]["info"]["tag"]
+        if "baseline_snapshot_hash" in entry:
+            entry["baseline_snapshot_integrity"] = hex_to_b64(entry["baseline_snapshot_hash"])
         result[name] = entry
     dev = result["development"]
 
@@ -76,7 +89,6 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
-        "baseline_snapshot_integrity": "sha256-0Tzi9KCt4uCQR7Rph02s9NBx7TVY/sTCb40Lmdlfd7U=",
         "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
     },
     {
@@ -90,8 +102,7 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-59fa311f4.bin",
-        "baseline_snapshot_integrity": "sha256-WfoxH0rwuyhHfi+hf1TcJU7H+m8CYXuDKxQYVORL1iE=",
-        "baseline_snapshot_hash": "TODO",
+        "baseline_snapshot_hash": "59fa311f4af0bb28477e2fa17f54dc254ec7fa6f02617b832b141854e44bd621",
     },
     {
         "real_pyodide_version": "0.26.0a2",

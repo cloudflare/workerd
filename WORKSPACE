@@ -66,10 +66,6 @@ http_archive(
     url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.1.tar.gz",
 )
 
-load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
-
-dep_pyodide()
-
 # ========================================================================================
 # tcmalloc
 http_archive(
@@ -234,3 +230,7 @@ new_local_repository(
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
+
+load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
+
+dep_pyodide()
