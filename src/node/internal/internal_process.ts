@@ -10,6 +10,7 @@
 import { validateObject } from 'node-internal:validators';
 
 import {
+  ERR_EPERM,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_OUT_OF_RANGE,
@@ -62,21 +63,67 @@ export function getegid(): number {
   return 0;
 }
 
+export function getgid(): number {
+  return 0;
+}
+
+export function getgroups(): number[] {
+  return [0];
+}
+
 // On the virtual filesystem, we only support user 0
 export function geteuid(): number {
   return 0;
 }
 
-export function setegid(_guid: number): void {
-  // no-op, since we only support gid 0
+export function getuid(): number {
+  return 0;
 }
 
-export function seteuid(_uid: number): void {
-  // no-op, since we only support uid 0
+export function setegid(_id: number | string): void {
+  throw new ERR_EPERM({ syscall: 'setegid' });
 }
 
-export function setSourceMapsEnabled(_enabled: boolean): void {
+export function setgid(_id: number | string): void {
+  throw new ERR_EPERM({ syscall: 'setgid' });
+}
+
+export function setgroups(_groups: number[]): void {
+  throw new ERR_EPERM({ syscall: 'setgroups' });
+}
+
+export function seteuid(_id: number | string): void {
+  throw new ERR_EPERM({ syscall: 'seteuid' });
+}
+
+export function setuid(_id: number | string): void {
+  throw new ERR_EPERM({ syscall: 'setuid' });
+}
+
+export function initgroups(
+  _user: number | string,
+  _extractGroup: number | string
+): void {
+  throw new ERR_EPERM({ syscall: 'initgroups' });
+}
+
+export function setSourceMapsEnabled(
+  _enabled: boolean,
+  options?: { nodeModules: boolean; generatedCode: boolean }
+): void {
   // no-op since we do not support disabling source maps
+}
+
+export function getSourceMapsSupport(): {
+  enabled: boolean;
+  nodeModules: boolean;
+  generatedCode: boolean;
+} {
+  return {
+    enabled: false,
+    nodeModules: false,
+    generatedCode: false,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
