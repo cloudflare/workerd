@@ -2511,7 +2511,6 @@ jsg::Promise<void> Fetcher::delete_(jsg::Lock& js, kj::String url) {
 jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
     jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages) {
   auto& ioContext = IoContext::current();
-  auto worker = getClient(ioContext, kj::none, "queue"_kjc);
 
   auto encodedMessages = kj::heapArrayBuilder<IncomingQueueMessage>(messages.size());
   for (auto& msg: messages) {
@@ -2538,6 +2537,8 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
     }
   }
 
+  // Only create worker interface after the error checks above to reduce overhead in case of errors.
+  auto worker = getClient(ioContext, kj::none, "queue"_kjc);
   auto event = kj::refcounted<api::QueueCustomEventImpl>(QueueEvent::Params{
     .queueName = kj::mv(queueName),
     .messages = encodedMessages.finish(),
