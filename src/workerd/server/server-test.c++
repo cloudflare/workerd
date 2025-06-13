@@ -4708,30 +4708,34 @@ KJ_TEST("Server: Durable Object facets") {
                 `    let results = [];
                 `
                 `    if (request.url.endsWith("/part1")) {
-                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER});
+                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
                 `      results.push(await foo.increment(true));  // increments foo
                 `      results.push(await foo.increment());  // increments foo
                 `      results.push(await foo.increment());  // increments foo
+                `      await foo.assertId("abc");
                 `
                 `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
                 `      results.push(await bar.increment("foo", true));  // increments bar.foo
                 `      results.push(await bar.increment("bar", true));  // increments bar.bar
                 `      results.push(await bar.increment("foo"));        // increments bar.foo
+                `      await bar.assertId(this.ctx.id.toString());
                 `
                 `      // Get foo again to make sure we get the same object.
-                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.COUNTER});
+                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
                 `      results.push(await foo2.increment());  // increments foo
                 `      results.push(await foo.increment());   // increments foo
+                `      await foo.assertId("abc");
                 `    } else if (request.url.endsWith("/part2")) {
                 `      // Get in a different order from before to make sure ID assignment is
                 `      // consistent.
                 `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
                 `      results.push(await bar.increment("bar", true));  // increments bar.bar
                 `      results.push(await bar.increment("foo", true));  // increments bar.foo
-                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER});
+                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
                 `      results.push(await foo.increment(true));  // increments foo
                 `
-                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.EXFILTRATOR});
+                `      let foo2 = this.ctx.facets.get(
+                `          "foo", {class: this.env.EXFILTRATOR, id: "abc"});
                 `      results.push(await foo2.exfiltrate());
                 `
                 `      try {
@@ -4765,11 +4769,21 @@ KJ_TEST("Server: Durable Object facets") {
                 `    this.ctx.storage.put("value", this.i + 1);
                 `    return this.i++;
                 `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
+                `  }
                 `}
                 `export class NestedFacet extends DurableObject {
                 `  increment(name, first) {
                 `    let facet = this.ctx.facets.get(name, {class: this.env.COUNTER});
                 `    return facet.increment(first);
+                `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
                 `  }
                 `}
                 `export class ExfiltrationFacet extends DurableObject {
