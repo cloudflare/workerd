@@ -66,6 +66,7 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
   }
 
   void cancelAll() override {
+
     timerTask = nullptr;
     timeouts.clear();
     timeoutTimes.clear();
