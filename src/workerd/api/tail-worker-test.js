@@ -63,7 +63,6 @@ export const test = {
       // this should be fine in practice.
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
       // tests/websocket-hibernation.js: hibernatableWebSocket events
       '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',

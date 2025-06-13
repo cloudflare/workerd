@@ -214,7 +214,8 @@ class Server::Service {
 
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
-  virtual kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) = 0;
+  virtual kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest = false) = 0;
 
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
@@ -475,7 +476,8 @@ class Server::HttpRewriter {
 // Service used when the service's config is invalid.
 class Server::InvalidConfigService final: public Service {
  public:
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
     JSG_FAIL_REQUIRE(Error, "Service cannot handle requests because its config is invalid.");
   }
 
@@ -540,7 +542,8 @@ class Server::ExternalTcpService final: public Service, private WorkerInterface 
  public:
   ExternalTcpService(kj::Own<kj::NetworkAddress> addrParam): addr(kj::mv(addrParam)) {}
 
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
     return {this, kj::NullDisposer::instance};
   }
 
@@ -625,7 +628,8 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
         httpOverCapnpFactory(httpOverCapnpFactory),
         waitUntilTasks(*this) {}
 
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
     return kj::heap<WorkerInterfaceImpl>(*this, kj::mv(metadata));
   }
 
@@ -866,7 +870,8 @@ class Server::NetworkService final: public Service, private WorkerInterface {
               .tlsContext = tlsContext})),
         serviceAdapter(kj::newHttpService(*inner)) {}
 
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
     return {this, kj::NullDisposer::instance};
   }
 
@@ -958,7 +963,8 @@ class Server::DiskDirectoryService final: public Service, private WorkerInterfac
         hLastModified(headerTableBuilder.add("Last-Modified")),
         allowDotfiles(conf.getAllowDotfiles()) {}
 
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
     return {this, kj::NullDisposer::instance};
   }
 
@@ -1834,8 +1840,9 @@ class Server::WorkerService final: public Service,
     return actorNamespaces;
   }
 
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    return startRequest(kj::mv(metadata), kj::none, {});
+  kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
+    return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false, isTest);
   }
 
   bool hasHandler(kj::StringPtr handlerName) override {
@@ -1850,7 +1857,8 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::Own<Worker::Actor>> actor = kj::none,
-      bool isTracer = false) {
+      bool isTracer = false,
+      bool isTest = false) {
     TRACE_EVENT("workerd", "Server::WorkerService::startRequest()");
 
     auto& channels = KJ_ASSERT_NONNULL(ioChannels.tryGet<LinkedIoChannels>());
@@ -1870,9 +1878,9 @@ class Server::WorkerService final: public Service,
         if (!isTracer) {
           // This is a self-reference. Create a request with isTracer=true.
           KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<WorkerService>(service)) {
-            workers.add(s.startRequest({}, kj::none, {}, kj::none, true));
+            workers.add(s.startRequest({}, kj::none, {}, kj::none, true, false));
           } else KJ_IF_SOME(s, kj::dynamicDowncastIfAvailable<EntrypointService>(service)) {
-            workers.add(s.startRequest({}, true));
+            workers.add(s.startRequest({}, true, false));
           } else {
             KJ_FAIL_ASSERT("Unexpected service type in recursive tail worker declaration");
           }
@@ -1881,14 +1889,14 @@ class Server::WorkerService final: public Service,
           // themselves
         }
       } else {
-        workers.add(service.startRequest({}));
+        workers.add(service.startRequest({}, false));
       }
     };
 
     // Only add tracers for events other than the test event – it does not support tracing/does not
     // produce completed trace objects but can still result in the tail worker being called,
     // resulting in unsightly JS errors in the self-logger-test.
-    if (entrypointName.orDefault("") != "test"_kj) {
+    if (!isTest) {
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);
       }
@@ -2441,13 +2449,15 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-      return startRequest(kj::mv(metadata), false);
+    kj::Own<WorkerInterface> startRequest(
+        IoChannelFactory::SubrequestMetadata metadata, bool isTest) override {
+      return startRequest(kj::mv(metadata), false, isTest);
     }
 
     kj::Own<WorkerInterface> startRequest(
-        IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
-      return worker.startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
+        IoChannelFactory::SubrequestMetadata metadata, bool isTracer, bool isTest) {
+      return worker.startRequest(
+          kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer, isTest);
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -4256,7 +4266,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     //   people. Note that server-test.c++ actually tests for this logging, so simply writing to
     //   stderr wouldn't work.
     KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
-    auto req = service.startRequest({});
+    auto req = service.startRequest({}, true);
     auto start = kj::systemPreciseMonotonicClock().now();
 
     bool result = co_await req->test();
