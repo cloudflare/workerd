@@ -18,15 +18,17 @@ struct R2BindingRequest {
     head @1 :R2HeadRequest $Json.flatten();
     get @2 :R2GetRequest $Json.flatten();
     put @3 :R2PutRequest $Json.flatten();
-    list @4 :R2ListRequest $Json.flatten();
-    delete @5 :R2DeleteRequest $Json.flatten();
-    createBucket @6 :R2CreateBucketRequest $Json.flatten();
-    listBucket @7 :R2ListBucketRequest $Json.flatten();
-    deleteBucket @8 :R2DeleteBucketRequest $Json.flatten();
-    createMultipartUpload @9 :R2CreateMultipartUploadRequest $Json.flatten();
-    uploadPart @10 :R2UploadPartRequest $Json.flatten();
-    completeMultipartUpload @11 :R2CompleteMultipartUploadRequest $Json.flatten();
-    abortMultipartUpload @12 :R2AbortMultipartUploadRequest $Json.flatten();
+    copy @4 :R2CopyRequest $Json.flatten();
+    list @5 :R2ListRequest $Json.flatten();
+    delete @6 :R2DeleteRequest $Json.flatten();
+    createBucket @7 :R2CreateBucketRequest $Json.flatten();
+    listBucket @8 :R2ListBucketRequest $Json.flatten();
+    deleteBucket @9 :R2DeleteBucketRequest $Json.flatten();
+    createMultipartUpload @10 :R2CreateMultipartUploadRequest $Json.flatten();
+    uploadPart @11 :R2UploadPartRequest $Json.flatten();
+    uploadPartCopy @12 :R2UploadPartCopyRequest $Json.flatten();
+    completeMultipartUpload @13 :R2CompleteMultipartUploadRequest $Json.flatten();
+    abortMultipartUpload @14 :R2AbortMultipartUploadRequest $Json.flatten();
   }
 }
 
@@ -114,6 +116,30 @@ struct R2PutRequest {
   ssec @10 :R2SSECOptions;
 }
 
+struct R2CopySource {
+    bucket @0 :Text;
+    object @1 :Text;
+    onlyIf @2 :R2Conditional;
+    ssec @3 :R2SSECOptions;
+}
+
+enum R2CopyMetadataDirective {
+  copy @0;
+  replace @1;
+  merge @2;
+}
+
+struct R2CopyRequest {
+  object @0 :Text;
+  source @1 :R2CopySource;
+  metadataDirective @2 :Text;
+  customFields @3 :List(Record);
+  httpFields @4 :R2HttpFields;
+  onlyIf @5 :R2Conditional;
+  storageClass @6 :Text;
+  ssec @7 :R2SSECOptions;
+}
+
 struct R2CreateMultipartUploadRequest {
   object @0 :Text;
   customFields @1 :List(Record);
@@ -127,6 +153,23 @@ struct R2UploadPartRequest {
   uploadId @1 :Text;
   partNumber @2 :UInt32;
   ssec @3 :R2SSECOptions;
+}
+
+struct R2UploadPartCopySource {
+    bucket @0 :Text;
+    object @1 :Text;
+    onlyIf @2 :R2Conditional;
+    range @3 :R2Range;
+    rangeHeader @4 :Text;
+    ssec @5 :R2SSECOptions;
+}
+
+struct R2UploadPartCopyRequest {
+  object @0 :Text;
+  uploadId @1 :Text;
+  source @2 :R2UploadPartCopySource;
+  partNumber @3 :UInt32;
+  ssec @4 :R2SSECOptions;
 }
 
 struct R2CompleteMultipartUploadRequest {
@@ -152,13 +195,6 @@ struct R2ListRequest {
   # Additional fields to include in the response that might not normally be rendered.
   # The values are all IncludeField but we can't actually have that here because otherwise
   # capnp's builtin JSON encoder will print the enum name instead of the value.
-
-  newRuntime @6 :Bool;
-  # We used to send the include but not honor it. Newer versions of the runtime will send this to
-  # indicate we're sending a version of the `include` that can be honored. Before that the R2 worker
-  # should assume include always means http & custom metadata should be returned. This is a
-  # transitionary field just to avoid coupling needing to simultaneously release the Worker &
-  # runtime and can be removed after the release cut for the week of July 4, 2022.
 
   enum IncludeField @0xc02f1c58744671f1 {
     http @0;
@@ -242,6 +278,8 @@ using R2GetResponse = R2HeadResponse;
 
 using R2PutResponse = R2HeadResponse;
 
+using R2CopyResponse = R2HeadResponse;
+
 struct R2CreateMultipartUploadResponse {
   uploadId @0 :Text;
   # The unique identifier of this object, required for subsequent operations on
@@ -255,6 +293,8 @@ struct R2UploadPartResponse {
   # The ETag the of the uploaded part.
   # This ETag is required in order to complete the multipart upload.
 }
+
+using R2UploadPartCopyResponse = R2UploadPartResponse;
 
 using R2CompleteMultipartUploadResponse = R2PutResponse;
 
