@@ -1851,7 +1851,7 @@ class Server::WorkerService final: public Service,
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, kj::none);
       auto ns =
           kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath);
+              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2080,13 +2080,15 @@ class Server::WorkerService final: public Service,
         kj::Timer& timer,
         capnp::ByteStreamFactory& byteStreamFactory,
         kj::Network& dockerNetwork,
-        kj::Maybe<kj::StringPtr> dockerPath)
+        kj::Maybe<kj::StringPtr> dockerPath,
+        kj::TaskSet& waitUntilTasks)
         : actorClass(kj::mv(actorClass)),
           config(config),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
           dockerNetwork(dockerNetwork),
-          dockerPath(dockerPath) {}
+          dockerPath(dockerPath),
+          waitUntilTasks(waitUntilTasks) {}
 
     // Called at link time to provide needed resources.
     void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
@@ -2130,8 +2132,7 @@ class Server::WorkerService final: public Service,
           ActorNamespace& ns,
           kj::Maybe<ActorContainer&> parent,
           kj::Own<ActorClass> actorClass,
-          kj::Timer& timer,
-          capnp::ByteStreamFactory& byteStreamFactory)
+          kj::Timer& timer)
           : key(kj::mv(key)),
             id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
@@ -2141,7 +2142,6 @@ class Server::WorkerService final: public Service,
             parent(parent),
             actorClass(kj::mv(actorClass)),
             timer(timer),
-            byteStreamFactory(byteStreamFactory),
             lastAccess(timer.now()) {}
 
       ~ActorContainer() noexcept(false) {
@@ -2280,8 +2280,8 @@ class Server::WorkerService final: public Service,
       kj::Own<ActorContainer> getFacetContainer(
           kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
         auto makeContainer = [&]() {
-          return kj::refcounted<ActorContainer>(kj::mv(childKey), kj::mv(childId), ns, *this,
-              kj::mv(childActorClass), timer, byteStreamFactory);
+          return kj::refcounted<ActorContainer>(
+              kj::mv(childKey), kj::mv(childId), ns, *this, kj::mv(childActorClass), timer);
         };
 
         bool isNew = false;
@@ -2352,7 +2352,6 @@ class Server::WorkerService final: public Service,
       kj::Maybe<ActorContainer&> parent;
       kj::Own<ActorClass> actorClass;
       kj::Timer& timer;
-      capnp::ByteStreamFactory& byteStreamFactory;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
@@ -2625,10 +2624,10 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer, ns.dockerNetwork,
+          containerClient = kj::heap<ContainerClient>(ns.byteStreamFactory, timer, ns.dockerNetwork,
               kj::str(dockerPathRef),
               kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
-              kj::str(imageName), service.waitUntilTasks);
+              kj::str(imageName), ns.waitUntilTasks);
         }
 
         auto actor = actorClass->newActor(getTracker(), Worker::Actor::cloneId(id),
@@ -2655,8 +2654,8 @@ class Server::WorkerService final: public Service,
 
       return actors
           .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(kj::mv(key), kj::mv(id), *this, kj::none,
-            kj::addRef(*actorClass), timer, byteStreamFactory);
+        auto container = kj::refcounted<ActorContainer>(
+            kj::mv(key), kj::mv(id), *this, kj::none, kj::addRef(*actorClass), timer);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
@@ -2696,6 +2695,7 @@ class Server::WorkerService final: public Service,
     capnp::ByteStreamFactory& byteStreamFactory;
     kj::Network& dockerNetwork;
     kj::Maybe<kj::StringPtr> dockerPath;
+    kj::TaskSet& waitUntilTasks;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
 
     // Removes actors from `actors` after 70 seconds of last access.
