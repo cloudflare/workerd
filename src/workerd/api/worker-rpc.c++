@@ -1707,12 +1707,14 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
+      kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
         props(kj::mv(props)),
+        wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
@@ -1731,7 +1733,34 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
           "\"cloudflare:workers\".");
     }
 
-    TargetInfo targetInfo{.target = jsg::JsObject(handler->self.getHandle(lock)),
+    auto target = jsg::JsObject(handler->self.getHandle(lock));
+
+    KJ_IF_SOME(moduleName, wrapperModule) {
+      // We've been asked to apply a wrapper module to the handler. This is a builtin module whose
+      // default export is a class. The class is constructed with the constructor arguments being
+      // the ctx and env objects and the original DO instance.
+
+      // This mechanism probably won't work very well on anything other than Durable Objects, so
+      // block such usage for now. We could reconsider this if we have a use case in the future.
+      auto& actor = JSG_REQUIRE_NONNULL(
+          ioCtx.getActor(), Error, "Wrapper modules can only be applied to Durable Objects.");
+
+      auto module = JSG_REQUIRE_NONNULL(
+          js.resolveInternalModule(moduleName), Error, "Unknown internal module: ", moduleName);
+      v8::Local<v8::Value> defaultExport = module.get(js, "default"_kj);
+      JSG_REQUIRE(defaultExport->IsFunction(), TypeError,
+          "Internal module's default export is not a function.");
+      auto func = defaultExport.As<v8::Function>();
+
+      v8::Local<v8::Value> args[3] = {actor.getCtx(js), actor.getEnv(js), target};
+      auto jsContext = js.v8Context();
+      v8::Local<v8::Value> result = jsg::check(func->NewInstance(jsContext, 3, args));
+      JSG_REQUIRE(result->IsObject(), TypeError,
+          "Internal module wrapper function did not return an object.");
+      target = jsg::JsObject(result.As<v8::Object>());
+    }
+
+    TargetInfo targetInfo{.target = target,
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
       return {
         .env = handler->env.getHandle(js),
@@ -1753,6 +1782,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  private:
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
+  kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
 
   bool isReservedName(kj::StringPtr name) override {
@@ -1838,8 +1868,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  EntrypointJsRpcTarget target(
-      ioctx, entrypointName, kj::mv(props), mapAddRef(incomingRequest->getWorkerTracer()));
+  EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(props), kj::mv(wrapperModule),
+      mapAddRef(incomingRequest->getWorkerTracer()));
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
   try {

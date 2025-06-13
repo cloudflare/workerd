@@ -155,10 +155,25 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
 // Global durable object class binding type.
 class DurableObjectNamespace: public jsg::Object {
-
  public:
+  // Instead of providing a channel ID, the caller can pass a factory object. This is used in cases
+  // where a DurableObjectNamespace is constructed dynamically within an execution context, rather
+  // than being a long-lived binding.
+  class ActorChannelFactory: public kj::Refcounted {
+   public:
+    virtual kj::Own<IoChannelFactory::ActorChannel> getGlobalActor(
+        const ActorIdFactory::ActorId& id,
+        kj::Maybe<kj::String> locationHint,
+        ActorGetMode mode,
+        bool enableReplicaRouting,
+        SpanParent parentSpan) = 0;
+  };
+
   DurableObjectNamespace(uint channel, kj::Own<ActorIdFactory> idFactory)
       : channel(channel),
+        idFactory(kj::mv(idFactory)) {}
+  DurableObjectNamespace(IoOwn<ActorChannelFactory> factory, kj::Own<ActorIdFactory> idFactory)
+      : channel(kj::mv(factory)),
         idFactory(kj::mv(idFactory)) {}
 
   struct NewUniqueIdOptions {
@@ -238,7 +253,7 @@ class DurableObjectNamespace: public jsg::Object {
   }
 
  private:
-  uint channel;
+  kj::OneOf<uint, IoOwn<ActorChannelFactory>> channel;
   kj::Own<ActorIdFactory> idFactory;
 
   jsg::Ref<DurableObject> getImpl(jsg::Lock& js,

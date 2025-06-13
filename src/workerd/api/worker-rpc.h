@@ -431,11 +431,13 @@ class RpcStubDisposalGroup {
 class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEventImpl(uint16_t typeId,
+      kj::Maybe<kj::String> wrapperModule = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
-        typeId(typeId) {}
+        typeId(typeId),
+        wrapperModule(kj::mv(wrapperModule)) {}
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -478,6 +480,8 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   // limited return type.
   kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
+
+  kj::Maybe<kj::String> wrapperModule;
 
   class ServerTopLevelMembrane;
 };

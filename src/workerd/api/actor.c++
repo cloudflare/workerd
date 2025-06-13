@@ -51,12 +51,14 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
 class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  GlobalActorOutgoingFactory(uint channelId,
+  using ChannelIdOrFactory = kj::OneOf<uint, kj::Own<DurableObjectNamespace::ActorChannelFactory>>;
+
+  GlobalActorOutgoingFactory(ChannelIdOrFactory channelIdOrFactory,
       jsg::Ref<DurableObjectId> id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
       bool enableReplicaRouting)
-      : channelId(channelId),
+      : channelIdOrFactory(kj::mv(channelIdOrFactory)),
         id(kj::mv(id)),
         locationHint(kj::mv(locationHint)),
         mode(mode),
@@ -73,8 +75,16 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
-            kj::mv(locationHint), mode, enableReplicaRouting, tracing.span);
+        KJ_SWITCH_ONEOF(channelIdOrFactory) {
+          KJ_CASE_ONEOF(channelId, uint) {
+            actorChannel = context.getGlobalActorChannel(channelId, id->getInner(),
+                kj::mv(locationHint), mode, enableReplicaRouting, tracing.span);
+          }
+          KJ_CASE_ONEOF(factory, kj::Own<DurableObjectNamespace::ActorChannelFactory>) {
+            actorChannel = factory->getGlobalActor(
+                id->getInner(), kj::mv(locationHint), mode, enableReplicaRouting, tracing.span);
+          }
+        }
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
@@ -86,7 +96,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   }
 
  private:
-  uint channelId;
+  ChannelIdOrFactory channelIdOrFactory;
   jsg::Ref<DurableObjectId> id;
   kj::Maybe<kj::String> locationHint;
   ActorGetMode mode;
@@ -171,19 +181,41 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
   }
 
   bool enableReplicaRouting = FeatureFlags::get(js).getReplicaRouting();
-  auto outgoingFactory =
-      context.addObject<Fetcher::OutgoingFactory>(kj::heap<GlobalActorOutgoingFactory>(
-          channel, id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting));
+
+  kj::Own<Fetcher::OutgoingFactory> outgoingFactory;
+  KJ_SWITCH_ONEOF(channel) {
+    KJ_CASE_ONEOF(channelId, uint) {
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(
+          channelId, id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting);
+    }
+    KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
+      outgoingFactory = kj::heap<GlobalActorOutgoingFactory>(kj::addRef(*channelFactory),
+          id.addRef(), kj::mv(locationHint), mode, enableReplicaRouting);
+    }
+  }
+
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
-  return js.alloc<DurableObject>(kj::mv(id), kj::mv(outgoingFactory), requiresHost);
+  return js.alloc<DurableObject>(
+      kj::mv(id), context.addObject(kj::mv(outgoingFactory)), requiresHost);
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
     jsg::Lock& js, kj::String jurisdiction) {
-  return js.alloc<api::DurableObjectNamespace>(
-      channel, idFactory->cloneWithJurisdiction(jurisdiction));
+  auto newIdFactory = idFactory->cloneWithJurisdiction(jurisdiction);
+
+  KJ_SWITCH_ONEOF(channel) {
+    KJ_CASE_ONEOF(channelId, uint) {
+      return js.alloc<api::DurableObjectNamespace>(channelId, kj::mv(newIdFactory));
+    }
+    KJ_CASE_ONEOF(channelFactory, IoOwn<ActorChannelFactory>) {
+      return js.alloc<api::DurableObjectNamespace>(
+          IoContext::current().addObject(kj::addRef(*channelFactory)), kj::mv(newIdFactory));
+    }
+  }
+
+  KJ_UNREACHABLE;
 }
 
 }  // namespace workerd::api
