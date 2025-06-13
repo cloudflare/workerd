@@ -162,16 +162,6 @@ class UtilModule final: public jsg::Object {
 
   jsg::Name getResourceTypeInspect(jsg::Lock& js);
 
-#ifdef _WIN32
-  static constexpr kj::StringPtr processPlatform = "win32"_kj;
-#elif defined(__linux__)
-  static constexpr kj::StringPtr processPlatform = "linux"_kj;
-#elif defined(__APPLE__)
-  static constexpr kj::StringPtr processPlatform = "darwin"_kj;
-#else
-  static constexpr kj::StringPtr processPlatform = "unsupported-platform"_kj;
-#endif
-
   // `getOwnNonIndexProperties()` `filter`s
   static constexpr int ALL_PROPERTIES = jsg::PropertyFilter::ALL_PROPERTIES;
   static constexpr int ONLY_ENUMERABLE = jsg::PropertyFilter::ONLY_ENUMERABLE;
@@ -230,23 +220,6 @@ class UtilModule final: public jsg::Object {
   bool isAnyArrayBuffer(jsg::JsValue value);
   bool isBoxedPrimitive(jsg::JsValue value);
 
-  jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
-
-  // This is used in the implementation of process.exit(...). Contrary
-  // to what the name suggests, it does not actually exit the process.
-  // Instead, it will cause the IoContext, if any, and will stop javascript
-  // from further executing in that request. If there is no active IoContext,
-  // then it becomes a non-op.
-  void processExitImpl(jsg::Lock& js, int code);
-
-  // IMPORTANT: This function will always return "linux" on production.
-  // This is only added for Node.js compatibility and running OS specific tests
-  kj::StringPtr getProcessPlatform() const {
-    return processPlatform;
-  }
-
-  jsg::JsObject getEnvObject(jsg::Lock& js);
-
   JSG_RESOURCE_TYPE(UtilModule) {
     JSG_NESTED_TYPE(MIMEType);
     JSG_NESTED_TYPE(MIMEParams);
@@ -266,19 +239,12 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
-    // TODO(cleanup): It might be about time to separate some of these out
-    // to a different module.
-    JSG_METHOD(getEnvObject);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)
 #undef V
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
-
-    JSG_METHOD(getBuiltinModule);
-    JSG_METHOD(processExitImpl);
-    JSG_LAZY_READONLY_INSTANCE_PROPERTY(processPlatform, getProcessPlatform);
   }
 };
 
