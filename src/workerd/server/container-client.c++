@@ -226,7 +226,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
       auto array = portMapping.getValue().getArray();
       JSG_REQUIRE(array.size() > 0, Error, "Malformed ContainerInspect port mapping response");
       auto obj = array[0].getObject();
-      JSG_REQUIRE(array.size() > 1, Error, "Malformed ContainerInspect port mapping object");
+      JSG_REQUIRE(obj.size() > 1, Error, "Malformed ContainerInspect port mapping object");
       auto mappedPort = obj[1].getValue().getString();
       number = mappedPort.asString().parseAs<uint16_t>();
     }
