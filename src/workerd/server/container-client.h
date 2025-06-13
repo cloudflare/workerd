@@ -28,7 +28,10 @@ class ContainerClient final: public rpc::Container::Server {
       kj::Network& network,
       kj::String dockerPath,
       kj::String containerName,
-      kj::String imageName);
+      kj::String imageName,
+      kj::TaskSet& waitUntilTasks);
+
+  ~ContainerClient() noexcept(false);
 
   // Implement rpc::Container::Server interface
   kj::Promise<void> status(StatusContext context) override;
@@ -46,6 +49,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::String dockerPath;
   kj::String containerName;
   kj::String imageName;
+  kj::TaskSet& waitUntilTasks;
 
   // Docker-specific Port implementation
   class DockerPort;
@@ -61,8 +65,11 @@ class ContainerClient final: public rpc::Container::Server {
   };
 
   // Docker API v1.50 helper methods
-  kj::Promise<Response> dockerApiRequest(
-      kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body = kj::none);
+  static kj::Promise<Response> dockerApiRequest(kj::Network& network,
+      kj::String dockerPath,
+      kj::HttpMethod method,
+      kj::String endpoint,
+      kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment);

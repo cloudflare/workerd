@@ -2304,7 +2304,7 @@ class Server::WorkerService final: public Service,
           containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer, service.network,
               kj::str(dockerPathRef),
               kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
-              kj::str(imageName));
+              kj::str(imageName), service.waitUntilTasks);
         }
 
         auto& actorRef = *actor.emplace(kj::refcounted<Worker::Actor>(*service.worker, getTracker(),
