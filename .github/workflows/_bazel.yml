@@ -156,7 +156,7 @@ jobs:
         if: inputs.upload_test_logs
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ inputs.os_name }}-${{ runner.arch }}${{ inputs.suffix }}.zip
+          name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
         if: always()
