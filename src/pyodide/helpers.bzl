@@ -47,6 +47,7 @@ def _fmt_python_snapshot_release(
         pyodide_date,
         packages,
         backport,
+        baseline_snapshot,
         baseline_snapshot_hash,
         flag,
         **_kwds):
@@ -56,6 +57,7 @@ def _fmt_python_snapshot_release(
             'pyodideRevision = "%s"' % pyodide_date,
             'packages = "%s"' % packages,
             "backport = %s" % backport,
+            'baselineSnapshot = "%s"' % baseline_snapshot,
             'baselineSnapshotHash = "%s"' % baseline_snapshot_hash,
             'flagName = "%s"' % flag,
         ],
