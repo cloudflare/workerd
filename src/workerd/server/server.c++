@@ -1812,9 +1812,9 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, kj::none);
-      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
-          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(),
-          network, dockerPath);
+      auto ns =
+          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
+              threadContext.getByteStreamFactory(), network, dockerPath);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2236,9 +2236,8 @@ class Server::WorkerService final: public Service,
       kj::Own<ActorContainer> getFacetContainer(
           kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
         auto makeContainer = [&]() {
-          return kj::refcounted<ActorContainer>(
-              kj::mv(childKey), kj::mv(childId), ns, *this, kj::mv(childActorClass), timer,
-              byteStreamFactory);
+          return kj::refcounted<ActorContainer>(kj::mv(childKey), kj::mv(childId), ns, *this,
+              kj::mv(childActorClass), timer, byteStreamFactory);
         };
 
         bool isNew = false;
@@ -2582,8 +2581,7 @@ class Server::WorkerService final: public Service,
               containerId = kj::str(existingId);
             }
           }
-          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer,
-              ns.dockerNetwork,
+          containerClient = kj::heap<ContainerClient>(byteStreamFactory, timer, ns.dockerNetwork,
               kj::str(dockerPathRef),
               kj::str("workerd-", KJ_ASSERT_NONNULL(uniqueKey), "-", containerId),
               kj::str(imageName), service.waitUntilTasks);
@@ -2613,9 +2611,8 @@ class Server::WorkerService final: public Service,
 
       return actors
           .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(
-            kj::mv(key), kj::mv(id), *this, kj::none, kj::addRef(*actorClass), timer,
-            byteStreamFactory);
+        auto container = kj::refcounted<ActorContainer>(kj::mv(key), kj::mv(id), *this, kj::none,
+            kj::addRef(*actorClass), timer, byteStreamFactory);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};
