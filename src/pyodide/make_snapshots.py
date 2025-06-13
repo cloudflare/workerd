@@ -2,9 +2,12 @@ import shutil
 import subprocess
 import sys
 from base64 import b64encode
+from contextlib import contextmanager
 from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from textwrap import indent
+from time import time
 
 TEMPLATE = """
 using Workerd = import "/workerd/workerd.capnp";
@@ -29,9 +32,9 @@ const mainWorker :Workerd.Worker = (
 
 
 def make_config(
-    flags,
-    reqs,
-):
+    flags: list[str],
+    reqs: list[str],
+) -> str:
     requirements = ""
     for name in reqs:
         requirements += f'(name="{name}", pythonRequirement=""),'
@@ -42,14 +45,14 @@ def make_config(
     return TEMPLATE.format(requirements=requirements, compat_flags=compat_flags)
 
 
-def make_worker(imports):
+def make_worker(imports: list[str]) -> str:
     contents = ""
     for i in imports:
         contents += f"import {i}\n"
     return contents
 
 
-def run(cmd):
+def run(cmd: list[str | Path]):
     res = subprocess.run(
         cmd,
         capture_output=True,
@@ -70,7 +73,7 @@ def make_snapshot(  # noqa: PLR0913
     compat_flags: list[str],
     requirements: list[str],
     imports: list[str],
-):
+) -> str:
     config_path = d / "config.capnp"
     config_path.write_text(make_config(compat_flags, requirements))
     worker_path = d / "worker.py"
@@ -100,42 +103,57 @@ def make_snapshot(  # noqa: PLR0913
     return outname
 
 
+def bytesdigest(p: Path | str) -> bytes:
+    with Path(p).open("rb") as f:
+        return file_digest(f, "sha256").digest()
+
+
 def hexdigest(p: Path | str) -> str:
-    p1 = Path(p)
-    digest = file_digest(p1.open("rb"), "sha256").digest()
+    digest = bytesdigest(p)
     return "".join(hex(e)[2:] for e in digest)
 
 
 def b64digest(p: Path) -> str:
-    digest = file_digest(p.open("rb"), "sha256").digest()
+    digest = bytesdigest(p)
     return "sha256-" + b64encode(digest).decode()
 
 
-def make_baseline_snapshot(cache, outdir, compat_flags):
+@contextmanager
+def timing(name: str):
+    print(f"Making {name}...")
+    start = time()
+    yield
+    elapsed = time() - start
+    print(f"... made {name} in {elapsed:.2f} seconds")
+
+
+def make_baseline_snapshot(
+    cache: Path, outdir: Path, compat_flags: list[str]
+) -> list[tuple[str, str]]:
     name = make_snapshot(cache, outdir, "baseline", compat_flags, [], [])
     digest = hexdigest(outdir / name)
-    print(
-        f"""\
-        "baseline_snapshot": "{name}",
-        "baseline_snapshot_hash": "{digest}",\
-        """
-    )
+    return [
+        ("baseline_snapshot", name),
+        ("baseline_snapshot_hash", digest),
+    ]
 
 
-def make_numpy_snapshot(cache, outdir, compat_flags):
+def make_numpy_snapshot(
+    cache: Path, outdir: Path, compat_flags: list[str]
+) -> list[tuple[str, str]]:
     name = make_snapshot(
         cache, outdir, "package_snapshot_numpy", compat_flags, ["numpy"], ["numpy"]
     )
     digest = b64digest(outdir / name)
-    print(
-        f"""\
-        "numpy_snapshot": "{name}",
-        "numpy_snapshot_integrity": "{digest}",\
-        """
-    )
+    return [
+        ("numpy_snapshot", name),
+        ("numpy_snapshot_integrity", digest),
+    ]
 
 
-def make_fastapi_snapshot(cache, outdir, compat_flags):
+def make_fastapi_snapshot(
+    cache: Path, outdir: Path, compat_flags: list[str]
+) -> list[tuple[str, str]]:
     name = make_snapshot(
         cache,
         outdir,
@@ -145,22 +163,28 @@ def make_fastapi_snapshot(cache, outdir, compat_flags):
         ["fastapi", "pydantic"],
     )
     digest = b64digest(outdir / name)
-    print(
-        f"""\
-        "fastapi_snapshot": "{name}",
-        "fastapi_snapshot_integrity": "{digest}",\
-        """
-    )
+    return [
+        ("fastapi_snapshot", name),
+        ("fastapi_snapshot_integrity", digest),
+    ]
 
 
-def main():
+def main() -> int:
     compat_flags = ["python_workers_20250116"]
     with TemporaryDirectory() as package_cache:
         cache = Path(package_cache)
         cwd = Path.cwd()
-        make_baseline_snapshot(cache, cwd, compat_flags)
-        make_numpy_snapshot(cache, cwd, compat_flags)
-        make_fastapi_snapshot(cache, cwd, compat_flags)
+        res = []
+        with timing("baseline snapshot"):
+            res += make_baseline_snapshot(cache, cwd, compat_flags)
+        with timing("numpy snapshot"):
+            res += make_numpy_snapshot(cache, cwd, compat_flags)
+        with timing("fastapi snapshot"):
+            res += make_fastapi_snapshot(cache, cwd, compat_flags)
+    print()
+    print("Update python_metadata.bzl:\n")
+    for key, val in res:
+        print(indent(f'"{key}": "{val}"', " " * 8))
     return 0
 
 
