@@ -873,6 +873,7 @@ class Worker::Actor final: public kj::Refcounted {
   //   to customize the JS API but only the underlying ActorCacheInterface?
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
+  static bool idsEqual(const Id& a, const Id& b);
 
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
@@ -905,6 +906,24 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
   };
 
+  class FacetManager {
+   public:
+    // Information needed to start a facet.
+    struct StartInfo {
+      // The actor class channel number, from a DurableObjectClass binding.
+      uint actorClassChannel;
+
+      // ctx.id for the child object.
+      Worker::Actor::Id id;
+    };
+
+    // These methods are C++ equivalents of the JavaScript ctx.facets API.
+    virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
+        kj::StringPtr name, StartInfo startInfo) = 0;
+    virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
+    virtual void deleteFacet(kj::StringPtr name) = 0;
+  };
+
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
   Actor(const Worker& worker,
@@ -919,7 +938,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Own<ActorObserver> metrics,
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
-      kj::Maybe<rpc::Container::Client> container = kj::none);
+      kj::Maybe<rpc::Container::Client> container = kj::none,
+      kj::Maybe<FacetManager&> facetManager = kj::none);
 
   ~Actor() noexcept(false);
 
