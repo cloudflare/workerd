@@ -710,6 +710,9 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   incomingRequest->delivered();
 
   auto& context = incomingRequest->getContext();
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setEventInfo(context.getInvocationSpanContext(), context.now(), tracing::CustomEventInfo());
+  }
 
   context.addWaitUntil(context.run([entrypointName = entrypointName, props = kj::mv(props),
                                        &context, &metrics = incomingRequest->getMetrics()](
