@@ -31,6 +31,8 @@ PATCHES = [
     "0023-Add-more-sandbox-APIs.patch",
     "0024-bazel-Port-concurrent-mksnapshot-support.patch",
     "0025-bazel-Port-V8_USE_ZLIB-support.patch",
+    "0026-Add-ValueSerializer-SetTreatErrorsAsHostObjects.patch",
+    "0027-Add-more-Error-constructor-methods.patch",
 ]
 
 # V8 and its dependencies

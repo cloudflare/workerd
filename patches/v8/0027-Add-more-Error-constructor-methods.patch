@@ -1,0 +1,48 @@
+From e941ed4d066e60db0a5f7da5022ed8aa463c5d15 Mon Sep 17 00:00:00 2001
+From: James M Snell <jsnell@cloudflare.com>
+Date: Thu, 29 May 2025 15:07:37 -0700
+Subject: [PATCH] Add more Error constructor methods
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+---
+ include/v8-exception.h | 8 ++++++++
+ src/api/api.cc         | 4 ++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/include/v8-exception.h b/include/v8-exception.h
+index 5441a0ab6a4..b9933027aaf 100644
+--- a/include/v8-exception.h
++++ b/include/v8-exception.h
+@@ -48,6 +48,14 @@ class V8_EXPORT Exception {
+   static Local<Value> WasmSuspendError(Local<String> message,
+                                        Local<Value> options = {});
+   static Local<Value> Error(Local<String> message, Local<Value> options = {});
++  static Local<Value> URIError(Local<String> message,
++                               Local<Value> options = {});
++  static Local<Value> EvalError(Local<String> message,
++                               Local<Value> options = {});
++  static Local<Value> AggregateError(Local<String> message,
++                                     Local<Value> options = {});
++  static Local<Value> SuppressedError(Local<String> message,
++                                      Local<Value> options = {});
+ 
+   /**
+    * Creates an error message for the given exception.
+diff --git a/src/api/api.cc b/src/api/api.cc
+index c6291d1a7ea..2228cac9cae 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -11254,6 +11254,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
+ DEFINE_ERROR(WasmLinkError, wasm_link_error)
+ DEFINE_ERROR(WasmRuntimeError, wasm_runtime_error)
+ DEFINE_ERROR(WasmSuspendError, wasm_suspend_error)
++DEFINE_ERROR(EvalError, eval_error)
++DEFINE_ERROR(URIError, uri_error)
++DEFINE_ERROR(AggregateError, aggregate_error)
++DEFINE_ERROR(SuppressedError, suppressed_error)
+ DEFINE_ERROR(Error, error)
+ 
+ #undef DEFINE_ERROR
+-- 
+2.34.1
+
