@@ -1,7 +1,6 @@
 import shutil
 import subprocess
 import sys
-from base64 import b64encode
 from contextlib import contextmanager
 from hashlib import file_digest
 from pathlib import Path
@@ -95,12 +94,13 @@ def make_snapshot(  # noqa: PLR0913
         ],
     )
     snapshot_path = d / "snapshot.bin"
-    digest9 = hexdigest(snapshot_path)[:9]
+    digest = hexdigest(snapshot_path)
+    digest9 = digest[:9]
     outname = f"{outprefix}-{digest9}.bin"
     outfile = outdir / outname
     shutil.copyfile(snapshot_path, outfile)
     snapshot_path.unlink()
-    return outname
+    return [outname, digest]
 
 
 def bytesdigest(p: Path | str) -> bytes:
@@ -111,11 +111,6 @@ def bytesdigest(p: Path | str) -> bytes:
 def hexdigest(p: Path | str) -> str:
     digest = bytesdigest(p)
     return "".join(hex(e)[2:] for e in digest)
-
-
-def b64digest(p: Path) -> str:
-    digest = bytesdigest(p)
-    return "sha256-" + b64encode(digest).decode()
 
 
 @contextmanager
@@ -130,8 +125,7 @@ def timing(name: str):
 def make_baseline_snapshot(
     cache: Path, outdir: Path, compat_flags: list[str]
 ) -> list[tuple[str, str]]:
-    name = make_snapshot(cache, outdir, "baseline", compat_flags, [], [])
-    digest = hexdigest(outdir / name)
+    name, digest = make_snapshot(cache, outdir, "baseline", compat_flags, [], [])
     return [
         ("baseline_snapshot", name),
         ("baseline_snapshot_hash", digest),
@@ -141,20 +135,19 @@ def make_baseline_snapshot(
 def make_numpy_snapshot(
     cache: Path, outdir: Path, compat_flags: list[str]
 ) -> list[tuple[str, str]]:
-    name = make_snapshot(
+    name, digest = make_snapshot(
         cache, outdir, "package_snapshot_numpy", compat_flags, ["numpy"], ["numpy"]
     )
-    digest = b64digest(outdir / name)
     return [
         ("numpy_snapshot", name),
-        ("numpy_snapshot_integrity", digest),
+        ("numpy_snapshot_hash", digest),
     ]
 
 
 def make_fastapi_snapshot(
     cache: Path, outdir: Path, compat_flags: list[str]
 ) -> list[tuple[str, str]]:
-    name = make_snapshot(
+    name, digest = make_snapshot(
         cache,
         outdir,
         "package_snapshot_fastapi",
@@ -162,10 +155,9 @@ def make_fastapi_snapshot(
         ["fastapi"],
         ["fastapi", "pydantic"],
     )
-    digest = b64digest(outdir / name)
     return [
         ("fastapi_snapshot", name),
-        ("fastapi_snapshot_integrity", digest),
+        ("fastapi_snapshot_hash", digest),
     ]
 
 

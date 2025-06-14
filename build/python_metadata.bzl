@@ -58,17 +58,23 @@ verify_no_packages_were_removed()
 def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
     return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
 
-def make_bundle_version_info(versions):
+def _add_integrity(entry):
+    for key, value in entry.items():
+        if not key.endswith("_hash"):
+            continue
+        newkey = key.removesuffix("_hash") + "_integrity"
+        entry[newkey] = hex_to_b64(value)
+
+def _make_bundle_version_info(versions):
     result = {}
     for entry in versions:
         name = entry["name"]
-        if entry["name"] != "development":
+        if name != "development":
             entry["id"] = _bundle_id(**entry)
         entry["feature_flags"] = [entry["flag"]]
         if "packages" in entry:
             entry["packages"] = entry["packages"]["info"]["tag"]
-        if "baseline_snapshot_hash" in entry:
-            entry["baseline_snapshot_integrity"] = hex_to_b64(entry["baseline_snapshot_hash"])
+        _add_integrity(entry)
         result[name] = entry
     dev = result["development"]
 
@@ -77,7 +83,7 @@ def make_bundle_version_info(versions):
     result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
-BUNDLE_VERSION_INFO = make_bundle_version_info([
+BUNDLE_VERSION_INFO = _make_bundle_version_info([
     {
         "name": "0.26.0a2",
         "pyodide_version": "0.26.0a2",
@@ -90,6 +96,10 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
         "baseline_snapshot_hash": "d13ce2f4a0ade2e09047b469874dacf4d071ed3558fec4c26f8d0b99d95f77b5",
+        "numpy_snapshot": "ew-py-package-snapshot_numpy-v2.bin",
+        "numpy_snapshot_hash": "5055deb53f404afacba73642fd10e766b123e661847e8fdf4f1ec92d8ca624dc",
+        "fastapi_snapshot": "ew-py-package-snapshot_fastapi-v2.bin",
+        "fastapi_snapshot_hash": "d204956a074cd74f7fe72e029e9a82686fcb8a138b509f765e664a03bfdd50fb",
     },
     {
         "name": "0.27.7",
@@ -103,6 +113,10 @@ BUNDLE_VERSION_INFO = make_bundle_version_info([
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-59fa311f4.bin",
         "baseline_snapshot_hash": "59fa311f4af0bb28477e2fa17f54dc254ec7fa6f02617b832b141854e44bd621",
+        "numpy_snapshot": "package_snapshot_numpy-429b1174f.bin",
+        "numpy_snapshot_hash": "429b1174f9c0d73f9c845007c60595c0a80141b440c080c862568f9d2351dcbb",
+        "fastapi_snapshot": "package_snapshot_fastapi-23337a32b.bin",
+        "fastapi_snapshot_hash": "23337a032bb78f8c2d1abb9439a9c16f56c50130b67aff6bf82b78c896d9a1cc",
     },
     {
         "real_pyodide_version": "0.26.0a2",
