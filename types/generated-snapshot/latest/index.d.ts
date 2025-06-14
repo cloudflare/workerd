@@ -4383,6 +4383,7 @@ interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
   /**
    * A query you wish to perform against the provided contexts.
    */
+  query: string;
   /**
    * Number of returned results starting with the best score.
    */
