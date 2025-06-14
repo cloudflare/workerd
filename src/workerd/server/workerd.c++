@@ -650,26 +650,23 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   CliMain(kj::ProcessContext& context, char** argv)
       : context(context),
         argv(argv),
-        server(kj::heap<Server>(*fs,
-            io.provider->getTimer(),
-            network,
-            entropySource,
-            Worker::ConsoleMode::STDOUT,
-            [&](kj::String error) {
-              if (watcher == kj::none) {
-                // TODO(someday): Don't just fail on the first error, keep going in order to report
-                //   additional errors. The tricky part is we don't currently have any signal of when
-                //   the server has completely finished loading, and also we probably don't want to
-                //   accept any connections on any of the sockets if the server is partially broken.
-                context.exitError(error);
-              } else {
-                // In --watch mode, we don't want to exit from errors, we want to wait until things
-                // change. It's OK if we try to serve requests despite brokenness since this is a
-                // development server.
-                hadErrors = true;
-                context.error(error);
-              }
-            })) {
+        network(io.provider->getNetwork(), *io.provider),
+        server(kj::heap<
+            Server>(*fs, io, entropySource, Worker::ConsoleMode::STDOUT, [&](kj::String error) {
+          if (watcher == kj::none) {
+            // TODO(someday): Don't just fail on the first error, keep going in order to report
+            //   additional errors. The tricky part is we don't currently have any signal of when
+            //   the server has completely finished loading, and also we probably don't want to
+            //   accept any connections on any of the sockets if the server is partially broken.
+            context.exitError(error);
+          } else {
+            // In --watch mode, we don't want to exit from errors, we want to wait until things
+            // change. It's OK if we try to serve requests despite brokenness since this is a
+            // development server.
+            hadErrors = true;
+            context.error(error);
+          }
+        })) {
     KJ_IF_SOME(e, exeInfo) {
       auto& exe = *e.file;
       auto size = exe.stat().size;

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "workerd/api/pyodide/pyodide.h"
+
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
@@ -32,6 +34,9 @@ using api::pyodide::PythonConfig;
 
 // A Worker::Api implementation with support for all the APIs supported by the OSS runtime.
 class WorkerdApi final: public Worker::Api {
+ private:
+  kj::AsyncIoContext& ioContext;
+
  public:
   WorkerdApi(jsg::V8System& v8System,
       CompatibilityFlags::Reader features,
@@ -42,7 +47,8 @@ class WorkerdApi final: public Worker::Api {
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-      kj::Own<VirtualFileSystem> vfs);
+      kj::Own<VirtualFileSystem> vfs,
+      kj::AsyncIoContext& ioContext);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -279,14 +285,23 @@ class WorkerdApi final: public Worker::Api {
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,
-      kj::Maybe<kj::String> fallbackService = kj::none);
+      kj::Maybe<kj::String> fallbackService,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      kj::AsyncIoContext& ioContext);
 
  private:
   struct Impl;
   kj::Own<Impl> impl;
+
+ public:
+  kj::AsyncIoContext& getIoContext() const {
+    return ioContext;
+  }
 };
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
 }  // namespace workerd::server
