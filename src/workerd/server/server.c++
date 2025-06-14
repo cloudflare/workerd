@@ -1922,9 +1922,10 @@ class Server::WorkerService final: public Service,
       }
     };
 
-    // Only add tracers for events other than the test event – it does not support tracing/does not
-    // produce completed trace objects but can still result in the tail worker being called,
-    // resulting in unsightly JS errors in the self-logger-test.
+    // Do not add tracers for worker interfaces with the "test" entrypoint – we generally do not
+    // need to trace the test event, although this is useful to test that span tracing works, so
+    // we are not implementing a (more complex) mechanism to disable tracing for all test() events
+    // here.
     if (entrypointName.orDefault("") != "test"_kj) {
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(legacyTailWorkers, *service);

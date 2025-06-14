@@ -57,7 +57,7 @@ export class DurableObjectExample {
   }
 }
 
-export default {
+export const test = {
   async test(ctrl, env, ctx) {
     let id = env.ns.idFromName('A');
     let obj = env.ns.get(id);
