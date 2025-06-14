@@ -50,6 +50,8 @@ function prepareWasmLinearMemory(Module: Module): void {
     // The effects of these are purely in Python state so they only need to be run
     // if we didn't restore a snapshot.
     entropyBeforeTopLevel(Module);
+    // Note that setupPythonSearchPath runs after adjustSysPath and rearranges where
+    // the /session/metadata path is added.
     adjustSysPath(Module);
   }
   if (Module.API.version !== '0.26.0a2') {
@@ -57,15 +59,36 @@ function prepareWasmLinearMemory(Module: Module): void {
   }
 }
 
-function maybeAddVendorDirectoryToPath(pyodide: Pyodide): void {
+function setupPythonSearchPath(pyodide: Pyodide): void {
   pyodide.runPython(`
     def _tmp():
       import sys
       from pathlib import Path
 
       VENDOR_PATH = "/session/metadata/vendor"
-      if Path(VENDOR_PATH).is_dir():
-        sys.path.append(VENDOR_PATH)
+      SESSION_PATH = "/session/metadata"
+
+      # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
+      # code runs irrespective of the memory snapshot.
+      if SESSION_PATH in sys.path:
+        sys.path.remove(SESSION_PATH)
+      if VENDOR_PATH in sys.path:
+        sys.path.remove(VENDOR_PATH)
+
+      # Insert vendor path after system paths but before site-packages
+      # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
+      # We want to insert before '/lib/python3.12/site-packages' and other site-packages
+      #
+      # We also need the session path to be before the vendor path, if we don't do so then a local
+      # import will pick a module from the vendor path rather than the local path. We've got a test
+      # that reproduces this (vendor_dir).
+      for i, path in enumerate(sys.path):
+        if 'site-packages' in path:
+          sys.path[i:i] = [SESSION_PATH, VENDOR_PATH]
+          break
+      else:
+        # If no site-packages found, fail
+        raise ValueError("No site-packages found in sys.path")
 
     _tmp()
     del _tmp
@@ -143,7 +166,7 @@ export async function loadPyodide(
         console.error(msg);
       }
     );
-    maybeAddVendorDirectoryToPath(pyodide);
+    setupPythonSearchPath(pyodide);
     return pyodide;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
