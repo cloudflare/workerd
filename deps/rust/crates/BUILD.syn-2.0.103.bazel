@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "getopts",
+    name = "syn",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,20 +28,33 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "clone-impls",
+        "default",
+        "derive",
+        "extra-traits",
+        "fold",
+        "full",
+        "parsing",
+        "printing",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getopts",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.21",
+    version = "2.0.103",
     deps = [
-        "@crates_vendor__unicode-width-0.1.14//:unicode_width",
+        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
     ],
 )

@@ -48,6 +48,6 @@ rust_library(
     version = "0.12.0",
     deps = [
         "@crates_vendor__termcolor-1.4.1//:termcolor",
-        "@crates_vendor__unicode-width-0.2.0//:unicode_width",
+        "@crates_vendor__unicode-width-0.2.1//:unicode_width",
     ],
 )
