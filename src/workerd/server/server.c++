@@ -1849,7 +1849,7 @@ class Server::WorkerService final: public Service,
                 "workerd may make this a startup-time error."));
       }
 
-      auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, kj::none);
+      auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
       auto ns =
           kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
               threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
@@ -1857,8 +1857,7 @@ class Server::WorkerService final: public Service,
     }
   }
 
-  kj::Maybe<kj::Own<Service>> getEntrypoint(
-      kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
+  kj::Maybe<kj::Own<Service>> getEntrypoint(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
     const kj::HashSet<kj::String>* handlers;
     KJ_IF_SOME(n, name) {
       KJ_IF_SOME(entry, namedEntrypoints.findEntry(n)) {
@@ -1895,13 +1894,12 @@ class Server::WorkerService final: public Service,
         return fakeOwn(*this);
       }
     }
-    return kj::heap<EntrypointService>(*this, name, propsJson, *handlers);
+    return kj::heap<EntrypointService>(*this, name, kj::mv(props), *handlers);
   }
 
-  kj::Maybe<kj::Own<ActorClass>> getActorClass(
-      kj::Maybe<kj::StringPtr> name, kj::Maybe<kj::StringPtr> propsJson) {
+  kj::Maybe<kj::Own<ActorClass>> getActorClass(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
-      return kj::refcounted<ActorClassImpl>(*this, className, propsJson);
+      return kj::refcounted<ActorClassImpl>(*this, className, kj::mv(props));
     } else {
       return kj::none;
     }
@@ -2779,15 +2777,12 @@ class Server::WorkerService final: public Service,
    public:
     EntrypointService(WorkerService& worker,
         kj::Maybe<kj::StringPtr> entrypoint,
-        kj::Maybe<kj::StringPtr> propsJson,
+        Frankenvalue props,
         const kj::HashSet<kj::String>& handlers)
         : worker(worker),
           entrypoint(entrypoint),
-          handlers(handlers) {
-      KJ_IF_SOME(m, propsJson) {
-        props = Frankenvalue::fromJson(kj::str(m));
-      }
-    }
+          handlers(handlers),
+          props(kj::mv(props)) {}
 
     kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
       return startRequest(kj::mv(metadata), false);
@@ -2816,14 +2811,10 @@ class Server::WorkerService final: public Service,
 
   class ActorClassImpl final: public ActorClass {
    public:
-    ActorClassImpl(
-        WorkerService& service, kj::StringPtr className, kj::Maybe<kj::StringPtr> propsJson)
+    ActorClassImpl(WorkerService& service, kj::StringPtr className, Frankenvalue props)
         : service(service),
-          className(className) {
-      KJ_IF_SOME(m, propsJson) {
-        props = Frankenvalue::fromJson(kj::str(m));
-      }
-    }
+          className(className),
+          props(kj::mv(props)) {}
 
     kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
         Worker::Actor::Id actorId,
@@ -3809,10 +3800,10 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     // in exactyl the same order as the channels were allocated earlier when we compiled the
     // ctx.exports bindings.
     if (workerService.hasDefaultEntrypoint()) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(kj::none, kj::none)));
+      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(/*name=*/kj::none, /*props=*/{})));
     }
     for (auto& ep: entrypointNames) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(ep, kj::none)));
+      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(ep, /*props=*/{})));
     }
 
     result.subrequest = services.finish();
@@ -3989,22 +3980,22 @@ kj::Own<Server::Service> Server::lookupService(
     entrypointName = designator.getEntrypoint();
   }
 
-  auto propsJson = [&]() -> kj::Maybe<kj::StringPtr> {
+  auto props = [&]() -> Frankenvalue {
     auto props = designator.getProps();
     switch (props.which()) {
       case config::ServiceDesignator::Props::EMPTY:
-        return kj::none;
+        return {};
       case config::ServiceDesignator::Props::JSON:
-        return props.getJson();
+        return Frankenvalue::fromJson(kj::str(props.getJson()));
     }
     reportConfigError(kj::str(errorContext,
         " has unrecognized props type. Was the config compiled with a "
         "newer version of the schema?"));
-    return kj::none;
+    return {};
   }();
 
   if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-    KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName, propsJson)) {
+    KJ_IF_SOME(ep, worker->getEntrypoint(entrypointName, kj::mv(props))) {
       return kj::mv(ep);
     } else KJ_IF_SOME(ep, entrypointName) {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
@@ -4022,7 +4013,7 @@ kj::Own<Server::Service> Server::lookupService(
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\" with a named entrypoint \"", ep, "\", but \"", targetName,
           "\" is not a Worker, so does not have any named entrypoints."));
-    } else if (propsJson != kj::none) {
+    } else if (!props.empty()) {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\" and provides a `props` value, but \"", targetName,
           "\" is not a Worker, so cannot accept `props`"));
@@ -4048,22 +4039,22 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
     entrypointName = designator.getEntrypoint();
   }
 
-  auto propsJson = [&]() -> kj::Maybe<kj::StringPtr> {
+  auto props = [&]() -> Frankenvalue {
     auto props = designator.getProps();
     switch (props.which()) {
       case config::ServiceDesignator::Props::EMPTY:
-        return kj::none;
+        return {};
       case config::ServiceDesignator::Props::JSON:
-        return props.getJson();
+        return Frankenvalue::fromJson(kj::str(props.getJson()));
     }
     reportConfigError(kj::str(errorContext,
         " has unrecognized props type. Was the config compiled with a "
         "newer version of the schema?"));
-    return kj::none;
+    return {};
   }();
 
   if (WorkerService* worker = dynamic_cast<WorkerService*>(service)) {
-    KJ_IF_SOME(ep, worker->getActorClass(entrypointName, propsJson)) {
+    KJ_IF_SOME(ep, worker->getActorClass(entrypointName, kj::mv(props))) {
       return kj::mv(ep);
     } else KJ_IF_SOME(ep, entrypointName) {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
@@ -4862,7 +4853,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       if (WorkerService* worker = dynamic_cast<WorkerService*>(service.value.get())) {
         for (auto& name: worker->getEntrypointNames()) {
           if (entrypointGlob.matches(name)) {
-            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name, kj::none));
+            kj::Own<Service> ep = KJ_ASSERT_NONNULL(worker->getEntrypoint(name, /*props=*/{}));
             if (ep->hasHandler("test"_kj)) {
               co_await doTest(*ep, kj::str(service.key, ':', name));
             }
