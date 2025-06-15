@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "adler2",
+    name = "clap_lex",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,10 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=adler2",
+        "crate-name=clap_lex",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.0",
+    version = "0.7.5",
 )
