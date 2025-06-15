@@ -160,6 +160,10 @@ wd_cc_library(
         "//src/pyodide:pyodide_static",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 

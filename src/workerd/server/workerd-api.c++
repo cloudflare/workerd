@@ -25,6 +25,7 @@
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
@@ -53,6 +54,7 @@
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
+#include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
@@ -333,6 +335,27 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
   return pyConfig.pyodideBundleManager.getPyodideBundle(version);
 }
 
+/**
+ * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
+ * works on the workerd ModulesSource definition rather than the WorkerBundle.
+ */
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source) {
+  kj::Vector<kj::String> requirements;
+
+  for (auto& def: source.modules) {
+    KJ_SWITCH_ONEOF(def.content) {
+      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        requirements.add(api::pyodide::canonicalizePythonPackageName(def.name));
+      }
+      KJ_CASE_ONEOF_DEFAULT {
+        break;
+      }
+    }
+  }
+
+  return requirements.releaseAsArray();
+}
+
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
@@ -452,8 +475,10 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-    kj::Own<VirtualFileSystem> vfs)
-    : impl(kj::heap<Impl>(v8System,
+    kj::Own<VirtualFileSystem> vfs,
+    kj::AsyncIoContext& ioContext)
+    : ioContext(ioContext),
+      impl(kj::heap<Impl>(v8System,
           features,
           extensions,
           kj::mv(createParams),
@@ -748,6 +773,15 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = KJ_ASSERT_NONNULL(
           fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+
+      // Get Python requirements and fetch packages
+      KJ_IF_SOME(a, artifacts) {
+        KJ_IF_SOME(pm, a->packageManager) {
+          auto pythonRequirements = getPythonRequirements(source);
+          fetchPyodidePackages(
+              impl->pythonConfig, pm, pythonRequirements, pythonRelease, getIoContext());
+        }
+      }
 
       // Inject Pyodide bundle
       modules->addBuiltinBundle(bundle, kj::none);
@@ -1084,7 +1118,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
-    kj::Maybe<kj::String> maybeFallbackService) {
+    kj::Maybe<kj::String> maybeFallbackService,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    kj::AsyncIoContext& ioContext) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
@@ -1224,6 +1260,14 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = KJ_ASSERT_NONNULL(
           fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
+
+      // Get Python requirements and fetch packages
+      KJ_IF_SOME(a, artifacts) {
+        KJ_IF_SOME(pm, a->packageManager) {
+          auto pythonRequirements = getPythonRequirements(source);
+          fetchPyodidePackages(pythonConfig, pm, pythonRequirements, pythonRelease, ioContext);
+        }
+      }
 
       // We end up add modules from the bundle twice, once to get BUILTIN modules
       // and again to get the BUILTIN_ONLY modules. These end up in two different
