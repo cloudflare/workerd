@@ -164,6 +164,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
+  class DynamicIsolateNamespace;
+  kj::HashMap<kj::StringPtr, kj::Own<DynamicIsolateNamespace>> dynamicIsolateNamespaces;
+
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
   // Initialized in startAlarmScheduler().

@@ -5,8 +5,11 @@
 #pragma once
 
 #include <workerd/io/actor-id.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-source.h>
 
 #include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
@@ -63,6 +66,10 @@ class TimerChannel {
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
 };
+
+class DynamicIsolateChannel;
+struct DynamicIsolateSource;
+using DynamicIsolateInitFunc = kj::Function<kj::Promise<void>(DynamicIsolateSource)>;
 
 // Each IoContext has a set of "channels" on which outgoing I/O can be initiated. All outgoing
 // I/O occurs through these channels. Think of these kind of like file descriptors. They are
@@ -136,17 +143,25 @@ class IoChannelFactory {
   virtual kj::Promise<void> writeLogfwdr(
       uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor. Multiple requests may be
-  // sent, and they will be delivered in the order they are sent (e-order). This is an I/O type
-  // so it is only valid within the `IoContext` where it was created.
-  class ActorChannel {
+  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
+  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
+  // created.
+  class SubrequestChannel {
    public:
-    // Start a new request to this actor.
+    // Start a new request to this target.
     //
     // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
     // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
     // `dynamicDispatchTarget` do not.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+  };
+
+  // Stub for a remote actor. Allows sending requests to the actor.
+  class ActorChannel: public SubrequestChannel {
+   public:
+    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
+    // easy to imagine that actor stubs may have more functionality than just sending requests
+    // someday, so we keep this as a separate type.
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.
@@ -170,6 +185,39 @@ class IoChannelFactory {
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
+
+  // Use a dynamic isolate loader binding to obtain an isolate by name. If the named isolate
+  // doesn't already exist, the callback will be called to fetch the source code from which the
+  // isolate should be created.
+  virtual kj::Own<DynamicIsolateChannel> loadIsolate(uint loaderChannel,
+      kj::String name,
+      kj::Function<kj::Promise<DynamicIsolateSource>()> fetchSource) {
+    JSG_FAIL_REQUIRE(Error, "Dynamic isolate loading is not supported by this runtime.");
+  }
+};
+
+// Represents a dynamically-loaded isolate to which requests can be sent.
+//
+// This object is returned before the isolate actually loads, so if any errors occur while loading,
+// any requests sent to the isolate will fail, propagating the exception.
+class DynamicIsolateChannel {
+ public:
+  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+      kj::Maybe<kj::String> name, Frankenvalue props);
+
+  // TODO(now): Expose actor class entrypoints for use with facets.
+
+  // TODO(someday): Allow caller to enumerate entrypoints?
+};
+
+// Source code needed to dynamically load an isolate.
+struct DynamicIsolateSource {
+  WorkerSource source;
+  CompatibilityFlags::Reader compatibilityFlags;
+
+  // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
+  // `StringPtr`s; `ownContent` owns the backing buffer for them.)
+  kj::Own<void> ownContent;
 };
 
 }  // namespace workerd

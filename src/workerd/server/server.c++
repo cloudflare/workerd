@@ -3009,6 +3009,12 @@ class Server::WorkerService final: public Service,
     abortActorsCallback(reason);
   }
 
+  kj::Own<DynamicIsolateChannel> loadIsolate(uint loaderChannel,
+      kj::String name,
+      kj::Function<kj::Promise<DynamicIsolateSource>()> fetchSource) override {
+
+  }
+
   // ---------------------------------------------------------------------------
   // implements TimerChannel
 
@@ -3886,6 +3892,106 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       kj::mv(errorReporter.actorClasses), def.localActorConfigs, kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors), network, kj::mv(dockerPath));
 }
+
+// =======================================================================================
+
+class Server::DynamicIsolateNamespace {
+ public:
+  kj::Own<DynamicIsolateChannel> loadIsolate(kj::String name,
+      kj::Function<kj::Promise<DynamicIsolateSource>()> fetchSource) {
+    return isolates.findOrCreate(name, [&]() -> decltype(isolates)::Entry {
+      auto displayName = kj::str(namespaceName, ':', name);
+
+      return {
+        .key = kj::mv(name),
+        .value = kj::rc<DynamicIsolateImpl>(kj::mv(displayName), kj::mv(fetchSource))
+      };
+    }).addRef().toOwn();
+  }
+
+ private:
+  Server& server;
+  kj::String namespaceName;
+
+  class DynamicIsolateImpl;
+  kj::HashMap<kj::String, kj::Rc<DynamicIsolateImpl>> isolates;
+
+  class DynamicIsolateImpl
+      : public DynamicIsolateChannel, public kj::Refcounted,
+        public kj::EnableAddRefToThis<DynamicIsolateImpl> {
+   public:
+    DynamicIsolateImpl(Server& server, kj::String displayName,
+        kj::Function<kj::Promise<DynamicIsolateSource>()> fetchSource)
+        : startupTask(start(server, kj::mv(displayName), kj::mv(fetchSource)).fork()) {}
+
+    kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+        kj::Maybe<kj::String> name, Frankenvalue props) override {
+      return kj::heap<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
+    }
+
+   private:
+    kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
+    kj::ForkedPromise<void> startupTask;  // resolves when `service` is non-null
+
+    kj::Promise<void> start(Server& server, kj::String displayName,
+        kj::Function<kj::Promise<DynamicIsolateSource>()> fetchSource) {
+      auto source = co_await fetchSource();
+      static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
+      WorkerDef def {
+        .featureFlags = source.compatibilityFlags,
+        .bundleDirectory = getBundleDirectory({}),  // TODO(now)
+        .source = source.source,
+        .moduleFallback = kj::none,
+        .localActorConfigs = EMPTY_ACTOR_CONFIGS,
+
+        .globalOutbound = {},  // TODO(now)
+      };
+
+      ErrorReporter errorReporter;  // TODO(now)
+
+      auto service = server.makeWorkerImpl(displayName, kj::mv(def), {}, errorReporter);
+      service->link();
+      this->service = kj::mv(service);
+    }
+
+    class SubrequestChannelImpl: public IoChannelFactory::SubrequestChannel {
+    public:
+      SubrequestChannelImpl(
+          kj::Rc<DynamicIsolateImpl> isolate, kj::Maybe<kj::String> entrypointName,
+          Frankenvalue props)
+          : isolate(kj::mv(isolate)), entrypointName(kj::mv(entrypointName)),
+            props(kj::mv(props)) {}
+
+      kj::Own<WorkerInterface> startRequest(
+          IoChannelFactory::SubrequestMetadata metadata) override {
+        if (isolate->service == kj::none) {
+          return newPromisedWorkerInterface(isolate->startupTask.addBranch()
+              .then([this, metadata = kj::mv(metadata)]() mutable {
+            return startRequestImpl(kj::mv(metadata));
+          }));
+        } else {
+          return startRequestImpl(kj::mv(metadata));
+        }
+      }
+
+    private:
+      kj::Rc<DynamicIsolateImpl> isolate;
+      kj::Maybe<kj::String> entrypointName;
+      Frankenvalue props;
+
+      kj::Maybe<kj::Own<Service>> entrypointService;
+
+      kj::Own<WorkerInterface> startRequestImpl(
+          IoChannelFactory::SubrequestMetadata metadata) {
+        auto& service = KJ_ASSERT_NONNULL(isolate->service);
+        if (entrypointService == kj::none) {
+          entrypointService.emplace(service->getEntrypoint(entrypointName, kj::mv(props)));
+        }
+        KJ_ASSERT_NONNULL(entrypointService)->startRequest(kj::mv(metadata));
+      }
+    };
+  };
+};
 
 // =======================================================================================
 
