@@ -92,7 +92,8 @@ export default {
   },
 };
 
-export const inspect = {
+// inspect tests
+export const test = {
   async test(ctrl, env, ctx) {
     // Check URL with duplicate search param keys
     const url = new URL('http://user:pass@placeholder:8787/path?a=1&a=2&b=3');

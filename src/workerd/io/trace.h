@@ -613,6 +613,18 @@ struct CompleteSpan {
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
   CompleteSpan clone() const;
+  explicit CompleteSpan(uint64_t spanId,
+      uint64_t parentSpanId,
+      kj::ConstString operationName,
+      kj::Date startTime,
+      kj::Date endTime,
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags)
+      : spanId(spanId),
+        parentSpanId(parentSpanId),
+        operationName(kj::mv(operationName)),
+        startTime(startTime),
+        endTime(endTime),
+        tags(kj::mv(tags)) {}
   explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
       : operationName(kj::mv(operationName)),
         startTime(startTime),

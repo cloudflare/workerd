@@ -38,14 +38,18 @@ export const test = {
 
     let expected = [
       // http-test.js: fetch and scheduled events get reported correctly.
+      // First event is emitted by the test() event, which allows us to get some coverage for span tracing.
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"attributes","info":[]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"attributes","info":[]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"attributes","info":[]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"attributes","info":[]}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"http://placeholder/body-length","cfJson":"","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"http://placeholder/body-length","cfJson":"","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":""}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":"* * * * 30"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://placeholder/not-found","cfJson":"","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":404}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://placeholder/web-socket","cfJson":"","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"exception","name":"Error","message":"The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response. Refer to: https://developers.cloudflare.com/workers/observability/errors/"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
       // queue-test.js: queue events
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","cfJson":"","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-delay-secs","value":"2"},{"name":"x-msg-fmt","value":"text"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","cfJson":"","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-fmt","value":"bytes"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","cfJson":"","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-fmt","value":"json"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
@@ -61,7 +65,6 @@ export const test = {
       // after the onsets above is not guaranteed, but since the streaming tail worker is invoked
       // when the main invocation starts whereas the legacy tail worker is only invoked when it ends
       // this should be fine in practice.
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"trace","traces":[""]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
