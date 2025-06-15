@@ -49,8 +49,8 @@ build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
 ## simdutf
 build --per_file_copt=external/simdutf@-Wno-unused-const-variable
 
-# TODO(cleanup): New LLVM 20 warning, fix and enable again
-build --copt=-Wno-nontrivial-memcall
+# TODO(cleanup): Causes warnings with LLVM20, fix and enable again
+build --copt=-Wno-nontrivial-memaccess
 
 # Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
 # GitHub Actions. This is an optional performance hack intended for CI, although it might also be
