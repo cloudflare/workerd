@@ -320,6 +320,43 @@ export const processUnsupported = {
   },
 };
 
+// Properties which are undefined and NOT throwing stubs to ensure polyfillability
+// via if (!process.prop) process.prop = polyfill();
+// Some of these might be implemented at future dates.
+export const processUndefined = {
+  test() {
+    // TODO(soon): Implement these!
+    assert.strictEqual(process.cwd, undefined);
+    assert.strictEqual(process.chdir, undefined);
+    assert.strictEqual(process.umask, undefined);
+    assert.strictEqual(process.stdin, undefined);
+    assert.strictEqual(process.stdout, undefined);
+    assert.strictEqual(process.stderr, undefined);
+
+    assert.strictEqual(process.exitCode, undefined);
+    assert.strictEqual(process.channel, undefined);
+    assert.strictEqual(process.connected, undefined);
+    assert.strictEqual(process.binding, undefined);
+    assert.strictEqual(process.debugPort, undefined);
+    assert.strictEqual(process.dlopen, undefined);
+    assert.strictEqual(process.finalization, undefined);
+    assert.strictEqual(process.getActiveResourcesInfo, undefined);
+    assert.strictEqual(process.setUncaughtExceptionCaptureCallback, undefined);
+    assert.strictEqual(process.hasUncaughtExceptionCaptureCallback, undefined);
+    assert.strictEqual(process.memoryUsage, undefined);
+    assert.strictEqual(process.noDeprecation, undefined);
+    assert.strictEqual(process.permission, undefined);
+    assert.strictEqual(process.release, undefined);
+    assert.strictEqual(process.report, undefined);
+    assert.strictEqual(process.resourceUsage, undefined);
+    assert.strictEqual(process.send, undefined);
+    assert.strictEqual(process.traceDeprecation, undefined);
+    assert.strictEqual(process.throwDeprecation, undefined);
+    assert.strictEqual(process.sourceMapsEnabled, undefined);
+    assert.strictEqual(process.threadCpuUsage, undefined);
+  },
+};
+
 export const processVersions = {
   test() {
     assert.strictEqual(typeof process.versions, 'object');
