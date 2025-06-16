@@ -4,6 +4,7 @@
 
 #include "r2-bucket.h"
 
+#include "r2-impl-utils.h"
 #include "r2-multipart.h"
 #include "r2-rpc.h"
 #include "util.h"
@@ -40,11 +41,6 @@ kj::Own<kj::HttpClient> r2GetClient(
   // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
   return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
       .attach(kj::mv(traceContext));
-}
-
-static bool isWholeNumber(double x) {
-  double intpart;
-  return modf(x, &intpart) == 0;
 }
 
 // TODO(perf): Would be nice to expose the v8 internals for parsing a date/stringifying it as

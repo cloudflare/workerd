@@ -5,6 +5,7 @@
 #include "r2-multipart.h"
 
 #include "r2-bucket.h"
+#include "r2-impl-utils.h"
 #include "r2-rpc.h"
 #include "workerd/jsg/jsg.h"
 
