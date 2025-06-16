@@ -32,14 +32,14 @@ import {
   stripVTControlCharacters,
 } from 'node-internal:internal_inspect';
 
-import { callbackify } from 'node-internal:internal_utils';
+import { callbackify, parseEnv } from 'node-internal:internal_utils';
 import {
   isReadableStream,
   isWritableStream,
   isNodeStream,
 } from 'node-internal:streams_util';
 export { inspect, format, formatWithOptions, stripVTControlCharacters };
-export { callbackify } from 'node-internal:internal_utils';
+export { callbackify, parseEnv } from 'node-internal:internal_utils';
 export const types = internalTypes;
 
 export const { MIMEParams, MIMEType } = utilImpl;
@@ -227,12 +227,6 @@ export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
 
 export function isArray(a: unknown): a is Array<any> {
   return Array.isArray(a);
-}
-
-export function parseEnv(): void {
-  // We don't implement this function yet because it is currently under
-  // active development. We should implement it when it's stable
-  throw new Error('node:util parseEnv is not implemented');
 }
 
 export function getSystemErrorMap(): void {
