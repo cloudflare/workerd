@@ -6,8 +6,11 @@
 
 #include "r2-rpc.h"
 
+#include <workerd/api/http.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/jsg/jsg.h>
+
+#include <kj/encoding.h>
 
 namespace workerd::api {
 class Headers;
@@ -223,6 +226,27 @@ class R2Bucket: public jsg::Object {
         storageClass,
         ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
+  };
+
+  struct CopySource {
+    kj::String bucket;
+    kj::String object;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+    jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
+    JSG_STRUCT(bucket, object, ssecKey, onlyIf);
+    JSG_STRUCT_TS_OVERRIDE(R2CopySource);
+  };
+
+  struct CopyOptions {
+    jsg::Optional<kj::String> metadataDirective;
+    jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+    jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
+    jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
+    jsg::Optional<kj::String> storageClass;
+    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+
+    JSG_STRUCT(metadataDirective, customMetadata, httpMetadata, onlyIf, storageClass, ssecKey);
+    JSG_STRUCT_TS_OVERRIDE(R2CopyOptions);
   };
 
   struct MultipartOptions {
@@ -463,6 +487,11 @@ class R2Bucket: public jsg::Object {
       kj::Maybe<R2PutValue> value,
       jsg::Optional<PutOptions> options,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+  jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> copy(jsg::Lock& js,
+      kj::String key,
+      CopySource source,
+      jsg::Optional<CopyOptions> options,
+      const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUpload(jsg::Lock& js,
       kj::String key,
       jsg::Optional<MultipartOptions> options,
@@ -483,6 +512,7 @@ class R2Bucket: public jsg::Object {
     JSG_METHOD(head);
     JSG_METHOD(get);
     JSG_METHOD(put);
+    JSG_METHOD(copy);
     JSG_METHOD(createMultipartUpload);
     JSG_METHOD(resumeMultipartUpload);
     JSG_METHOD_NAMED(delete, delete_);
@@ -499,6 +529,9 @@ class R2Bucket: public jsg::Object {
         options?: R2PutOptions & { onlyIf: R2BucketConditional | Headers }
       ): Promise<R2Object | null>;
       put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: R2PutOptions): Promise<R2Object>;
+
+      copy(key: string, source: R2CopySource, options: R2CopyOptions & { onlyIf: R2BucketConditional | Headers }): Promise<R2Object | null>;
+      copy(key: string, source: R2CopySource, options?: R2CopyOptions): Promise<R2Object>;
     });
     // Exclude `R2Object` from `get` return type if `onlyIf` not specified, and exclude `null` from `put` return type
 

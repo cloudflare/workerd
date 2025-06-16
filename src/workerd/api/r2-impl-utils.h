@@ -9,6 +9,7 @@
 #include <workerd/api/http.h>
 #include <workerd/api/r2-api.capnp.h>
 #include <workerd/api/streams/readable.h>
+#include <workerd/io/trace.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/encoding.h>
@@ -16,6 +17,27 @@
 #include <regex>
 
 namespace workerd::api::public_beta {
+
+// Forward declaration for buildEtagsString (defined in r2-bucket.c++)
+kj::String buildEtagsString(kj::ArrayPtr<R2Bucket::Etag> etagArray);
+
+// Convert a kj::Date to ISO string format for tracing
+inline kj::String toISOString(jsg::Lock& js, kj::Date date) {
+  return js.date(date).toISOString(js);
+}
+
+// Shared helper for adding R2 response span tags
+inline void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
+  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
+    traceContext.userSpan.setTag("error.type"_kjc, e.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, e.asPtr());
+  }
+  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
+    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, static_cast<int64_t>(v4));
+  }
+}
+
 // Utility function for initOnlyIf
 inline void addEtagsToBuilder(
     capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
@@ -38,51 +60,11 @@ inline void addEtagsToBuilder(
   }
 }
 
-// Options Helpers
-template <typename Builder, typename Options>
-void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
-  KJ_IF_SOME(i, o.onlyIf) {
-    R2Bucket::UnwrappedConditional c = [&] {
-      KJ_SWITCH_ONEOF(i) {
-        KJ_CASE_ONEOF(conditional, R2Bucket::Conditional) {
-          return R2Bucket::UnwrappedConditional(conditional);
-        }
-        KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-          return R2Bucket::UnwrappedConditional(js, *h);
-        }
-      }
-      KJ_UNREACHABLE;
-    }();
-
-    R2Conditional::Builder onlyIfBuilder = builder.initOnlyIf();
-    KJ_IF_SOME(etagArray, c.etagMatches) {
-      capnp::List<R2Etag>::Builder etagMatchList = onlyIfBuilder.initEtagMatches(etagArray.size());
-      addEtagsToBuilder(
-          etagMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
-    }
-    KJ_IF_SOME(etagArray, c.etagDoesNotMatch) {
-      auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray.size());
-      addEtagsToBuilder(
-          etagDoesNotMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
-    }
-    KJ_IF_SOME(d, c.uploadedBefore) {
-      onlyIfBuilder.setUploadedBefore((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-      if (c.secondsGranularity) {
-        onlyIfBuilder.setSecondsGranularity(true);
-      }
-    }
-    KJ_IF_SOME(d, c.uploadedAfter) {
-      onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-      if (c.secondsGranularity) {
-        onlyIfBuilder.setSecondsGranularity(true);
-      }
-    }
-  }
-}
 inline bool isWholeNumber(double x) {
   double intpart;
   return modf(x, &intpart) == 0;
 }
+
 template <typename Builder, typename Options>
 void initRange(jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(range, o.range) {
@@ -125,11 +107,14 @@ void initRange(jsg::Lock& js, Builder& builder, Options& o) {
     }
   }
 }
-static const std::regex hexPattern("^[0-9a-f]+$");
+inline const std::regex hexPattern("^[0-9a-f]+$");
 template <typename Builder, typename Options>
 void initSsec(jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(rawSsecKey, o.ssecKey) {
     auto ssecBuilder = builder.initSsec();
+    // SSE-C key must be 32 bytes.
+    // When provided as a hex string, it must be 64 characters long.
+    // When provided as a byte array, it must be 32 bytes long.
     KJ_SWITCH_ONEOF(rawSsecKey) {
       KJ_CASE_ONEOF(keyString, kj::String) {
         JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,

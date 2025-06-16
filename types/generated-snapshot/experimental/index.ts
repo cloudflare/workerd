@@ -2451,6 +2451,18 @@ export declare abstract class R2Bucket {
       | Blob,
     options?: R2PutOptions,
   ): Promise<R2Object>;
+  copy(
+    key: string,
+    source: R2CopySource,
+    options: R2CopyOptions & {
+      onlyIf: R2Conditional | Headers;
+    },
+  ): Promise<R2Object | null>;
+  copy(
+    key: string,
+    source: R2CopySource,
+    options?: R2CopyOptions,
+  ): Promise<R2Object>;
   createMultipartUpload(
     key: string,
     options?: R2MultipartOptions,
@@ -2466,6 +2478,18 @@ export interface R2MultipartUpload {
     partNumber: number,
     value: ReadableStream | (ArrayBuffer | ArrayBufferView) | string | Blob,
     options?: R2UploadPartOptions,
+  ): Promise<R2UploadedPart>;
+  uploadPartCopy(
+    partNumber: number,
+    source: R2UploadPartCopySource & {
+      onlyIf: R2Conditional | Headers;
+    },
+    options: R2UploadPartCopyOptions,
+  ): Promise<R2UploadedPart | undefined>;
+  uploadPartCopy(
+    partNumber: number,
+    source: R2UploadPartCopySource,
+    options: R2UploadPartCopyOptions,
   ): Promise<R2UploadedPart>;
   abort(): Promise<void>;
   complete(uploadedParts: R2UploadedPart[]): Promise<R2Object>;
@@ -2534,6 +2558,20 @@ export interface R2PutOptions {
   storageClass?: string;
   ssecKey?: ArrayBuffer | string;
 }
+export interface R2CopySource {
+  bucket: string;
+  object: string;
+  ssecKey?: ArrayBuffer | string;
+  onlyIf?: R2Conditional | Headers;
+}
+export interface R2CopyOptions {
+  metadataDirective?: string;
+  customMetadata?: Record<string, string>;
+  httpMetadata?: R2HTTPMetadata | Headers;
+  onlyIf?: R2Conditional | Headers;
+  storageClass?: string;
+  ssecKey?: ArrayBuffer | string;
+}
 export interface R2MultipartOptions {
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
@@ -2576,6 +2614,16 @@ export type R2Objects = {
     }
 );
 export interface R2UploadPartOptions {
+  ssecKey?: ArrayBuffer | string;
+}
+export interface R2UploadPartCopySource {
+  bucket: string;
+  object: string;
+  onlyIf?: R2Conditional | Headers;
+  range?: R2Range | Headers;
+  ssecKey?: ArrayBuffer | string;
+}
+export interface R2UploadPartCopyOptions {
   ssecKey?: ArrayBuffer | string;
 }
 export declare abstract class JsRpcPromise {

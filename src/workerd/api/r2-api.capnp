@@ -27,6 +27,8 @@ struct R2BindingRequest {
     uploadPart @10 :R2UploadPartRequest $Json.flatten();
     completeMultipartUpload @11 :R2CompleteMultipartUploadRequest $Json.flatten();
     abortMultipartUpload @12 :R2AbortMultipartUploadRequest $Json.flatten();
+    copy @13 :R2CopyRequest $Json.flatten();
+    uploadPartCopy @14 :R2UploadPartCopyRequest $Json.flatten();
   }
 }
 
@@ -114,6 +116,52 @@ struct R2PutRequest {
   ssec @10 :R2SSECOptions;
 }
 
+struct R2CopySource {
+  bucket @0 :Text;
+  # The bucket containing the source object. Must be in the same account.
+
+  object @1 :Text;
+  # The key of the source object to copy from.
+
+  onlyIf @2 :R2Conditional;
+  # Conditional checks against the source object (distinct from destination conditionals).
+
+  ssec @3 :R2SSECOptions;
+  # Required if the source object was encrypted with SSE-C.
+}
+
+enum R2CopyMetadataDirective {
+  copy @0;
+  replace @1;
+  merge @2;
+}
+
+struct R2CopyRequest {
+  object @0 :Text;
+  # The key of the destination object.
+
+  source @1 :R2CopySource;
+  # The source object to copy from.
+
+  metadataDirective @2 :Text;
+  # How to handle metadata: "COPY", "REPLACE", or "MERGE".
+
+  customFields @3 :List(Record);
+  # User-defined metadata for the destination object (used with REPLACE or MERGE).
+
+  httpFields @4 :R2HttpFields;
+  # HTTP metadata for the destination object (used with REPLACE or MERGE).
+
+  onlyIf @5 :R2Conditional;
+  # Conditional checks against the destination object (distinct from source conditionals).
+
+  storageClass @6 :Text;
+  # Storage class for the destination object (e.g., "Standard", "InfrequentAccess").
+
+  ssec @7 :R2SSECOptions;
+  # SSE-C encryption key for the destination object.
+}
+
 struct R2CreateMultipartUploadRequest {
   object @0 :Text;
   customFields @1 :List(Record);
@@ -127,6 +175,43 @@ struct R2UploadPartRequest {
   uploadId @1 :Text;
   partNumber @2 :UInt32;
   ssec @3 :R2SSECOptions;
+}
+
+struct R2UploadPartCopySource {
+  bucket @0 :Text;
+  # The bucket containing the source object. Must be in the same account.
+
+  object @1 :Text;
+  # The key of the source object to copy from.
+
+  onlyIf @2 :R2Conditional;
+  # Conditional checks against the source object.
+
+  range @3 :R2Range;
+  # Byte range to copy from the source object.
+
+  rangeHeader @4 :Text;
+  # Alternative to range: a raw HTTP Range header string (e.g., "bytes=0-1023").
+
+  ssec @5 :R2SSECOptions;
+  # Required if the source object was encrypted with SSE-C.
+}
+
+struct R2UploadPartCopyRequest {
+  object @0 :Text;
+  # The key of the destination object for the multipart upload.
+
+  uploadId @1 :Text;
+  # The upload ID from createMultipartUpload.
+
+  source @2 :R2UploadPartCopySource;
+  # The source object to copy from.
+
+  partNumber @3 :UInt32;
+  # The part number (1-10000) for this upload part.
+
+  ssec @4 :R2SSECOptions;
+  # SSE-C encryption key for the destination object.
 }
 
 struct R2CompleteMultipartUploadRequest {
@@ -152,13 +237,6 @@ struct R2ListRequest {
   # Additional fields to include in the response that might not normally be rendered.
   # The values are all IncludeField but we can't actually have that here because otherwise
   # capnp's builtin JSON encoder will print the enum name instead of the value.
-
-  newRuntime @6 :Bool;
-  # We used to send the include but not honor it. Newer versions of the runtime will send this to
-  # indicate we're sending a version of the `include` that can be honored. Before that the R2 worker
-  # should assume include always means http & custom metadata should be returned. This is a
-  # transitionary field just to avoid coupling needing to simultaneously release the Worker &
-  # runtime and can be removed after the release cut for the week of July 4, 2022.
 
   enum IncludeField @0xc02f1c58744671f1 {
     http @0;
@@ -242,6 +320,8 @@ using R2GetResponse = R2HeadResponse;
 
 using R2PutResponse = R2HeadResponse;
 
+using R2CopyResponse = R2HeadResponse;
+
 struct R2CreateMultipartUploadResponse {
   uploadId @0 :Text;
   # The unique identifier of this object, required for subsequent operations on
@@ -255,6 +335,8 @@ struct R2UploadPartResponse {
   # The ETag the of the uploaded part.
   # This ETag is required in order to complete the multipart upload.
 }
+
+using R2UploadPartCopyResponse = R2UploadPartResponse;
 
 using R2CompleteMultipartUploadResponse = R2PutResponse;
 

@@ -17,20 +17,7 @@
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
 
-#include <regex>
-
 namespace workerd::api::public_beta {
-
-static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
-  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
-  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
-    traceContext.userSpan.setTag("error.type"_kjc, e.asPtr());
-    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, e.asPtr());
-  }
-  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
-    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, static_cast<int64_t>(v4));
-  }
-}
 
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg::Lock& js,
     int partNumber,
@@ -79,9 +66,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         auto ssecBuilder = uploadPartBuilder.initSsec();
         KJ_SWITCH_ONEOF(ssecKey) {
           KJ_CASE_ONEOF(keyString, kj::String) {
-            JSG_REQUIRE(
-                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-                Error, "SSE-C Key has invalid format");
+            JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,
+                "SSE-C Key has invalid format");
             JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
             ssecBuilder.setKey(kj::str(keyString));
             traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
@@ -139,6 +125,215 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       kj::StringPtr etag = responseBuilder.getEtag();
       traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, etag);
       UploadedPart uploadedPart = {partNumber, kj::str(etag)};
+      return uploadedPart;
+    });
+  });
+}
+
+jsg::Promise<kj::Maybe<R2MultipartUpload::UploadedPart>> R2MultipartUpload::uploadPartCopy(
+    jsg::Lock& js,
+    int partNumber,
+    UploadPartCopySource source,
+    jsg::Optional<UploadPartCopyOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
+        "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
+
+    auto& context = IoContext::current();
+
+    auto traceSpan = context.makeTraceSpan("r2_uploadPartCopy"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_uploadPartCopy"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, "UploadPartCopy"_kjc);
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, b);
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.request.source.bucket"_kjc, source.bucket.asPtr());
+    traceContext.userSpan.setTag("cloudflare.r2.request.source.object"_kjc, source.object.asPtr());
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto payloadBuilder = requestBuilder.initPayload();
+    auto uploadPartCopyBuilder = payloadBuilder.initUploadPartCopy();
+
+    uploadPartCopyBuilder.setUploadId(uploadId);
+    uploadPartCopyBuilder.setPartNumber(partNumber);
+    uploadPartCopyBuilder.setObject(key);
+    // SSE-C for Uploaded Part
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(ssecKey, o.ssecKey) {
+        auto ssecBuilder = uploadPartCopyBuilder.initSsec();
+        KJ_SWITCH_ONEOF(ssecKey) {
+          KJ_CASE_ONEOF(keyString, kj::String) {
+            JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,
+                "SSE-C Key has invalid format");
+            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::str(keyString));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+          }
+          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+            ssecBuilder.setKey(kj::encodeHex(keyBuff));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+          }
+        }
+      }
+    }
+    auto sourceBuilder = uploadPartCopyBuilder.initSource();
+    sourceBuilder.setBucket(source.bucket);
+    sourceBuilder.setObject(source.object);
+
+    // Range for source
+    KJ_IF_SOME(range, source.range) {
+      KJ_SWITCH_ONEOF(range) {
+        KJ_CASE_ONEOF(r, R2Bucket::Range) {
+          auto rangeBuilder = sourceBuilder.initRange();
+          KJ_IF_SOME(offset, r.offset) {
+            JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
+                ") must be greater than or equal to 0.");
+            JSG_REQUIRE(isWholeNumber(offset), RangeError, "Invalid range. Starting offset (",
+                offset, ") must be an integer, not floating point.");
+            rangeBuilder.setOffset(static_cast<uint64_t>(offset));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.source.range.offset"_kjc, static_cast<int64_t>(offset));
+          }
+          KJ_IF_SOME(length, r.length) {
+            JSG_REQUIRE(length >= 0, RangeError, "Invalid range. Length (", length,
+                ") must be greater than or equal to 0.");
+            JSG_REQUIRE(isWholeNumber(length), RangeError, "Invalid range. Length (", length,
+                ") must be an integer, not floating point.");
+            rangeBuilder.setLength(static_cast<uint64_t>(length));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.source.range.length"_kjc, static_cast<int64_t>(length));
+          }
+          KJ_IF_SOME(suffix, r.suffix) {
+            JSG_REQUIRE(r.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
+            JSG_REQUIRE(r.length == kj::none, TypeError, "Suffix is incompatible with length.");
+            JSG_REQUIRE(suffix >= 0, RangeError, "Invalid suffix. Suffix (", suffix,
+                ") must be greater than or equal to 0.");
+            JSG_REQUIRE(isWholeNumber(suffix), RangeError, "Invalid range. Suffix (", suffix,
+                ") must be an integer, not floating point.");
+            rangeBuilder.setSuffix(static_cast<uint64_t>(suffix));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.source.range.suffix"_kjc, static_cast<int64_t>(suffix));
+          }
+        }
+        KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+          KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
+            sourceBuilder.setRangeHeader(kj::str(e));
+            traceContext.userSpan.setTag("cloudflare.r2.request.source.range"_kjc, e.asPtr());
+          }
+        }
+      }
+    }
+
+    // Conditional for source
+    KJ_IF_SOME(i, source.onlyIf) {
+      R2Bucket::UnwrappedConditional c = [&] {
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(conditional, R2Bucket::Conditional) {
+            return R2Bucket::UnwrappedConditional(conditional);
+          }
+          KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+            return R2Bucket::UnwrappedConditional(js, *h);
+          }
+        }
+        KJ_UNREACHABLE;
+      }();
+
+      R2Conditional::Builder onlyIfBuilder = sourceBuilder.initOnlyIf();
+      KJ_IF_SOME(etagArray, c.etagMatches) {
+        auto etagMatchList = onlyIfBuilder.initEtagMatches(etagArray.size());
+        addEtagsToBuilder(
+            etagMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+        traceContext.userSpan.setTag("cloudflare.r2.request.source.only_if.etag_matches"_kjc,
+            buildEtagsString(etagArray));
+      }
+      KJ_IF_SOME(etagArray, c.etagDoesNotMatch) {
+        auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray.size());
+        addEtagsToBuilder(etagDoesNotMatchList,
+            kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+        traceContext.userSpan.setTag("cloudflare.r2.request.source.only_if.etag_does_not_match"_kjc,
+            buildEtagsString(etagArray));
+      }
+      KJ_IF_SOME(d, c.uploadedBefore) {
+        onlyIfBuilder.setUploadedBefore((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        if (c.secondsGranularity) {
+          onlyIfBuilder.setSecondsGranularity(true);
+        }
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.source.only_if.uploaded_before"_kjc, toISOString(js, d));
+      }
+      KJ_IF_SOME(d, c.uploadedAfter) {
+        onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+        if (c.secondsGranularity) {
+          onlyIfBuilder.setSecondsGranularity(true);
+        }
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.source.only_if.uploaded_after"_kjc, toISOString(js, d));
+      }
+    }
+
+    // SSE-C for Source Object
+    KJ_IF_SOME(ssecKey, source.ssecKey) {
+      auto ssecBuilder = sourceBuilder.initSsec();
+      KJ_SWITCH_ONEOF(ssecKey) {
+        KJ_CASE_ONEOF(keyString, kj::String) {
+          JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), hexPattern), Error,
+              "SSE-C Key has invalid format");
+          JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
+          ssecBuilder.setKey(kj::str(keyString));
+          traceContext.userSpan.setTag("cloudflare.r2.request.source.ssec_key"_kjc, true);
+        }
+        KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
+          JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
+          ssecBuilder.setKey(kj::encodeHex(keyBuff));
+          traceContext.userSpan.setTag("cloudflare.r2.request.source.ssec_key"_kjc, true);
+        }
+      }
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, this->bucket->adminBucket);
+    auto promise =
+        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
+
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, partNumber, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<UploadedPart> {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      if (r2Result.preconditionFailed()) {
+        return kj::none;
+      }
+      r2Result.throwIfError("uploadPartCopy", errorType);
+
+      capnp::MallocMessageBuilder responseMessage;
+      capnp::JsonCodec json;
+      json.handleByAnnotation<R2UploadPartResponse>();
+      auto responseBuilder = responseMessage.initRoot<R2UploadPartResponse>();
+
+      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+      kj::String etag = kj::str(responseBuilder.getEtag());
+      traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, etag.asPtr());
+      UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
       return uploadedPart;
     });
   });
