@@ -268,17 +268,6 @@ jsg::BufferSource transcode(
       "Unable to transcode buffer");
 }
 
-kj::String getIcuVersion() {
-  // ICU provides version information through U_ICU_VERSION which is defined in uvernum.h
-  // The format is like "75.1" for ICU 75.1
-  UVersionInfo versionArray;
-  u_getVersion(versionArray);
-
-  // Convert the version array to a string
-  // UVersionInfo is an array of 4 uint8_t values: [major, minor, patch, build]
-  return kj::str(versionArray[0], ".", versionArray[1]);
-}
-
 }  // namespace i18n
 
 }  // namespace workerd::api::node
