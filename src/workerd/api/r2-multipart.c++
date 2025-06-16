@@ -5,6 +5,7 @@
 #include "r2-multipart.h"
 
 #include "r2-bucket.h"
+#include "r2-impl-utils.h"
 #include "r2-rpc.h"
 #include "workerd/jsg/jsg.h"
 
@@ -48,22 +49,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     uploadPartBuilder.setPartNumber(partNumber);
     uploadPartBuilder.setObject(key);
     KJ_IF_SOME(options, options) {
-      KJ_IF_SOME(ssecKey, options.ssecKey) {
-        auto ssecBuilder = uploadPartBuilder.initSsec();
-        KJ_SWITCH_ONEOF(ssecKey) {
-          KJ_CASE_ONEOF(keyString, kj::String) {
-            JSG_REQUIRE(
-                std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-                Error, "SSE-C Key has invalid format");
-            JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::str(keyString));
-          }
-          KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
-            JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
-            ssecBuilder.setKey(kj::encodeHex(keyBuff));
-          }
-        }
-      }
+      initSsec(js, uploadPartBuilder, options);
     }
 
     auto requestJson = json.encode(requestBuilder);

@@ -4,6 +4,7 @@
 
 #include "r2-bucket.h"
 
+#include "r2-impl-utils.h"
 #include "r2-multipart.h"
 #include "r2-rpc.h"
 #include "util.h"
@@ -37,11 +38,6 @@ kj::Own<kj::HttpClient> r2GetClient(
   }
 
   return context.getHttpClientWithSpans(subrequestChannel, true, kj::none, user.op, kj::mv(tags));
-}
-
-static bool isWholeNumber(double x) {
-  double intpart;
-  return modf(x, &intpart) == 0;
 }
 
 // TODO(perf): Would be nice to expose the v8 internals for parsing a date/stringifying it as
@@ -196,72 +192,6 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
   return parseObjectMetadata<T>(js, responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
-namespace {
-
-void addEtagsToBuilder(
-    capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
-  R2Bucket::Etag* currentEtag = etagArray.begin();
-  for (unsigned int i = 0; i < etagArray.size(); i++) {
-    KJ_SWITCH_ONEOF(*currentEtag) {
-      KJ_CASE_ONEOF(e, R2Bucket::WildcardEtag) {
-        etagListBuilder[i].initType().setWildcard();
-      }
-      KJ_CASE_ONEOF(e, R2Bucket::StrongEtag) {
-        etagListBuilder[i].initType().setStrong();
-        etagListBuilder[i].setValue(e.value);
-      }
-      KJ_CASE_ONEOF(e, R2Bucket::WeakEtag) {
-        etagListBuilder[i].initType().setWeak();
-        etagListBuilder[i].setValue(e.value);
-      }
-    }
-    currentEtag = std::next(currentEtag);
-  }
-}
-
-}  // namespace
-
-template <typename Builder, typename Options>
-void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
-  KJ_IF_SOME(i, o.onlyIf) {
-    R2Bucket::UnwrappedConditional c = [&] {
-      KJ_SWITCH_ONEOF(i) {
-        KJ_CASE_ONEOF(conditional, R2Bucket::Conditional) {
-          return R2Bucket::UnwrappedConditional(conditional);
-        }
-        KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-          return R2Bucket::UnwrappedConditional(js, *h);
-        }
-      }
-      KJ_UNREACHABLE;
-    }();
-
-    R2Conditional::Builder onlyIfBuilder = builder.initOnlyIf();
-    KJ_IF_SOME(etagArray, c.etagMatches) {
-      capnp::List<R2Etag>::Builder etagMatchList = onlyIfBuilder.initEtagMatches(etagArray.size());
-      addEtagsToBuilder(
-          etagMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
-    }
-    KJ_IF_SOME(etagArray, c.etagDoesNotMatch) {
-      auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray.size());
-      addEtagsToBuilder(
-          etagDoesNotMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
-    }
-    KJ_IF_SOME(d, c.uploadedBefore) {
-      onlyIfBuilder.setUploadedBefore((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-      if (c.secondsGranularity) {
-        onlyIfBuilder.setSecondsGranularity(true);
-      }
-    }
-    KJ_IF_SOME(d, c.uploadedAfter) {
-      onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-      if (c.secondsGranularity) {
-        onlyIfBuilder.setSecondsGranularity(true);
-      }
-    }
-  }
-}
-
 kj::Maybe<kj::String> buildSsecKey(
     kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey) {
   KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
@@ -284,51 +214,8 @@ kj::Maybe<kj::String> buildSsecKey(
 template <typename Builder, typename Options>
 void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   initOnlyIf(js, builder, o);
-  KJ_IF_SOME(range, o.range) {
-    KJ_SWITCH_ONEOF(range) {
-      KJ_CASE_ONEOF(r, R2Bucket::Range) {
-        auto rangeBuilder = builder.initRange();
-        KJ_IF_SOME(offset, r.offset) {
-          JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
-              ") must be greater than or equal to 0.");
-          JSG_REQUIRE(isWholeNumber(offset), RangeError, "Invalid range. Starting offset (", offset,
-              ") must be an integer, not floating point.");
-          rangeBuilder.setOffset(static_cast<uint64_t>(offset));
-        }
-
-        KJ_IF_SOME(length, r.length) {
-          JSG_REQUIRE(length >= 0, RangeError, "Invalid range. Length (", length,
-              ") must be greater than or equal to 0.");
-          JSG_REQUIRE(isWholeNumber(length), RangeError, "Invalid range. Length (", length,
-              ") must be an integer, not floating point.");
-
-          rangeBuilder.setLength(static_cast<uint64_t>(length));
-        }
-        KJ_IF_SOME(suffix, r.suffix) {
-          JSG_REQUIRE(r.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
-          JSG_REQUIRE(r.length == kj::none, TypeError, "Suffix is incompatible with length.");
-
-          JSG_REQUIRE(suffix >= 0, RangeError, "Invalid suffix. Suffix (", suffix,
-              ") must be greater than or equal to 0.");
-          JSG_REQUIRE(isWholeNumber(suffix), RangeError, "Invalid range. Suffix (", suffix,
-              ") must be an integer, not floating point.");
-
-          rangeBuilder.setSuffix(static_cast<uint64_t>(suffix));
-        }
-      }
-
-      KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-        KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
-          builder.setRangeHeader(kj::str(e));
-        }
-      }
-    }
-  }
-  kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
-  KJ_IF_SOME(ssecKey, maybeSsecKey) {
-    auto ssecBuilder = builder.initSsec();
-    ssecBuilder.setKey(ssecKey);
-  }
+  initRange(js, builder, o);
+  initSsec(js, builder, o);
 }
 
 static bool isQuotedEtag(kj::StringPtr etag) {
@@ -597,11 +484,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
       KJ_IF_SOME(s, o.storageClass) {
         putBuilder.setStorageClass(s);
       }
-      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
-      KJ_IF_SOME(ssecKey, maybeSsecKey) {
-        auto ssecBuilder = putBuilder.initSsec();
-        ssecBuilder.setKey(ssecKey);
-      }
+      initSsec(js, putBuilder, o);
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -695,11 +578,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       KJ_IF_SOME(s, o.storageClass) {
         createMultipartUploadBuilder.setStorageClass(s);
       }
-      kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
-      KJ_IF_SOME(ssecKey, maybeSsecKey) {
-        auto ssecBuilder = createMultipartUploadBuilder.initSsec();
-        ssecBuilder.setKey(ssecKey);
-      }
+      initSsec(js, createMultipartUploadBuilder, o);
     }
 
     auto requestJson = json.encode(requestBuilder);
