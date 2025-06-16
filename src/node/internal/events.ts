@@ -511,7 +511,10 @@ function _addListener(
           count: existing.length,
         }
       );
-      process.emitWarning(w);
+      // Because process is the internal process here, emitWarning will only ever
+      // be defined when using the enable_nodejs_process_v2 flag, so the warning
+      // is only logged under that condition.
+      process.emitWarning?.(w);
     }
   }
 

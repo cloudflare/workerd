@@ -833,9 +833,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # implementation the recommended behavior is what is implemented. With this compat flag
   # enabled, the original module registry implementation will follow the recommended behavior.
 
-  unsupportedProcessRealPlatform @95 :Bool
-      $compatEnableFlag("unsupported_process_real_platform")
+  unsupportedProcessActualPlatform @95 :Bool
+      $compatEnableFlag("unsupported_process_actual_platform")
       $experimental;
-  # Enables support for process.platform to expose the actual system platform
-  # This will never ever be supported and is a WPT test path only.
+  # By default, Workerd will always expose "linux" as the process.platform.
+  # This flag enables support for process.platform to expose the actual system platform.
+  # This is unsupported, as this feature will never ever be supported as non-experimental and is a
+  # temporary WPT test path only.
+
+  enableNodeJsProcessV2 @96 :Bool
+      $compatEnableFlag("enable_nodejs_process_v2")
+      $experimental;
+  # Enables full process compat support, instead of the former partial implementation.
 }
