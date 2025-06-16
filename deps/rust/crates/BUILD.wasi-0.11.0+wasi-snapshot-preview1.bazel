@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "miniz_oxide",
+    name = "wasi",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,23 +28,17 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "with-alloc",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=miniz_oxide",
+        "crate-name=wasi",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.9",
-    deps = [
-        "@crates_vendor__adler2-2.0.1//:adler2",
-    ],
+    version = "0.11.0+wasi-snapshot-preview1",
 )

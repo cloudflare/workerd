@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "getopts",
+    name = "miniz_oxide",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,9 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "with-alloc",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,13 +38,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getopts",
+        "crate-name=miniz_oxide",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.23",
+    version = "0.8.8",
     deps = [
-        "@crates_vendor__unicode-width-0.2.1//:unicode_width",
+        "@crates_vendor__adler2-2.0.0//:adler2",
     ],
 )
