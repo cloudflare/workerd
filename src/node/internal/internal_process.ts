@@ -435,19 +435,22 @@ export function unref(_maybeRefable: unknown): void {
 }
 
 // TODO(soon): Support via experimental FS
-export function chdir(_dir: string): void {
-  throw new ERR_UNSUPPORTED_OPERATION();
-}
+// Non-throwing stub to ensure polyfills still engage
+export const chdir = undefined;
+// export function chdir(_dir: string): void {
+// }
 
 // TODO(soon): Support via experimental FS
-export function cwd(): string {
-  throw new ERR_UNSUPPORTED_OPERATION();
-}
+// Non-throwing stub to ensure polyfills still engage
+export const cwd = undefined;
+// export function cwd(): string {
+// }
 
 // TODO(soon): Support via experimental FS
-export function umask(_mask: string | number): void {
-  throw new ERR_UNSUPPORTED_OPERATION();
-}
+// Non-throwing stub to ensure polyfills still engage
+export const umask = undefined;
+// export function umask(_mask: string | number): void {
+// }
 
 export const hrtime: {
   (time?: [number, number]): [number, number];
