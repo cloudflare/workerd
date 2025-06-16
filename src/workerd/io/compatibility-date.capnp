@@ -838,4 +838,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables support for process.platform to expose the actual system platform
   # This will never ever be supported and is a WPT test path only.
+
+  populateProcessVersions @96 :Bool
+      $compatEnableFlag("nodejs_compat_populate_process_versions")
+      $compatDisableFlag("nodejs_compat_do_not_populate_process_versions")
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2025-06-16");
+  # Automatically populate process.versions only when nodejs_compat is being used.
 }
