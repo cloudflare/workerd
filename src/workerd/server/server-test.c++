@@ -321,6 +321,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
         cwd(root->openSubdir(pwd, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT)),
         timer(kj::origin<kj::TimePoint>()),
         server(*this,
+            kj::none,
             timer,
             mockNetwork,
             *this,

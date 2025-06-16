@@ -651,6 +651,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       : context(context),
         argv(argv),
         server(kj::heap<Server>(*fs,
+            io,
             io.provider->getTimer(),
             network,
             entropySource,
@@ -841,7 +842,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       features.setPythonWorkers(true);
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(features));
       auto version = getPythonBundleName(pythonRelease);
-      KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
+      auto io = kj::setupAsyncIo();
+      KJ_ASSERT_NONNULL(fetchPyodideBundle(io, config, version), "Failed to get Pyodide bundle");
 
       auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
 

@@ -167,12 +167,14 @@ static inline kj::Own<T> fakeOwn(T& ref) {
 // =======================================================================================
 
 Server::Server(kj::Filesystem& fs,
+    kj::Maybe<kj::AsyncIoContext&> ioContext,
     kj::Timer& timer,
     kj::Network& network,
     kj::EntropySource& entropySource,
     Worker::ConsoleMode consoleMode,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
+      ioContext(ioContext),
       timer(timer),
       network(network),
       entropySource(entropySource),
@@ -3118,13 +3120,13 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
 
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
         source.tryGet<Worker::Script::ModulesSource>(), featureFlags.asReader(), pythonConfig,
-        bundleBase, extensions, kj::mv(maybeFallbackService));
+        bundleBase, extensions, ioContext, kj::mv(maybeFallbackService));
   }
 
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, featureFlags.asReader(), extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs));
+      pythonConfig, kj::mv(newModuleRegistry), kj::mv(workerFs), ioContext);
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {

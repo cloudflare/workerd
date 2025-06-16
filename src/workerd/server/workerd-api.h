@@ -42,7 +42,8 @@ class WorkerdApi final: public Worker::Api {
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-      kj::Own<VirtualFileSystem> vfs);
+      kj::Own<VirtualFileSystem> vfs,
+      kj::Maybe<kj::AsyncIoContext&> ioContext);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
@@ -279,14 +280,21 @@ class WorkerdApi final: public Worker::Api {
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,
+      kj::Maybe<kj::AsyncIoContext&> ioContext,
       kj::Maybe<kj::String> fallbackService = kj::none);
+
+  kj::AsyncIoContext& getIoContext() const {
+    return KJ_ASSERT_NONNULL(ioContext);
+  }
 
  private:
   struct Impl;
   kj::Own<Impl> impl;
+  kj::Maybe<kj::AsyncIoContext&> ioContext;
 };
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(kj::AsyncIoContext& ioContext,
+    const api::pyodide::PythonConfig& pyConfig,
+    kj::StringPtr version);
 
 }  // namespace workerd::server

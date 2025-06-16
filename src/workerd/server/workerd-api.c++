@@ -277,7 +277,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
 }  // namespace
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
+    kj::AsyncIoContext& io, const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
   if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
     return pyConfig.pyodideBundleManager.getPyodideBundle(version);
   }
@@ -295,39 +295,33 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     return kj::none;
   }
 
-  {
-    kj::Thread([&]() {
-      kj::String url =
-          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
-      KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
-      kj::AsyncIoContext io = kj::setupAsyncIo();
-      kj::HttpHeaderTable table;
+  kj::String url =
+      kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
+  KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
+  kj::HttpHeaderTable table;
 
-      kj::TlsContext::Options options;
-      options.useSystemTrustStore = true;
+  kj::TlsContext::Options options;
+  options.useSystemTrustStore = true;
 
-      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
-      auto& network = io.provider->getNetwork();
-      auto tlsNetwork = tls->wrapNetwork(network);
-      auto& timer = io.provider->getTimer();
+  kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+  auto& network = io.provider->getNetwork();
+  auto tlsNetwork = tls->wrapNetwork(network);
+  auto& timer = io.provider->getTimer();
 
-      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
+  auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
 
-      kj::HttpHeaders headers(table);
+  kj::HttpHeaders headers(table);
 
-      auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
+  auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
-      auto res = req.response.wait(io.waitScope);
-      KJ_ASSERT(res.statusCode == 200,
-          kj::str(
-              "Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
-      auto body = res.body->readAllBytes().wait(io.waitScope);
+  auto res = req.response.wait(io.waitScope);
+  KJ_ASSERT(res.statusCode == 200,
+      kj::str("Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
+  auto body = res.body->readAllBytes().wait(io.waitScope);
 
-      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
+  writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
 
-      pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-    });
-  }
+  pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
 
   KJ_LOG(INFO, "Loaded Pyodide package from internet");
   return pyConfig.pyodideBundleManager.getPyodideBundle(version);
@@ -342,6 +336,7 @@ struct WorkerdApi::Impl final {
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
+  kj::Maybe<kj::AsyncIoContext&> ioContext;
   kj::Maybe<api::pyodide::EmscriptenRuntime> maybeEmscriptenRuntime;
 
   class Configuration {
@@ -372,6 +367,7 @@ struct WorkerdApi::Impl final {
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
       kj::Own<VirtualFileSystem> vfs,
+      kj::Maybe<kj::AsyncIoContext&> ioContext,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
@@ -382,7 +378,8 @@ struct WorkerdApi::Impl final {
         jsgIsolate(
             v8System, group, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
-        pythonConfig(pythonConfig) {
+        pythonConfig(pythonConfig),
+        ioContext(ioContext) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
       // maybeOwnedModuleRegistry is only set when using the
       // new module registry implementation. When that is the
@@ -394,7 +391,8 @@ struct WorkerdApi::Impl final {
         auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
         auto version = getPythonBundleName(pythonRelease);
         auto bundle = KJ_ASSERT_NONNULL(
-            fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
+            fetchPyodideBundle(KJ_ASSERT_NONNULL(ioContext), pythonConfig, version),
+            "Failed to get Pyodide bundle");
         jsg::NewContextOptions options{.enableWeakRef = features->getJsWeakRef()};
         auto context = lock.newContext<api::ServiceWorkerGlobalScope>(options);
         v8::Context::Scope scope(context.getHandle(lock));
@@ -452,7 +450,8 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
     kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-    kj::Own<VirtualFileSystem> vfs)
+    kj::Own<VirtualFileSystem> vfs,
+    kj::Maybe<kj::AsyncIoContext&> ioContext)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -461,6 +460,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           kj::mv(observer),
           memoryCacheProvider,
           kj::mv(vfs),
+          ioContext,
           pythonConfig,
           kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
@@ -747,7 +747,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+          fetchPyodideBundle(KJ_ASSERT_NONNULL(impl->ioContext), impl->pythonConfig, version),
+          "Failed to get Pyodide bundle");
 
       // Inject Pyodide bundle
       modules->addBuiltinBundle(bundle, kj::none);
@@ -1084,6 +1085,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
+    kj::Maybe<kj::AsyncIoContext&> ioContext,
     kj::Maybe<kj::String> maybeFallbackService) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
@@ -1222,8 +1224,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       // Inject metadata that the entrypoint module will read.
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
-      auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
+      auto bundle =
+          KJ_ASSERT_NONNULL(fetchPyodideBundle(KJ_ASSERT_NONNULL(ioContext), pythonConfig, version),
+              "Failed to get Pyodide bundle");
 
       // We end up add modules from the bundle twice, once to get BUILTIN modules
       // and again to get the BUILTIN_ONLY modules. These end up in two different
