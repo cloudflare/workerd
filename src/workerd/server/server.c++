@@ -1490,11 +1490,8 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer,
-      kj::TaskSet& waitUntilTasks,
-      SpanParent userSpanParent)
-      : tracer(kj::mv(tracer)),
-        userRequestSpan(userSpanParent.newChild("worker"_kjc)) {}
+  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
+      : tracer(kj::mv(tracer)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
@@ -1604,17 +1601,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     }
   }
 
-  virtual SpanParent getUserSpan() override {
-    return this->userRequestSpan;
-  }
-
  private:
   kj::Maybe<kj::Own<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
   kj::uint fetchStatus = 0;
-  // The root span for the new tracing format.
-  SpanBuilder userRequestSpan;
 };
 
 class WorkerTracerSpanObserver: public SpanObserver,
@@ -1947,12 +1938,15 @@ class Server::WorkerService final: public Service,
       auto tracer = kj::rc<PipelineTracer>();
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-      workerTracer =
-          tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel, kj::none /* scriptId */,
-              kj::none /* stableId */, kj::none /* scriptName */, kj::none /* scriptVersion */,
-              kj::none /* dispatchNamespace */, nullptr /* scriptTags */, kj::none /* entrypoint */,
-              tracing::initializeTailStreamWriter(
-                  streamingTailWorkers.releaseAsArray(), waitUntilTasks));
+      auto tailStreamWriter = tracing::initializeTailStreamWriter(
+          streamingTailWorkers.releaseAsArray(), waitUntilTasks);
+      KJ_IF_SOME(t, tailStreamWriter) {
+        tracer->addTailStreamWriter(kj::addRef(*t));
+      }
+      workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
+          kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
+          kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
+          kj::none /* entrypoint */, kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the
@@ -1977,13 +1971,14 @@ class Server::WorkerService final: public Service,
       })));
     }
 
-    SpanParent userSpanParent(nullptr);
-    if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
-      auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
-      userSpanParent = SpanParent(kj::mv(tracerSpanObserver));
+    KJ_IF_SOME(w, workerTracer) {
+      if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
+        auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
+        SpanBuilder userSpanParent(kj::mv(tracerSpanObserver), "worker"_kjc);
+        w->setUserRequestSpan(kj::mv(userSpanParent));
+      }
     }
-    observer = kj::refcounted<RequestObserverWithTracer>(
-        mapAddRef(workerTracer), waitUntilTasks, kj::mv(userSpanParent));
+    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),

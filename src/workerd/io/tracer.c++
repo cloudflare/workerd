@@ -99,19 +99,25 @@ void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
   traces.add(kj::refcounted<Trace>(reader));
 }
 
+void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
+  tailStreamWriters.add(kj::mv(writer));
+}
+
 WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
     kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::mv(trace)),
+      userRequestSpan(nullptr),
       parentPipeline(kj::mv(parentPipeline)),
       maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
 
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
       trace(kj::refcounted<Trace>(
-          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)) {}
+          kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
+      userRequestSpan(nullptr) {}
 
 constexpr kj::LiteralStringConst logSizeExceeded =
     "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
@@ -328,6 +334,10 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
 
+  // All spans must have wrapped up by now. Report the top-level "worker" span and deallocate the
+  // span builder which holds a reference to this workerTracer.
+  userRequestSpan.end();
+  userRequestSpan = nullptr;
   // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
   // wd_test), we never set up a tail stream and accordingly should not report an outcome
   // event. Worker events that should be traced need to set the event info at the start of the
@@ -360,6 +370,15 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
     writer->report(
         spanContext, tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}));
   }
+}
+
+void WorkerTracer::setUserRequestSpan(SpanBuilder&& span) {
+  KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
+  userRequestSpan = kj::mv(span);
+}
+
+SpanParent WorkerTracer::getUserRequestSpan() {
+  return userRequestSpan;
 }
 
 }  // namespace workerd
