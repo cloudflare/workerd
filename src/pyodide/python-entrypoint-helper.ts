@@ -244,7 +244,8 @@ const SPECIAL_DO_HANDLER_NAMES = [
 
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
-  isDurableObject: boolean
+  isDurableObject: boolean,
+  isWorkflow: boolean
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
@@ -257,7 +258,10 @@ function makeEntrypointProxyHandler(
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop == 'fetch';
-      if (isKnownHandler || isKnownDoHandler) {
+      // TODO: find a better workaround for this. We can't keep considering any worker that implements a run method
+      // as a workflow. What consequences do we have here?
+      const isWorkflowHandler = isWorkflow || prop == 'run';
+      if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
         prop = 'on_' + prop;
       }
 
@@ -269,6 +273,10 @@ function makeEntrypointProxyHandler(
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
+          return await doPyCallHelper(true, pyInstance[prop], args);
+        }
+
+        if (isWorkflowHandler) {
           return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
@@ -291,6 +299,7 @@ function makeEntrypointClass(
   methods: string[]
 ): any {
   const isDurableObject = classKind.name === 'DurableObject';
+  const isWorkflow = classKind.name === 'WorkflowEntrypoint';
   const result = class EntrypointWrapper extends classKind {
     constructor(...args: any[]) {
       super(...args);
@@ -300,7 +309,7 @@ function makeEntrypointClass(
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject)
+        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject, isWorkflow)
       );
     }
   };

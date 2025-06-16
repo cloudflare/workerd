@@ -3,8 +3,10 @@
 # programming language.
 import datetime
 import functools
+import asyncio
 import http.client
 import json
+import inspect
 from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
@@ -930,8 +932,48 @@ def handler(func):
     return wrapper
 
 
+class _WorkflowStepWrapper:
+    def __init__(self, js_step):
+        self._js_step = js_step
+
+    def do(self, name, config=None):
+        def decorator(func):
+            @functools.wraps(func)
+            async def wrapper(*args, **kwargs):
+                async def _callback():
+                    # Execute the user function (sync or async) and convert its result.
+                    result = func(*args, **kwargs)
+
+                    # If the result is awaitable (coroutine / Future), await it.
+                    if inspect.isawaitable(result):
+                        result = await result
+
+                    return result
+                python_callback = _callback  # `to_js` will handle the conversion.
+
+                if config is None:
+                    result = await self._js_step.do(name, python_callback)
+                else:
+                    result = await self._js_step.do(name, to_js(config), python_callback)
+
+                return result
+            return wrapper
+
+        return decorator
+
+    # JS <-> PY already converts casing
+    # No further work needed for sleep/sleep_until since APIs are identical
+
+    async def wait_for_event(self, name, type, timeout=None):
+        options = {"type": type}
+        if timeout is not None:
+            options["timeout"] = timeout
+        event = await self._js_step.waitForEvent(name, to_js(options))
+        return python_from_rpc(event)
+
+
 def _wrap_subclass(cls):
-    # Override the class __init__ so that we can wrap the `env` in the constructor.
+    """Patch subclass to wrap `env` and `step` parameters with Python wrappers."""
     original_init = cls.__init__
 
     def wrapped_init(self, *args, **kwargs):
@@ -941,6 +983,39 @@ def _wrap_subclass(cls):
         original_init(self, *args, **kwargs)
 
     cls.__init__ = wrapped_init
+
+    run_fn = getattr(cls, "on_run", None)
+    if run_fn is None:
+        return
+
+    # Only patch `on_run` for subclasses of WorkflowEntrypoint.
+    is_workflow_subclass = any(
+        base.__name__ == "WorkflowEntrypoint" for base in cls.__mro__[1:]
+    )
+
+    if not is_workflow_subclass:
+        # Not a workflow subclass, so don't wrap `on_run`.
+        return
+
+    if asyncio.iscoroutinefunction(run_fn):
+        async def wrapped_run(self, *args, **kwargs):
+            if len(args) > 1:
+                args = (python_from_rpc(args[0]), _WorkflowStepWrapper(args[1])) + args[2:]
+            elif len(args) > 2:
+                args = (python_from_rpc(args[0]), python_from_rpc(args[1]), _WorkflowStepWrapper(args[2])) + args[3:]
+
+            return await run_fn(self, *args, **kwargs)
+
+    else:
+        def wrapped_run(self, *args, **kwargs):
+            if len(args) > 1:
+                args = (python_from_rpc(args[0]), _WorkflowStepWrapper(args[1])) + args[2:]
+            elif len(args) > 2:
+                args = (python_from_rpc(args[0]), args[1], _WorkflowStepWrapper(args[2])) + args[3:]
+
+            return run_fn(self, *args, **kwargs)
+
+    cls.on_run = wrapped_run
 
 
 class DurableObject:
