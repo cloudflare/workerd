@@ -17,8 +17,6 @@
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
 
-#include <regex>
-
 namespace workerd::api::public_beta {
 
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg::Lock& js,
@@ -63,6 +61,70 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     return context.awaitIo(
         js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
       r2Result.throwIfError("uploadPart", errorType);
+
+      capnp::MallocMessageBuilder responseMessage;
+      capnp::JsonCodec json;
+      json.handleByAnnotation<R2UploadPartResponse>();
+      auto responseBuilder = responseMessage.initRoot<R2UploadPartResponse>();
+
+      json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
+      kj::String etag = kj::str(responseBuilder.getEtag());
+      UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
+      return uploadedPart;
+    });
+  });
+}
+
+jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartCopy(jsg::Lock& js,
+    int partNumber,
+    UploadPartCopySource source,
+    jsg::Optional<UploadPartCopyOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
+        "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
+
+    auto& context = IoContext::current();
+    auto client = r2GetClient(context, this->bucket->clientIndex,
+        {"r2_uploadPartCopy"_kjc, {"rpc.method"_kjc, "UploadPartCopy"_kjc},
+          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto payloadBuilder = requestBuilder.initPayload();
+    auto uploadPartCopyBuilder = payloadBuilder.initUploadPartCopy();
+
+    uploadPartCopyBuilder.setUploadId(uploadId);
+    uploadPartCopyBuilder.setPartNumber(partNumber);
+    uploadPartCopyBuilder.setObject(key);
+    // SSE-C for Uploaded Part
+    KJ_IF_SOME(options, options) {
+      initSsec(js, uploadPartCopyBuilder, options);
+    }
+    auto sourceBuilder = uploadPartCopyBuilder.initSource();
+    sourceBuilder.setBucket(source.bucket);
+    sourceBuilder.setObject(source.object);
+    initRange(js, sourceBuilder, source);
+    initOnlyIf(js, sourceBuilder, source);
+    // SSE-C for Source Object
+    initSsec(js, sourceBuilder, source);
+
+    auto requestJson = json.encode(requestBuilder);
+    auto bucket = this->bucket->adminBucket.map([](auto&& s) { return kj::str(s); });
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, this->bucket->adminBucket);
+    auto promise =
+        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
+
+    return context.awaitIo(
+        js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
+      r2Result.throwIfError("uploadPartCopy", errorType);
 
       capnp::MallocMessageBuilder responseMessage;
       capnp::JsonCodec json;

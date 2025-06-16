@@ -21,8 +21,6 @@
 #include <kj/encoding.h>
 
 #include <array>
-#include <cmath>
-#include <regex>
 
 namespace workerd::api::public_beta {
 kj::Own<kj::HttpClient> r2GetClient(
@@ -192,23 +190,53 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
   return parseObjectMetadata<T>(js, responseBuilder, expectedFields, kj::fwd<Args>(args)...);
 }
 
-kj::Maybe<kj::String> buildSsecKey(
-    kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey) {
-  KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
-    KJ_SWITCH_ONEOF(rawSsecKey) {
-      KJ_CASE_ONEOF(keyString, kj::String) {
-        JSG_REQUIRE(std::regex_match(keyString.begin(), keyString.end(), std::regex("^[0-9a-f]+$")),
-            Error, "SSE-C Key has invalid format");
-        JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
-        return kj::str(keyString);
-      }
-      KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
-        JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
-        return kj::encodeHex(keyBuff);
-      }
+struct MetadataReturn {
+  jsg::Dict<kj::String> customMetadata;
+  R2Bucket::HttpMetadata httpMetadata;
+};
+
+template <typename Builder, typename Options>
+void initMetadata(jsg::Lock& js, Builder& builder, Options& o) {
+  KJ_IF_SOME(m, o.customMetadata) {
+    auto fields = builder.initCustomFields(m.fields.size());
+    for (size_t i = 0; i < m.fields.size(); i++) {
+      fields[i].setK(m.fields[i].name);
+      fields[i].setV(m.fields[i].value);
     }
   }
-  return kj::none;
+  KJ_IF_SOME(m, o.httpMetadata) {
+    auto fields = builder.initHttpFields();
+    auto httpMetadata = [&]() {
+      KJ_SWITCH_ONEOF(m) {
+        KJ_CASE_ONEOF(m, R2Bucket::HttpMetadata) {
+          return kj::mv(m);
+        }
+        KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
+          return R2Bucket::HttpMetadata::fromRequestHeaders(js, *h);
+        }
+      }
+      KJ_UNREACHABLE;
+    }();
+
+    KJ_IF_SOME(ct, httpMetadata.contentType) {
+      fields.setContentType(ct);
+    }
+    KJ_IF_SOME(ce, httpMetadata.contentEncoding) {
+      fields.setContentEncoding(ce);
+    }
+    KJ_IF_SOME(cd, httpMetadata.contentDisposition) {
+      fields.setContentDisposition(cd);
+    }
+    KJ_IF_SOME(cl, httpMetadata.contentLanguage) {
+      fields.setContentLanguage(cl);
+    }
+    KJ_IF_SOME(cc, httpMetadata.cacheControl) {
+      fields.setCacheControl(cc);
+    }
+    KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
+      fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+    }
+  }
 }
 
 template <typename Builder, typename Options>
@@ -345,9 +373,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto putBuilder = payloadBuilder.initPut();
     putBuilder.setObject(name);
 
-    HttpMetadata sentHttpMetadata;
-    jsg::Dict<kj::String> sentCustomMetadata;
-
     bool hashAlreadySpecified = false;
     const auto verifyHashNotSpecified = [&] {
       JSG_REQUIRE(
@@ -357,47 +382,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
     KJ_IF_SOME(o, options) {
       initOnlyIf(js, putBuilder, o);
-      KJ_IF_SOME(m, o.customMetadata) {
-        auto fields = putBuilder.initCustomFields(m.fields.size());
-        for (size_t i = 0; i < m.fields.size(); i++) {
-          fields[i].setK(m.fields[i].name);
-          fields[i].setV(m.fields[i].value);
-        }
-        sentCustomMetadata = kj::mv(m);
-      }
-      KJ_IF_SOME(m, o.httpMetadata) {
-        auto fields = putBuilder.initHttpFields();
-        sentHttpMetadata = [&]() {
-          KJ_SWITCH_ONEOF(m) {
-            KJ_CASE_ONEOF(m, HttpMetadata) {
-              return kj::mv(m);
-            }
-            KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-              return HttpMetadata::fromRequestHeaders(js, *h);
-            }
-          }
-          KJ_UNREACHABLE;
-        }();
-
-        KJ_IF_SOME(ct, sentHttpMetadata.contentType) {
-          fields.setContentType(ct);
-        }
-        KJ_IF_SOME(ce, sentHttpMetadata.contentEncoding) {
-          fields.setContentEncoding(ce);
-        }
-        KJ_IF_SOME(cd, sentHttpMetadata.contentDisposition) {
-          fields.setContentDisposition(cd);
-        }
-        KJ_IF_SOME(cl, sentHttpMetadata.contentLanguage) {
-          fields.setContentLanguage(cl);
-        }
-        KJ_IF_SOME(cc, sentHttpMetadata.cacheControl) {
-          fields.setCacheControl(cc);
-        }
-        KJ_IF_SOME(ce, sentHttpMetadata.cacheExpiry) {
-          fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-        }
-      }
+      initMetadata(js, putBuilder, o);
       KJ_IF_SOME(md5, o.md5) {
         verifyHashNotSpecified();
         KJ_SWITCH_ONEOF(md5) {
@@ -496,18 +481,73 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
-        [sentHttpMetadata = kj::mv(sentHttpMetadata),
-            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType](
-            jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+        [&errorType](jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       if (r2Result.preconditionFailed()) {
         return kj::none;
       } else {
-        auto result = parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
-        KJ_IF_SOME(o, result) {
-          o.get()->httpMetadata = kj::mv(sentHttpMetadata);
-          o.get()->customMetadata = kj::mv(sentCustomMetadata);
+        return parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
+      }
+    });
+  });
+}
+
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::copy(jsg::Lock& js,
+    kj::String key,
+    CopySource source,
+    jsg::Optional<CopyOptions> options,
+    const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
+  return js.evalNow([&] {
+    auto& context = IoContext::current();
+    auto client = r2GetClient(context, clientIndex,
+        {"r2_copyObject"_kjc, {"rpc.method"_kjc, "CopyObject"_kjc}, this->adminBucketName(),
+          {{"cloudflare.r2.key"_kjc, key.asPtr()}}});
+
+    capnp::JsonCodec json;
+    json.handleByAnnotation<R2BindingRequest>();
+    json.setHasMode(capnp::HasMode::NON_DEFAULT);
+    capnp::MallocMessageBuilder requestMessage;
+
+    auto requestBuilder = requestMessage.initRoot<R2BindingRequest>();
+    requestBuilder.setVersion(VERSION_PUBLIC_BETA);
+    auto payloadBuilder = requestBuilder.initPayload();
+    auto copyBuilder = payloadBuilder.initCopy();
+    copyBuilder.setObject(key);
+    auto sourceBuilder = copyBuilder.initSource();
+    sourceBuilder.setBucket(source.bucket);
+    sourceBuilder.setObject(source.object);
+    initOnlyIf(js, sourceBuilder, source);
+    initSsec(js, sourceBuilder, source);
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(metadataDirective, o.metadataDirective) {
+        if (metadataDirective == "COPY" || metadataDirective == "REPLACE" ||
+            metadataDirective == "MERGE") {
+          copyBuilder.setMetadataDirective(metadataDirective);
+        } else {
+          JSG_FAIL_REQUIRE(RangeError, "Unsupported metadata directive value ", metadataDirective);
         }
-        return result;
+      }
+      initOnlyIf(js, copyBuilder, o);
+      initMetadata(js, copyBuilder, o);
+      KJ_IF_SOME(s, o.storageClass) {
+        copyBuilder.setStorageClass(s);
+      }
+      initSsec(js, copyBuilder, o);
+    }
+
+    auto requestJson = json.encode(requestBuilder);
+
+    kj::StringPtr components[1];
+    auto path = fillR2Path(components, adminBucket);
+    auto promise =
+        doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
+
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType](jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      if (r2Result.preconditionFailed()) {
+        return kj::none;
+      } else {
+        return parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
       }
     });
   });
@@ -535,46 +575,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     createMultipartUploadBuilder.setObject(key);
 
     KJ_IF_SOME(o, options) {
-      KJ_IF_SOME(m, o.customMetadata) {
-        auto fields = createMultipartUploadBuilder.initCustomFields(m.fields.size());
-        for (size_t i = 0; i < m.fields.size(); i++) {
-          fields[i].setK(m.fields[i].name);
-          fields[i].setV(m.fields[i].value);
-        }
-      }
-      KJ_IF_SOME(m, o.httpMetadata) {
-        auto fields = createMultipartUploadBuilder.initHttpFields();
-        HttpMetadata httpMetadata = [&]() {
-          KJ_SWITCH_ONEOF(m) {
-            KJ_CASE_ONEOF(m, HttpMetadata) {
-              return kj::mv(m);
-            }
-            KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
-              return HttpMetadata::fromRequestHeaders(js, *h);
-            }
-          }
-          KJ_UNREACHABLE;
-        }();
-
-        KJ_IF_SOME(ct, httpMetadata.contentType) {
-          fields.setContentType(ct);
-        }
-        KJ_IF_SOME(ce, httpMetadata.contentEncoding) {
-          fields.setContentEncoding(ce);
-        }
-        KJ_IF_SOME(cd, httpMetadata.contentDisposition) {
-          fields.setContentDisposition(cd);
-        }
-        KJ_IF_SOME(cl, httpMetadata.contentLanguage) {
-          fields.setContentLanguage(cl);
-        }
-        KJ_IF_SOME(cc, httpMetadata.cacheControl) {
-          fields.setCacheControl(cc);
-        }
-        KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
-          fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
-        }
-      }
+      initMetadata(js, createMultipartUploadBuilder, o);
       KJ_IF_SOME(s, o.storageClass) {
         createMultipartUploadBuilder.setStorageClass(s);
       }
@@ -732,12 +733,6 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
         listBuilder.initInclude(0);
       }
     }
-
-    // TODO(soon): Remove this after the release for 2022-07-04 is cut (from here & R2 worker).
-    // This just tells the R2 worker that it can honor the `includes` field without breaking back
-    // compat. If we just started spontaneously honoring the `includes` field then existing Workers
-    // might suddenly lose http metadata because they weren't explicitly asking for it even though
-    listBuilder.setNewRuntime(true);
 
     // TODO(later): Add a sentry message (+ console warning) to check if we have users that aren't
     // asking for any optional metadata but are asking it in the result anyway just so that we can
