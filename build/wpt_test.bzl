@@ -51,7 +51,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         compat_date_path = compat_date_path,
         autogates = autogates,
         wpt_cacert = wpt_cacert,
-        compat_flags = compat_flags + ["experimental", "nodejs_compat", "unsupported_process_real_platform"],
+        compat_flags = compat_flags + ["experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
     data = [

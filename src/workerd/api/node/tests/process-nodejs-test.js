@@ -13,6 +13,7 @@ const pEnv = { ...process.env };
 
 // Verify process keys match default keys and features
 const keys = [
+  'abort',
   'allowedNodeEnvironmentFlags',
   'arch',
   'argv',
@@ -91,6 +92,13 @@ export const processKeys = {
     );
     assert.deepStrictEqual(
       Object.keys(processMod.default)
+        .filter((v) => v[0] !== '_')
+        .sort(),
+      keys
+    );
+    const processBuiltin = processMod.getBuiltinModule('process');
+    assert.deepStrictEqual(
+      Object.keys(processBuiltin)
         .filter((v) => v[0] !== '_')
         .sort(),
       keys
@@ -310,16 +318,6 @@ export const processProperties = {
   },
 };
 
-export const processUnsupported = {
-  test() {
-    assert.throws(() => process.kill(0), { code: 'ERR_UNSUPPORTED_OPERATION' });
-    assert.throws(() => process.ref({}), { code: 'ERR_UNSUPPORTED_OPERATION' });
-    assert.throws(() => process.unref({}), {
-      code: 'ERR_UNSUPPORTED_OPERATION',
-    });
-  },
-};
-
 // Properties which are undefined and NOT throwing stubs to ensure polyfillability
 // via if (!process.prop) process.prop = polyfill();
 // Some of these might be implemented at future dates.
@@ -333,6 +331,10 @@ export const processUndefined = {
     assert.strictEqual(process.stdout, undefined);
     assert.strictEqual(process.stderr, undefined);
 
+    // These may be implemented in future
+    assert.strictEqual(process.kill, undefined);
+    assert.strictEqual(process.ref, undefined);
+    assert.strictEqual(process.unref, undefined);
     assert.strictEqual(process.exitCode, undefined);
     assert.strictEqual(process.channel, undefined);
     assert.strictEqual(process.connected, undefined);
@@ -378,7 +380,7 @@ export const processVersions = {
 export const processFeatures = {
   test() {
     assert.strictEqual(typeof process.features, 'object');
-    assert.ok(process.features !== null);
+    assert.ok(process.features != null);
 
     // Process features should be an object that can be inspected
     const features = Object.keys(process.features);
@@ -416,7 +418,7 @@ export const processNextTick = {
     order.push('sync');
 
     // Wait for microtasks to complete
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await scheduler.wait(0);
 
     assert.ok(called);
     assert.deepStrictEqual(order, [
@@ -622,7 +624,7 @@ export const processHrtime = {
     {
       const start = process.hrtime.bigint();
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await scheduler.wait(1000);
 
       const end = process.hrtime.bigint();
       assert.strictEqual(typeof end, 'bigint');
@@ -783,22 +785,23 @@ export const processLoadEnvFile = {
 export const processRejectionListeners = {
   async test() {
     const e = new Error();
-    const unhandledPromise = new Promise((resolve) =>
-      process.on('unhandledRejection', (reason, promise) => {
-        resolve({ reason, promise });
-      })
-    );
+
+    const { promise: unhandledPromise, resolve } = Promise.withResolvers();
+    process.on('unhandledRejection', (reason, promise) => {
+      resolve({ reason, promise });
+    });
     Promise.reject(e);
     const { reason, promise } = await unhandledPromise;
     assert.strictEqual(reason, e);
 
-    const handledPromise = new Promise((resolve) =>
+    {
+      const { promise: handledPromise, resolve } = Promise.withResolvers();
       process.on('rejectionHandled', (promise) => {
         resolve({ promise });
-      })
-    );
-    await new Promise((resolve) => promise.catch(resolve));
-    const { promise: promise2 } = await handledPromise;
-    assert.strictEqual(promise, promise2);
+      });
+      await new Promise((resolve) => promise.catch(resolve));
+      const { promise: promise2 } = await handledPromise;
+      assert.strictEqual(promise, promise2);
+    }
   },
 };
