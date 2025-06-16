@@ -19,11 +19,11 @@ def _workspace_path(label, path):
 def _capnp_plugin_gen(ctx, output_format, out_dir, inputs, includes, src_prefix, system_include):
     """Generate output files of the given output_format ("js" or "ts")"""
 
-    if not(output_format == "js" or output_format == "ts"):
+    if not (output_format == "js" or output_format == "ts"):
         fail("Only js and ts output formats are supported")
 
     # Filter the outputs to generate by requested output_format
-    outputs  = [out for out in ctx.outputs.outs if out.path.endswith(".%s" % output_format)]
+    outputs = [out for out in ctx.outputs.outs if out.path.endswith(".%s" % output_format)]
     if (not outputs):
         return
 
@@ -46,7 +46,7 @@ def _capnp_plugin_gen(ctx, output_format, out_dir, inputs, includes, src_prefix,
     ctx.actions.run(
         inputs = inputs + plugin_files + ctx.files._capnpc_capnp + ctx.files._capnp_system,
         tools = [plugin_executable],  # Include required js_binary runfiles
-        outputs  = outputs,
+        outputs = outputs,
         executable = ctx.executable._capnpc,
         arguments = [args],
         mnemonic = "GenCapnp",
@@ -78,7 +78,7 @@ def _capnp_gen_impl(ctx):
         inputs = inputs,
         includes = includes,
         src_prefix = src_prefix,
-        system_include = system_include
+        system_include = system_include,
     )
 
     _capnp_plugin_gen(
@@ -88,7 +88,7 @@ def _capnp_gen_impl(ctx):
         inputs = inputs,
         includes = includes,
         src_prefix = src_prefix,
-        system_include = system_include
+        system_include = system_include,
     )
 
     return [
