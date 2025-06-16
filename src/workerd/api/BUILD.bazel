@@ -743,3 +743,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/request-signal-passthrough.js"],
 )
+
+wd_test(
+    src = "tests/leak-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/leak-fetch-test.js"],
+)
