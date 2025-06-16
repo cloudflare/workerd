@@ -10,13 +10,13 @@
 namespace workerd::api::node {
 
 DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
-  auto parsed = rust::dns::parse_caa_record(::rust::Str(record.begin(), record.size()));
+  auto parsed = rust::dns::parse_caa_record(record.as<Rust>());
   return CaaRecord{
     .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
 DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
-  auto parsed = rust::dns::parse_naptr_record(::rust::Str(record.begin(), record.size()));
+  auto parsed = rust::dns::parse_naptr_record(record.as<Rust>());
   return NaptrRecord{
     .flags = kj::str(parsed.flags),
     .service = kj::str(parsed.service),
