@@ -1015,7 +1015,10 @@ SpanParent IoContext::getCurrentTraceSpan() {
 SpanParent IoContext::getCurrentUserTraceSpan() {
   // TODO(o11y): Add support for retrieving span from storage scope lock for more accurate span
   // context, as with Jaeger spans.
-  return getMetrics().getUserSpan();
+  KJ_IF_SOME(workerTracer, getWorkerTracer()) {
+    return workerTracer.getUserRequestSpan();
+  }
+  return SpanParent(nullptr);
 }
 
 SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
