@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  capnp-es@0.0.11:
-    hash: b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172
-    path: patches/capnp-es@0.0.11.patch
-
 importers:
 
   .:
@@ -30,8 +25,8 @@ importers:
         specifier: ^22.15.3
         version: 22.15.3
       capnp-es:
-        specifier: ^0.0.11
-        version: 0.0.11(patch_hash=b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172)(typescript@5.8.3)
+        specifier: 0.0.11
+        version: 0.0.11(typescript@5.8.3)
       chrome-remote-interface:
         specifier: ^0.33.3
         version: 0.33.3
@@ -1005,7 +1000,7 @@ snapshots:
 
   callsites@3.1.0: {}
 
-  capnp-es@0.0.11(patch_hash=b1e7e020a4ea848c342ee51c4a7913d941bdfe49e0d004cb3afb02dc7caac172)(typescript@5.8.3):
+  capnp-es@0.0.11(typescript@5.8.3):
     optionalDependencies:
       typescript: 5.8.3
 
