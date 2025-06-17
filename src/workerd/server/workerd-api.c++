@@ -1006,6 +1006,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
       value = lock.wrap(context, lock.alloc<api::DurableObjectClass>(actorClass.channel));
     }
+
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      value = lock.wrap(context,
+          lock.alloc<api::WorkerLoader>(
+              workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
+    }
   }
 
   return value;
@@ -1095,6 +1101,9 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
 
     KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
       result.value = actorClass.clone();
+    }
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      result.value = workerLoader.clone();
     }
   }
 

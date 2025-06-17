@@ -254,6 +254,7 @@ Server::~Server() noexcept {
   tasks.clear();
 
   // Unlink all the services, which should remove all refcount cycles.
+  unlinkWorkerLoaders();
   for (auto& service: services) {
     service.value->unlink();
   }
@@ -3166,6 +3167,10 @@ struct FutureActorClassChannel {
   kj::String errorContext;
 };
 
+struct FutureWorkerLoaderChannel {
+  kj::String id;
+};
+
 static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     config::Worker::Reader conf,
     config::Worker::Binding::Reader binding,
@@ -3173,6 +3178,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     kj::Vector<FutureSubrequestChannel>& subrequestChannels,
     kj::Vector<FutureActorChannel>& actorChannels,
     kj::Vector<FutureActorClassChannel>& actorClassChannels,
+    kj::Vector<FutureWorkerLoaderChannel>& workerLoaderChannels,
     kj::HashMap<kj::String, kj::HashMap<kj::String, Server::ActorConfig>>& actorConfigs,
     bool experimental) {
   // creates binding object or returns null and reports an error
@@ -3389,7 +3395,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       for (const auto& innerBinding: wrapped.getInnerBindings()) {
         KJ_IF_SOME(global,
             createBinding(workerName, conf, innerBinding, errorReporter, subrequestChannels,
-                actorChannels, actorClassChannels, actorConfigs, experimental)) {
+                actorChannels, actorClassChannels, workerLoaderChannels, actorConfigs,
+                experimental)) {
           innerGlobals.add(kj::mv(global));
         } else {
           // we've already communicated the error
@@ -3492,6 +3499,26 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
           FutureActorClassChannel{binding.getDurableObjectClass(), kj::mv(errorContext)});
       return makeGlobal(Global::ActorClass{.channel = channel});
     }
+
+    case config::Worker::Binding::WORKER_LOADER: {
+      if (!experimental) {
+        errorReporter.addError(kj::str(
+            "Worker loader bindings are an experimental feature which may change or go away "
+            "in the future. You must run workerd with `--experimental` to use this feature."));
+        return kj::none;
+      }
+
+      auto loaderConf = binding.getWorkerLoader();
+      if (!loaderConf.hasId()) {
+        errorReporter.addError(
+            kj::str("Worker loader binding '", bindingName, "' must declare an ID."));
+        return kj::none;
+      }
+
+      uint channel = workerLoaderChannels.size();
+      workerLoaderChannels.add(FutureWorkerLoaderChannel{kj::str(loaderConf.getId())});
+      return makeGlobal(Global::WorkerLoader{.channel = channel});
+    }
   }
   errorReporter.addError(kj::str(errorContext,
       "has unrecognized type. Was the config compiled with a newer version of "
@@ -3536,6 +3563,7 @@ struct Server::WorkerDef {
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
+  kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
   kj::Array<FutureSubrequestChannel> tails;
   kj::Array<FutureSubrequestChannel> streamingTails;
 
@@ -3707,6 +3735,12 @@ class Server::WorkerLoaderNamespace {
   };
 };
 
+void Server::unlinkWorkerLoaders() {
+  for (auto& loader: workerLoaderNamespaces) {
+    loader.value->unlink();
+  }
+}
+
 kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel,
     kj::String name,
     kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
@@ -3739,13 +3773,14 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   kj::Vector<FutureSubrequestChannel> subrequestChannels;
   kj::Vector<FutureActorChannel> actorChannels;
   kj::Vector<FutureActorClassChannel> actorClassChannels;
+  kj::Vector<FutureWorkerLoaderChannel> workerLoaderChannels;
 
   auto confBindings = conf.getBindings();
   kj::Vector<WorkerdApi::Global> globals(confBindings.size());
   for (auto binding: confBindings) {
     KJ_IF_SOME(global,
         createBinding(name, conf, binding, errorReporter, subrequestChannels, actorChannels,
-            actorClassChannels, actorConfigs, experimental)) {
+            actorClassChannels, workerLoaderChannels, actorConfigs, experimental)) {
       globals.add(kj::mv(global));
     }
   }
@@ -3773,6 +3808,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     .subrequestChannels = kj::mv(subrequestChannels),
     .actorChannels = kj::mv(actorChannels),
     .actorClassChannels = kj::mv(actorClassChannels),
+    .workerLoaderChannels = kj::mv(workerLoaderChannels),
 
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
     return {
@@ -4131,7 +4167,16 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
           lookupService(tail.designator, kj::mv(tail.errorContext)));
     };
 
-    // TODO(now): Fill in result.workerLoaders
+    result.workerLoaders = KJ_MAP(il, def.workerLoaderChannels) {
+      return workerLoaderNamespaces
+          .findOrCreate(il.id, [&]() -> decltype(workerLoaderNamespaces)::Entry {
+        kj::StringPtr key = il.id;
+        return {
+          .key = key,
+          .value = kj::heap<WorkerLoaderNamespace>(*this, kj::mv(il.id)),
+        };
+      }).get();
+    };
 
     return result;
   };
