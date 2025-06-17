@@ -165,6 +165,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   class WorkerLoaderNamespace;
+  kj::HashMap<kj::StringPtr, kj::Own<WorkerLoaderNamespace>> workerLoaderNamespaces;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
@@ -275,6 +276,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
+
+  void unlinkWorkerLoaders();
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
