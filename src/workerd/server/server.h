@@ -164,6 +164,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
+  class WorkerLoaderNamespace;
+
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
   // Initialized in startAlarmScheduler().
@@ -254,6 +256,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   struct ErrorReporter;
   struct ConfigErrorReporter;
+  struct DynamicErrorReporter;
   struct WorkerDef;
   kj::Own<WorkerService> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
