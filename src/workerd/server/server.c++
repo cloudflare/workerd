@@ -206,7 +206,7 @@ struct Server::GlobalContext {
 class Server::Service {
  public:
   // Cross-links this service with other services. Must be called once before `startRequest()`.
-  virtual void link() {}
+  virtual void link(Worker::ValidationErrorReporter& errorReporter) {}
 
   // Drops any cross-links created during link(). This called just before all the services are
   // destroyed. An `Own<T>` cannot be destroyed unless the object it points to still exists, so
@@ -1820,7 +1820,8 @@ class Server::WorkerService final: public Service,
     kj::Array<kj::Own<Service>> tails;
     kj::Array<kj::Own<Service>> streamingTails;
   };
-  using LinkCallback = kj::Function<LinkedIoChannels(WorkerService&)>;
+  using LinkCallback =
+      kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
   using AbortActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
 
   WorkerService(ThreadContext& threadContext,
@@ -1919,10 +1920,10 @@ class Server::WorkerService final: public Service,
     return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
   }
 
-  void link() override {
+  void link(Worker::ValidationErrorReporter& errorReporter) override {
     LinkCallback callback =
         kj::mv(KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkCallback>(), "already called link()"));
-    auto linked = callback(*this);
+    auto linked = callback(*this, errorReporter);
 
     for (auto& ns: actorNamespaces) {
       ns.value->link(linked.actorStorage, linked.alarmScheduler);
@@ -3774,7 +3775,8 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
-  auto linkCallback = [this, name, def = kj::mv(def)](WorkerService& workerService) mutable {
+  auto linkCallback = [this, def = kj::mv(def)](WorkerService& workerService,
+                          Worker::ValidationErrorReporter& errorReporter) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
     auto entrypointNames = workerService.getEntrypointNames();
@@ -3872,22 +3874,17 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       KJ_IF_SOME(svc, this->services.find(def.actorStorageConf.getLocalDisk())) {
         auto diskSvc = dynamic_cast<DiskDirectoryService*>(svc.get());
         if (diskSvc == nullptr) {
-          reportConfigError(kj::str("service ", name,
-              ": durableObjectStorage config refers "
-              "to the service \"",
+          errorReporter.addError(kj::str("durableObjectStorage config refers to the service \"",
               diskName, "\", but that service is not a local disk service."));
         } else KJ_IF_SOME(dir, diskSvc->getWritable()) {
           result.actorStorage = dir;
         } else {
-          reportConfigError(kj::str("service ", name,
-              ": durableObjectStorage config refers "
-              "to the disk service \"",
-              diskName, "\", but that service is defined read-only."));
+          errorReporter.addError(
+              kj::str("durableObjectStorage config refers to the disk service \"", diskName,
+                  "\", but that service is defined read-only."));
         }
       } else {
-        reportConfigError(kj::str("service ", name,
-            ": durableObjectStorage config refers "
-            "to a service \"",
+        errorReporter.addError(kj::str("durableObjectStorage config refers to a service \"",
             diskName, "\", but no such service is defined."));
       }
     }
@@ -4644,7 +4641,8 @@ void Server::startServices(jsg::V8System& v8System,
 
   // Third pass: Cross-link services.
   for (auto& service: services) {
-    service.value->link();
+    ConfigErrorReporter errorReporter(*this, service.key);
+    service.value->link(errorReporter);
   }
 }
 
