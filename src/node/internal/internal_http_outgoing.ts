@@ -8,6 +8,7 @@ import {
   ERR_HTTP_HEADERS_SENT,
   ERR_INVALID_ARG_TYPE,
   ERR_STREAM_CANNOT_PIPE,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import {
   validateHeaderName,
@@ -62,7 +63,6 @@ export class OutgoingMessage extends Writable {
     }
 
     if (
-      headers == null ||
       Array.isArray(headers) ||
       typeof headers !== 'object' ||
       !('keys' in headers) ||
@@ -85,13 +85,13 @@ export class OutgoingMessage extends Writable {
     for (const { 0: key, 1: value } of headers) {
       if (key === 'set-cookie') {
         if (Array.isArray(value)) {
-          cookies.push(...value);
+          cookies.push(...(value as string[]));
         } else {
-          cookies.push(value);
+          cookies.push(value as string);
         }
         continue;
       }
-      this.setHeader(key, value);
+      this.setHeader(key as string, value as string | string[]);
     }
     if (cookies.length) {
       this.setHeader('set-cookie', cookies);
@@ -110,7 +110,7 @@ export class OutgoingMessage extends Writable {
 
     const field = name.toLowerCase();
     const headers = this[kOutHeaders];
-    if (headers === null || !headers[field]) {
+    if (!headers[field]) {
       return this.setHeader(name, value);
     }
 
@@ -119,7 +119,7 @@ export class OutgoingMessage extends Writable {
       headers[field].value = [headers[field].value as string];
     }
 
-    const existingValues = headers[field].value as string[];
+    const existingValues = headers[field].value;
     if (Array.isArray(value)) {
       existingValues.push(...value);
     } else {
@@ -177,5 +177,9 @@ export class OutgoingMessage extends Writable {
 
   public [EventEmitter.captureRejectionSymbol](error: Error): void {
     this.destroy(error);
+  }
+
+  public _implicitHeader(): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_implicitHeader()');
   }
 }

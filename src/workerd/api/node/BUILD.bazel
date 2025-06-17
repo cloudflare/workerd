@@ -407,6 +407,12 @@ wd_test(
     data = ["tests/http-nodejs-test.js"],
 )
 
+wd_test(
+    src = "tests/http-outgoing-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/http-outgoing-nodejs-test.js"],
+)
+
 js_binary(
     name = "http-client-server",
     entry_point = "tests/http-client-server.js",
