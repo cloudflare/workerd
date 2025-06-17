@@ -16,7 +16,7 @@ export default {
           break;
         case 'attributes': {
           let span = spans.get(event.spanId);
-          for (let {name, value} of event.event.info) {
+          for (let { name, value } of event.event.info) {
             span[name] = value;
           }
           spans.set(event.spanId, span);
@@ -41,7 +41,9 @@ export const test = {
 
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with KV
-    let received = Array.from(spans.values()).filter(span => span.name !== 'jsRpcSession');
+    let received = Array.from(spans.values()).filter(
+      (span) => span.name !== 'jsRpcSession'
+    );
 
     // spans emitted by kv-test.js in execution order
     let expected = [
@@ -49,138 +51,138 @@ export const test = {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         'cloudflare.kv.query.parameter.cacheTtl': 100n,
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
-      },
-      {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         'cloudflare.kv.query.parameter.type': 'json',
-        closed: true
+        closed: true,
+      },
+      {
+        name: 'kv_get_bulk',
+        'db.system': 'cloudflare-kv',
+        'cloudflare.kv.operation.name': 'get_bulk',
+        'cloudflare.kv.query.parameter.type': 'json',
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         'cloudflare.kv.query.parameter.type': 'arrayBuffer',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         'cloudflare.kv.query.parameter.type': 'banana',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_getWithMetadata',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'getWithMetadata',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true
-      },
-      {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         'cloudflare.kv.query.parameter.type': 'json',
-        closed: true
+        closed: true,
+      },
+      {
+        name: 'kv_get_bulk',
+        'db.system': 'cloudflare-kv',
+        'cloudflare.kv.operation.name': 'get_bulk',
+        'cloudflare.kv.query.parameter.type': 'json',
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
         'cloudflare.kv.query.parameter.type': 'json',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
         'cloudflare.kv.query.parameter.type': 'stream',
-        closed: true
+        closed: true,
       },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
         'cloudflare.kv.query.parameter.type': 'arrayBuffer',
-        closed: true
-      }
+        closed: true,
+      },
     ];
 
     assert.deepStrictEqual(received, expected);
