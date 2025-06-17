@@ -217,7 +217,7 @@ export function mountWorkerFiles(Module: Module): void {
 
 /**
  * Add the directories created by mountLib to sys.path.
- * Has to run after the runtime is initialized.
+ * Has to run after the runtime is initialized but before memory snapshot is collected.
  */
 export function adjustSysPath(Module: Module): void {
   const site_packages = Module.FS.sessionSitePackages;
