@@ -26,7 +26,10 @@ const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
  *  field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
  *  field-vchar    = VCHAR / obs-text
  */
-export function _checkInvalidHeaderChar(val: string): boolean {
+export function _checkInvalidHeaderChar(val: string | string[]): boolean {
+  if (Array.isArray(val)) {
+    return val.some((v) => headerCharRegex.test(v));
+  }
   return headerCharRegex.test(val);
 }
 
@@ -41,7 +44,7 @@ export function validateHeaderName(
 
 export function validateHeaderValue(
   name: string,
-  value: string | undefined
+  value: string | string[] | undefined
 ): void {
   if (value === undefined) {
     throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name);

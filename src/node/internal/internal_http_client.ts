@@ -4,11 +4,10 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http';
-import { kOutHeaders } from 'node-internal:internal_http_outgoing';
 import {
-  validateHeaderName,
-  validateHeaderValue,
-} from 'node-internal:internal_http';
+  kHeadersSent,
+  kOutHeaders,
+} from 'node-internal:internal_http_outgoing';
 import { Buffer } from 'node-internal:internal_buffer';
 import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
 import {
@@ -26,6 +25,7 @@ import type {
   RequestOptions,
 } from 'node:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
+import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
@@ -41,9 +41,7 @@ function validateHost(host: unknown, name: string): string {
   return host as string;
 }
 
-export class ClientRequest extends Writable {
-  public [kOutHeaders]: Record<string, { name: string; value: string }> = {};
-
+export class ClientRequest extends OutgoingMessage {
   #abortController = new AbortController();
   #body: Buffer[] = [];
   #incomingMessage?: IncomingMessage;
@@ -214,33 +212,14 @@ export class ClientRequest extends Writable {
     });
   }
 
-  public setHeader(name: string, value?: string): void {
-    validateHeaderName(name);
-    validateHeaderValue(name, value);
-
-    // Node.js uses an array, but we store it as an object.
-    this[kOutHeaders][name.toLowerCase()] = {
-      name,
-      value: value as string,
-    };
-  }
-
-  public getHeader(name: string): string | undefined {
-    return this[kOutHeaders][name.toLowerCase()]?.value;
-  }
-
-  public removeHeader(name: string): void {
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete this[kOutHeaders][name.toLowerCase()];
-  }
-
   #onFinish(): void {
     if (this.destroyed) return;
 
     let body: BodyInit | null = null;
     if (this.method !== 'GET' && this.method !== 'HEAD') {
+      const value = this.getHeader('content-type') ?? '';
       body = new Blob(this.#body, {
-        type: this.getHeader('content-type') ?? '',
+        type: typeof value === 'string' ? value : value.join(','),
       });
     }
 
@@ -275,6 +254,8 @@ export class ClientRequest extends Writable {
     const url = new URL(`http://${host}`);
     url.pathname = this.path;
 
+    this[kHeadersSent] = true;
+
     // HTTP on fetch has two major design limitations.
     //
     // 1. Content decoding is handled automatically by fetch, but expectation is that it's not handled in http.
@@ -301,6 +282,7 @@ export class ClientRequest extends Writable {
     });
 
     this.emit('response', this.#incomingMessage);
+    this._ended = true;
   }
 
   #handleFetchError(error: Error): void {
@@ -310,6 +292,7 @@ export class ClientRequest extends Writable {
       // Without this error log, it's impossible to debug.
       console.error(error);
     }
+    this._ended = true;
   }
 
   public abort(error?: Error | null): void {
@@ -395,9 +378,5 @@ export class ClientRequest extends Writable {
         this.emit('timeout');
       }, this.timeout) as unknown as number;
     }
-  }
-
-  public flushHeaders(): void {
-    // Not implemented
   }
 }
