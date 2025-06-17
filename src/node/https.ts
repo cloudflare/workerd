@@ -27,6 +27,7 @@ export function request(...args: unknown[]): ClientRequest {
   options._defaultAgent = globalAgent;
   args.unshift(options);
 
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
   return Reflect.construct(ClientRequest, args);
 }
 

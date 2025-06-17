@@ -22,7 +22,7 @@ export class Agent extends EventEmitter implements _Agent {
   public totalSocketCount: number;
 
   public constructor(options: AgentOptions) {
-    super();
+    super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
     this.options = { __proto__: null, ...options };
 
     if (this.options.noDelay === undefined) this.options.noDelay = true;
@@ -51,7 +51,7 @@ export class Agent extends EventEmitter implements _Agent {
     let name = options.host || 'localhost';
 
     name += ':';
-    if (options.port) name += options.port;
+    if (options.port) name += options.port.toString();
 
     name += ':';
     if (options.localAddress) name += options.localAddress;
