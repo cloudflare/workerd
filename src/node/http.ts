@@ -10,6 +10,7 @@ import {
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 import { ClientRequest } from 'node-internal:internal_http_client';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
 
@@ -41,6 +42,8 @@ export {
   ClientRequest,
   WebSocket,
   OutgoingMessage,
+  Agent,
+  globalAgent,
 };
 export default {
   validateHeaderName,
@@ -52,4 +55,6 @@ export default {
   get,
   WebSocket,
   OutgoingMessage,
+  Agent,
+  globalAgent,
 };
