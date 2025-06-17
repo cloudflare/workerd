@@ -110,6 +110,7 @@ wd_cc_library(
         ":alarm-scheduler",
         ":bundle-fs",
         ":container-client",
+        ":facet-tree-index",
         ":fallback-service",
         ":workerd_capnp",
         "//deps/rust:runtime",
@@ -197,6 +198,20 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "facet-tree-index",
+    srcs = [
+        "facet-tree-index.c++",
+    ],
+    hdrs = [
+        "facet-tree-index.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 wd_capnp_library(
     src = "workerd.capnp",
     # Limit visibility to avoid accidental usage – there should be no need to use this outside of
@@ -245,4 +260,12 @@ copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin_cross",
     out = "pyodide.capnp.bin",
+)
+
+kj_test(
+    src = "facet-tree-index-test.c++",
+    deps = [
+        ":facet-tree-index",
+        "@capnp-cpp//src/kj",
+    ],
 )

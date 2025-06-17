@@ -4685,5 +4685,213 @@ KJ_TEST("Server: Catch websocket server errors") {
   }
 }
 
+KJ_TEST("Server: Durable Object facets") {
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-04-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { DurableObject } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let id = env.NS.idFromName("name");
+                `    let actor = env.NS.get(id);
+                `    return await actor.fetch(request);
+                `  }
+                `}
+                `export class MyActorClass extends DurableObject {
+                `  async fetch(request) {
+                `    let results = [];
+                `
+                `    if (request.url.endsWith("/part1")) {
+                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      results.push(await foo.increment(true));  // increments foo
+                `      results.push(await foo.increment());  // increments foo
+                `      results.push(await foo.increment());  // increments foo
+                `      await foo.assertId("abc");
+                `
+                `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
+                `      results.push(await bar.increment("foo", true));  // increments bar.foo
+                `      results.push(await bar.increment("bar", true));  // increments bar.bar
+                `      results.push(await bar.increment("foo"));        // increments bar.foo
+                `      await bar.assertId(this.ctx.id.toString());
+                `
+                `      // Get foo again to make sure we get the same object.
+                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      results.push(await foo2.increment());  // increments foo
+                `      results.push(await foo.increment());   // increments foo
+                `      await foo.assertId("abc");
+                `    } else if (request.url.endsWith("/part2")) {
+                `      // Get in a different order from before to make sure ID assignment is
+                `      // consistent.
+                `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
+                `      results.push(await bar.increment("bar", true));  // increments bar.bar
+                `      results.push(await bar.increment("foo", true));  // increments bar.foo
+                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      results.push(await foo.increment(true));  // increments foo
+                `
+                `      let foo2 = this.ctx.facets.get(
+                `          "foo", {class: this.env.EXFILTRATOR, id: "abc"});
+                `      results.push(await foo2.exfiltrate());
+                `
+                `      try {
+                `        await foo.increment();
+                `        throw new Error("broken stub didn't throw?");
+                `      } catch (err) {
+                `        if (err.message != "The facet is restarting because the parent " +
+                `            "specified different parameters to facets.get(). You may need to " +
+                `            "recreate the stub to talk to the new version.") {
+                `          throw err;
+                `        }
+                `      }
+                `
+                `      // Delete bar, which recursively deletes its children.
+                `      this.ctx.facets.delete("bar");
+                `    } else {
+                `      throw new Error(`bad url: ${request.url}`);
+                `    }
+                `
+                `    return new Response(results.join(" "));
+                `  }
+                `}
+                `export class CounterFacet extends DurableObject {
+                `  async increment(first) {
+                `    let storedI = (await this.ctx.storage.get("value")) || 0;
+                `    if (first) {
+                `      this.i = storedI;
+                `    } else if (this.i != storedI) {
+                `      throw new Error("inconsistent stored value ${storedI} != ${this.i}");
+                `    }
+                `    this.ctx.storage.put("value", this.i + 1);
+                `    return this.i++;
+                `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
+                `  }
+                `}
+                `export class NestedFacet extends DurableObject {
+                `  increment(name, first) {
+                `    let facet = this.ctx.facets.get(name, {class: this.env.COUNTER});
+                `    return facet.increment(first);
+                `  }
+                `  assertId(id) {
+                `    if (this.ctx.id.toString() != id) {
+                `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
+                `    }
+                `  }
+                `}
+                `export class ExfiltrationFacet extends DurableObject {
+                `  exfiltrate() {
+                `    return this.ctx.storage.get("value");
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            (name = "NS", durableObjectNamespace = "MyActorClass"),
+            (name = "COUNTER", durableObjectClass = (name = "hello", entrypoint = "CounterFacet")),
+            (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
+            ( name = "EXFILTRATOR",
+              durableObjectClass = (name = "hello", entrypoint = "ExfiltrationFacet") )
+          ],
+          durableObjectNamespaces = [
+            ( className = "MyActorClass",
+              uniqueKey = "mykey",
+            )
+          ],
+          durableObjectStorage = (localDisk = "my-disk")
+        )
+      ),
+      ( name = "my-disk",
+        disk = (
+          path = "../../do-storage",
+          writable = true,
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj;
+
+  // Create a directory outside of the test scope which we can use across multiple TestServers.
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/part1", "0 1 2 0 0 1 3 4");
+  }
+
+  // Verify the expected files exist.
+  auto nsDir = dir->openSubdir(kj::Path({"mykey"}));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.2.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.facets"})));
+
+  // We should only have created four child facets (foo, bar, bar.foo, bar.bar). No ID 5 should
+  // exist.
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.5.sqlite"})));
+
+  // We didn't create any other durable objects in the namespace. All files in the namespace should
+  // be prefixed with our one DO ID.
+  for (auto& name: nsDir->listNames()) {
+    KJ_EXPECT(name.startsWith("3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a."),
+        "unexpected file found in namespace storage", name);
+  }
+
+  // Start a new server, make sure it's able to load the files again.
+  {
+    TestServer test(config);
+
+    // Link our directory into the test filesystem.
+    test.root->transfer(
+        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/part2", "1 2 5 6");
+  }
+
+  // Root and foo still exist, bar does not.
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.sqlite"})));
+  KJ_EXPECT(nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.1.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.2.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
+  KJ_EXPECT(!nsDir->exists(
+      kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+}
+
 }  // namespace
 }  // namespace workerd::server
