@@ -19,7 +19,7 @@ bazel_dep(name = "platforms", version = "1.0.0")
 # apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
 # needs to be pulled in before rules_cc for this toolchain to actually be used.
 bazel_dep(name = "apple_support", version = "1.22.0")
-bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "rules_cc", version = "0.1.2")
 bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
 git_override(
     module_name = "zlib",
@@ -32,3 +32,9 @@ git_override(
     patches = ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"],
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
 )
+
+# BoringSSL may subtly break backwards compatibility and behave differently than the latest FIPS
+# version, often by rejecting key values that it considers invalid/unsafe even though they are still
+# accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
+# downstream build.
+bazel_dep(name = "boringssl", version = "0.20250514.0", repo_name = "ssl")
