@@ -3,10 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
 
+// tailStream is going to be invoked multiple times, but we want to wait
+// to run the test until all executions are done. Collect promises for
+// each
+let invocationPromises = [];
 let spans = new Map();
 
 export default {
   tailStream(event, env, ctx) {
+    // For each "onset" event, store a promise which we will resolve when
+    // we receive the equivalent "outcome" event
+    let resolveFn;
+    invocationPromises.push(new Promise((resolve, reject) => { resolveFn = resolve }));
+
     // Accumulate the span info for easier testing
     return (event) => {
       switch (event.event.type) {
@@ -28,6 +37,9 @@ export default {
           spans.set(event.spanId, span);
           break;
         }
+        case 'outcome':
+          resolveFn();
+          break;
       }
     };
   },
@@ -35,9 +47,8 @@ export default {
 
 export const test = {
   async test() {
-    // HACK: The prior tests terminates once the scheduled() invocation has returned a response, but
-    // propagating the outcome of the invocation may take longer. Wait briefly so this can go ahead.
-    await scheduler.wait(50);
+    // Wait for all the tailStream executions to finish
+    await Promise.allSettled(invocationPromises);
 
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with KV
