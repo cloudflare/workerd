@@ -40,15 +40,22 @@ static void validateKeyName(kj::StringPtr method, kj::StringPtr name) {
       ".");
 }
 
-static void parseListMetadata(
-    jsg::Lock& js, jsg::JsValue listResponse, kj::Maybe<jsg::JsValue> cacheStatus) {
+static void parseListMetadata(TraceContext& traceContext,
+    jsg::Lock& js,
+    jsg::JsValue listResponse,
+    kj::Maybe<jsg::JsValue> cacheStatus) {
   static constexpr auto METADATA = "metadata"_kjc;
   static constexpr auto KEYS = "keys"_kjc;
+  static constexpr auto CURSOR = "cursor"_kjc;
+  static constexpr auto LIST_COMPLETE = "list_complete"_kjc;
+  static constexpr auto EXPIRATION = "expiration"_kjc;
 
   js.withinHandleScope([&] {
     auto obj = KJ_ASSERT_NONNULL(listResponse.tryCast<jsg::JsObject>());
     KJ_IF_SOME(keysArr, obj.get(js, KEYS).tryCast<jsg::JsArray>()) {
       auto length = keysArr.size();
+      traceContext.userSpan.setTag(
+          "cloudflare.kv.response.returned_rows"_kjc, static_cast<int64_t>(length));
       for (int i = 0; i < length; i++) {
         js.withinHandleScope([&] {
           KJ_IF_SOME(key, keysArr.get(js, i).tryCast<jsg::JsObject>()) {
@@ -60,11 +67,56 @@ static void parseListMetadata(
       }
     }
 
+    KJ_IF_SOME(expiration, obj.get(js, EXPIRATION).tryCast<jsg::JsNumber>()) {
+      KJ_IF_SOME(exp, expiration.value(js)) {
+        traceContext.userSpan.setTag("cloudflare.kv.response.expiration"_kjc, exp);
+      }
+    }
+
+    // TODO: unused variable warning
+    KJ_IF_SOME(cursor, obj.get(js, CURSOR).tryCast<jsg::JsString>()) {
+      traceContext.userSpan.setTag("cloudflare.kv.response.cursor"_kjc, true);
+    }
+
+    KJ_IF_SOME(listComplete, obj.get(js, LIST_COMPLETE).tryCast<jsg::JsBoolean>()) {
+      traceContext.userSpan.setTag(
+          "cloudflare.kv.response.list_complete"_kjc, listComplete.value(js));
+    }
+
     obj.set(js, "cacheStatus"_kjc, cacheStatus.orDefault(js.null()));
+    KJ_IF_SOME(cs, cacheStatus) {
+      traceContext.userSpan.setTag("cloudflare.kv.response.cache_status"_kjc, cs.toString(js));
+    }
   });
 }
 
 constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
+
+kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
+    kj::HttpHeaders& headers,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
+    kj::StringPtr urlStr,
+    TraceContext& traceContext) {
+
+  // TODO: Factor this out into its own function
+  KJ_SWITCH_ONEOF(opTypeOrUnknown) {
+    KJ_CASE_ONEOF(name, kj::LiteralStringConst) {}
+    KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
+      // Check if we've hit KV usage limits. (This will throw if we have.)
+      context.getLimitEnforcer().newKvRequest(opType);
+    }
+  }
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+
+  headers.add(FLPROD_405_HEADER, urlStr);
+  for (const auto& header: additionalHeaders) {
+    KJ_LOG(WARNING, header.name, header.value);
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
+
+  return client;
+}
 
 kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::HttpHeaders& headers,
@@ -343,7 +395,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
   return context.awaitIo(js, kj::mv(request.response),
       [type = kj::mv(type), &context, client = kj::mv(client)](
           jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-      -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
+          -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
         response.headers->get(context.getHeaderIds().cfCacheStatus).map([&](kj::StringPtr cs) {
       return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
@@ -424,6 +476,13 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
+    auto traceSpan = context.makeTraceSpan("kv.list"_kjc);
+    auto userSpan = context.makeUserTraceSpan("kv.list"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+    traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare.kv"_kjc));
+    traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("list"_kjc));
+    traceContext.userSpan.setTag("cloudflare.binding_type"_kjc, kj::str("KV"_kjc));
 
     kj::Url url;
     url.scheme = kj::str("https");
@@ -431,16 +490,20 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
         if (limit > 0) {
+          traceContext.userSpan.setTag(
+              "cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
           url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
+          traceContext.userSpan.setTag("cloudflare.kv.query.prefix"_kjc, kj::str(prefix));
           url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
+          traceContext.userSpan.setTag("cloudflare.kv.query.cursor"_kjc, true);
           url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
         }
       }
@@ -450,11 +513,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, kj::mv(options));
+        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, traceContext);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js, kj::mv(request.response),
-        [&context, client = kj::mv(client)](jsg::Lock& js,
+        [&context, traceContext = kj::mv(traceContext), client = kj::mv(client)](jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
@@ -473,9 +536,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [cacheStatus = kj::mv(cacheStatus)](jsg::Lock& js, kj::String text) mutable {
+          [cacheStatus = kj::mv(cacheStatus), traceContext = kj::mv(traceContext)](
+              jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
-        parseListMetadata(js, result,
+        parseListMetadata(traceContext, js, result,
             cacheStatus.map(
                 [&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue { return cs.getHandle(js); }));
         return jsg::JsRef(js, result);
