@@ -31,6 +31,7 @@ PATCHES = [
     "0023-Add-more-sandbox-APIs.patch",
     "0024-bazel-Port-concurrent-mksnapshot-support.patch",
     "0025-bazel-Port-V8_USE_ZLIB-support.patch",
+    "0026-Seal-the-HandleScope-when-performing-GC.patch",
 ]
 
 # V8 and its dependencies

@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <erikcorry@chromium.org>
+Date: Tue, 17 Jun 2025 16:04:50 +0200
+Subject: Seal the HandleScope when performing GC.
+
+This catches embedders that forget to make a
+HandleScope in GC callbacks that need to create
+a Local. For example using the Get method in
+ResetRoot from traced-handles.cc.
+
+diff --git a/src/heap/heap.cc b/src/heap/heap.cc
+index f1500d72aec046a21f8f45abb7eaf34b4ed683ca..34ebdff123a3cfd0ce4fee247c63d8041ef0f408 100644
+--- a/src/heap/heap.cc
++++ b/src/heap/heap.cc
+@@ -1566,6 +1566,11 @@ void Heap::CollectGarbage(AllocationSpace space,
+                           GarbageCollectionReason gc_reason,
+                           const v8::GCCallbackFlags gc_callback_flags) {
+   CHECK(isolate_->IsOnCentralStack());
++  // Any handles that are created during GC (eg during API callbacks)
++  // should be in a fresh handle scope that is torn down before the GC
++  // terminates. We don't really want new handles to appear during GC,
++  // but some APIs require it - they should at least be short lived.
++  SealHandleScope scope(isolate_);
+   DCHECK_EQ(resize_new_space_mode_, ResizeNewSpaceMode::kNone);
+ 
+   if (V8_UNLIKELY(!deserialization_complete_)) {
