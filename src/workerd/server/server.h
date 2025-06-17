@@ -253,6 +253,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class HttpListener;
 
   struct ErrorReporter;
+  struct ConfigErrorReporter;
   struct WorkerDef;
   kj::Own<WorkerService> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,

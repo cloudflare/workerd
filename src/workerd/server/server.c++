@@ -1763,20 +1763,13 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
 
 }  // namespace
 
+// Shared ErrorReporter base implemnetation. The logic to collect entrypoint information is the
+// same regardless of where the code came from.
 struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
-  ErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
-
-  Server& server;
-  kj::StringPtr name;
-
   // The `HashSet`s are the set of exported handlers, like `fetch`, `test`, etc.
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
   kj::HashSet<kj::String> actorClasses;
-
-  void addError(kj::String error) override {
-    server.handleReportConfigError(kj::str("service ", name, ": ", error));
-  }
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
     kj::HashSet<kj::String> set;
@@ -1792,6 +1785,19 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
 
   void addActorClass(kj::StringPtr exportName) override {
     actorClasses.insert(kj::str(exportName));
+  }
+};
+
+// Implementation of ErrorReporter specifically for reporting errors in the top-level workerd
+// config.
+struct Server::ConfigErrorReporter final: public ErrorReporter {
+  ConfigErrorReporter(Server& server, kj::StringPtr name): server(server), name(name) {}
+
+  Server& server;
+  kj::StringPtr name;
+
+  void addError(kj::String error) override {
+    server.handleReportConfigError(kj::str("service ", name, ": ", error));
   }
 };
 
@@ -3513,7 +3519,7 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
   auto& localActorConfigs = KJ_ASSERT_NONNULL(actorConfigs.find(name));
 
-  ErrorReporter errorReporter(*this, name);
+  ConfigErrorReporter errorReporter(*this, name);
 
   capnp::MallocMessageBuilder arena;
   // TODO(beta): Factor out FeatureFlags from WorkerBundle.
