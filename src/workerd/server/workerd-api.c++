@@ -40,6 +40,7 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg.h>
@@ -118,6 +119,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
+    EW_WORKER_LOADER_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
