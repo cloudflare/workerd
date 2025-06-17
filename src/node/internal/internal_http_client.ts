@@ -229,7 +229,7 @@ export class ClientRequest extends OutgoingMessage {
       if (value) {
         if (Array.isArray(value)) {
           for (const item of value) {
-            headers.push([name, item as string]);
+            headers.push([name, item]);
           }
         } else {
           headers.push([name, value]);

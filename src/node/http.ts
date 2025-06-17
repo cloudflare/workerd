@@ -9,6 +9,7 @@ import {
 } from 'node-internal:internal_http';
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 import { ClientRequest } from 'node-internal:internal_http_client';
+import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
 
@@ -39,6 +40,7 @@ export {
   STATUS_CODES,
   ClientRequest,
   WebSocket,
+  OutgoingMessage,
 };
 export default {
   validateHeaderName,
@@ -49,4 +51,5 @@ export default {
   request,
   get,
   WebSocket,
+  OutgoingMessage,
 };

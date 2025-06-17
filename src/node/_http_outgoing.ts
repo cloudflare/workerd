@@ -11,6 +11,7 @@ import {
   kUniqueHeaders,
   kHighWaterMark,
   parseUniqueHeadersOption,
+  OutgoingMessage,
 } from 'node-internal:internal_http_outgoing';
 
 export {
@@ -19,6 +20,7 @@ export {
   kUniqueHeaders,
   kHighWaterMark,
   parseUniqueHeadersOption,
+  OutgoingMessage,
 };
 export default {
   validateHeaderName,
@@ -26,4 +28,5 @@ export default {
   kUniqueHeaders,
   kHighWaterMark,
   parseUniqueHeadersOption,
+  OutgoingMessage,
 };
