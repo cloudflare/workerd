@@ -180,9 +180,10 @@ export const testHttpDontSetDefaultHeadersWithSetHeader = {
     req.setHeader('connection', 'close');
     req.on('response', resolve);
     req.on('error', reject);
-
+    strictEqual(req.headersSent, false);
     req.end();
     await promise;
+    strictEqual(req.headersSent, true);
   },
 };
 

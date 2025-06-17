@@ -7,6 +7,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #reading: boolean = false;
   #response: Response;
   #resetTimers: (opts: { finished: boolean }) => void;
+  #aborted: boolean = false;
 
   public url: string = '';
   // @ts-expect-error TS2416 Type-inconsistencies
@@ -51,7 +52,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   async #tryRead(): Promise<void> {
-    if (!this.#reader || this.#reading) return;
+    if (!this.#reader || this.#reading || this.#aborted) return;
 
     this.#reading = true;
 
@@ -74,10 +75,25 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   public override _read(): void {
-    if (!this.#reading) {
+    if (!this.#reading && !this.#aborted) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       this.#tryRead();
     }
+  }
+
+  public override _destroy(
+    error: Error | null,
+    callback: (error?: Error | null) => void
+  ): void {
+    if (!this.#aborted) {
+      this.#aborted = true;
+      this.emit('aborted');
+    }
+    this.#reading = false;
+
+    queueMicrotask(() => {
+      callback(error);
+    });
   }
 
   public get headers(): Record<string, string> {
