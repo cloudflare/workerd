@@ -14,7 +14,11 @@ export default {
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
     let resolveFn;
-    invocationPromises.push(new Promise((resolve, reject) => { resolveFn = resolve }));
+    invocationPromises.push(
+      new Promise((resolve, reject) => {
+        resolveFn = resolve;
+      })
+    );
 
     // Accumulate the span info for easier testing
     return (event) => {
