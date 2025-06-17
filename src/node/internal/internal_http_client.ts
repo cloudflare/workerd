@@ -28,6 +28,7 @@ import type {
 } from 'node:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
@@ -59,6 +60,7 @@ export class ClientRequest extends OutgoingMessage {
   public protocol: string = 'http:';
   public port: string = '80';
   public joinDuplicateHeaders: boolean | undefined;
+  public agent: Agent | undefined;
 
   public constructor(
     input: string | URL | RequestOptions | null,
@@ -92,15 +94,39 @@ export class ClientRequest extends OutgoingMessage {
       }
     }
 
-    // We don't support any other protocol than http: but
-    // node.js supports different protocols according to the default agent.
-    if (options.protocol !== undefined) {
-      if (options.protocol !== 'http:') {
-        throw new ERR_INVALID_PROTOCOL(options.protocol as string, 'http:');
+    type AgentLike = Agent | boolean | null | undefined;
+    let agent = options.agent as unknown as AgentLike;
+    // TODO(soon): Rather than using RequestOptions use our own type that includes our own Agent class type.
+    const defaultAgent =
+      (options._defaultAgent as unknown as AgentLike) || globalAgent;
+    if (agent === false) {
+      // @ts-expect-error TS2351 This expression is not constructable.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call
+      agent = new defaultAgent.constructor();
+    } else if (agent == null) {
+      if (typeof options.createConnection !== 'function') {
+        agent = defaultAgent as Agent;
       }
+    } else if (
+      typeof agent === 'object' &&
+      typeof agent.addRequest !== 'function'
+    ) {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.agent',
+        ['Agent-like Object', 'undefined', 'false'],
+        agent
+      );
     }
+    this.agent = agent as unknown as Agent | undefined;
 
-    const defaultPort = options.defaultPort || 80;
+    const protocol = options.protocol || (defaultAgent as Agent).protocol;
+    let expectedProtocol = (defaultAgent as Agent).protocol;
+    if (this.agent?.protocol) expectedProtocol = this.agent.protocol;
+    const defaultPort = options.defaultPort || options.defaultPort || 80;
+
+    if (protocol !== expectedProtocol) {
+      throw new ERR_INVALID_PROTOCOL(protocol, expectedProtocol);
+    }
 
     const port = (options.port = options.port || defaultPort || 80);
     this.port = port.toString();
@@ -144,10 +170,6 @@ export class ClientRequest extends OutgoingMessage {
 
     if (options.insecureHTTPParser !== undefined) {
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.insecureHTTPParser');
-    }
-
-    if (options.agent !== undefined) {
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.agent');
     }
 
     if (options.createConnection !== undefined) {
