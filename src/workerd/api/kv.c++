@@ -98,7 +98,6 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::StringPtr urlStr,
     TraceContext& traceContext) {
 
-  // TODO: Factor this out into its own function
   KJ_SWITCH_ONEOF(opTypeOrUnknown) {
     KJ_CASE_ONEOF(name, kj::LiteralStringConst) {}
     KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
@@ -111,7 +110,6 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
 
   headers.add(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
-    KJ_LOG(WARNING, header.name, header.value);
     headers.add(header.name.asPtr(), header.value.asPtr());
   }
 
