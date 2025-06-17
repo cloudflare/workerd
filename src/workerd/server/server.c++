@@ -1788,6 +1788,22 @@ struct Server::ConfigErrorReporter final: public ErrorReporter {
   }
 };
 
+// Implementation of ErrorReporter for dynamically-loaded Workers. We'll collect the errors and
+// report them in an exception at the end.
+struct Server::DynamicErrorReporter final: public ErrorReporter {
+  kj::Vector<kj::String> errors;
+
+  void addError(kj::String error) override {
+    errors.add(kj::mv(error));
+  }
+
+  void throwIfErrors() {
+    if (!errors.empty()) {
+      JSG_FAIL_REQUIRE(Error, "Failed to start Worker:\n", kj::strArray(errors, "\n"));
+    }
+  }
+};
+
 class Server::WorkerService final: public Service,
                                    private kj::TaskSet::ErrorHandler,
                                    private IoChannelFactory,
@@ -1806,6 +1822,7 @@ class Server::WorkerService final: public Service,
     AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
+    kj::Array<WorkerLoaderNamespace*> workerLoaders;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -3077,6 +3094,10 @@ class Server::WorkerService final: public Service,
     abortActorsCallback(reason);
   }
 
+  kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
+      kj::String name,
+      kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
+
   // ---------------------------------------------------------------------------
   // implements TimerChannel
 
@@ -3531,6 +3552,171 @@ struct Server::WorkerDef {
       compileBindings;
 };
 
+class Server::WorkerLoaderNamespace {
+ public:
+  WorkerLoaderNamespace(Server& server, kj::String namespaceName)
+      : server(server),
+        namespaceName(kj::mv(namespaceName)) {}
+
+  void unlink() {
+    for (auto& isolate: isolates) {
+      isolate.value->unlink();
+    }
+  }
+
+  kj::Own<WorkerStubChannel> loadIsolate(
+      kj::String name, kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+    return isolates
+        .findOrCreate(name,
+            [&]() -> decltype(isolates)::Entry {
+      auto displayName = kj::str(namespaceName, ':', name);
+
+      return {.key = kj::mv(name),
+        .value = kj::rc<WorkerStubImpl>(server, kj::mv(displayName), kj::mv(fetchSource))};
+    })
+        .addRef()
+        .toOwn();
+  }
+
+ private:
+  Server& server;
+  kj::String namespaceName;
+
+  class WorkerStubImpl;
+  kj::HashMap<kj::String, kj::Rc<WorkerStubImpl>> isolates;
+
+  class WorkerStubImpl final: public WorkerStubChannel,
+                              public kj::Refcounted,
+                              public kj::EnableAddRefToThis<WorkerStubImpl> {
+   public:
+    WorkerStubImpl(Server& server,
+        kj::String displayName,
+        kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
+        : startupTask(start(server, kj::mv(displayName), kj::mv(fetchSource)).fork()) {}
+
+    void unlink() {
+      KJ_IF_SOME(s, service) {
+        s->unlink();
+      }
+    }
+
+    kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+        kj::Maybe<kj::String> name, Frankenvalue props) override {
+      return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
+    }
+
+   private:
+    kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
+    kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
+
+    kj::Promise<void> start(Server& server,
+        kj::String displayName,
+        kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+      auto source = co_await fetchSource();
+      static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
+      WorkerDef def{
+        .featureFlags = source.compatibilityFlags,
+        // TODO(worker-loader): Support node FS compat backed by actual source code. For now we use
+        //   an empty bundle directory.
+        .bundleDirectory = getBundleDirectory({}),
+        .source = kj::mv(source.source),
+        .moduleFallback = kj::none,
+        .localActorConfigs = EMPTY_ACTOR_CONFIGS,
+
+        // TODO(now): Allow overriding globalOutbound.
+        .globalOutbound{
+          .designator = config::Worker::Reader().getGlobalOutbound(),
+          .errorContext = kj::str("Worker's globalOutbound"),
+        },
+
+        .compileBindings =
+            [env = kj::mv(source.env)](
+                jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
+        if (!env.empty()) {
+          // Copy properties of the provided `env` object into `target`.
+          js.withinHandleScope([&]() {
+            auto targetObj = jsg::JsObject(target);
+            auto sourceObj = KJ_REQUIRE_NONNULL(
+                env.toJs(js).tryCast<jsg::JsObject>(), "'env' must be an object");
+            auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+                jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
+            auto propCount = props.size();
+            for (auto i: kj::zeroTo(propCount)) {
+              auto prop = props.get(js, i);
+              targetObj.set(js, prop, sourceObj.get(js, prop));
+            }
+          });
+        }
+      },
+      };
+
+      DynamicErrorReporter errorReporter;
+
+      auto service = server.makeWorkerImpl(displayName, kj::mv(def), {}, errorReporter);
+      errorReporter.throwIfErrors();
+
+      service->link(errorReporter);
+      errorReporter.throwIfErrors();
+
+      this->service = kj::mv(service);
+    }
+
+    class SubrequestChannelImpl final: public IoChannelFactory::SubrequestChannel {
+     public:
+      SubrequestChannelImpl(
+          kj::Rc<WorkerStubImpl> isolate, kj::Maybe<kj::String> entrypointName, Frankenvalue props)
+          : isolate(kj::mv(isolate)),
+            entrypointName(kj::mv(entrypointName)),
+            props(kj::mv(props)) {}
+
+      kj::Own<WorkerInterface> startRequest(
+          IoChannelFactory::SubrequestMetadata metadata) override {
+        if (isolate->service == kj::none) {
+          return newPromisedWorkerInterface(
+              isolate->startupTask.addBranch().then([this, metadata = kj::mv(metadata)]() mutable {
+            return startRequestImpl(kj::mv(metadata));
+          }));
+        } else {
+          return startRequestImpl(kj::mv(metadata));
+        }
+      }
+
+     private:
+      kj::Rc<WorkerStubImpl> isolate;
+      kj::Maybe<kj::String> entrypointName;
+      Frankenvalue props;  // moved away when `entrypointService` is initialized
+
+      kj::Maybe<kj::Own<Service>> entrypointService;
+
+      kj::Own<WorkerInterface> startRequestImpl(IoChannelFactory::SubrequestMetadata metadata) {
+        auto& service = KJ_ASSERT_NONNULL(isolate->service);
+        if (entrypointService == kj::none) {
+          entrypointService = service->getEntrypoint(entrypointName, kj::mv(props));
+        }
+        KJ_IF_SOME(ep, entrypointService) {
+          return ep->startRequest(kj::mv(metadata));
+        } else {
+          KJ_IF_SOME(en, entrypointName) {
+            JSG_FAIL_REQUIRE(Error, "Worker has no such entrypoint: ", en);
+          } else {
+            JSG_FAIL_REQUIRE(Error, "Worker has no default entrypoint.");
+          }
+        }
+      }
+    };
+  };
+};
+
+kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel,
+    kj::String name,
+    kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+  auto& channels =
+      KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+  KJ_REQUIRE(loaderChannel < channels.workerLoaders.size(), "invalid worker loader channel number");
+
+  return channels.workerLoaders[loaderChannel]->loadIsolate(kj::mv(name), kj::mv(fetchSource));
+}
+
 kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
@@ -3944,6 +4130,8 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       return kj::Own<IoChannelFactory::SubrequestChannel>(
           lookupService(tail.designator, kj::mv(tail.errorContext)));
     };
+
+    // TODO(now): Fill in result.workerLoaders
 
     return result;
   };
