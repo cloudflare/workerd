@@ -15,6 +15,8 @@ import {
   ERR_INVALID_HTTP_TOKEN,
   ERR_OPTION_NOT_IMPLEMENTED,
   ERR_UNESCAPED_CHARACTERS,
+  ERR_INVALID_PROTOCOL,
+  ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 import { validateInteger, validateBoolean } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
@@ -54,6 +56,9 @@ export class ClientRequest extends OutgoingMessage {
   public method: string = 'GET';
   public path: string;
   public host: string;
+  public protocol: string = 'http:';
+  public port: string = '80';
+  public joinDuplicateHeaders: boolean | undefined;
 
   public constructor(
     input: string | URL | RequestOptions | null,
@@ -87,9 +92,18 @@ export class ClientRequest extends OutgoingMessage {
       }
     }
 
+    // We don't support any other protocol than http: but
+    // node.js supports different protocols according to the default agent.
+    if (options.protocol !== undefined) {
+      if (options.protocol !== 'http:') {
+        throw new ERR_INVALID_PROTOCOL(options.protocol as string, 'http:');
+      }
+    }
+
     const defaultPort = options.defaultPort || 80;
 
     const port = (options.port = options.port || defaultPort || 80);
+    this.port = port.toString();
     const host = (options.host =
       validateHost(options.hostname, 'hostname') ||
       validateHost(options.host, 'host') ||
@@ -99,7 +113,6 @@ export class ClientRequest extends OutgoingMessage {
       options.setHost !== undefined
         ? Boolean(options.setHost)
         : options.setDefaultHeaders !== false;
-
     if (options.timeout !== undefined)
       this.timeout = getTimerDuration(options.timeout, 'timeout');
 
@@ -154,13 +167,8 @@ export class ClientRequest extends OutgoingMessage {
         options.joinDuplicateHeaders,
         'options.joinDuplicateHeaders'
       );
-
-      if (options.joinDuplicateHeaders) {
-        // We do not support joinDuplicateHeaders because the underlying
-        // implementation based on fetch() will handle duplicate headers.
-        throw new ERR_OPTION_NOT_IMPLEMENTED('options.joinDuplicateHeaders');
-      }
     }
+    this.joinDuplicateHeaders = options.joinDuplicateHeaders;
 
     this.path = options.path || '/';
     if (cb) {
@@ -205,6 +213,14 @@ export class ClientRequest extends OutgoingMessage {
           'Basic ' + Buffer.from(options.auth).toString('base64')
         );
       }
+    } else {
+      if (headers.length % 2 !== 0) {
+        throw new ERR_INVALID_ARG_VALUE('headers', headers);
+      }
+
+      for (let n = 0; n < headers.length; n += 2) {
+        this.setHeader(headers[n + 0] as string, headers[n + 1] as string);
+      }
     }
 
     this.on('finish', () => {
@@ -219,7 +235,7 @@ export class ClientRequest extends OutgoingMessage {
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       const value = this.getHeader('content-type') ?? '';
       body = new Blob(this.#body, {
-        type: typeof value === 'string' ? value : value.join(','),
+        type: typeof value === 'string' ? value : value.join(', '),
       });
     }
 
@@ -228,19 +244,17 @@ export class ClientRequest extends OutgoingMessage {
       const value = this[kOutHeaders][name]?.value;
       if (value) {
         if (Array.isArray(value)) {
-          for (const item of value) {
-            headers.push([name, item]);
+          if (this.joinDuplicateHeaders) {
+            headers.push([name, value.join(', ')]);
+          } else {
+            for (const item of value) {
+              headers.push([name, item]);
+            }
           }
         } else {
           headers.push([name, value]);
         }
       }
-    }
-
-    const host = this.getHeader('host');
-    if (!host) {
-      // TODO(soon): Investigate what to do when this particular error is thrown.
-      throw new Error('Host header is not set');
     }
 
     if (this.timeout) {
@@ -251,7 +265,31 @@ export class ClientRequest extends OutgoingMessage {
       }, this.timeout) as unknown as number;
     }
 
+    if (
+      this.host &&
+      !this.getHeader('host') &&
+      Object.keys(this[kOutHeaders]).length === 0
+    ) {
+      // From RFC 7230 5.4 https://datatracker.ietf.org/doc/html/rfc7230#section-5.4
+      // A server MUST respond with a 400 (Bad Request) status code to any
+      // HTTP/1.1 request message that lacks a Host header field
+      queueMicrotask(() => {
+        this.#handleFetchResponse(
+          new Response(null, {
+            status: 400,
+            statusText: 'Bad Request',
+            headers: {
+              connection: 'close',
+            },
+          })
+        );
+      });
+      return;
+    }
+
+    const host = this.getHeader('host') ?? this.host;
     const url = new URL(`http://${host}`);
+    url.port = this.port;
     url.pathname = this.path;
 
     this[kHeadersSent] = true;

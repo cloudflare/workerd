@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import http from 'node:http';
-import { strictEqual, ok, deepStrictEqual, rejects } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -202,6 +202,84 @@ export const testHttpDontSetDefaultHeadersWithSetHost = {
       .on('error', reject)
       .on('response', resolve)
       .end();
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-request-end-twice.js
+export const testHttpRequestEndTwice = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const req = http
+      .get({ port: env.HEADER_VALIDATION_SERVER_PORT }, function (res) {
+        res.on('error', reject).on('end', function () {
+          strictEqual(req.end(), req);
+          resolve();
+        });
+        res.resume();
+      })
+      .on('error', reject);
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-request-host-header.js
+export const testHttpRequestHostHeader = {
+  async test(_ctrl, env) {
+    // From RFC 7230 5.4 https://datatracker.ietf.org/doc/html/rfc7230#section-5.4
+    // A server MUST respond with a 400 (Bad Request) status code to any
+    // HTTP/1.1 request message that lacks a Host header field
+    const { promise, resolve } = Promise.withResolvers();
+    http.get(
+      { port: env.HEADER_VALIDATION_SERVER_PORT, headers: [] },
+      (res) => {
+        strictEqual(res.statusCode, 400);
+        strictEqual(res.headers.connection, 'close');
+        resolve();
+      }
+    );
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-request-invalid-method-error.js
+export const testHttpRequestInvalidMethodError = {
+  async test() {
+    throws(() => http.request({ method: '\0' }), {
+      code: 'ERR_INVALID_HTTP_TOKEN',
+      name: 'TypeError',
+      message: 'Method must be a valid HTTP token ["\u0000"]',
+    });
+  },
+};
+
+export const testHttpRequestJoinAuthorizationHeaders = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    http.get(
+      {
+        port: env.HELLO_WORLD_SERVER_PORT,
+        method: 'POST',
+        headers: [
+          'authorization',
+          '1',
+          'authorization',
+          '2',
+          'cookie',
+          'foo',
+          'cookie',
+          'bar',
+        ],
+        joinDuplicateHeaders: true,
+        path: '/join-duplicate-headers',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        strictEqual(res.headers.authorization, '3, 4');
+        strictEqual(res.headers.cookie, 'foo; bar');
+        resolve();
+      }
+    );
     await promise;
   },
 };

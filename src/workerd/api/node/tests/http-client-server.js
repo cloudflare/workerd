@@ -50,6 +50,19 @@ const helloWorldServer = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Length': '0' });
       res.end();
       break;
+    case 'join-duplicate-headers':
+      res.writeHead(200, [
+        'authorization',
+        '3',
+        'authorization',
+        '4',
+        'cookie',
+        'foo',
+        'cookie',
+        'bar',
+      ]);
+      res.end();
+      break;
     default:
       res.end();
   }
