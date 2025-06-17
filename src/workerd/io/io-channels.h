@@ -5,8 +5,11 @@
 #pragma once
 
 #include <workerd/io/actor-id.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-source.h>
 
 #include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
@@ -63,6 +66,9 @@ class TimerChannel {
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
 };
+
+class WorkerStubChannel;
+struct DynamicWorkerSource;
 
 // Each IoContext has a set of "channels" on which outgoing I/O can be initiated. All outgoing
 // I/O occurs through these channels. Think of these kind of like file descriptors. They are
@@ -204,6 +210,43 @@ class IoChannelFactory {
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
+
+  // Use a dynamic Worker loader binding to obtain an Worker by name. If the named Worker
+  // doesn't already exist, the callback will be called to fetch the source code from which the
+  // Worker should be created.
+  virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
+      kj::String name,
+      kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+    JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
+  }
+};
+
+// Represents a dynamically-loaded Worker to which requests can be sent.
+//
+// This object is returned before the Worker actually loads, so if any errors occur while loading,
+// any requests sent to the Worker will fail, propagating the exception.
+class WorkerStubChannel {
+ public:
+  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
+
+  // TODO(now): Expose actor class entrypoints for use with facets.
+
+  // TODO(someday): Allow caller to enumerate entrypoints?
+};
+
+// Source code needed to dynamically load a Worker.
+struct DynamicWorkerSource {
+  WorkerSource source;
+  CompatibilityFlags::Reader compatibilityFlags;
+
+  // `env` object to pass to the loaded worker. Can contain anything that can be serialized to
+  // a `Frankenvalue` (which should eventually include all binding types, RPC stubs, etc.).
+  Frankenvalue env;
+
+  // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
+  // `StringPtr`s; `ownContent` owns the backing buffer for them.)
+  kj::Own<void> ownContent;
 };
 
 }  // namespace workerd
