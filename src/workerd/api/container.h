@@ -62,8 +62,11 @@ class Container: public jsg::Object {
  private:
   IoOwn<rpc::Container::Client> rpcClient;
   bool running;
+  bool monitoring;
+  bool monitoringExplicitly;
 
   kj::Maybe<jsg::Value> destroyReason;
+  void monitorOnBackgroundIfNeeded();
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);
@@ -71,6 +74,7 @@ class Container: public jsg::Object {
 
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
+  friend class DurableObjectState;
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES api::Container, api::Container::StartupOptions
