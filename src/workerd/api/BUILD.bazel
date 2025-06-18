@@ -396,7 +396,10 @@ wd_test(
 wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
-    data = ["kv-test.js"],
+    data = [
+        "kv-instrumentation-test.js",
+        "kv-test.js",
+    ],
 )
 
 wd_test(
