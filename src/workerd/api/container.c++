@@ -78,6 +78,12 @@ jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> e
     destroyReason = kj::mv(error);
   }
 
+  // We only set running to false to not give user false hope that the container is still running.
+  // In practice, users should call monitor() to track the container's status but in reality,
+  // users can call destroy() and later expect running to be false.
+  // Ref: https://github.com/cloudflare/workerd/issues/4362
+  running = false;
+
   return IoContext::current().awaitIo(
       js, rpcClient->destroyRequest(capnp::MessageSize{4, 0}).sendIgnoringResult());
 }
