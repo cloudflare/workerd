@@ -377,7 +377,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
+    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code: ", statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
