@@ -35,6 +35,7 @@ http_archive(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
     strip_prefix = "sqlite-src-3470000",
