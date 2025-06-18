@@ -676,11 +676,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       KJ_ASSERT(size > sizeof(COMPILED_MAGIC_SUFFIX) + sizeof(uint64_t));
       kj::byte magic[sizeof(COMPILED_MAGIC_SUFFIX)]{};
       exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX), magic);
-      if (kj::arrayPtr(magic) == kj::arrayPtr(COMPILED_MAGIC_SUFFIX).asBytes()) {
+      if (kj::arrayPtr(magic) == kj::asBytes(COMPILED_MAGIC_SUFFIX)) {
         // Oh! It appears we are running a compiled binary, it has a config appended to the end.
         uint64_t configSize;
-        exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t),
-            kj::arrayPtr(&configSize, 1).asBytes());
+        exe.read(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t), kj::asBytes(configSize));
         KJ_ASSERT(size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t) >
             configSize * sizeof(capnp::word));
         size_t offset = size - sizeof(COMPILED_MAGIC_SUFFIX) - sizeof(uint64_t) -
