@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import http from 'node:http';
+import https from 'node:https';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 
 export const checkPortsSetCorrectly = {
@@ -281,5 +282,14 @@ export const testHttpRequestJoinAuthorizationHeaders = {
       }
     );
     await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-https-agent-constructor.js
+export const testHttpsAgentConstructor = {
+  async test() {
+    ok(new https.Agent() instanceof https.Agent);
+    strictEqual(typeof https.request, 'function');
+    strictEqual(typeof http.get, 'function');
   },
 };
