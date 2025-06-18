@@ -59,8 +59,33 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   req.setCompatibilityFlags(flags);
 
   IoContext::current().addTask(req.sendIgnoringResult());
-
   running = true;
+  monitorOnBackgroundIfNeeded();
+}
+
+void Container::monitorOnBackgroundIfNeeded() {
+  if (monitoring || !running) {
+    return;
+  }
+  monitoring = true;
+
+  auto req = rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+                 .sendIgnoringResult()
+                 .then([this, self = JSG_THIS]() {
+    running = false;
+    monitoring = false;
+  }, [this, self = JSG_THIS](kj::Exception&& error) {
+    running = false;
+    monitoring = false;
+
+    // Check if there is an existing monitor request made by the user.
+    // If not, we can abort the current context and error.
+    if (!monitoringExplicitly) {
+      IoContext::current().abort(kj::mv(error));
+    }
+  });
+
+  IoContext::current().addTask(kj::mv(req));
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
@@ -109,10 +134,13 @@ jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<F
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
+  monitoringExplicitly = true;
+
   return IoContext::current()
       .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
       .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
+    monitoringExplicitly = false;
     auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
@@ -127,6 +155,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
+    monitoringExplicitly = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
