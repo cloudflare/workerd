@@ -21,6 +21,30 @@ export class DurableObjectExample extends DurableObject {
 
     const monitor = container.monitor().catch((_err) => {});
 
+    // Test HTTP requests to container (error)
+    {
+      for (let i = 0; i < 6; i++) {
+        try {
+          await container
+            .getTcpPort(8081)
+            .fetch('http://foo/bar/baz', { method: 'POST', body: 'hello' });
+          throw new Error("It succeeded when it wasn't supposed to");
+        } catch (e) {
+          if (e.message.includes('not listening on port')) {
+            break;
+          }
+
+          await scheduler.wait(500);
+          if (i === 5) {
+            console.error(
+              `Failed to connect to container ${container.id}. Retried ${i} times`
+            );
+            throw e;
+          }
+        }
+      }
+    }
+
     // Test HTTP requests to container
     {
       let resp;
