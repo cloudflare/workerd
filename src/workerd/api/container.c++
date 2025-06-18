@@ -65,7 +65,6 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
       js.throwException(kj::mv(error));
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
-    running = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });

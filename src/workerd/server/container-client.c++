@@ -372,15 +372,19 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
       co_await timer.afterDelay(1 * kj::SECONDS);
       continue;
     }
-    JSG_REQUIRE(response.statusCode == 200, Error,
+    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
         "Monitoring container failed with: ", response.statusCode, response.body);
-    // Parse JSON response
-    auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
-    auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
+
+    // If container is not found, we ignore it to set "running" correctly in the container orchestrator.
+    if (response.statusCode == 200) {
+      auto jsonRoot =
+          decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
+      auto statusCode = jsonRoot.getStatusCode();
+      JSG_REQUIRE(
+          statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
+    }
     co_return;
   }
-  JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
