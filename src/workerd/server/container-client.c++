@@ -362,6 +362,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   // Monitor is often called right after start but the api layer's start does not await the RPC's
   // start response. That means that the createContainer call might not have even started yet.
   // If it hasn't, we'll give it 3 tries before failing.
+  auto results = context.getResults();
   for (int i = 0; i < 3; i++) {
     // Docker API: POST /containers/{id}/wait - wait for container to exit
     auto endpoint = kj::str("/containers/", containerName, "/wait");
@@ -377,7 +378,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code: ", statusCode);
+    results.setExitCode(statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
