@@ -35,6 +35,7 @@ using api::pyodide::PythonConfig;
 class Server final: private kj::TaskSet::ErrorHandler {
  public:
   Server(kj::Filesystem& fs,
+      kj::Maybe<kj::AsyncIoContext&> ioContext,
       kj::Timer& timer,
       kj::Network& network,
       kj::EntropySource& entropySource,
@@ -116,8 +117,13 @@ class Server final: private kj::TaskSet::ErrorHandler {
     reportConfigError(kj::mv(error));
   }
 
+  kj::Maybe<kj::AsyncIoContext&> getIoContext() {
+    return ioContext;
+  }
+
  private:
   kj::Filesystem& fs;
+  kj::Maybe<kj::AsyncIoContext&> ioContext;
   kj::Timer& timer;
   kj::Network& network;
   kj::EntropySource& entropySource;
