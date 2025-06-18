@@ -127,7 +127,7 @@ export class ClientRequest extends OutgoingMessage {
     if (protocol !== expectedProtocol) {
       throw new ERR_INVALID_PROTOCOL(protocol, expectedProtocol);
     }
-
+    this.protocol = protocol;
     const port = (options.port = options.port || defaultPort || 80);
     this.port = port.toString();
     const host = (options.host =
@@ -311,6 +311,7 @@ export class ClientRequest extends OutgoingMessage {
 
     const host = this.getHeader('host') ?? this.host;
     const url = new URL(`http://${host}`);
+    url.protocol = this.protocol;
     url.port = this.port;
     url.pathname = this.path;
 

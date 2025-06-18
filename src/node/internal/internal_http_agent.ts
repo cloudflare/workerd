@@ -5,7 +5,15 @@
 
 import { EventEmitter } from 'node-internal:events';
 import { validateOneOf, validateNumber } from 'node-internal:validators';
-import type { RequestOptions, Agent as _Agent, AgentOptions } from 'node:http';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import type {
+  RequestOptions,
+  Agent as _Agent,
+  AgentOptions,
+  ClientRequest,
+  IncomingMessage,
+} from 'node:http';
+import type { Socket } from 'node:net';
 
 // @ts-expect-error TS2507 EventEmitter is not a constructor function type.
 export class Agent extends EventEmitter implements _Agent {
@@ -20,8 +28,11 @@ export class Agent extends EventEmitter implements _Agent {
   public scheduling: 'lifo' | 'fifo' = 'lifo';
   public maxTotalSockets: number;
   public totalSocketCount: number;
+  public readonly freeSockets: NodeJS.ReadOnlyDict<Socket[]> = {};
+  public readonly sockets: NodeJS.ReadOnlyDict<Socket[]> = {};
+  public readonly requests: NodeJS.ReadOnlyDict<IncomingMessage[]> = {};
 
-  public constructor(options: AgentOptions) {
+  public constructor(options?: AgentOptions) {
     super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
     this.options = { __proto__: null, ...options };
 
@@ -47,6 +58,13 @@ export class Agent extends EventEmitter implements _Agent {
 
   public static defaultMaxSockets: number = Infinity;
 
+  public createConnection(): void {
+    // We can't create a connection like this because our implementation
+    // relies on fetch() not on node:net sockets. In node.js, method
+    // calls node:net's createConnection method.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createConnection');
+  }
+
   public getName(options: RequestOptions = {}): string {
     let name = options.host || 'localhost';
 
@@ -66,29 +84,33 @@ export class Agent extends EventEmitter implements _Agent {
     return name;
   }
 
-  public addRequest(): void {
-    // Not implemented
+  public addRequest(_req: ClientRequest, _options: unknown): void {
+    // Not implemented. Acts as a no-op.
   }
 
-  public createSocket(): void {
-    // Not implemented
+  public createSocket(
+    _req: ClientRequest,
+    _options: unknown,
+    _callback: VoidFunction
+  ): void {
+    // Not implemented. Acts as a no-op.
   }
 
-  public removeSocket(): void {
-    // Not implemented
+  public removeSocket(_socket: Socket): void {
+    // Not implemented. Acts as a no-op.
   }
 
-  public keepSocketAlive(): boolean {
-    // Not implemented
+  public keepSocketAlive(_socket: Socket): boolean {
+    // Not implemented. Acts as a no-op.
     return false;
   }
 
-  public reuseSocket(): void {
-    // Not implemented
+  public reuseSocket(_socket: Socket, _req: ClientRequest): void {
+    // Not implemented. Acts as a no-op.
   }
 
-  public destroy(): void {
-    // Not implemented
+  public destroy(_error?: Error): void {
+    // Not implemented. Acts as a no-op.
   }
 }
 
