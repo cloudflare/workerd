@@ -1987,6 +1987,10 @@ KJ_TEST("Server: Durable Objects (in memory)") {
                 `      throw new Error("durable ID should be type DurableObjectId, " +
                 `                      `got: ${this.id.constructor.name}`);
                 `    }
+                `    if (this.id.name) {
+                `      throw new Error("ctx.id for Durable Object should not have a .name " +
+                `                      `property, got: ${this.id.name}`);
+                `    }
                 `  }
                 `  async fetch(request) {
                 `    let count = (await this.storage.get("foo")) || 0;

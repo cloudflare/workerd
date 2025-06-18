@@ -2115,6 +2115,14 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Own<IoChannelFactory::ActorChannel> getActorChannel(Worker::Actor::Id id) {
+      KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
+        // To emulate production, we have to recreate this ID.
+        ActorIdFactoryImpl::ActorIdImpl* idImpl =
+            dynamic_cast<ActorIdFactoryImpl::ActorIdImpl*>(doId.get());
+        KJ_ASSERT(idImpl != nullptr, "Unexpected ActorId type?");
+        idImpl->clearName();
+      }
+
       return kj::heap<ActorChannelImpl>(getActorContainer(kj::mv(id)));
     }
 
