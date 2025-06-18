@@ -140,24 +140,29 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     const auto [_running, portMappings] = co_await containerClient.inspectContainer();
     auto maybeMappedPort = portMappings.find(containerPort);
     if (maybeMappedPort == kj::none) {
-      throw JSG_KJ_EXCEPTION(DISCONNECTED, Error,
-          "connect(): Connection refused: container port not found. Make sure you exposed the port in your container definition.");
+      throw JSG_KJ_EXCEPTION(DISCONNECTED, Error, "connect(): Connection refused: container port ",
+          containerPort,
+          " not found. Make sure you exposed the port in your container definition.");
     }
     auto mappedPort = KJ_ASSERT_NONNULL(maybeMappedPort);
 
     auto address =
         co_await containerClient.network.parseAddress(kj::str(containerHost, ":", mappedPort));
-    auto connection = co_await address->connect();
-
-    auto upPipe = kj::newOneWayPipe();
-    auto upEnd = kj::mv(upPipe.in);
-    auto results = context.getResults();
-    results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
-    auto downEnd = containerClient.byteStreamFactory.capnpToKj(context.getParams().getDown());
-    pumpTask =
-        kj::joinPromisesFailFast(kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
-            .ignoreResult()
-            .attach(kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
+    try {
+      auto connection = co_await address->connect();
+      auto upPipe = kj::newOneWayPipe();
+      auto upEnd = kj::mv(upPipe.in);
+      auto results = context.getResults();
+      results.setUp(containerClient.byteStreamFactory.kjToCapnp(kj::mv(upPipe.out)));
+      auto downEnd = containerClient.byteStreamFactory.capnpToKj(context.getParams().getDown());
+      pumpTask = kj::joinPromisesFailFast(
+          kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
+                     .ignoreResult()
+                     .attach(kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
+    } catch (const kj::Exception& error) {
+      throw JSG_KJ_EXCEPTION(DISCONNECTED, Error,
+          "the container is not listening on the TCP address 0.0.0.0:", containerPort);
+    }
     co_return;
   }
 
@@ -377,7 +382,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
+    JSG_REQUIRE(statusCode == 0, Error, "container exited with unexpected exit code: ", statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
