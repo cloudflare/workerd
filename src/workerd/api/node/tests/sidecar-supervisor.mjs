@@ -4,7 +4,6 @@
 
 import net from 'node:net';
 import child_process from 'node:child_process';
-import { scheduler } from 'node:timers/promises';
 
 const ANY_PORT = 0;
 const CONNECT_POLL_INTERVAL_MS = 500;
@@ -53,7 +52,10 @@ function waitForListening(port) {
 
 function runSidecar(cmd) {
   const { promise, resolve } = Promise.withResolvers();
-  const proc = child_process.spawn(cmd, { shell: true, stdio: 'inherit' });
+  const proc = child_process.spawn(cmd, {
+    shell: true,
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
   proc.once('exit', resolve);
   return { promise, proc };
 }
@@ -67,7 +69,7 @@ const sidecar = runSidecar(sidecarCommand);
 await Promise.all(Object.values(ports).map(waitForListening));
 
 process.exitCode = child_process.spawnSync(testArgv[0], testArgv.slice(1), {
-  stdio: 'inherit',
+  stdio: ['inherit', 'inherit', 'inherit'],
 }).status;
 
 sidecar.proc.kill();

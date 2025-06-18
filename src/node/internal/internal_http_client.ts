@@ -52,7 +52,6 @@ export class ClientRequest extends OutgoingMessage {
 
   public _ended: boolean = false;
 
-  public timeoutCb?: VoidFunction | undefined;
   public timeout?: number;
   public method: string = 'GET';
   public path: string;
@@ -343,16 +342,15 @@ export class ClientRequest extends OutgoingMessage {
     });
 
     this.emit('response', this.#incomingMessage);
-    this._ended = true;
   }
 
   #handleFetchError(error: Error): void {
     if (!this.destroyed) {
       this.emit('error', error);
     } else {
-      // Without this error log, it's impossible to debug.
-      console.error(error);
+      console.log(error);
     }
+    this.destroyed = true;
     this._ended = true;
   }
 
@@ -390,16 +388,11 @@ export class ClientRequest extends OutgoingMessage {
   }
 
   public setTimeout(msecs: number, callback?: VoidFunction): this {
-    if (this._ended || this.timeoutCb) {
-      return this;
-    }
-
     if (this.#timer) {
       clearTimeout(this.#timer);
       this.#timer = null;
     }
 
-    this.timeoutCb = callback;
     this.timeout = getTimerDuration(msecs, 'msecs');
     this.#resetTimers({ finished: false });
 
@@ -435,8 +428,13 @@ export class ClientRequest extends OutgoingMessage {
       clearTimeout(this.#timer as number);
       this.#timer = null;
     } else if (this.timeout) {
+      if (this.#timer) {
+        clearTimeout(this.#timer);
+      }
       this.#timer = setTimeout(() => {
         this.emit('timeout');
+        this.#incomingMessage?.emit('timeout');
+        this.#abortController.abort();
       }, this.timeout) as unknown as number;
     }
   }

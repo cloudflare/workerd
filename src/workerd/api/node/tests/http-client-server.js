@@ -25,12 +25,10 @@ const asdServer = http.createServer((_req, res) => {
 });
 asdServer.listen(process.env.ASD_SERVER_PORT, () => reportPort(asdServer));
 
-let timeoutServerRequestCount = 0;
 const timeoutServer = http.createServer((_req, res) => {
-  res.flushHeaders();
-  if (timeoutServerRequestCount++ === 0) {
-    res.end();
-  }
+  setTimeout(() => {
+    res.end('pong');
+  }, 1000);
 });
 timeoutServer.listen(process.env.TIMEOUT_SERVER_PORT, () =>
   reportPort(timeoutServer)

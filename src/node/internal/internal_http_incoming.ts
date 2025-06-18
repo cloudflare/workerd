@@ -46,6 +46,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       queueMicrotask(() => this.emit('close'));
     });
 
+    this.on('timeout', () => {
+      this.#reading = false;
+    });
+
     this.#reader = this.#response.body?.getReader();
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     this.#tryRead();
@@ -119,8 +123,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     return {};
   }
 
-  public setTimeout(_msecs: number, _callback?: () => void): this {
-    // TODO(soon): Not yet implemented
+  public setTimeout(_msecs: number, callback?: () => void): this {
+    if (callback) {
+      this.on('timeout', callback);
+    }
     return this;
   }
 }
