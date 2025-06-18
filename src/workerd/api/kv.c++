@@ -73,8 +73,7 @@ static void parseListMetadata(TraceContext& traceContext,
       }
     }
 
-    // TODO: unused variable warning
-    KJ_IF_SOME(cursor, obj.get(js, CURSOR).tryCast<jsg::JsString>()) {
+    if (obj.get(js, CURSOR).tryCast<jsg::JsString>() != kj::none) {
       traceContext.userSpan.setTag("cloudflare.kv.response.cursor"_kjc, true);
     }
 
