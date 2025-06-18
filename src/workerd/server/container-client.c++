@@ -148,7 +148,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
 
     auto address =
         co_await containerClient.network.parseAddress(kj::str(containerHost, ":", mappedPort));
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
+    try {
       auto connection = co_await address->connect();
       auto upPipe = kj::newOneWayPipe();
       auto upEnd = kj::mv(upPipe.in);
@@ -159,7 +159,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
           kj::arr(upEnd->pumpTo(*connection), connection->pumpTo(*downEnd)))
                      .ignoreResult()
                      .attach(kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd));
-        }) {
+    } catch (const kj::Exception& error) {
       throw JSG_KJ_EXCEPTION(DISCONNECTED, Error,
           "the container is not listening on the TCP address 0.0.0.0:", containerPort);
     }
