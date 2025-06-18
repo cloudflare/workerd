@@ -1511,7 +1511,10 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   }
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
-    // TODO(someday): Trace non-top-level calls?
+    KJ_IF_SOME(t, mapAddRef(ioctx.getWorkerTracer())) {
+      t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
+          tracing::JsRpcEventInfo(kj::str(methodName)));
+    }
   }
 };
 
