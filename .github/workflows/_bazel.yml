@@ -159,7 +159,9 @@ jobs:
           name: test-logs-${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}.zip
           path: bazel-testlogs/**/test.xml
       - name: Report disk usage (in MB)
-        if: always()
+        # This step takes a few seconds on Mac and Linux but takes 16 minutes on Windows for
+        # some reason. It doesn't seem important enough to wait for 16 minutes on every build.
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
