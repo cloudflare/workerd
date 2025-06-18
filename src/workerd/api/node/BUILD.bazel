@@ -433,6 +433,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/http-agent-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/http-agent-nodejs-test.js"],
+)
+
+wd_test(
     src = "tests/bound-als-test.wd-test",
     args = ["--experimental"],
     data = ["tests/bound-als-test.js"],
