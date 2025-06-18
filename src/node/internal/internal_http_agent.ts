@@ -15,24 +15,27 @@ import type {
 } from 'node:http';
 import type { Socket } from 'node:net';
 
+// This is mostly a stub implementation.
+// We don't intend to support the Agent API right now beyond providing a very limited stub API.
+//
 // @ts-expect-error TS2507 EventEmitter is not a constructor function type.
 export class Agent extends EventEmitter implements _Agent {
-  public defaultPort = 80;
-  public protocol: string = 'http:';
+  defaultPort = 80;
+  protocol: string = 'http:';
 
-  public options: AgentOptions & { __proto__: null };
-  public keepAliveMsecs: number = 1000;
-  public keepAlive: boolean = false;
-  public maxSockets: number;
-  public maxFreeSockets: number;
-  public scheduling: 'lifo' | 'fifo' = 'lifo';
-  public maxTotalSockets: number;
-  public totalSocketCount: number;
-  public readonly freeSockets: NodeJS.ReadOnlyDict<Socket[]> = {};
-  public readonly sockets: NodeJS.ReadOnlyDict<Socket[]> = {};
-  public readonly requests: NodeJS.ReadOnlyDict<IncomingMessage[]> = {};
+  options: AgentOptions & { __proto__: null };
+  keepAliveMsecs: number = 1000;
+  keepAlive: boolean = false;
+  maxSockets: number;
+  maxFreeSockets: number;
+  scheduling: 'lifo' | 'fifo' = 'lifo';
+  maxTotalSockets: number;
+  totalSocketCount: number;
+  readonly freeSockets: NodeJS.ReadOnlyDict<Socket[]> = {};
+  readonly sockets: NodeJS.ReadOnlyDict<Socket[]> = {};
+  readonly requests: NodeJS.ReadOnlyDict<IncomingMessage[]> = {};
 
-  public constructor(options?: AgentOptions) {
+  constructor(options?: AgentOptions) {
     super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
     this.options = { __proto__: null, ...options };
 
@@ -56,16 +59,16 @@ export class Agent extends EventEmitter implements _Agent {
     }
   }
 
-  public static defaultMaxSockets: number = Infinity;
+  static defaultMaxSockets: number = Infinity;
 
-  public createConnection(): void {
+  createConnection(): void {
     // We can't create a connection like this because our implementation
     // relies on fetch() not on node:net sockets. In node.js, method
     // calls node:net's createConnection method.
     throw new ERR_METHOD_NOT_IMPLEMENTED('createConnection');
   }
 
-  public getName(options: RequestOptions = {}): string {
+  getName(options: RequestOptions = {}): string {
     let name = options.host || 'localhost';
 
     name += ':';
@@ -84,11 +87,11 @@ export class Agent extends EventEmitter implements _Agent {
     return name;
   }
 
-  public addRequest(_req: ClientRequest, _options: unknown): void {
+  addRequest(_req: ClientRequest, _options: unknown): void {
     // Not implemented. Acts as a no-op.
   }
 
-  public createSocket(
+  createSocket(
     _req: ClientRequest,
     _options: unknown,
     _callback: VoidFunction
@@ -96,20 +99,20 @@ export class Agent extends EventEmitter implements _Agent {
     // Not implemented. Acts as a no-op.
   }
 
-  public removeSocket(_socket: Socket): void {
+  removeSocket(_socket: Socket): void {
     // Not implemented. Acts as a no-op.
   }
 
-  public keepSocketAlive(_socket: Socket): boolean {
+  keepSocketAlive(_socket: Socket): boolean {
     // Not implemented. Acts as a no-op.
     return false;
   }
 
-  public reuseSocket(_socket: Socket, _req: ClientRequest): void {
+  reuseSocket(_socket: Socket, _req: ClientRequest): void {
     // Not implemented. Acts as a no-op.
   }
 
-  public destroy(_error?: Error): void {
+  destroy(_error?: Error): void {
     // Not implemented. Acts as a no-op.
   }
 }

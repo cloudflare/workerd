@@ -9,6 +9,11 @@ import { Agent, globalAgent } from 'node-internal:internal_https_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
 
+export function request(
+  url: string | URL | RequestOptions,
+  options?: RequestOptions | IncomingMessageCallback,
+  cb?: IncomingMessageCallback
+): ClientRequest;
 export function request(...args: unknown[]): ClientRequest {
   let options: RequestOptions = {};
 
@@ -27,8 +32,8 @@ export function request(...args: unknown[]): ClientRequest {
   options._defaultAgent = globalAgent;
   args.unshift(options);
 
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-  return Reflect.construct(ClientRequest, args);
+  // @ts-expect-error TS2556 This is OK.
+  return new ClientRequest(...args);
 }
 
 export function get(

@@ -1,3 +1,8 @@
+// Copyright (c) 2017-2022 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+// Copyright Joyent and Node contributors. All rights reserved. MIT license.
+
 import type { IncomingMessage as _IncomingMessage } from 'node:http';
 import { Readable } from 'node-internal:streams_readable';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
@@ -9,24 +14,32 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #resetTimers: (opts: { finished: boolean }) => void;
   #aborted: boolean = false;
 
-  public url: string = '';
+  url: string = '';
   // @ts-expect-error TS2416 Type-inconsistencies
-  public method: string | null = null;
+  method: string | null = null;
   // @ts-expect-error TS2416 Type-inconsistencies
-  public statusCode: number | null = null;
+  statusCode: number | null = null;
   // @ts-expect-error TS2416 Type-inconsistencies
-  public statusMessage: string | null = null;
-  public httpVersionMajor = 1;
-  public httpVersionMinor = 1;
-  public httpVersion: string = '1.1';
+  statusMessage: string | null = null;
+  httpVersionMajor = 1;
+  httpVersionMinor = 1;
+  httpVersion: string = '1.1';
 
   // TODO(soon): Get rid of the second argument.
-  public constructor(
+  constructor(
     response: Response,
-    resetTimers: (opts: { finished: boolean }) => void
+    resetTimers?: (opts: { finished: boolean }) => void
   ) {
-    if (!(response instanceof Response)) {
-      // TODO(soon): Fully support IncomingMessage constructor
+    if (!(response instanceof Response) || resetTimers == null) {
+      // IncomingMessage constructor is not documented by Node.js but in order
+      // to be 100% node.js compatible we need to implement it, and expose it as
+      // a class that can be constructed.
+      //
+      // Node.js uses "Socket" as the first argument for IncomingMessage and
+      // does not have a second argument. In order to implement our "fetch"
+      // based ClientRequest class, we need to implement it as following.
+      //
+      // TODO(soon): Try to remove these from the constructor.
       throw new ERR_METHOD_NOT_IMPLEMENTED('IncomingMessage');
     }
     super({});
@@ -42,8 +55,12 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.statusCode = response.status;
     this.statusMessage = response.statusText;
 
-    this.on('end', () => {
+    this.once('end', () => {
       queueMicrotask(() => this.emit('close'));
+    });
+
+    this.on('timeout', () => {
+      this.#reading = false;
     });
 
     this.#reader = this.#response.body?.getReader();
@@ -74,14 +91,14 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
   }
 
-  public override _read(): void {
+  override _read(): void {
     if (!this.#reading && !this.#aborted) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       this.#tryRead();
     }
   }
 
-  public override _destroy(
+  override _destroy(
     error: Error | null,
     callback: (error?: Error | null) => void
   ): void {
@@ -96,31 +113,33 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     });
   }
 
-  public get headers(): Record<string, string> {
+  get headers(): Record<string, string> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-explicit-any
     return Object.fromEntries(this.#response.headers as any);
   }
 
   // @ts-expect-error TS2416 Type inconsistency
-  public get headersDistinct(): Record<string, string> {
+  get headersDistinct(): Record<string, string> {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-explicit-any
     return Object.fromEntries(this.#response.headers as any);
   }
 
   // @ts-expect-error TS2416 Type inconsistency
-  public get trailers(): Record<string, unknown> {
+  get trailers(): Record<string, unknown> {
     // Not supported.
     return {};
   }
 
   // @ts-expect-error TS2416 Type inconsistency
-  public get trailersDistinct(): Record<string, unknown> {
+  get trailersDistinct(): Record<string, unknown> {
     // Not supported.
     return {};
   }
 
-  public setTimeout(_msecs: number, _callback?: () => void): this {
-    // TODO(soon): Not yet implemented
+  setTimeout(_msecs: number, callback?: () => void): this {
+    if (callback) {
+      this.on('timeout', callback);
+    }
     return this;
   }
 }

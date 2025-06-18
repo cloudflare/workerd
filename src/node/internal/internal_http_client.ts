@@ -18,7 +18,13 @@ import {
   ERR_INVALID_PROTOCOL,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
-import { validateInteger, validateBoolean } from 'node-internal:validators';
+import {
+  validateInteger,
+  validateBoolean,
+  validateFunction,
+  validateString,
+  validateNumber,
+} from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
 import { addAbortSignal } from 'node-internal:streams_util';
 import { Writable } from 'node-internal:streams_writable';
@@ -34,7 +40,7 @@ import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
 function validateHost(host: unknown, name: string): string {
-  if (host !== null && host !== undefined && typeof host !== 'string') {
+  if (host != null && typeof host !== 'string') {
     throw new ERR_INVALID_ARG_TYPE(
       `options.${name}`,
       ['string', 'undefined', 'null'],
@@ -50,19 +56,18 @@ export class ClientRequest extends OutgoingMessage {
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
 
-  public _ended: boolean = false;
+  _ended: boolean = false;
 
-  public timeoutCb?: VoidFunction | undefined;
-  public timeout?: number;
-  public method: string = 'GET';
-  public path: string;
-  public host: string;
-  public protocol: string = 'http:';
-  public port: string = '80';
-  public joinDuplicateHeaders: boolean | undefined;
-  public agent: Agent | undefined;
+  timeout?: number;
+  method: string = 'GET';
+  path: string;
+  host: string;
+  protocol: string = 'http:';
+  port: string = '80';
+  joinDuplicateHeaders: boolean | undefined;
+  agent: Agent | undefined;
 
-  public constructor(
+  constructor(
     input: string | URL | RequestOptions | null,
     options?: RequestOptions | IncomingMessageCallback,
     cb?: IncomingMessageCallback
@@ -117,12 +122,12 @@ export class ClientRequest extends OutgoingMessage {
         agent
       );
     }
-    this.agent = agent as unknown as Agent | undefined;
+    this.agent = agent as Agent | undefined;
 
-    const protocol = options.protocol || (defaultAgent as Agent).protocol;
     let expectedProtocol = (defaultAgent as Agent).protocol;
+    const protocol = options.protocol || expectedProtocol;
     if (this.agent?.protocol) expectedProtocol = this.agent.protocol;
-    const defaultPort = options.defaultPort || options.defaultPort || 80;
+    const defaultPort = options.defaultPort || this.agent?.defaultPort || 80;
 
     if (protocol !== expectedProtocol) {
       throw new ERR_INVALID_PROTOCOL(protocol, expectedProtocol);
@@ -164,23 +169,39 @@ export class ClientRequest extends OutgoingMessage {
 
     const maxHeaderSize = options.maxHeaderSize;
     if (maxHeaderSize !== undefined) {
+      // This overrides the maximum length of response headers in bytes.
+      // It doesn't make sense to override the maximum length for Workerd implementation
+      // which is based on the original "fetch" API.
       validateInteger(maxHeaderSize, 'maxHeaderSize', 0);
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.maxHeaderSize');
     }
 
     if (options.insecureHTTPParser !== undefined) {
+      // If enabled it will use a HTTP parser with leniency flags enabled.
+      // Since our implementation does not use any http parser, and uses "fetch" API,
+      // it doesn't make sense to support this option.
+      validateBoolean(options.insecureHTTPParser, 'options.insecureHTTPParser');
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.insecureHTTPParser');
     }
 
     if (options.createConnection !== undefined) {
+      // Our implementation is based on the original "fetch" API, which doesn't support
+      // custom socket creation. Therefore, this option is not applicable.
+      validateFunction(options.createConnection, 'options.createConnection');
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.createConnection');
     }
 
     if (options.lookup !== undefined) {
+      // Our implementation is based on the original "fetch" API, which doesn't support
+      // custom DNS resolution. Therefore, this option is not applicable.
+      validateFunction(options.lookup, 'options.lookup');
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.lookup');
     }
 
     if (options.socketPath !== undefined) {
+      // Unix domain socket. Cannot be used if one of host or port is specified, as those specify a TCP Socket.
+      // This option is not applicable for our "fetch" based implementation.
+      validateString(options.socketPath, 'options.socketPath');
       throw new ERR_OPTION_NOT_IMPLEMENTED('options.socketPath');
     }
 
@@ -343,20 +364,19 @@ export class ClientRequest extends OutgoingMessage {
     });
 
     this.emit('response', this.#incomingMessage);
-    this._ended = true;
   }
 
   #handleFetchError(error: Error): void {
     if (!this.destroyed) {
       this.emit('error', error);
     } else {
-      // Without this error log, it's impossible to debug.
-      console.error(error);
+      console.log(error);
     }
+    this.destroyed = true;
     this._ended = true;
   }
 
-  public abort(error?: Error | null): void {
+  abort(error?: Error | null): void {
     this.destroyed = true;
     this.#resetTimers({ finished: true });
     if (this.#incomingMessage) {
@@ -368,7 +388,7 @@ export class ClientRequest extends OutgoingMessage {
     }
   }
 
-  public override _write(
+  override _write(
     chunk: Buffer,
     _encoding: BufferEncoding,
     callback: VoidFunction
@@ -377,29 +397,27 @@ export class ClientRequest extends OutgoingMessage {
     callback();
   }
 
-  public setNoDelay(_noDelay?: boolean): void {
+  setNoDelay(noDelay?: boolean): void {
+    validateBoolean(noDelay, 'noDelay');
     // Not implemented
   }
 
-  public setSocketKeepAlive(_enable?: boolean, _initialDelay?: number): void {
+  setSocketKeepAlive(enable?: boolean, initialDelay?: number): void {
+    validateBoolean(enable, 'enable');
+    validateNumber(initialDelay, 'initialDelay');
     // Not implemented
   }
 
-  public clearTimeout(cb?: VoidFunction): void {
+  clearTimeout(cb?: VoidFunction): void {
     this.setTimeout(0, cb);
   }
 
-  public setTimeout(msecs: number, callback?: VoidFunction): this {
-    if (this._ended || this.timeoutCb) {
-      return this;
-    }
-
+  setTimeout(msecs: number, callback?: VoidFunction): this {
     if (this.#timer) {
       clearTimeout(this.#timer);
       this.#timer = null;
     }
 
-    this.timeoutCb = callback;
     this.timeout = getTimerDuration(msecs, 'msecs');
     this.#resetTimers({ finished: false });
 
@@ -409,7 +427,7 @@ export class ClientRequest extends OutgoingMessage {
   }
 
   // @ts-expect-error TS2416 Type mismatch.
-  public override end(
+  override end(
     data?: Buffer | string | VoidFunction,
     encoding?: NodeJS.BufferEncoding,
     callback?: VoidFunction
@@ -435,8 +453,13 @@ export class ClientRequest extends OutgoingMessage {
       clearTimeout(this.#timer as number);
       this.#timer = null;
     } else if (this.timeout) {
+      if (this.#timer) {
+        clearTimeout(this.#timer);
+      }
       this.#timer = setTimeout(() => {
         this.emit('timeout');
+        this.#incomingMessage?.emit('timeout');
+        this.#abortController.abort();
       }, this.timeout) as unknown as number;
     }
   }

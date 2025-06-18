@@ -206,6 +206,8 @@ export const testHttpCommon = {
     ok(checkIsHttpToken('ttt'));
     ok(checkIsHttpToken('tttt'));
     ok(checkIsHttpToken('ttttt'));
+    ok(checkIsHttpToken('content-type'));
+    ok(checkIsHttpToken('etag'));
 
     strictEqual(checkIsHttpToken(''), false);
     strictEqual(checkIsHttpToken(' '), false);

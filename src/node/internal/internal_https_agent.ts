@@ -9,10 +9,10 @@ import { Agent as HttpAgent } from 'node-internal:internal_http_agent';
 import type { RequestOptions } from 'node:https';
 
 export class Agent extends HttpAgent {
-  public override defaultPort = 443;
-  public override protocol: string = 'https:';
+  override defaultPort = 443;
+  override protocol: string = 'https:';
 
-  public override getName(options: RequestOptions = {}): string {
+  override getName(options: RequestOptions = {}): string {
     let name = super.getName(options);
 
     name += ':';

@@ -5,6 +5,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
+import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -76,6 +77,7 @@ export const testHttpClientResDestroyed = {
   },
 };
 
+// TODO(soon): Support this test case, if possible with the current implementation
 // Test is taken from test/parallel/test-http-client-response-timeout.js
 // export const testHttpClientResponseTimeout = {
 //   async test(_ctrl, env) {
@@ -291,5 +293,18 @@ export const testHttpsAgentConstructor = {
     ok(new https.Agent() instanceof https.Agent);
     strictEqual(typeof https.request, 'function');
     strictEqual(typeof http.get, 'function');
+  },
+};
+
+// Test is taken from test/parallel/test-http-set-timeout.js
+export const testHttpSetTimeout = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const request = http.get({ port: env.TIMEOUT_SERVER_PORT, path: '/' });
+    request.setTimeout(100);
+    request.on('error', reject);
+    request.on('timeout', resolve);
+    request.end();
+    await promise;
   },
 };

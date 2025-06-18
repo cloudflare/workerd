@@ -38,10 +38,10 @@ export function parseUniqueHeadersOption(
 }
 
 export class OutgoingMessage extends Writable {
-  public [kHeadersSent]: boolean = false;
-  public [kOutHeaders]: Record<string, Record<string, string | string[]>> = {};
+  [kHeadersSent]: boolean = false;
+  [kOutHeaders]: Record<string, Record<string, string | string[]>> = {};
 
-  public setHeader(name: string, value: string | string[]): this {
+  setHeader(name: string, value: string | string[]): this {
     if (this[kHeadersSent]) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
@@ -57,13 +57,14 @@ export class OutgoingMessage extends Writable {
     return this;
   }
 
-  public setHeaders(headers: HeadersInit): this {
+  setHeaders(headers: HeadersInit): this {
     if (this[kHeadersSent]) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
 
     if (
       Array.isArray(headers) ||
+      headers == null ||
       typeof headers !== 'object' ||
       !('keys' in headers) ||
       !('get' in headers) ||
@@ -100,7 +101,7 @@ export class OutgoingMessage extends Writable {
     return this;
   }
 
-  public appendHeader(name: string, value: string | string[]): this {
+  appendHeader(name: string, value: string | string[]): this {
     if (this[kHeadersSent]) {
       throw new ERR_HTTP_HEADERS_SENT('append');
     }
@@ -129,17 +130,17 @@ export class OutgoingMessage extends Writable {
     return this;
   }
 
-  public getHeader(name: unknown): string | string[] | undefined {
+  getHeader(name: unknown): string | string[] | undefined {
     validateString(name, 'name');
     return this[kOutHeaders][name.toLowerCase()]?.value;
   }
 
-  public hasHeader(name: unknown): boolean {
+  hasHeader(name: unknown): boolean {
     validateString(name, 'name');
     return Boolean(this[kOutHeaders][name.toLowerCase()]);
   }
 
-  public removeHeader(name: string): void {
+  removeHeader(name: string): void {
     validateString(name, 'name');
 
     if (this[kHeadersSent]) {
@@ -151,35 +152,35 @@ export class OutgoingMessage extends Writable {
   }
 
   // Returns an array of the names of the current outgoing headers.
-  public getHeaderNames(): string[] {
+  getHeaderNames(): string[] {
     return Object.keys(this[kOutHeaders]);
   }
 
   // Returns an array of the names of the current outgoing raw headers.
-  public getRawHeaderNames(): string[] {
+  getRawHeaderNames(): string[] {
     return Object.keys(this[kOutHeaders]).flatMap(
       (key) => this[kOutHeaders][key]?.name ?? []
     );
   }
 
-  public flushHeaders(): void {
+  flushHeaders(): void {
     // Not implemented
   }
 
-  public get headersSent(): boolean {
+  get headersSent(): boolean {
     return this[kHeadersSent];
   }
 
   // @ts-expect-error TS2416 Unnecessary type assertion
-  public pipe(): void {
+  pipe(): void {
     this.emit('error', new ERR_STREAM_CANNOT_PIPE());
   }
 
-  public [EventEmitter.captureRejectionSymbol](error: Error): void {
+  [EventEmitter.captureRejectionSymbol](error: Error): void {
     this.destroy(error);
   }
 
-  public _implicitHeader(): void {
+  _implicitHeader(): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('_implicitHeader()');
   }
 }
