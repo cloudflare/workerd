@@ -26,9 +26,9 @@ type RawInfoResponse =
     };
 
 class TransformationResultImpl implements ImageTransformationResult {
-  public constructor(private readonly bindingsResponse: Response) {}
+  constructor(private readonly bindingsResponse: Response) {}
 
-  public contentType(): string {
+  contentType(): string {
     const contentType = this.bindingsResponse.headers.get('content-type');
     if (!contentType) {
       throw new ImagesErrorImpl(
@@ -40,11 +40,11 @@ class TransformationResultImpl implements ImageTransformationResult {
     return contentType;
   }
 
-  public image(): ReadableStream<Uint8Array> {
+  image(): ReadableStream<Uint8Array> {
     return this.bindingsResponse.body || new ReadableStream();
   }
 
-  public response(): Response {
+  response(): Response {
     return new Response(this.image(), {
       headers: {
         'content-type': this.contentType(),
@@ -54,9 +54,9 @@ class TransformationResultImpl implements ImageTransformationResult {
 }
 
 class DrawTransformer {
-  public constructor(
-    public readonly child: ImageTransformerImpl,
-    public readonly options: ImageDrawOptions
+  constructor(
+    readonly child: ImageTransformerImpl,
+    readonly options: ImageDrawOptions
   ) {}
 }
 
@@ -64,7 +64,7 @@ class ImageTransformerImpl implements ImageTransformer {
   private transforms: (ImageTransform | DrawTransformer)[];
   private consumed: boolean;
 
-  public constructor(
+  constructor(
     private readonly fetcher: Fetcher,
     private readonly stream: ReadableStream<Uint8Array>
   ) {
@@ -72,12 +72,12 @@ class ImageTransformerImpl implements ImageTransformer {
     this.consumed = false;
   }
 
-  public transform(transform: ImageTransform): this {
+  transform(transform: ImageTransform): this {
     this.transforms.push(transform);
     return this;
   }
 
-  public draw(
+  draw(
     image: ReadableStream<Uint8Array> | ImageTransformer,
     options: ImageDrawOptions = {}
   ): this {
@@ -99,7 +99,7 @@ class ImageTransformerImpl implements ImageTransformer {
     return this;
   }
 
-  public async output(
+  async output(
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
     const formData = new StreamableFormData();
@@ -200,11 +200,9 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 }
 
 class ImagesBindingImpl implements ImagesBinding {
-  public constructor(private readonly fetcher: Fetcher) {}
+  constructor(private readonly fetcher: Fetcher) {}
 
-  public async info(
-    stream: ReadableStream<Uint8Array>
-  ): Promise<ImageInfoResponse> {
+  async info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse> {
     const body = new StreamableFormData();
     body.append('image', stream, { type: 'file' });
 
@@ -235,15 +233,15 @@ class ImagesBindingImpl implements ImagesBinding {
     return r;
   }
 
-  public input(stream: ReadableStream<Uint8Array>): ImageTransformer {
+  input(stream: ReadableStream<Uint8Array>): ImageTransformer {
     return new ImageTransformerImpl(this.fetcher, stream);
   }
 }
 
 class ImagesErrorImpl extends Error implements ImagesError {
-  public constructor(
+  constructor(
     message: string,
-    public readonly code: number
+    readonly code: number
   ) {
     super(message);
   }
@@ -323,7 +321,7 @@ class StreamableFormData {
   }[];
   private boundary: string;
 
-  public constructor() {
+  constructor() {
     this.entries = [];
 
     this.boundary = '--------------------------';
@@ -332,7 +330,7 @@ class StreamableFormData {
     }
   }
 
-  public append(
+  append(
     field: string,
     value: ReadableStream | string,
     options?: EntryOptions
@@ -382,11 +380,11 @@ class StreamableFormData {
     return new Blob(['--', this.boundary, '--', CRLF]).stream();
   }
 
-  public contentType(): string {
+  contentType(): string {
     return `multipart/form-data; boundary=${this.boundary}`;
   }
 
-  public stream(): ReadableStream {
+  stream(): ReadableStream {
     const streams: ReadableStream[] = [this.multipartBoundary()];
 
     const valueStreams = [];

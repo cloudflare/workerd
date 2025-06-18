@@ -17,8 +17,8 @@ export function baseConfig() {
       },
       rules: {
         "@typescript-eslint/explicit-function-return-type": "error",
-        "@typescript-eslint/explicit-member-accessibility": "error",
-        "@typescript-eslint/explicit-module-boundary-types": "error",
+        "@typescript-eslint/explicit-member-accessibility": ["error", { "accessibility": "no-public" }],
+        "@typescript-eslint/explicit-module-boundary-types": "off",
         "@typescript-eslint/no-require-imports": "error",
         "@typescript-eslint/prefer-enum-initializers": "error",
         "@typescript-eslint/restrict-template-expressions": "off",

@@ -198,14 +198,14 @@ declare abstract class VectorizeIndex {
    * Get information about the currently bound index.
    * @returns A promise that resolves with information about the current index.
    */
-  public describe(): Promise<VectorizeIndexDetails>;
+  describe(): Promise<VectorizeIndexDetails>;
   /**
    * Use the provided vector to perform a similarity search across the index.
    * @param vector Input vector that will be used to drive the similarity search.
    * @param options Configuration options to massage the returned data.
    * @returns A promise that resolves with matched and scored vectors.
    */
-  public query(
+  query(
     vector: VectorFloatArray | number[],
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
@@ -214,25 +214,25 @@ declare abstract class VectorizeIndex {
    * @param vectors List of vectors that will be inserted.
    * @returns A promise that resolves with the ids & count of records that were successfully processed.
    */
-  public insert(vectors: VectorizeVector[]): Promise<VectorizeVectorMutation>;
+  insert(vectors: VectorizeVector[]): Promise<VectorizeVectorMutation>;
   /**
    * Upsert a list of vectors into the index dataset. If a provided id exists, it will be replaced with the new values.
    * @param vectors List of vectors that will be upserted.
    * @returns A promise that resolves with the ids & count of records that were successfully processed.
    */
-  public upsert(vectors: VectorizeVector[]): Promise<VectorizeVectorMutation>;
+  upsert(vectors: VectorizeVector[]): Promise<VectorizeVectorMutation>;
   /**
    * Delete a list of vectors with a matching id.
    * @param ids List of vector ids that should be deleted.
    * @returns A promise that resolves with the ids & count of records that were successfully processed (and thus deleted).
    */
-  public deleteByIds(ids: string[]): Promise<VectorizeVectorMutation>;
+  deleteByIds(ids: string[]): Promise<VectorizeVectorMutation>;
   /**
    * Get a list of vectors with a matching id.
    * @param ids List of vector ids that should be returned.
    * @returns A promise that resolves with the raw unscored vectors matching the id set.
    */
-  public getByIds(ids: string[]): Promise<VectorizeVector[]>;
+  getByIds(ids: string[]): Promise<VectorizeVector[]>;
 }
 
 /**
@@ -245,14 +245,14 @@ declare abstract class Vectorize {
    * Get information about the currently bound index.
    * @returns A promise that resolves with information about the current index.
    */
-  public describe(): Promise<VectorizeIndexInfo>;
+  describe(): Promise<VectorizeIndexInfo>;
   /**
    * Use the provided vector to perform a similarity search across the index.
    * @param vector Input vector that will be used to drive the similarity search.
    * @param options Configuration options to massage the returned data.
    * @returns A promise that resolves with matched and scored vectors.
    */
-  public query(
+  query(
     vector: VectorFloatArray | number[],
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
@@ -262,7 +262,7 @@ declare abstract class Vectorize {
    * @param options Configuration options to massage the returned data.
    * @returns A promise that resolves with matched and scored vectors.
    */
-  public queryById(
+  queryById(
     vectorId: string,
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches>;
@@ -271,23 +271,23 @@ declare abstract class Vectorize {
    * @param vectors List of vectors that will be inserted.
    * @returns A promise that resolves with a unique identifier of a mutation containing the insert changeset.
    */
-  public insert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;
+  insert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;
   /**
    * Upsert a list of vectors into the index dataset. If a provided id exists, it will be replaced with the new values.
    * @param vectors List of vectors that will be upserted.
    * @returns A promise that resolves with a unique identifier of a mutation containing the upsert changeset.
    */
-  public upsert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;
+  upsert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation>;
   /**
    * Delete a list of vectors with a matching id.
    * @param ids List of vector ids that should be deleted.
    * @returns A promise that resolves with a unique identifier of a mutation containing the delete changeset.
    */
-  public deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation>;
+  deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation>;
   /**
    * Get a list of vectors with a matching id.
    * @param ids List of vector ids that should be returned.
    * @returns A promise that resolves with the raw unscored vectors matching the id set.
    */
-  public getByIds(ids: string[]): Promise<VectorizeVector[]>;
+  getByIds(ids: string[]): Promise<VectorizeVector[]>;
 }

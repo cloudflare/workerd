@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/explicit-module-boundary-types  */
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return  */
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
@@ -293,7 +293,7 @@ function makeEntrypointClass(
 ): any {
   const isDurableObject = classKind.name === 'DurableObject';
   const result = class EntrypointWrapper extends classKind {
-    public constructor(...args: any[]) {
+    constructor(...args: any[]) {
       super(...args);
       // Initialise a Python instance of the class.
       const pyInstancePromise = initPyInstance(className, args);

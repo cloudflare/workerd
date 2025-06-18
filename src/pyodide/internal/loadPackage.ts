@@ -107,9 +107,9 @@ function loadBundleFromArtifactBundler(requirement: string): Promise<Reader> {
  * ArrayBufferReader wraps around an arrayBuffer in a way that tar.js is able to read from
  */
 class ArrayBufferReader {
-  public constructor(private arrayBuffer: ArrayBuffer) {}
+  constructor(private arrayBuffer: ArrayBuffer) {}
 
-  public read(offset: number, buf: Uint8Array): number {
+  read(offset: number, buf: Uint8Array): number {
     const size = this.arrayBuffer.byteLength;
     if (offset >= size || offset < 0) {
       return 0;

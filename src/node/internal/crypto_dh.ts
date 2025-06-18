@@ -62,20 +62,20 @@ import {
 const DH_GENERATOR = 2;
 
 declare class SharedDiffieHellman {
-  public generateKeys: typeof dhGenerateKeys;
-  public computeSecret: typeof dhComputeSecret;
-  public getPrime: typeof dhGetPrime;
-  public getGenerator: typeof dhGetGenerator;
-  public getPublicKey: typeof dhGetPublicKey;
-  public getPrivateKey: typeof dhGetPrivateKey;
-  public setPrivateKey: typeof dhSetPrivateKey;
-  public setPublicKey: typeof dhSetPublicKey;
+  generateKeys: typeof dhGenerateKeys;
+  computeSecret: typeof dhComputeSecret;
+  getPrime: typeof dhGetPrime;
+  getGenerator: typeof dhGetGenerator;
+  getPublicKey: typeof dhGetPublicKey;
+  getPrivateKey: typeof dhGetPrivateKey;
+  setPrivateKey: typeof dhSetPrivateKey;
+  setPublicKey: typeof dhSetPublicKey;
 }
 
 declare class DiffieHellman extends SharedDiffieHellman {
-  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
+  [kHandle]: cryptoImpl.DiffieHellmanHandle;
 
-  public constructor(
+  constructor(
     sizeOrKey: number | ArrayLike,
     keyEncoding?: number | string,
     generator?: number | ArrayLike,
@@ -154,8 +154,8 @@ function DiffieHellman(
 }
 
 declare class DiffieHellmanGroup extends SharedDiffieHellman {
-  public [kHandle]: cryptoImpl.DiffieHellmanHandle;
-  public constructor(name: string);
+  [kHandle]: cryptoImpl.DiffieHellmanHandle;
+  constructor(name: string);
 }
 
 function DiffieHellmanGroup(this: unknown, name: string): DiffieHellmanGroup {

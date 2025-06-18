@@ -4,8 +4,8 @@ import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
 if (typeof FinalizationRegistry === 'undefined') {
   // @ts-expect-error cannot assign to globalThis
   globalThis.FinalizationRegistry = class FinalizationRegistry {
-    public register(): void {}
-    public unregister(): void {}
+    register(): void {}
+    unregister(): void {}
   };
 }
 

@@ -146,38 +146,38 @@ export type SocketWriteData = Array<{
 
 // @ts-expect-error TS2323 Redeclare error.
 export declare class Socket extends _Socket {
-  public timeout: number;
-  public connecting: boolean;
-  public _aborted: boolean;
-  public _hadError: boolean;
-  public _parent: null | Socket['_handle'];
-  public _parentWrap: null | Socket | JSStreamSocket;
-  public _host: null | string;
-  public _peername: null | string;
-  public _getsockname(): {
+  timeout: number;
+  connecting: boolean;
+  _aborted: boolean;
+  _hadError: boolean;
+  _parent: null | Socket['_handle'];
+  _parentWrap: null | Socket | JSStreamSocket;
+  _host: null | string;
+  _peername: null | string;
+  _getsockname(): {
     address?: string;
     port?: number;
     family?: string;
   };
-  public [kLastWriteQueueSize]: number | null | undefined;
-  public [kTimeout]: Socket | null | undefined;
-  public [kBuffer]: null | boolean | Uint8Array;
-  public [kBufferCb]:
+  [kLastWriteQueueSize]: number | null | undefined;
+  [kTimeout]: Socket | null | undefined;
+  [kBuffer]: null | boolean | Uint8Array;
+  [kBufferCb]:
     | null
     | undefined
     | ((len?: number, buf?: Buffer) => boolean | Uint8Array);
-  public [kBufferGen]: null | (() => undefined | Uint8Array);
-  public [kSocketInfo]: null | {
+  [kBufferGen]: null | (() => undefined | Uint8Array);
+  [kSocketInfo]: null | {
     address?: string;
     port?: number;
     family?: number | string;
     remoteAddress?: Record<string, unknown>;
   };
-  public [kBytesRead]: number;
-  public [kBytesWritten]: number;
-  public [kReinitializeHandle](handle: Socket['_handle']): void;
-  public _closeAfterHandlingError: boolean;
-  public _handle: null | {
+  [kBytesRead]: number;
+  [kBytesWritten]: number;
+  [kReinitializeHandle](handle: Socket['_handle']): void;
+  _closeAfterHandlingError: boolean;
+  _handle: null | {
     writeQueueSize?: number;
     lastWriteQueueSize?: number;
     reading: boolean | undefined;
@@ -192,37 +192,37 @@ export declare class Socket extends _Socket {
       addressType: number;
     };
   };
-  public _sockname?: null | AddressInfo;
-  public _onTimeout(): void;
-  public _unrefTimer(): void;
-  public _writeGeneric(
+  _sockname?: null | AddressInfo;
+  _onTimeout(): void;
+  _unrefTimer(): void;
+  _writeGeneric(
     writev: boolean,
     data: SocketWriteData,
     encoding: string,
     cb: (err?: Error) => void
   ): void;
-  public _final(cb: (err?: Error) => void): void;
-  public _read(n: number): void;
-  public _reset(): void;
-  public _getpeername(): Record<string, unknown>;
-  public _writableState: null | unknown[];
-  public _bytesDispatched: number;
-  public _pendingData: SocketWriteData | null;
-  public _pendingEncoding: string;
-  public _undestroy(): void;
+  _final(cb: (err?: Error) => void): void;
+  _read(n: number): void;
+  _reset(): void;
+  _getpeername(): Record<string, unknown>;
+  _writableState: null | unknown[];
+  _bytesDispatched: number;
+  _pendingData: SocketWriteData | null;
+  _pendingEncoding: string;
+  _undestroy(): void;
   // This should have existed in _Socket type but it's not...
-  public writableBuffer?: Writable & {
+  writableBuffer?: Writable & {
     allBuffers: boolean;
     length: number;
   };
 
   // Defined by TLSSocket
-  public encrypted?: boolean;
-  public _finishInit(): void;
+  encrypted?: boolean;
+  _finishInit(): void;
 
-  public constructor(options?: SocketOptions);
-  public prototype: Socket;
-  public resetAndClosing?: boolean;
+  constructor(options?: SocketOptions);
+  prototype: Socket;
+  resetAndClosing?: boolean;
 }
 
 // @ts-expect-error TS2323 Redeclare error.

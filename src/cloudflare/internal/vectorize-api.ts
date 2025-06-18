@@ -32,14 +32,14 @@ function toNdJson(arr: object[]): string {
  * and not visible to end users.
  */
 class VectorizeIndexImpl implements Vectorize {
-  public constructor(
+  constructor(
     private readonly fetcher: Fetcher,
     private readonly indexId: string,
     private readonly indexVersion: VectorizeVersion,
     private readonly useNdJson: boolean
   ) {}
 
-  public async describe(): Promise<VectorizeIndexInfo> {
+  async describe(): Promise<VectorizeIndexInfo> {
     const endpoint =
       this.indexVersion === 'v2' ? `info` : `binding/indexes/${this.indexId}`;
     const res = await this._send(Operation.INDEX_GET, endpoint, {
@@ -49,7 +49,7 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeIndexInfo>(res);
   }
 
-  public async query(
+  async query(
     vector: VectorFloatArray | number[],
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
@@ -93,7 +93,7 @@ class VectorizeIndexImpl implements Vectorize {
     }
   }
 
-  public async queryById(
+  async queryById(
     vectorId: string,
     options?: VectorizeQueryOptions
   ): Promise<VectorizeMatches> {
@@ -104,9 +104,7 @@ class VectorizeIndexImpl implements Vectorize {
     }
   }
 
-  public async insert(
-    vectors: VectorizeVector[]
-  ): Promise<VectorizeAsyncMutation> {
+  async insert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation> {
     const endpoint =
       this.indexVersion === 'v2'
         ? `insert`
@@ -141,9 +139,7 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeAsyncMutation>(res);
   }
 
-  public async upsert(
-    vectors: VectorizeVector[]
-  ): Promise<VectorizeAsyncMutation> {
+  async upsert(vectors: VectorizeVector[]): Promise<VectorizeAsyncMutation> {
     const endpoint =
       this.indexVersion === 'v2'
         ? `upsert`
@@ -178,7 +174,7 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeAsyncMutation>(res);
   }
 
-  public async getByIds(ids: string[]): Promise<VectorizeVector[]> {
+  async getByIds(ids: string[]): Promise<VectorizeVector[]> {
     const endpoint =
       this.indexVersion === 'v2'
         ? `getByIds`
@@ -195,7 +191,7 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeVector[]>(res);
   }
 
-  public async deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation> {
+  async deleteByIds(ids: string[]): Promise<VectorizeAsyncMutation> {
     const endpoint =
       this.indexVersion === 'v2'
         ? `deleteByIds`
