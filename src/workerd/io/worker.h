@@ -17,6 +17,7 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/thread-scopes.h>
@@ -243,135 +244,23 @@ class Worker::Script: public kj::AtomicRefcounted {
     jsg::V8Ref<v8::Value> value;
   };
 
-  // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
-  // module types.
-  struct EsModule {
-    kj::StringPtr body;
-  };
-  struct CommonJsModule {
-    kj::StringPtr body;
-    kj::Maybe<kj::Array<kj::StringPtr>> namedExports;
-  };
-  struct TextModule {
-    kj::StringPtr body;
-  };
-  struct DataModule {
-    kj::ArrayPtr<const byte> body;
-  };
-  struct WasmModule {
-    // Compiled .wasm file content.
-    kj::ArrayPtr<const byte> body;
-  };
-  struct JsonModule {
-    // JSON-encoded content; will be parsed automatically when imported.
-    kj::StringPtr body;
-  };
-  struct PythonModule {
-    kj::StringPtr body;
-  };
-
-  // PythonRequirement is a variant of ModuleContent, but has no body. The module name specifies
-  // a Python package to be provided by the system.
-  struct PythonRequirement {};
-
-  // CapnpModule is a .capnp Cap'n Proto schema file. The original text of the file isn't provided;
-  // instead, `ModulesSource::capnpSchemas` contains all the capnp schemas needed by the Worker,
-  // and the `CapnpModule` only specifies the type ID of a particular file found in there.
-  //
-  // TODO(someday): Support CapnpSchema in workerd. Today, it's only supported in the internal
-  //   codebase.
-  struct CapnpModule {
-    uint64_t typeId;
-  };
-
-  using ModuleContent = kj::OneOf<EsModule,
-      CommonJsModule,
-      TextModule,
-      DataModule,
-      WasmModule,
-      JsonModule,
-      PythonModule,
-      PythonRequirement,
-      CapnpModule>;
-
-  struct Module {
-    kj::StringPtr name;
-    ModuleContent content;
-
-    // Hack for tests: register this as an internal module. Not allowed in production.
-    bool treatAsInternalForTest = false;
-  };
-
-  // Representation of source code for a worker using Service Workers syntax (deprecated, but will
-  // be supported forever).
-  struct ScriptSource {
-    // Content of the script (JavaScript). Pointer is valid only until the Script constructor
-    // returns.
-    kj::StringPtr mainScript;
-
-    // Name of the script, used as the script origin for stack traces. Pointer is valid only until
-    // the Script constructor returns.
-    kj::StringPtr mainScriptName;
-
-    // Global variables to inject at startup.
-    //
-    // This is sort of weird and historical. Under the old Service Workers syntax, the entire
-    // Worker is one JavaScript file, so there are no "modules" in the normal sense. However,
-    // there were various extra blobs of data we wanted to distribute with the code: Wasm modules,
-    // as well as large text and data blobs (e.g. embedded asset files). We decided at the time
-    // that these made sense as types of bindings. But in fact they don't fit well in the bindings
-    // abstraction: most bindings are used as configuration, but these are whole files, too big
-    // to be treated like configuration. We ended up creating a mechanism to separate out these
-    // binding types and distribute them with the code rather than the config. We also need them
-    // to be delivered to the `Worker::Script` constructor rather than the `Worker` constructor
-    // (long story).
-    //
-    // When ES modules arrived, it suddenly made sense to just say that these are modules, not
-    // bindings. But of course, we have to keep supporting Service Workers syntax forever.
-    //
-    // Recall that in Service Workers syntax, bindings show up as global variables.
-    //
-    // So, this array contains the set of Service Worker bindings that are module-like (text, data,
-    // or Wasm blobs), which should be injected into the global scope. We reuse the `Module` type
-    // for this because it is convenient, but note that only a subset of types are actually
-    // supported as globals. In this array, the `name` of each `Module` is the global variable
-    // name.
-    kj::Array<Module> globals;
-
-    // The worker may have a bundle of capnp schemas attached. (In Service Workers syntax, these
-    // can't be referenced directly by the app, but they may be used by bindings.)
-    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
-  };
-
-  // Representation of source code for a worker using ES Modules syntax.
-  struct ModulesSource {
-    // Path to the main module, which can be looked up in the module registry. Pointer is valid
-    // only until the Script constructor returns.
-    kj::StringPtr mainModule;
-
-    // All the Worker's modules.
-    kj::Array<Module> modules;
-
-    // The worker may have a bundle of capnp schemas attached.
-    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
-
-    bool isPython;
-
-    // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
-    // entrypoint classes based on the declared self-referential bindings and actor namespaces
-    // pointing at the service. This is needed becaues in workerd, the Python runtime is unable
-    // to fully execute at startup in order to discover what the Worker actually exports. This
-    // should be fixed eventually, but for now, we use this work-around.
-    kj::Array<kj::String> inferredEntrypointClassesForPython;
-    kj::Array<kj::String> inferredActorClassesForPython;
-
-    // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
-    // so we use AnyStruct here. This is deprecated anyway.
-    kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
-  };
-
-  // Representation of the source code for a worker.
-  using Source = kj::OneOf<ScriptSource, ModulesSource>;
+  // Historically these types were declared here, but then they were moved to `WorkerSource`. We
+  // maintain aliases here for backwards compatibility.
+  // TODO(cleanup): Update all the references, then remove these.
+  using EsModule = WorkerSource::EsModule;
+  using CommonJsModule = WorkerSource::CommonJsModule;
+  using TextModule = WorkerSource::TextModule;
+  using DataModule = WorkerSource::DataModule;
+  using WasmModule = WorkerSource::WasmModule;
+  using JsonModule = WorkerSource::JsonModule;
+  using PythonModule = WorkerSource::PythonModule;
+  using PythonRequirement = WorkerSource::PythonRequirement;
+  using CapnpModule = WorkerSource::CapnpModule;
+  using ModuleContent = WorkerSource::ModuleContent;
+  using Module = WorkerSource::Module;
+  using ScriptSource = WorkerSource::ScriptSource;
+  using ModulesSource = WorkerSource::ModulesSource;
+  using Source = WorkerSource;
 
  private:
   kj::Own<const Isolate> isolate;
@@ -449,6 +338,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   }
 
   // Parses the given code to create a new script object and returns it.
+  //
+  // Note that the `source` is fully consumed before this method returns, so the underlying buffers
+  // it points into can be freed immediately after the call.
   kj::Own<const Worker::Script> newScript(kj::StringPtr id,
       Script::Source source,
       IsolateObserver::StartType startType,
