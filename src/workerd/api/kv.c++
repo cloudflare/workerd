@@ -473,11 +473,12 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto traceSpan = context.makeTraceSpan("kv.list"_kjc);
-    auto userSpan = context.makeUserTraceSpan("kv.list"_kjc);
+    auto traceSpan = context.makeTraceSpan(kj::ConstString(kj::str(bindingName, ".list")));
+    auto userSpan = context.makeUserTraceSpan(kj::ConstString(kj::str(bindingName, ".list")));
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
 
     traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare.kv"_kjc));
+    traceContext.userSpan.setTag("db.namespace"_kjc, kj::str(bindingName));
     traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("list"_kjc));
     traceContext.userSpan.setTag("cloudflare.binding_type"_kjc, kj::str("KV"_kjc));
 
