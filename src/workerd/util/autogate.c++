@@ -19,8 +19,6 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {
     case AutogateKey::TEST_WORKERD:
       return "test-workerd"_kj;
-    case AutogateKey::V8_FAST_API:
-      return "v8-fast-api"_kj;
     case AutogateKey::STREAMING_TAIL_WORKER:
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:

@@ -187,7 +187,6 @@ CallCounter runTest(Test test) {
 }
 
 KJ_TEST("v8::Local<v8::Value> and v8::Local<v8::Object> as fast method parameters") {
-  util::Autogate::initAutogateNamesForTest({"v8-fast-api"_kj});
   KJ_ASSERT(runTest({"processValue(42)"_kjc, "number"_kjc, "42"_kjc}) == CallCounter(2, 1));
   KJ_ASSERT(
       runTest({"processObject({test: 123})"_kjc, "number"_kjc, "123"_kjc}) == CallCounter(2, 1));

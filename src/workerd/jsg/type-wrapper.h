@@ -412,7 +412,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public UnimplementedWrapper,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
-  bool fastApiEnabled = false;
 
  public:
   template <typename MetaConfiguration>
@@ -421,7 +420,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         MaybeWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
-    fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
@@ -431,10 +429,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   static TypeWrapper& from(v8::Isolate* isolate) {
     return *reinterpret_cast<TypeWrapper*>(isolate->GetData(SET_DATA_TYPE_WRAPPER));
-  }
-
-  bool isFastApiEnabled() const {
-    return fastApiEnabled;
   }
 
   using TypeWrapperBase<Self, T>::getName...;

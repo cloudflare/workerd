@@ -1213,18 +1213,16 @@ struct ResourceTypeBuilder {
   template <const char* name, typename Method, Method method>
   inline void registerMethod() {
     if constexpr (isFastApiCompatible<Method>) {
-      if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
-            Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
-        auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+      auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
+          Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+      auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
+          &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
+              ArgumentIndexes<Method>>::callback,
+          v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+          v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
 
-        prototype->Set(isolate, name, functionTemplate);
-        return;
-      }
+      prototype->Set(isolate, name, functionTemplate);
+      return;
     }
 
     prototype->Set(isolate, name,
@@ -1237,22 +1235,20 @@ struct ResourceTypeBuilder {
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
     if constexpr (isFastApiCompatible<Method>) {
-      if (typeWrapper.isFastApiEnabled()) {
-        auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
-            method, ArgumentIndexes<Method>>::template fastCallback<>);
+      auto cFunction = v8::CFunction::Make(StaticMethodCallback<TypeWrapper, name, Self, Method,
+          method, ArgumentIndexes<Method>>::template fastCallback<>);
 
-        // Create a function template with both slow and fast paths
-        // Notably, we specify an empty signature because a static method invocation will have no holder
-        // object.
-        auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
-            v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
-        functionTemplate->RemovePrototype();
-        constructor->Set(v8StrIntern(isolate, name), functionTemplate);
-        return;
-      }
+      // Create a function template with both slow and fast paths
+      // Notably, we specify an empty signature because a static method invocation will have no holder
+      // object.
+      auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
+          &StaticMethodCallback<TypeWrapper, name, Self, Method, method,
+              ArgumentIndexes<Method>>::callback,
+          v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
+          v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+      functionTemplate->RemovePrototype();
+      constructor->Set(v8StrIntern(isolate, name), functionTemplate);
+      return;
     }
 
     // Notably, we specify an empty signature because a static method invocation will have no holder
@@ -1293,24 +1289,17 @@ struct ResourceTypeBuilder {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
-    bool useSlowApi = true;
     if constexpr (isFastApiCompatible<Getter> && isFastApiCompatible<Setter>) {
-      if (typeWrapper.isFastApiEnabled()) {
-        auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
-        getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&getterCFunction, 1});
+      auto getterCFunction = v8::CFunction::Make(Gcb::template fastCallback<>);
+      getterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Gcb::callback,
+          v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+          v8::SideEffectType::kHasSideEffect, {&getterCFunction, 1});
 
-        auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
-        setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
-            v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
-            v8::SideEffectType::kHasSideEffect, {&setterCFunction, 1});
-
-        useSlowApi = false;
-      }
-    }
-
-    if (useSlowApi) {
+      auto setterCFunction = v8::CFunction::Make(Scb::template fastCallback<>);
+      setterFn = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, &Scb::callback,
+          v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
+          v8::SideEffectType::kHasSideEffect, {&setterCFunction, 1});
+    } else {
       // Note that we cannot use `SetNativeDataProperty(...)` here the way we do with other
       // properties because it will not properly handle the prototype chain when it comes
       // to using setters... which is annoying. It means we end up having to use FunctionTemplates
