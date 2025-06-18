@@ -199,8 +199,9 @@ export const test = {
         closed: true,
       },
       {
-        name: 'kv.list',
+        name: 'KV.list',
         'db.system': 'cloudflare.kv',
+        'db.namespace': 'KV',
         'db.operation.name': 'list',
         'cloudflare.binding_type': 'KV',
         'cloudflare.kv.query.prefix': 'te',
@@ -210,8 +211,9 @@ export const test = {
         closed: true,
       },
       {
-        name: 'kv.list',
+        name: 'KV.list',
         'db.system': 'cloudflare.kv',
+        'db.namespace': 'KV',
         'db.operation.name': 'list',
         'cloudflare.binding_type': 'KV',
         'cloudflare.kv.query.prefix': 'te',
@@ -222,8 +224,9 @@ export const test = {
         closed: true,
       },
       {
-        name: 'kv.list',
+        name: 'KV.list',
         'db.system': 'cloudflare.kv',
+        'db.namespace': 'KV',
         'db.operation.name': 'list',
         'cloudflare.binding_type': 'KV',
         'cloudflare.kv.query.prefix': 'not-found',

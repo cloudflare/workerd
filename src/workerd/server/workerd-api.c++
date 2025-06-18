@@ -850,7 +850,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
       value = lock.wrap(context,
-          lock.alloc<api::KvNamespace>(
+          lock.alloc<api::KvNamespace>(kj::str(ns.bindingName),
               kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
     }
 

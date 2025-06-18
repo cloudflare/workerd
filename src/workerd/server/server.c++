@@ -3331,7 +3331,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getKvNamespace(), kj::mv(errorContext)});
 
-      return makeGlobal(Global::KvNamespace{.subrequestChannel = channel});
+      return makeGlobal(Global::KvNamespace{
+        .subrequestChannel = channel, .bindingName = kj::str(binding.getName())});
     }
 
     case config::Worker::Binding::R2_BUCKET: {
