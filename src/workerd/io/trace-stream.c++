@@ -91,7 +91,7 @@ namespace {
   V(WALLTIME, "wallTime")                                                                          \
   V(WASCLEAN, "wasClean")
 
-#define V(N, L) constexpr kj::StringPtr N##_STR = L##_kj;
+#define V(N, L) constexpr kj::LiteralStringConst N##_STR = L##_kjc;
 STRS(V)
 #undef STRS
 
@@ -101,15 +101,24 @@ class StringCache final {
   StringCache() = default;
   KJ_DISALLOW_COPY_AND_MOVE(StringCache);
 
-  jsg::JsValue get(jsg::Lock& js, kj::StringPtr value) {
+  // Inserted string keys must live as long as the cache. For string constants (the common case),
+  // we use LiteralStringConst and avoid memory allocation. For temporary strings, we pass in a
+  // StringPtr and allocate a string. Having ConstString as the value type fits both cases.
+  jsg::JsValue get(jsg::Lock& js, kj::LiteralStringConst value) {
     return cache
         .findOrCreate(value, [&]() -> decltype(cache)::Entry {
       return {value, jsg::JsRef<jsg::JsValue>(js, js.strIntern(value))};
     }).getHandle(js);
   }
+  jsg::JsValue get(jsg::Lock& js, kj::StringPtr value) {
+    return cache
+        .findOrCreate(value, [&]() -> decltype(cache)::Entry {
+      return {kj::ConstString(kj::str(value)), jsg::JsRef<jsg::JsValue>(js, js.strIntern(value))};
+    }).getHandle(js);
+  }
 
  private:
-  kj::HashMap<kj::StringPtr, jsg::JsRef<jsg::JsValue>> cache;
+  kj::HashMap<kj::ConstString, jsg::JsRef<jsg::JsValue>> cache;
 };
 
 // Why ToJS(...) functions and not JSG_STRUCT? Good question. The various tracing:*
