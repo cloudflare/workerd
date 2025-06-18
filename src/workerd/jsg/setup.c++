@@ -297,8 +297,9 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
-  auto& wrappable =
-      *static_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+  v8::HandleScope scope(isolate);
+  auto& wrappable = *static_cast<Wrappable*>(
+      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it

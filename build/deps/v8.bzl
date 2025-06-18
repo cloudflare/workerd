@@ -16,7 +16,7 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Revert-TracedReference-deref-API-removal.patch",
+    "0011-Seal-the-HandleScope-when-performing-GC.patch",
     "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
     "0013-Update-illegal-invocation-error-message-in-v8.patch",
     "0014-Implement-cross-request-context-promise-resolve-hand.patch",
