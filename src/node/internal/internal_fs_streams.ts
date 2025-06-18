@@ -11,13 +11,13 @@ export type ReadStreamOptions = {
 
 // @ts-expect-error TS2323 Cannot redeclare.
 export declare class ReadStream extends Readable {
-  public fd: number | null;
-  public flags: string;
-  public path: string;
-  public mode: number;
+  fd: number | null;
+  flags: string;
+  path: string;
+  mode: number;
 
-  public constructor(path: string, options?: Record<string, unknown>);
-  public close(callback: VoidFunction): void;
+  constructor(path: string, options?: Record<string, unknown>);
+  close(callback: VoidFunction): void;
 }
 
 // @ts-expect-error TS2323 Cannot redeclare.
@@ -69,9 +69,9 @@ export type WriteStreamOptions = {
 
 // @ts-expect-error TS2323 Cannot redeclare.
 export declare class WriteStream extends Writable {
-  public constructor(path: string, options?: WriteStreamOptions);
-  public close(cb: VoidFunction): void;
-  public destroySoon(): void;
+  constructor(path: string, options?: WriteStreamOptions);
+  close(cb: VoidFunction): void;
+  destroySoon(): void;
 }
 
 // @ts-expect-error TS2323 Cannot redeclare.

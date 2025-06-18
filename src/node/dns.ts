@@ -33,77 +33,77 @@ export const resolve = callbackify(dns.resolve.bind(this));
 export const resolveAny = callbackify(dns.resolveAny.bind(this));
 
 export class Resolver {
-  public cancel(): void {
+  cancel(): void {
     // TODO(soon): Implement this.
     throw new Error('Not implemented');
   }
 
-  public setLocalAddress(): void {
+  setLocalAddress(): void {
     // Does not apply to workerd implementation
     throw new Error('Not implemented');
   }
 
-  public getServers(...args: Parameters<typeof getServers>): void {
+  getServers(...args: Parameters<typeof getServers>): void {
     getServers(...args);
   }
 
-  public resolve(...args: Parameters<typeof resolve>): void {
+  resolve(...args: Parameters<typeof resolve>): void {
     resolve(...args);
   }
 
-  public resolve4(...args: Parameters<typeof resolve4>): void {
+  resolve4(...args: Parameters<typeof resolve4>): void {
     resolve4(...args);
   }
 
-  public resolve6(...args: Parameters<typeof resolve6>): void {
+  resolve6(...args: Parameters<typeof resolve6>): void {
     resolve6(...args);
   }
 
-  public resolveAny(...args: Parameters<typeof resolveAny>): void {
+  resolveAny(...args: Parameters<typeof resolveAny>): void {
     resolveAny(...args);
   }
 
-  public resolveCaa(...args: Parameters<typeof resolveCaa>): void {
+  resolveCaa(...args: Parameters<typeof resolveCaa>): void {
     resolveCaa(...args);
   }
 
-  public resolveCname(...args: Parameters<typeof resolveCname>): void {
+  resolveCname(...args: Parameters<typeof resolveCname>): void {
     resolveCname(...args);
   }
 
-  public resolveMx(...args: Parameters<typeof resolveMx>): void {
+  resolveMx(...args: Parameters<typeof resolveMx>): void {
     resolveMx(...args);
   }
 
-  public resolveNaptr(...args: Parameters<typeof resolveNaptr>): void {
+  resolveNaptr(...args: Parameters<typeof resolveNaptr>): void {
     resolveNaptr(...args);
   }
 
-  public resolveNs(...args: Parameters<typeof resolveNs>): void {
+  resolveNs(...args: Parameters<typeof resolveNs>): void {
     resolveNs(...args);
   }
 
-  public resolvePtr(...args: Parameters<typeof resolvePtr>): void {
+  resolvePtr(...args: Parameters<typeof resolvePtr>): void {
     resolvePtr(...args);
   }
 
-  public resolveSoa(...args: Parameters<typeof resolveSoa>): void {
+  resolveSoa(...args: Parameters<typeof resolveSoa>): void {
     resolveSoa(...args);
   }
 
-  public resolveSrv(...args: Parameters<typeof resolveSrv>): void {
+  resolveSrv(...args: Parameters<typeof resolveSrv>): void {
     resolveSrv(...args);
   }
 
-  public resolveTxt(...args: Parameters<typeof resolveTxt>): void {
+  resolveTxt(...args: Parameters<typeof resolveTxt>): void {
     resolveTxt(...args);
   }
 
-  public reverse(...args: Parameters<typeof reverse>): void {
+  reverse(...args: Parameters<typeof reverse>): void {
     reverse(...args);
   }
 
-  public setServers(...args: Parameters<typeof setServers>): void {
+  setServers(...args: Parameters<typeof setServers>): void {
     setServers(...args);
   }
 }

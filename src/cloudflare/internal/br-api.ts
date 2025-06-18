@@ -9,14 +9,11 @@ interface Fetcher {
 export class BrowserRendering {
   private readonly fetcher: Fetcher;
 
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
   }
 
-  public async fetch(
-    input: RequestInfo | URL,
-    init?: RequestInit
-  ): Promise<Response> {
+  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     return this.fetcher.fetch(input, init);
   }
 }

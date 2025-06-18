@@ -788,34 +788,30 @@ function validateStringAfterArrayBufferView(
 // Therefore, we intentionally use a class-style object here and make it an
 // error to try to create your own Stats object using the constructor.
 export class Stats {
-  public dev: number | bigint;
-  public ino: number | bigint;
-  public mode: number | bigint;
-  public nlink: number | bigint;
-  public uid: number | bigint;
-  public gid: number | bigint;
-  public rdev: number | bigint;
-  public size: number | bigint;
-  public blksize: number | bigint;
-  public blocks: number | bigint;
-  public atimeMs: number | bigint;
-  public mtimeMs: number | bigint;
-  public ctimeMs: number | bigint;
-  public birthtimeMs: number | bigint;
-  public atimeNs?: bigint;
-  public mtimeNs?: bigint;
-  public ctimeNs?: bigint;
-  public birthtimeNs?: bigint;
-  public atime: Date;
-  public mtime: Date;
-  public ctime: Date;
-  public birthtime: Date;
+  dev: number | bigint;
+  ino: number | bigint;
+  mode: number | bigint;
+  nlink: number | bigint;
+  uid: number | bigint;
+  gid: number | bigint;
+  rdev: number | bigint;
+  size: number | bigint;
+  blksize: number | bigint;
+  blocks: number | bigint;
+  atimeMs: number | bigint;
+  mtimeMs: number | bigint;
+  ctimeMs: number | bigint;
+  birthtimeMs: number | bigint;
+  atimeNs?: bigint;
+  mtimeNs?: bigint;
+  ctimeNs?: bigint;
+  birthtimeNs?: bigint;
+  atime: Date;
+  mtime: Date;
+  ctime: Date;
+  birthtime: Date;
 
-  public constructor(
-    badge: symbol,
-    stat: InternalStat,
-    options: { bigint: boolean }
-  ) {
+  constructor(badge: symbol, stat: InternalStat, options: { bigint: boolean }) {
     // The kBadge symbol is never exported for users. We use it as an internal
     // marker to ensure that only internal code can create a Stats object using
     // the constructor.
@@ -895,31 +891,31 @@ export class Stats {
     }
   }
 
-  public isBlockDevice(): boolean {
+  isBlockDevice(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFBLK;
   }
 
-  public isCharacterDevice(): boolean {
+  isCharacterDevice(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFCHR;
   }
 
-  public isDirectory(): boolean {
+  isDirectory(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFDIR;
   }
 
-  public isFIFO(): boolean {
+  isFIFO(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFIFO;
   }
 
-  public isFile(): boolean {
+  isFile(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFREG;
   }
 
-  public isSocket(): boolean {
+  isSocket(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFSOCK;
   }
 
-  public isSymbolicLink(): boolean {
+  isSymbolicLink(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFLNK;
   }
 }

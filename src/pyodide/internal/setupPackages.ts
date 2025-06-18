@@ -50,7 +50,7 @@ class VirtualizedDir {
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
   private soFiles: FilePath[];
   private loadedRequirements: Set<string>;
-  public constructor() {
+  constructor() {
     this.rootInfo = createTarFsInfo();
     this.dynlibTarFs = createTarFsInfo();
     this.soFiles = [];
@@ -63,7 +63,7 @@ class VirtualizedDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  public mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
+  mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
@@ -85,7 +85,7 @@ class VirtualizedDir {
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
    */
-  public addSmallBundle(
+  addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirement: string,
@@ -105,7 +105,7 @@ class VirtualizedDir {
    * @param {List<String>} soFiles A list of .so files contained in the big bundle
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
-  public addBigBundle(
+  addBigBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirements: Set<string>
@@ -129,23 +129,23 @@ class VirtualizedDir {
     }
   }
 
-  public getSitePackagesRoot(): TarFSInfo {
+  getSitePackagesRoot(): TarFSInfo {
     return this.rootInfo;
   }
 
-  public getDynlibRoot(): TarFSInfo {
+  getDynlibRoot(): TarFSInfo {
     return this.dynlibTarFs;
   }
 
-  public getSoFilesToLoad(): FilePath[] {
+  getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
 
-  public hasRequirementLoaded(req: string): boolean {
+  hasRequirementLoaded(req: string): boolean {
     return this.loadedRequirements.has(req);
   }
 
-  public mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
+  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
       tarFS,

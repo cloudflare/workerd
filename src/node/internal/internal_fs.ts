@@ -25,45 +25,41 @@ import { Buffer } from 'node-internal:internal_buffer';
 const kType = Symbol('type');
 
 export class Dirent {
-  public name: string | Buffer;
-  public parentPath: string | Buffer;
+  name: string | Buffer;
+  parentPath: string | Buffer;
   private [kType]: number;
 
-  public constructor(
-    name: string | Buffer,
-    type: number,
-    path: string | Buffer
-  ) {
+  constructor(name: string | Buffer, type: number, path: string | Buffer) {
     this.name = name;
     this.parentPath = path;
     this[kType] = type;
   }
 
-  public isDirectory(): boolean {
+  isDirectory(): boolean {
     return this[kType] === UV_DIRENT_DIR;
   }
 
-  public isFile(): boolean {
+  isFile(): boolean {
     return this[kType] === UV_DIRENT_FILE;
   }
 
-  public isBlockDevice(): boolean {
+  isBlockDevice(): boolean {
     return this[kType] === UV_DIRENT_BLOCK;
   }
 
-  public isCharacterDevice(): boolean {
+  isCharacterDevice(): boolean {
     return this[kType] === UV_DIRENT_CHAR;
   }
 
-  public isSymbolicLink(): boolean {
+  isSymbolicLink(): boolean {
     return this[kType] === UV_DIRENT_LINK;
   }
 
-  public isFIFO(): boolean {
+  isFIFO(): boolean {
     return this[kType] === UV_DIRENT_FIFO;
   }
 
-  public isSocket(): boolean {
+  isSocket(): boolean {
     return this[kType] === UV_DIRENT_SOCKET;
   }
 }
@@ -86,7 +82,7 @@ export class Dir {
   #encoding: BufferEncoding | null | undefined | 'buffer';
   #path: FilePath;
 
-  public constructor(
+  constructor(
     handle: cffs.DirEntryHandle[] | undefined,
     path: FilePath,
     options: DirOptions
@@ -103,15 +99,13 @@ export class Dir {
     this.#encoding = encoding as BufferEncoding;
   }
 
-  public get path(): FilePath {
+  get path(): FilePath {
     return this.#path;
   }
 
-  public read(): Promise<Dirent | null>;
-  public read(callback: DirentReadCallback): void;
-  public read(
-    callback?: DirentReadCallback
-  ): Promise<Dirent | null> | undefined {
+  read(): Promise<Dirent | null>;
+  read(callback: DirentReadCallback): void;
+  read(callback?: DirentReadCallback): Promise<Dirent | null> | undefined {
     if (typeof callback === 'function') {
       validateFunction(callback, 'callback');
       try {
@@ -135,7 +129,7 @@ export class Dir {
     }
   }
 
-  public readSync(): Dirent | null {
+  readSync(): Dirent | null {
     if (this.#handle === undefined) throw new ERR_DIR_CLOSED();
     const ent = this.#handle.shift();
     if (ent == null) return null;
@@ -150,7 +144,7 @@ export class Dir {
     );
   }
 
-  public close(callback?: (err: unknown) => void): Promise<void> | undefined {
+  close(callback?: (err: unknown) => void): Promise<void> | undefined {
     this.closeSync();
     if (typeof callback === 'function') {
       validateFunction(callback, 'callback');
@@ -162,14 +156,14 @@ export class Dir {
     return Promise.resolve();
   }
 
-  public closeSync(): void {
+  closeSync(): void {
     if (this.#handle === undefined) {
       throw new ERR_DIR_CLOSED();
     }
     this.#handle = undefined;
   }
 
-  public async *entries(): AsyncGenerator<Dirent, unknown, unknown> {
+  async *entries(): AsyncGenerator<Dirent, unknown, unknown> {
     for (;;) {
       const ent = await this.read();
       if (ent == null) return;
@@ -177,15 +171,15 @@ export class Dir {
     }
   }
 
-  public [Symbol.asyncIterator](): AsyncGenerator<Dirent, unknown, unknown> {
+  [Symbol.asyncIterator](): AsyncGenerator<Dirent, unknown, unknown> {
     return this.entries();
   }
 
-  public async [Symbol.asyncDispose](): Promise<void> {
+  async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
 
-  public [Symbol.dispose](): void {
+  [Symbol.dispose](): void {
     this.closeSync();
   }
 }

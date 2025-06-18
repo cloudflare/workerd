@@ -70,14 +70,14 @@ export type AiModelsSearchObject = {
 };
 
 export class InferenceUpstreamError extends Error {
-  public constructor(message: string, name = 'InferenceUpstreamError') {
+  constructor(message: string, name = 'InferenceUpstreamError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AiInternalError extends Error {
-  public constructor(message: string, name = 'AiInternalError') {
+  constructor(message: string, name = 'AiInternalError') {
     super(message);
     this.name = name;
   }
@@ -112,23 +112,20 @@ export class Ai {
   // @ts-expect-error this option is deprecated, do not use this
   private logs: Array<string> = [];
   private options: AiOptions = {};
-  public lastRequestId: string | null = null;
-  public aiGatewayLogId: string | null = null;
-  public lastRequestHttpStatusCode: number | null = null;
-  public lastRequestInternalStatusCode: number | null = null;
+  lastRequestId: string | null = null;
+  aiGatewayLogId: string | null = null;
+  lastRequestHttpStatusCode: number | null = null;
+  lastRequestInternalStatusCode: number | null = null;
 
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
   }
 
-  public async fetch(
-    input: RequestInfo | URL,
-    init?: RequestInit
-  ): Promise<Response> {
+  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     return this.fetcher.fetch(input, init);
   }
 
-  public async run(
+  async run(
     model: string,
     inputs: Record<string, object>,
     options: AiOptions = {}
@@ -191,7 +188,7 @@ export class Ai {
   /*
    * @deprecated this method is deprecated, do not use this
    */
-  public getLogs(): string[] {
+  getLogs(): string[] {
     return [];
   }
 
@@ -222,7 +219,7 @@ export class Ai {
     }
   }
 
-  public async models(
+  async models(
     params: AiModelsSearchParams = {}
   ): Promise<AiModelsSearchObject[]> {
     const url = new URL('https://workers-binding.ai/ai-api/models/search');
@@ -246,18 +243,18 @@ export class Ai {
     }
   }
 
-  public async toMarkdown(
+  async toMarkdown(
     files: { name: string; blob: Blob }[],
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse[]>;
-  public async toMarkdown(
+  async toMarkdown(
     files: {
       name: string;
       blob: Blob;
     },
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse>;
-  public async toMarkdown(
+  async toMarkdown(
     files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse | ConversionResponse[]> {
@@ -329,11 +326,11 @@ export class Ai {
     return obj;
   }
 
-  public gateway(gatewayId: string): AiGateway {
+  gateway(gatewayId: string): AiGateway {
     return new AiGateway(this.fetcher, gatewayId);
   }
 
-  public autorag(autoragId?: string): AutoRAG {
+  autorag(autoragId?: string): AutoRAG {
     return new AutoRAG(this.fetcher, autoragId);
   }
 }

@@ -5,11 +5,11 @@
 // Type definitions for c++ implementation.
 
 export class Socket {
-  public readonly readable: unknown;
-  public readonly writable: unknown;
-  public readonly closed: Promise<void>;
-  public close(): Promise<void>;
-  public startTls(options: TlsOptions): Socket;
+  readonly readable: unknown;
+  readonly writable: unknown;
+  readonly closed: Promise<void>;
+  close(): Promise<void>;
+  startTls(options: TlsOptions): Socket;
 }
 
 export type TlsOptions = {

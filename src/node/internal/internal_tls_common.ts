@@ -28,8 +28,8 @@ import { validateInteger } from 'node-internal:validators';
 
 // @ts-expect-error TS2323 Redeclare error.
 export declare class SecureContext {
-  public context: unknown;
-  public constructor(
+  context: unknown;
+  constructor(
     _secureProtocol?: string,
     secureOptions?: number,
     minVersion?: string,

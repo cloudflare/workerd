@@ -85,7 +85,7 @@ class FileHandle {
   #fd: number | undefined;
   #handle: cffs.FdHandle | undefined;
 
-  public constructor(badge: symbol, fd: number) {
+  constructor(badge: symbol, fd: number) {
     if (badge !== kBadge) {
       throw new TypeError('Illegal constructor');
     }
@@ -93,12 +93,12 @@ class FileHandle {
     this.#handle = cffs.getFdHandle(fd);
   }
 
-  public get fd(): number | undefined {
+  get fd(): number | undefined {
     // The fd property will be undefined if the handle has been closed.
     return this.#fd;
   }
 
-  public async appendFile(
+  async appendFile(
     data: string | ArrayBufferView,
     options: WriteFileOptions = {}
   ): Promise<void> {
@@ -108,35 +108,35 @@ class FileHandle {
     await appendFile(this.#fd, data, options);
   }
 
-  public async chmod(mode: string | number): Promise<void> {
+  async chmod(mode: string | number): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await fchmod(this.#fd, mode);
   }
 
-  public async chown(uid: number, gid: number): Promise<void> {
+  async chown(uid: number, gid: number): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await fchown(this.#fd, uid, gid);
   }
 
-  public async datasync(): Promise<void> {
+  async datasync(): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await fdatasync(this.#fd);
   }
 
-  public async sync(): Promise<void> {
+  async sync(): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await fsync(this.#fd);
   }
 
-  public async read<T extends NodeJS.ArrayBufferView>(
+  async read<T extends NodeJS.ArrayBufferView>(
     bufferOrOptions: T | ReadSyncOptions = {},
     offsetOrOptions: number | ReadSyncOptions = {},
     length?: number,
@@ -190,7 +190,7 @@ class FileHandle {
     };
   }
 
-  public async readv<T extends NodeJS.ArrayBufferView>(
+  async readv<T extends NodeJS.ArrayBufferView>(
     buffers: T[],
     position: Position = null
   ): Promise<{ bytesRead: number; buffers: T[] }> {
@@ -204,7 +204,7 @@ class FileHandle {
     };
   }
 
-  public async readFile(
+  async readFile(
     options: BufferEncoding | null | ReadFileSyncOptions = {}
   ): Promise<string | Buffer> {
     if (this.#fd === undefined) {
@@ -213,38 +213,35 @@ class FileHandle {
     return await readFile(this.#fd, options);
   }
 
-  public readLines(_options: any = undefined): void {
+  readLines(_options: any = undefined): void {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     throw new Error('not implemented');
   }
 
-  public async stat(options: StatOptions = {}): Promise<Stats | undefined> {
+  async stat(options: StatOptions = {}): Promise<Stats | undefined> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     return await fstat(this.#fd, options);
   }
 
-  public async truncate(len: number = 0): Promise<void> {
+  async truncate(len: number = 0): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await ftruncate(this.#fd, len);
   }
 
-  public async utimes(
-    atime: RawTime | Date,
-    mtime: RawTime | Date
-  ): Promise<void> {
+  async utimes(atime: RawTime | Date, mtime: RawTime | Date): Promise<void> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     await futimes(this.#fd, atime, mtime);
   }
 
-  public async write(
+  async write(
     buffer: NodeJS.ArrayBufferView | string,
     offsetPositionOrOptions: WriteSyncOptions | Position = null,
     lengthOrEncoding?: number | BufferEncoding | null,
@@ -272,7 +269,7 @@ class FileHandle {
     };
   }
 
-  public async writev(
+  async writev(
     buffers: NodeJS.ArrayBufferView[],
     position: Position = null
   ): Promise<{ bytesWritten: number; buffers: NodeJS.ArrayBufferView[] }> {
@@ -286,7 +283,7 @@ class FileHandle {
     };
   }
 
-  public async writeFile(
+  async writeFile(
     data: string | Buffer,
     options: BufferEncoding | null | WriteFileOptions = {}
   ): Promise<{ bytesWritten: number; buffer: Buffer }> {
@@ -302,31 +299,31 @@ class FileHandle {
     };
   }
 
-  public async close(): Promise<void> {
+  async close(): Promise<void> {
     if (this.#handle !== undefined) this.#handle.close();
     this.#fd = undefined;
     this.#handle = undefined;
   }
 
-  public async [Symbol.asyncDispose](): Promise<void> {
+  async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
 
-  public readableWebStream(_options: any = {}): void {
+  readableWebStream(_options: any = {}): void {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     throw new Error('not implemented');
   }
 
-  public createReadStream(_options: any = undefined): void {
+  createReadStream(_options: any = undefined): void {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
     throw new Error('not implemented');
   }
 
-  public createWriteStream(_options: any = undefined): void {
+  createWriteStream(_options: any = undefined): void {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
