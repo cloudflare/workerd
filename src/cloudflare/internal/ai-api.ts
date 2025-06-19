@@ -34,6 +34,11 @@ export type AiOptions = {
   sessionOptions?: SessionOptions;
 };
 
+export type AiInputReadableStream = {
+  body: ReadableStream;
+  contentType: string;
+};
+
 export type ConversionResponse = {
   name: string;
   mimeType: string;
@@ -103,6 +108,40 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+// TODO: merge this function with the one with images-api.ts
+function isReadableStream(obj: unknown): obj is ReadableStream {
+  return !!(
+    obj &&
+    typeof obj === 'object' &&
+    'getReader' in obj &&
+    typeof obj.getReader === 'function'
+  );
+}
+
+/**
+ * Find keys in inputs that have a ReadableStream
+ * */
+function findReadableStreamKeys(
+  inputs: Record<string, unknown>
+): Array<string> {
+  const readableStreamKeys: Array<string> = [];
+
+  for (const [key, value] of Object.entries(inputs)) {
+    // Check if value has a body property that's a ReadableStream
+    const hasReadableStreamBody =
+      value &&
+      typeof value === 'object' &&
+      'body' in value &&
+      isReadableStream(value.body);
+
+    if (hasReadableStreamBody || isReadableStream(value)) {
+      readableStreamKeys.push(key);
+    }
+  }
+
+  return readableStreamKeys;
+}
+
 export class Ai {
   private readonly fetcher: Fetcher;
 
@@ -127,7 +166,7 @@ export class Ai {
 
   async run(
     model: string,
-    inputs: Record<string, object>,
+    inputs: Record<string, unknown>,
     options: AiOptions = {}
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
     this.options = options;
@@ -141,29 +180,92 @@ export class Ai {
       ...object
     }): object => object)(this.options);
 
-    const body = JSON.stringify({
-      inputs,
-      options: cleanedOptions,
-    });
+    let res: Response;
+    /**
+     * Inputs that contain a ReadableStream which will be sent directly to
+     * the fetcher object along with other keys parsed as a query parameters
+     * */
+    const streamKeys = findReadableStreamKeys(inputs);
 
-    const fetchOptions = {
-      method: 'POST',
-      body: body,
-      headers: {
-        ...this.options.sessionOptions?.extraHeaders,
-        ...this.options.extraHeaders,
-        'content-type': 'application/json',
-        'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
-      },
-    };
+    if (streamKeys.length === 0) {
+      // Treat inputs as regular JS objects
+      const body = JSON.stringify({
+        inputs,
+        options: cleanedOptions,
+      });
 
-    let endpointUrl = 'https://workers-binding.ai/run?version=3';
-    if (options.gateway?.id) {
-      endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
+      const fetchOptions = {
+        method: 'POST',
+        body: body,
+        headers: {
+          ...this.options.sessionOptions?.extraHeaders,
+          ...this.options.extraHeaders,
+          'content-type': 'application/json',
+          'cf-consn-sdk-version': '2.0.0',
+          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        },
+      };
+
+      let endpointUrl = 'https://workers-binding.ai/run?version=3';
+      if (options.gateway?.id) {
+        endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
+      }
+
+      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
+    } else if (streamKeys.length > 1) {
+      throw new AiInternalError(
+        `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
+      );
+    } else {
+      const streamKey = streamKeys[0] ?? '';
+      const stream = streamKey ? inputs[streamKey] : null;
+      const body = (stream as AiInputReadableStream).body;
+      const contentType = (stream as AiInputReadableStream).contentType;
+
+      if (options.gateway?.id) {
+        throw new AiInternalError(
+          'AI Gateway does not support ReadableStreams yet.'
+        );
+      }
+
+      // Make sure user has supplied the Content-Type
+      // This allows AI binding to treat the ReadableStream correctly
+      if (!contentType) {
+        throw new AiInternalError(
+          'Content-Type is required with ReadableStream inputs'
+        );
+      }
+
+      // Pass single ReadableStream in request body
+      const fetchOptions = {
+        method: 'POST',
+        body: body,
+        headers: {
+          ...this.options.sessionOptions?.extraHeaders,
+          ...this.options.extraHeaders,
+          'content-type': contentType,
+          'cf-consn-sdk-version': '2.0.0',
+          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        },
+      };
+
+      // Fetch the additional input params
+      const { [streamKey]: streamInput, ...userInputs } = inputs;
+
+      // Construct query params
+      // Append inputs with ai.run options that are passed to the inference request
+      const query = {
+        ...cleanedOptions,
+        version: '3',
+        userInputs: JSON.stringify({ ...userInputs }),
+      };
+      const aiEndpoint = new URL('https://workers-binding.ai/run');
+      for (const [key, value] of Object.entries(query)) {
+        aiEndpoint.searchParams.set(key, value);
+      }
+
+      res = await this.fetcher.fetch(aiEndpoint, fetchOptions);
     }
-
-    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
