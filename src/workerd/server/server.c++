@@ -249,8 +249,21 @@ Server::~Server() noexcept {
   // This destructor is explicitly `noexcept` because if one of the `unlink()`s throws then we'd
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
   // whatever, better to crash.
+
+  // It's important to cancel all tasks before we start tearing down.
+  tasks.clear();
+
+  // Unlink all the services, which should remove all refcount cycles.
   for (auto& service: services) {
     service.value->unlink();
+  }
+
+  // Verify that unlinking actually eliminated cycles. Otherwise we have a memory leak -- and
+  // potentially use-after-free if we allow the `Server` to be destroyed while services still
+  // exist.
+  for (auto& service: services) {
+    KJ_ASSERT(
+        !service.value->isShared(), "service still has references after unlinking", service.key);
   }
 }
 
@@ -1872,7 +1885,7 @@ class Server::WorkerService final: public Service,
         // What will happen if you invoke this entrypoint? Not what you think. Check out the
         // test case in server-test.c++ entitled "referencing non-extant default entrypoint is not
         // an error" for the sordid details.
-        return fakeOwn(*this);
+        return kj::addRef(*this);
       }
     }
     return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers);
@@ -3006,10 +3019,7 @@ class Server::WorkerService final: public Service,
 
     KJ_REQUIRE(channel < channels.subrequest.size(), "invalid subrequest channel number");
 
-    // It's OK to return a fakeOwn() as this object will be treated as an I/O object within this
-    // IoContext anyway, and the IoContext cannot outlive the WorkerService, therefore can't
-    // outlive the subrequest channel array.
-    return fakeOwn(*channels.subrequest[channel]);
+    return kj::addRef(*channels.subrequest[channel]);
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel,
@@ -3803,15 +3813,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
     // legacy artifact that no one should be depending on.)
-    //
-    // We set up one as a fakeOwn() alias of the other. Awkwardly, it's important that real Own
-    // come first in the list, before the fakeOwn, because they'll be destroyed in reverse order,
-    // and the fakeOwn must be destroyed before the real one so that it's not dangling at time of
-    // destruction.
     static_assert(IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT == 2);
-    auto globalService2 = fakeOwn(*globalService);
+    services.add(kj::addRef(*globalService));
     services.add(kj::mv(globalService));
-    services.add(kj::mv(globalService2));
 
     for (auto& channel: def.subrequestChannels) {
       services.add(lookupService(channel.designator, kj::mv(channel.errorContext)));
@@ -3988,7 +3992,7 @@ kj::Own<Server::Service> Server::lookupService(
   Service* service = KJ_UNWRAP_OR(services.find(targetName), {
     reportConfigError(kj::str(errorContext, " refers to a service \"", targetName,
         "\", but no such service is defined."));
-    return fakeOwn(*invalidConfigServiceSingleton);
+    return kj::addRef(*invalidConfigServiceSingleton);
   });
 
   kj::Maybe<kj::StringPtr> entrypointName;
@@ -4017,12 +4021,12 @@ kj::Own<Server::Service> Server::lookupService(
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\" with a named entrypoint \"", ep, "\", but \"", targetName,
           "\" has no such named entrypoint."));
-      return fakeOwn(*invalidConfigServiceSingleton);
+      return kj::addRef(*invalidConfigServiceSingleton);
     } else {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\", but does not specify an entrypoint, and the service does not have a "
           "default entrypoint."));
-      return fakeOwn(*invalidConfigServiceSingleton);
+      return kj::addRef(*invalidConfigServiceSingleton);
     }
   } else {
     KJ_IF_SOME(ep, entrypointName) {
@@ -4035,7 +4039,7 @@ kj::Own<Server::Service> Server::lookupService(
           "\" is not a Worker, so cannot accept `props`"));
     }
 
-    return fakeOwn(*service);
+    return kj::addRef(*service);
   }
 }
 
@@ -4047,7 +4051,7 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
   Service* service = KJ_UNWRAP_OR(services.find(targetName), {
     reportConfigError(kj::str(errorContext, " refers to a service \"", targetName,
         "\", but no such service is defined."));
-    return fakeOwn(*invalidConfigActorClassSingleton);
+    return kj::addRef(*invalidConfigActorClassSingleton);
   });
 
   kj::Maybe<kj::StringPtr> entrypointName;
@@ -4076,12 +4080,12 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\" with a Durable Object entrypoint \"", ep, "\", but \"", targetName,
           "\" has no such exported entrypoint class."));
-      return fakeOwn(*invalidConfigActorClassSingleton);
+      return kj::addRef(*invalidConfigActorClassSingleton);
     } else {
       reportConfigError(kj::str(errorContext, " refers to service \"", targetName,
           "\", but does not specify an entrypoint, and the service does export a "
           "Durable Object class as its default entrypoint."));
-      return fakeOwn(*invalidConfigActorClassSingleton);
+      return kj::addRef(*invalidConfigActorClassSingleton);
     }
   } else {
     KJ_IF_SOME(ep, entrypointName) {
@@ -4094,7 +4098,7 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
           "\" is not a Worker, so cannot be used as a class."));
     }
 
-    return fakeOwn(*invalidConfigActorClassSingleton);
+    return kj::addRef(*invalidConfigActorClassSingleton);
   }
 }
 
