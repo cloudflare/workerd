@@ -108,20 +108,13 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-export function isReadableStream(value: unknown): boolean {
-  if (value instanceof ReadableStream) {
-    return true;
-  }
-
-  if (value && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    return (
-      typeof obj['getReader'] === 'function' &&
-      typeof obj['locked'] === 'boolean'
-    );
-  }
-
-  return false;
+function isReadableStream(obj: unknown): obj is ReadableStream {
+  return !!(
+    obj &&
+    typeof obj === 'object' &&
+    'getReader' in obj &&
+    typeof obj.getReader === 'function'
+  );
 }
 
 /**
@@ -138,11 +131,9 @@ function findReadableStreamKeys(
       value &&
       typeof value === 'object' &&
       'body' in value &&
-      isReadableStream((value as AiInputReadableStream).body);
+      isReadableStream(value?.body);
 
-    const isDirectReadableStream = isReadableStream(value);
-
-    if (hasReadableStreamBody || isDirectReadableStream) {
+    if (hasReadableStreamBody || isReadableStream(value)) {
       readableStreamKeys.push(key);
     }
   }
@@ -233,6 +224,12 @@ export class Ai {
       const body = (stream as AiInputReadableStream).body;
       const contentType = (stream as AiInputReadableStream).contentType;
 
+      if (options.gateway?.id) {
+        throw new AiInternalError(
+          'AI Gateway does not support ReadableStreams yet.'
+        );
+      }
+
       // Make sure user has supplied the Content-Type
       // This allows AI binding to treat the ReadableStream correctly
       if (!contentType) {
@@ -261,17 +258,15 @@ export class Ai {
       // Append inputs with ai.run options that are passed to the inference request
       const query = {
         ...cleanedOptions,
+        version: '3',
         userInputs: JSON.stringify({ ...userInputs }),
       };
-      const queryParams = new URLSearchParams(query).toString();
-
-      const endpointUrl = `https://workers-binding.ai/run?version=3&${queryParams}`;
-      if (options.gateway?.id) {
-        throw new AiInternalError(
-          'AI Gateway does not support ReadableStreams yet.'
-        );
+      const aiEndpoint = new URL('https://workers-binding.ai/run');
+      for(const [key, value] of Object.entries(query)) {
+        aiEndpoint.searchParams.set(key, value);
       }
-      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
+
+      res = await this.fetcher.fetch(aiEndpoint, fetchOptions);
     }
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');

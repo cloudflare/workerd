@@ -12,14 +12,6 @@ function base64ToBlob(base64, mimeType) {
   return new Blob([bytes], { type: mimeType });
 }
 
-export function extractQueryParams(params) {
-  const query = {};
-  for (const [key, value] of params) {
-    query[key] = value;
-  }
-  return query;
-}
-
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -96,7 +88,7 @@ export default {
     } else {
       data = {
         inputs: request.body,
-        options: extractQueryParams(url.searchParams),
+        options: Object.fromEntries(url.searchParams),
       };
     }
 

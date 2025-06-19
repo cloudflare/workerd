@@ -100,12 +100,12 @@ export const tests = {
 
     {
       // Test one readable stream input
+      const encoder = new TextEncoder();
       const arr = [1, 2, 3];
       const resp = await env.ai.run('readableStreamIputs', {
         audio: {
           body: new ReadableStream({
             start(controller) {
-              const encoder = new TextEncoder();
               for (const ele of arr) {
                 controller.enqueue(encoder.encode(ele));
               }
@@ -126,12 +126,12 @@ export const tests = {
 
     {
       // Test one readable stream input with additional parameters
+      const encoder = new TextEncoder();
       const arr = [1, 2, 3];
       const resp = await env.ai.run('readableStreamIputs', {
         audio: {
           body: new ReadableStream({
             start(controller) {
-              const encoder = new TextEncoder();
               for (const ele of arr) {
                 controller.enqueue(encoder.encode(ele));
               }
@@ -157,75 +157,60 @@ export const tests = {
 
     {
       // Test errors from one readable stream input without content-type
-      try {
-        const arr = [1, 2, 3];
-        const resp = await env.ai.run('readableStreamIputs', {
-          audio: {
-            body: new ReadableStream({
-              start(controller) {
-                const encoder = new TextEncoder();
-                for (const ele of arr) {
-                  controller.enqueue(encoder.encode(ele));
-                }
-                controller.close();
-              },
-            }),
-          },
-        });
-      } catch (e) {
-        assert.deepEqual(
-          {
-            name: e.name,
-            message: e.message,
-          },
-          {
-            name: 'AiInternalError',
-            message: 'Content-Type is required with ReadableStream inputs',
-          }
-        );
-        // Test request internal status code is present
-        assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
-      }
+      await assert.rejects(
+        async() => {
+          const arr = [1, 2, 3];
+          const encoder = new TextEncoder();
+          const resp = await env.ai.run('readableStreamIputs', {
+            audio: {
+              body: new ReadableStream({
+                start(controller) {
+                  for (const ele of arr) {
+                    controller.enqueue(encoder.encode(ele));
+                  }
+                  controller.close();
+                },
+              }),
+            },
+          });
+        },
+        {
+          name: 'AiInternalError',
+          message: 'Content-Type is required with ReadableStream inputs',
+        }
+      );
     }
 
     {
       // Test errors from two readable stream inputs
-      try {
-        const arr = [1, 2, 3];
-        const stream = new ReadableStream({
-          start(controller) {
-            const encoder = new TextEncoder();
-            for (const ele of arr) {
-              controller.enqueue(encoder.encode(ele));
-            }
-            controller.close();
-          },
-        });
-        const resp = await env.ai.run('readableStreamIputs', {
-          audio: {
-            body: stream,
-            contentType: 'audio/wav',
-          },
-          image: {
-            body: stream,
-            contentType: 'image/png',
-          },
-        });
-      } catch (e) {
-        assert.deepEqual(
-          {
-            name: e.name,
-            message: e.message,
-          },
-          {
-            name: 'AiInternalError',
-            message:
-              'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
-          }
-        );
-        // Test request internal status code is present
-        assert.deepStrictEqual(env.ai.lastRequestInternalStatusCode, 1001);
-      }
+      await assert.rejects(
+        async () => {
+          const arr = [1, 2, 3];
+          const stream = new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              for (const ele of arr) {
+                controller.enqueue(encoder.encode(ele));
+              }
+              controller.close();
+            },
+          });
+          const resp = await env.ai.run('readableStreamIputs', {
+            audio: {
+              body: stream,
+              contentType: 'audio/wav',
+            },
+            image: {
+              body: stream,
+              contentType: 'image/png',
+            },
+          });
+        },
+        {
+          name: 'AiInternalError',
+          message: 'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
+        }
+      );
     }
 
     {
