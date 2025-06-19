@@ -3158,8 +3158,21 @@ class Server::WorkerService final: public Service,
 };
 
 struct FutureSubrequestChannel {
-  config::ServiceDesignator::Reader designator;
+  kj::OneOf<config::ServiceDesignator::Reader, kj::Own<IoChannelFactory::SubrequestChannel>>
+      designator;
   kj::String errorContext;
+
+  kj::Own<IoChannelFactory::SubrequestChannel> lookup(Server& server) && {
+    KJ_SWITCH_ONEOF(designator) {
+      KJ_CASE_ONEOF(conf, config::ServiceDesignator::Reader) {
+        return server.lookupService(conf, kj::mv(errorContext));
+      }
+      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::SubrequestChannel>) {
+        return kj::mv(channel);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 struct FutureActorChannel {
@@ -4029,8 +4042,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
         entrypointNames.size() + workerService.hasDefaultEntrypoint());
 
-    kj::Own<IoChannelFactory::SubrequestChannel> globalService =
-        lookupService(def.globalOutbound.designator, kj::mv(def.globalOutbound.errorContext));
+    auto globalService = kj::mv(def.globalOutbound).lookup(*this);
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
     // legacy artifact that no one should be depending on.)
@@ -4039,7 +4051,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     services.add(kj::mv(globalService));
 
     for (auto& channel: def.subrequestChannels) {
-      services.add(lookupService(channel.designator, kj::mv(channel.errorContext)));
+      services.add(kj::mv(channel).lookup(*this));
     }
 
     // Link the ctx.exports self-referential channels. Note that it's important these are added
@@ -4104,7 +4116,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     result.actor = linkedActorChannels.finish();
 
     KJ_IF_SOME(out, def.cacheApiOutbound) {
-      result.cache = lookupService(out.designator, kj::mv(out.errorContext));
+      result.cache = kj::mv(out).lookup(*this);
     }
 
     if (def.actorStorageConf.isLocalDisk()) {
@@ -4145,15 +4157,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       }
     }
 
-    result.tails = KJ_MAP(tail, def.tails) {
-      return kj::Own<IoChannelFactory::SubrequestChannel>(
-          lookupService(tail.designator, kj::mv(tail.errorContext)));
-    };
+    result.tails = KJ_MAP(tail, def.tails) { return kj::mv(tail).lookup(*this); };
 
-    result.streamingTails = KJ_MAP(tail, def.streamingTails) {
-      return kj::Own<IoChannelFactory::SubrequestChannel>(
-          lookupService(tail.designator, kj::mv(tail.errorContext)));
-    };
+    result.streamingTails = KJ_MAP(tail, def.streamingTails) { return kj::mv(tail).lookup(*this); };
 
     result.workerLoaders = KJ_MAP(il, def.workerLoaderChannels) {
       return workerLoaderNamespaces
