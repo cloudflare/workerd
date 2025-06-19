@@ -797,8 +797,12 @@ class Worker::Actor final: public kj::Refcounted {
    public:
     // Information needed to start a facet.
     struct StartInfo {
-      // The actor class channel number, from a DurableObjectClass binding.
-      uint actorClassChannel;
+      // The actor class, from a DurableObjectClass binding.
+      //
+      // WARNING: The object passed here MUST be directly from IoChannelFactory::getActorClass(),
+      //   as the FacetManager implementation is allowed to assume it can downcast to whatever
+      //   type the IoChannelFactory produces.
+      kj::Own<IoChannelFactory::ActorClassChannel> actorClass;
 
       // ctx.id for the child object.
       Worker::Actor::Id id;

@@ -227,7 +227,7 @@ class Server::Service {
   }
 };
 
-class Server::ActorClass: public kj::Refcounted {
+class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
  public:
   // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
   // constructor.
@@ -243,11 +243,6 @@ class Server::ActorClass: public kj::Refcounted {
   // Start a request on the actor.
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
-
-  // Look up the appropriate actor class to use for a facet of this actor. Requires looking up in
-  // the channels table of the actor's service.
-  virtual kj::Own<ActorClass> getActorClassForFacet(
-      const Worker::Actor::FacetManager::StartInfo& startInfo) = 0;
 };
 
 Server::~Server() noexcept {
@@ -524,12 +519,6 @@ class Server::InvalidConfigActorClass final: public ActorClass {
 
   kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
-    // Can't get here because creating the actor would have required calling the other method.
-    KJ_UNREACHABLE;
-  }
-
-  kj::Own<ActorClass> getActorClassForFacet(
-      const Worker::Actor::FacetManager::StartInfo& startInfo) override {
     // Can't get here because creating the actor would have required calling the other method.
     KJ_UNREACHABLE;
   }
@@ -2316,7 +2305,7 @@ class Server::WorkerService final: public Service,
 
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
           kj::StringPtr name, StartInfo startInfo) override {
-        auto facetClass = actorClass->getActorClassForFacet(startInfo);
+        auto facetClass = startInfo.actorClass.downcast<ActorClass>();
         auto facet = getFacetContainer(kj::str(name), kj::mv(startInfo.id), kj::mv(facetClass));
         return kj::heap<ActorChannelImpl>(kj::mv(facet));
       }
@@ -2847,17 +2836,6 @@ class Server::WorkerService final: public Service,
       return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
     }
 
-    kj::Own<ActorClass> getActorClassForFacet(
-        const Worker::Actor::FacetManager::StartInfo& startInfo) override {
-      auto& channels = KJ_REQUIRE_NONNULL(
-          service.ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
-
-      KJ_REQUIRE(startInfo.actorClassChannel < channels.actorClass.size(),
-          "invalid actor class channel number");
-
-      return kj::addRef(*channels.actorClass[startInfo.actorClassChannel]);
-    }
-
    private:
     WorkerService& service;
     kj::StringPtr className;
@@ -3051,6 +3029,15 @@ class Server::WorkerService final: public Service,
         channels.actor[channel], Error, "Actor namespace configuration was invalid.");
     KJ_REQUIRE(ns.getConfig().is<Ephemeral>());  // should have been verified earlier
     return ns.getActorChannel(kj::str(id));
+  }
+
+  kj::Own<ActorClassChannel> getActorClass(uint channel) override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+
+    KJ_REQUIRE(channel < channels.actorClass.size(), "invalid actor class channel number");
+
+    return kj::addRef(*channels.actorClass[channel]);
   }
 
   void abortAllActors(kj::Maybe<kj::Exception&> reason) override {

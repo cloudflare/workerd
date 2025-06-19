@@ -166,6 +166,20 @@ class IoChannelFactory {
   virtual kj::Own<ActorChannel> getColoLocalActor(
       uint channel, kj::StringPtr id, SpanParent parentSpan) = 0;
 
+  // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
+  // token which can be passed into other interfaces that might use the actor class, particularly
+  // Worker::Actor::FacetManager.
+  class ActorClassChannel: public kj::Refcounted {
+   public:
+    // This class has no actual methods!
+  };
+
+  // Get an actor class binding corresponding to the given channel number.
+  virtual kj::Own<ActorClassChannel> getActorClass(uint channel) {
+    // TODO(cleanup): Remove this once the production runtime has implemented this.
+    KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
+  }
+
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");

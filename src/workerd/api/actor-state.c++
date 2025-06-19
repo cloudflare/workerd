@@ -823,12 +823,12 @@ void DurableObjectTransaction::maybeRollback() {
 class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   FacetOutgoingFactory(Worker::Actor::FacetManager& facetManager,
-      uint actorClassChannel,
+      kj::Own<IoChannelFactory::ActorClassChannel> actorClass,
       kj::String name,
       Worker::Actor::Id id)
       : facetManager(facetManager),
-        actorClassChannel(actorClassChannel),
         name(kj::mv(name)),
+        actorClass(kj::mv(actorClass)),
         id(kj::mv(id)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
@@ -844,7 +844,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
       if (actorChannel == kj::none) {
         actorChannel = facetManager.getFacet(name,
             {
-              .actorClassChannel = actorClassChannel,
+              .actorClass = kj::mv(actorClass),
               .id = kj::mv(id),
             });
       }
@@ -859,9 +859,11 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
 
  private:
   Worker::Actor::FacetManager& facetManager;
-  uint actorClassChannel;
   kj::String name;
-  Worker::Actor::Id id;  // moved away when `actorChannel` is initialized
+
+  // These are moved away when `actorChannel` is initialized.
+  kj::Own<IoChannelFactory::ActorClassChannel> actorClass;
+  Worker::Actor::Id id;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
@@ -885,8 +887,10 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js, kj::String name, GetOp
     id = ioCtx.getActorOrThrow().cloneId();
   }
 
+  auto actorClass = ioCtx.getIoChannelFactory().getActorClass(options.$class->getChannel());
+
   kj::Own<Fetcher::OutgoingFactory> factory =
-      kj::heap<FacetOutgoingFactory>(fm, options.$class->getChannel(), kj::mv(name), kj::mv(id));
+      kj::heap<FacetOutgoingFactory>(fm, kj::mv(actorClass), kj::mv(name), kj::mv(id));
 
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
