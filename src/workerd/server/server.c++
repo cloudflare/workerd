@@ -742,7 +742,7 @@ class Server::ExternalHttpService final: public Service {
   class WorkerInterfaceImpl final: public WorkerInterface, private kj::HttpService::Response {
    public:
     WorkerInterfaceImpl(ExternalHttpService& parent, IoChannelFactory::SubrequestMetadata metadata)
-        : parent(parent),
+        : parent(kj::addRef(parent)),
           metadata(kj::mv(metadata)) {}
 
     kj::Promise<void> request(kj::HttpMethod method,
@@ -753,12 +753,12 @@ class Server::ExternalHttpService final: public Service {
       TRACE_EVENT("workerd", "ExternalHttpServer::request()");
       KJ_REQUIRE(wrappedResponse == kj::none, "object should only receive one request");
       wrappedResponse = response;
-      if (parent.rewriter->needsRewriteRequest()) {
-        auto rewrite = parent.rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
-        return parent.serviceAdapter->request(method, url, *rewrite.headers, requestBody, *this)
+      if (parent->rewriter->needsRewriteRequest()) {
+        auto rewrite = parent->rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
+        return parent->serviceAdapter->request(method, url, *rewrite.headers, requestBody, *this)
             .attach(kj::mv(rewrite));
       } else {
-        return parent.serviceAdapter->request(method, url, headers, requestBody, *this);
+        return parent->serviceAdapter->request(method, url, headers, requestBody, *this);
       }
     }
 
@@ -768,7 +768,7 @@ class Server::ExternalHttpService final: public Service {
         ConnectResponse& tunnel,
         kj::HttpConnectSettings settings) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::connect()");
-      return parent.serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
+      return parent->serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
     }
 
     kj::Promise<void> prewarm(kj::StringPtr url) override {
@@ -783,16 +783,16 @@ class Server::ExternalHttpService final: public Service {
 
     kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
       // We'll use capnp RPC for custom events.
-      auto bootstrap = parent.getOutgoingCapnp(*parent.inner);
+      auto bootstrap = parent->getOutgoingCapnp(*parent->inner);
       auto dispatcher =
           bootstrap.startEventRequest(capnp::MessageSize{4, 0}).send().getDispatcher();
       return event
-          ->sendRpc(parent.httpOverCapnpFactory, parent.byteStreamFactory, kj::mv(dispatcher))
+          ->sendRpc(parent->httpOverCapnpFactory, parent->byteStreamFactory, kj::mv(dispatcher))
           .attach(kj::mv(event));
     }
 
    private:
-    ExternalHttpService& parent;
+    kj::Own<ExternalHttpService> parent;
     IoChannelFactory::SubrequestMetadata metadata;
     kj::Maybe<kj::HttpService::Response&> wrappedResponse;
 
@@ -806,9 +806,9 @@ class Server::ExternalHttpService final: public Service {
         kj::Maybe<uint64_t> expectedBodySize) override {
       TRACE_EVENT("workerd", "ExternalHttpService::send()", "status", statusCode);
       auto& response = KJ_ASSERT_NONNULL(wrappedResponse);
-      if (parent.rewriter->needsRewriteResponse()) {
+      if (parent->rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
-        parent.rewriter->rewriteResponse(rewrite);
+        parent->rewriter->rewriteResponse(rewrite);
         return response.send(statusCode, statusText, rewrite, expectedBodySize);
       } else {
         return response.send(statusCode, statusText, headers, expectedBodySize);
@@ -818,9 +818,9 @@ class Server::ExternalHttpService final: public Service {
     kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
       TRACE_EVENT("workerd", "ExternalHttpService::acceptWebSocket()");
       auto& response = KJ_ASSERT_NONNULL(wrappedResponse);
-      if (parent.rewriter->needsRewriteResponse()) {
+      if (parent->rewriter->needsRewriteResponse()) {
         auto rewrite = headers.cloneShallow();
-        parent.rewriter->rewriteResponse(rewrite);
+        parent->rewriter->rewriteResponse(rewrite);
         return response.acceptWebSocket(rewrite);
       } else {
         return response.acceptWebSocket(headers);
@@ -1816,10 +1816,8 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
-      const kj::HashMap<kj::String, ActorConfig>& actorClasses,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Network& network,
       kj::Maybe<kj::String> dockerPathParam)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
@@ -1829,8 +1827,13 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        dockerPath(kj::mv(dockerPathParam)) {
+        dockerPath(kj::mv(dockerPathParam)) {}
 
+  // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
+  // the constructor itself since it sets up cyclic references, which will throw an exception if
+  // done during the constructor.
+  void initActorNamespaces(
+      const kj::HashMap<kj::String, ActorConfig>& actorClasses, kj::Network& network) {
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
       if (!actorClassEntrypoints.contains(entry.key)) {
@@ -2785,7 +2788,7 @@ class Server::WorkerService final: public Service,
         kj::Maybe<kj::StringPtr> entrypoint,
         Frankenvalue props,
         const kj::HashSet<kj::String>& handlers)
-        : worker(worker),
+        : worker(kj::addRef(worker)),
           entrypoint(entrypoint),
           handlers(handlers),
           props(kj::mv(props)) {}
@@ -2796,7 +2799,7 @@ class Server::WorkerService final: public Service,
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
-      return worker.startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
+      return worker->startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -2805,11 +2808,11 @@ class Server::WorkerService final: public Service,
 
     // Return underlying WorkerService.
     virtual Service* service() override {
-      return &worker;
+      return worker;
     }
 
    private:
-    WorkerService& worker;
+    kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
     const kj::HashSet<kj::String>& handlers;
     Frankenvalue props;
@@ -2818,7 +2821,7 @@ class Server::WorkerService final: public Service,
   class ActorClassImpl final: public ActorClass {
    public:
     ActorClassImpl(WorkerService& service, kj::StringPtr className, Frankenvalue props)
-        : service(service),
+        : service(kj::addRef(service)),
           className(className),
           props(kj::mv(props)) {}
 
@@ -2830,13 +2833,13 @@ class Server::WorkerService final: public Service,
         kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
         kj::Maybe<rpc::Container::Client> container,
         kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
-      TimerChannel& timerChannel = service;
+      TimerChannel& timerChannel = *service;
 
       // We define this event ID in the internal codebase, but to have WebSocket Hibernation
       // work for local development we need to pass an event type.
       static constexpr uint16_t hibernationEventTypeId = 8;
 
-      return kj::refcounted<Worker::Actor>(*service.worker, tracker, kj::mv(actorId), true,
+      return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
           kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
           kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
           kj::mv(container), facetManager);
@@ -2846,11 +2849,11 @@ class Server::WorkerService final: public Service,
         IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
       // The `props` parameter is empty here because props are not passed per-request, they are
       // passed at Actor construction time.
-      return service.startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
+      return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
     }
 
    private:
-    WorkerService& service;
+    kj::Own<WorkerService> service;
     kj::StringPtr className;
     Frankenvalue props;
   };
@@ -2909,23 +2912,23 @@ class Server::WorkerService final: public Service,
   class CacheClientImpl final: public CacheClient {
    public:
     CacheClientImpl(Service& cacheService, kj::HttpHeaderId cacheNamespaceHeader)
-        : cacheService(cacheService),
+        : cacheService(kj::addRef(cacheService)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
     kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
-      return kj::heap<CacheHttpClientImpl>(cacheService, cacheNamespaceHeader, kj::none,
+      return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader, kj::none,
           kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
     }
 
     kj::Own<kj::HttpClient> getNamespace(
         kj::StringPtr cacheName, CacheClient::SubrequestMetadata metadata) override {
       auto encodedName = kj::encodeUriComponent(cacheName);
-      return kj::heap<CacheHttpClientImpl>(cacheService, cacheNamespaceHeader, kj::mv(encodedName),
+      return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader, kj::mv(encodedName),
           kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
     }
 
    private:
-    Service& cacheService;
+    kj::Own<Service> cacheService;
     kj::HttpHeaderId cacheNamespaceHeader;
   };
 
@@ -3945,10 +3948,12 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       break;
   }
 
-  return kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
+  auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), def.localActorConfigs, kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), network, kj::mv(dockerPath));
+      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
+  result->initActorNamespaces(def.localActorConfigs, network);
+  return result;
 }
 
 // =======================================================================================
