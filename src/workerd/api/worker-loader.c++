@@ -63,15 +63,24 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
   KJ_UNIMPLEMENTED("TODO(now): WorkerStub::getDurableObjectClass()");
 }
 
+class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
+ public:
+  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+    JSG_FAIL_REQUIRE(Error,
+        "This worker is not permitted to access the internet via global functions like fetch(). "
+        "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
+  }
+};
+
 jsg::Ref<WorkerStub> WorkerLoader::get(
     jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
   auto& ioctx = IoContext::current();
 
   auto reenterAndGetCode = ioctx.makeReentryCallback(
-      [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
+      [&ioctx, getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
           jsg::Lock& js) mutable {
     return getCode(js).then(
-        js, [compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
+        js, [&ioctx, compatDateValidation](jsg::Lock& js, WorkerCode code) -> DynamicWorkerSource {
       auto extractedSource = extractSource(js, code);
       auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
       CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
@@ -81,9 +90,23 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
         env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
       }
 
+      kj::Own<IoChannelFactory::SubrequestChannel> globalOutbound;
+      KJ_IF_SOME(maybeOut, code.globalOutbound) {
+        KJ_IF_SOME(out, maybeOut) {
+          globalOutbound = out->getSubrequestChannel(ioctx);
+        } else {
+          globalOutbound = kj::refcounted<NullGlobalOutboundChannel>();
+        }
+      } else {
+        // Inherit the calling worker's global outbound channel.
+        globalOutbound =
+            ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
+      }
+
       return {.source = kj::mv(extractedSource),
         .compatibilityFlags = compatFlags,
         .env = kj::mv(env),
+        .globalOutbound = kj::mv(globalOutbound),
         .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule))};
     });
   });
