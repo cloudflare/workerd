@@ -652,7 +652,7 @@ class Server::ExternalTcpService final: public Service, private WorkerInterface 
 };
 
 // Service used when the service is configured as external HTTP service.
-class Server::ExternalHttpService final: public Service, private kj::TaskSet::ErrorHandler {
+class Server::ExternalHttpService final: public Service {
  public:
   ExternalHttpService(kj::Own<kj::NetworkAddress> addrParam,
       kj::Own<HttpRewriter> rewriter,
@@ -673,8 +673,7 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
         rewriter(kj::mv(rewriter)),
         headerTable(headerTable),
         byteStreamFactory(byteStreamFactory),
-        httpOverCapnpFactory(httpOverCapnpFactory),
-        waitUntilTasks(*this) {}
+        httpOverCapnpFactory(httpOverCapnpFactory) {}
 
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::heap<WorkerInterfaceImpl>(*this, kj::mv(metadata));
@@ -696,11 +695,6 @@ class Server::ExternalHttpService final: public Service, private kj::TaskSet::Er
   kj::HttpHeaderTable& headerTable;
   capnp::ByteStreamFactory& byteStreamFactory;
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  kj::TaskSet waitUntilTasks;
-
-  void taskFailed(kj::Exception&& exception) override {
-    LOG_EXCEPTION("externalServiceWaitUntilTasks", exception);
-  }
 
   struct CapnpClient {
     kj::Own<kj::AsyncIoStream> connection;
