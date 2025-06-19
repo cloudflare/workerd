@@ -6,10 +6,10 @@ Subject: Enable V8 shared linkage
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc83324dc34871 100644
+index bae3abad0b68c6b09bdb022b8ce372b738130eb5..be2889dfc52358a678c5ff121d08de9155bf693e 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -1407,6 +1407,7 @@ filegroup(
+@@ -1409,6 +1409,7 @@ filegroup(
          "src/builtins/constants-table-builder.cc",
          "src/builtins/constants-table-builder.h",
          "src/builtins/data-view-ops.h",
@@ -17,7 +17,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
          "src/builtins/profile-data-reader.h",
          "src/codegen/aligned-slot-allocator.cc",
          "src/codegen/aligned-slot-allocator.h",
-@@ -1590,7 +1591,6 @@ filegroup(
+@@ -1592,7 +1593,6 @@ filegroup(
          "src/execution/futex-emulation.h",
          "src/execution/interrupts-scope.cc",
          "src/execution/interrupts-scope.h",
@@ -25,7 +25,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
          "src/execution/isolate.h",
          "src/execution/isolate-data.h",
          "src/execution/isolate-inl.h",
-@@ -3122,7 +3122,6 @@ filegroup(
+@@ -3140,7 +3140,6 @@ filegroup(
  filegroup(
      name = "v8_compiler_files",
      srcs = [
@@ -33,7 +33,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
          "src/compiler/access-builder.cc",
          "src/compiler/access-builder.h",
          "src/compiler/access-info.cc",
-@@ -3691,8 +3690,6 @@ filegroup(
+@@ -3720,8 +3719,6 @@ filegroup(
          "src/builtins/growable-fixed-array-gen.cc",
          "src/builtins/growable-fixed-array-gen.h",
          "src/builtins/number-builtins-reducer-inl.h",
@@ -42,7 +42,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
          "src/builtins/setup-builtins-internal.cc",
          "src/builtins/torque-csa-header-includes.h",
          "src/codegen/turboshaft-builtins-assembler-inl.h",
-@@ -3954,6 +3951,7 @@ filegroup(
+@@ -3994,6 +3991,7 @@ filegroup(
          "src/snapshot/snapshot-empty.cc",
          "src/snapshot/static-roots-gen.cc",
          "src/snapshot/static-roots-gen.h",
@@ -50,7 +50,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
      ],
  )
  
-@@ -4064,6 +4062,10 @@ filegroup(
+@@ -4104,6 +4102,10 @@ filegroup(
      name = "noicu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -61,7 +61,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
      ] + select({
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/noicu/embedded.S",
-@@ -4081,6 +4083,7 @@ filegroup(
+@@ -4121,6 +4123,7 @@ filegroup(
      name = "icu/snapshot_files",
      srcs = [
          "src/init/setup-isolate-deserialize.cc",
@@ -70,7 +70,7 @@ index f1d8db40031df49a9aa7307c6fa7b030939e0687..a73cfb6e5394041ad502d4bb7ddc8332
          "@v8//bazel/config:v8_target_arm": [
              "google3/snapshots/arm/icu/embedded.S",
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index a1539ab5399fe4759fcdbf93e62eb130cb7a2ae7..497246e6e5f63b5e73251177317a3c99cbdc7b09 100644
+index ef21af9febfd5cfe66c44c3044d24a084b45706d..a0c12c587c452c80e5293b8aeea08888d4181364 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -298,7 +298,6 @@ def v8_library(

@@ -9,10 +9,10 @@ and throw a TypeError if the input string isn't one-byte only.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 3776011f0f504f7991ebf54c76f5daa482c4524f..7620d3765563c54883aedc345475c81b28efae46 100644
+index c3d1e85dddc1ddf51534b732614ec5b03a83714d..fcfcda8aec66ce598efa1bb8a662fb0b5c2e991c 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -6007,7 +6007,8 @@ void String::WriteV2(Isolate* v8_isolate, uint32_t offset, uint32_t length,
+@@ -5933,7 +5933,8 @@ void String::WriteV2(Isolate* v8_isolate, uint32_t offset, uint32_t length,
  
  void String::WriteOneByteV2(Isolate* v8_isolate, uint32_t offset,
                              uint32_t length, uint8_t* buffer, int flags) const {
