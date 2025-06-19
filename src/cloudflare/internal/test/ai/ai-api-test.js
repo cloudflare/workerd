@@ -158,7 +158,7 @@ export const tests = {
     {
       // Test errors from one readable stream input without content-type
       await assert.rejects(
-        async() => {
+        async () => {
           const arr = [1, 2, 3];
           const encoder = new TextEncoder();
           const resp = await env.ai.run('readableStreamIputs', {
@@ -208,7 +208,8 @@ export const tests = {
         },
         {
           name: 'AiInternalError',
-          message: 'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
+          message:
+            'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
         }
       );
     }

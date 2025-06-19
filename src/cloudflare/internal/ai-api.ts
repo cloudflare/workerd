@@ -108,6 +108,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+// TODO: merge this function with the one with images-api.ts
 function isReadableStream(obj: unknown): obj is ReadableStream {
   return !!(
     obj &&
@@ -131,7 +132,7 @@ function findReadableStreamKeys(
       value &&
       typeof value === 'object' &&
       'body' in value &&
-      isReadableStream(value?.body);
+      isReadableStream(value.body);
 
     if (hasReadableStreamBody || isReadableStream(value)) {
       readableStreamKeys.push(key);
@@ -262,7 +263,7 @@ export class Ai {
         userInputs: JSON.stringify({ ...userInputs }),
       };
       const aiEndpoint = new URL('https://workers-binding.ai/run');
-      for(const [key, value] of Object.entries(query)) {
+      for (const [key, value] of Object.entries(query)) {
         aiEndpoint.searchParams.set(key, value);
       }
 
