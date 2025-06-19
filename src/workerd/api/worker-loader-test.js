@@ -57,3 +57,36 @@ export let passEnv = {
     assert.strictEqual(await resp.text(), 'env.hello = 123');
   },
 };
+
+export let testOutbound = {
+  async fetch(req, env, ctx) {
+    return new Response('hello from testOutbound');
+  },
+};
+
+// Test overriding globalOutbound
+export let overrideGlobalOutbound = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('overrideGlobalOutbound', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                return fetch(req);
+              },
+            }
+          `,
+        },
+
+        // Set globalOutbound to redirect to our own `testOutbound` entrypoint.
+        globalOutbound: ctx.exports.testOutbound,
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'hello from testOutbound');
+  },
+};

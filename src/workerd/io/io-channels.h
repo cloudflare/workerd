@@ -244,6 +244,9 @@ struct DynamicWorkerSource {
   // a `Frankenvalue` (which should eventually include all binding types, RPC stubs, etc.).
   Frankenvalue env;
 
+  // Where should global fetch() (and connect()) be sent?
+  kj::Own<IoChannelFactory::SubrequestChannel> globalOutbound;
+
   // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
   // `StringPtr`s; `ownContent` owns the backing buffer for them.)
   kj::Own<void> ownContent;

@@ -3664,9 +3664,8 @@ class Server::WorkerLoaderNamespace {
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
 
-        // TODO(now): Allow overriding globalOutbound.
         .globalOutbound{
-          .designator = config::Worker::Reader().getGlobalOutbound(),
+          .designator = kj::mv(source.globalOutbound),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
 

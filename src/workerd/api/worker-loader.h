@@ -82,9 +82,14 @@ class WorkerLoader: public jsg::Object {
     // Any RPC-serializable value!
     jsg::Optional<jsg::JsRef<jsg::JsObject>> env;
 
-    jsg::Optional<jsg::Ref<Fetcher>> globalOutbound;
+    // `Fetcher` (e.g. service binding) representing the loaded worker's global outbound.
+    //
+    // If omitted, inherit the current worker's global outbound.
+    //
+    // If `null`, block the global outbound (all requests throw errors).
+    jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> globalOutbound;
 
-    jsg::Optional<jsg::Ref<Fetcher>> cacheApiOutbound;
+    // TODO(someday): cache API outbound?
 
     // TODO(someday): Support specifying a list of tail workers. These should work similarly to
     //   globalOutbound.
@@ -95,8 +100,7 @@ class WorkerLoader: public jsg::Object {
         mainModule,
         modules,
         env,
-        globalOutbound,
-        cacheApiOutbound);
+        globalOutbound);
   };
 
   jsg::Ref<WorkerStub> get(
