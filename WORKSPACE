@@ -84,7 +84,7 @@ git_repository(
             name = "dragonbox",
             hdrs = glob(["include/dragonbox/*.h"]),
             visibility = ["//visibility:public"],
-            include_prefix = "third_party/dragonbox",
+            include_prefix = "third_party/dragonbox/src",
         )""",
     commit = "6c7c925b571d54486b9ffae8d9d18a822801cbda",
     remote = "https://github.com/jk-jeon/dragonbox.git",

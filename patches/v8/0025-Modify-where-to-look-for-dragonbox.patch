@@ -26,16 +26,4 @@ index d2f6f0234dbebc32da7f1c588aaa138e57a14128..f5b9f82ad28b2dd97969183817ba43ab
  )
  
  cc_library(
-diff --git a/src/numbers/conversions.cc b/src/numbers/conversions.cc
-index 1eec37da8d7570ebf6246c46f346774e3d8945e0..8f1b64ba81336fa806aa32cb5d66b4411e4380e6 100644
---- a/src/numbers/conversions.cc
-+++ b/src/numbers/conversions.cc
-@@ -23,7 +23,7 @@
- #include "src/objects/string-inl.h"
- #include "src/strings/char-predicates-inl.h"
- #include "src/utils/allocation.h"
--#include "third_party/dragonbox/src/include/dragonbox/dragonbox.h"
-+#include "third_party/dragonbox/include/dragonbox/dragonbox.h"
- #include "third_party/fast_float/src/include/fast_float/fast_float.h"
- #include "third_party/fast_float/src/include/fast_float/float_common.h"
  
