@@ -203,7 +203,7 @@ struct Server::GlobalContext {
         headerTable(headerTableBuilder.getFutureTable()) {}
 };
 
-class Server::Service {
+class Server::Service: public IoChannelFactory::SubrequestChannel {
  public:
   // Cross-links this service with other services. Must be called once before `startRequest()`.
   virtual void link(Worker::ValidationErrorReporter& errorReporter) {}
@@ -2998,6 +2998,18 @@ class Server::WorkerService final: public Service,
         "writeLogfwdr request returned an error");
     co_await response.body->readAllBytes().attach(kj::mv(response.body)).ignoreResult();
     co_return;
+  }
+
+  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) override {
+    auto& channels =
+        KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
+
+    KJ_REQUIRE(channel < channels.subrequest.size(), "invalid subrequest channel number");
+
+    // It's OK to return a fakeOwn() as this object will be treated as an I/O object within this
+    // IoContext anyway, and the IoContext cannot outlive the WorkerService, therefore can't
+    // outlive the subrequest channel array.
+    return fakeOwn(*channels.subrequest[channel]);
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel,

@@ -136,17 +136,37 @@ class IoChannelFactory {
   virtual kj::Promise<void> writeLogfwdr(
       uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor. Multiple requests may be
-  // sent, and they will be delivered in the order they are sent (e-order). This is an I/O type
-  // so it is only valid within the `IoContext` where it was created.
-  class ActorChannel {
+  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
+  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
+  // created.
+  class SubrequestChannel {
    public:
-    // Start a new request to this actor.
+    // Start a new request to this target.
     //
     // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
     // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
     // `dynamicDispatchTarget` do not.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+  };
+
+  // Obtain an object representing a particular subrequest channel.
+  //
+  // getSubrequestChannel(i).startRequest(meta) is exactly equivalent to startSubrequest(i, meta).
+  // The reason to use this instead is when the channel is not necessarily going to be used to
+  // start a subrequest immediately, but instead is going to be passed around as a capability.
+  //
+  // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) {
+    // TODO(cleanup): Remove this once the production runtime has implemented this.
+    KJ_UNIMPLEMENTED("This runtime doesn't support getSubrequestChannel().");
+  }
+
+  // Stub for a remote actor. Allows sending requests to the actor.
+  class ActorChannel: public SubrequestChannel {
+   public:
+    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
+    // easy to imagine that actor stubs may have more functionality than just sending requests
+    // someday, so we keep this as a separate type.
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.
