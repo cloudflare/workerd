@@ -1798,14 +1798,14 @@ class Server::WorkerService final: public Service,
 
   // I/O channels, delivered when link() is called.
   struct LinkedIoChannels {
-    kj::Array<kj::Own<Service>> subrequest;
+    kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> subrequest;
     kj::Array<kj::Maybe<ActorNamespace&>> actor;  // null = configuration error
     kj::Array<kj::Own<ActorClass>> actorClass;
-    kj::Maybe<kj::Own<Service>> cache;
+    kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> cache;
     kj::Maybe<const kj::Directory&> actorStorage;
     AlarmScheduler& alarmScheduler;
-    kj::Array<kj::Own<Service>> tails;
-    kj::Array<kj::Own<Service>> streamingTails;
+    kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
+    kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -1968,8 +1968,9 @@ class Server::WorkerService final: public Service,
 
     kj::Vector<kj::Own<WorkerInterface>> legacyTailWorkers(channels.tails.size());
     kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers(channels.streamingTails.size());
-    auto addWorkerIfNotRecursiveTracer =
-        [this, isTracer](kj::Vector<kj::Own<WorkerInterface>>& workers, Service& service) {
+    auto addWorkerIfNotRecursiveTracer = [this, isTracer](
+                                             kj::Vector<kj::Own<WorkerInterface>>& workers,
+                                             IoChannelFactory::SubrequestChannel& channel) {
       // Caution here... if the tail worker ends up having a circular dependency
       // on the worker we'll end up with an infinite loop trying to initialize.
       // We can test this directly but it's more difficult to test indirect
@@ -1977,6 +1978,12 @@ class Server::WorkerService final: public Service,
       // it simple and just check the direct dependency.
       // If service refers to an EntrypointService, we need to compare with the underlying
       // WorkerService to match this.
+      auto& service = KJ_UNWRAP_OR(kj::dynamicDowncastIfAvailable<Service>(channel), {
+        // Not a Service, probably not self-referential.
+        workers.add(channel.startRequest({}));
+        return;
+      });
+
       if (service.service() == this) {
         if (!isTracer) {
           // This is a self-reference. Create a request with isTracer=true.
@@ -2911,7 +2918,8 @@ class Server::WorkerService final: public Service,
   }
   class CacheClientImpl final: public CacheClient {
    public:
-    CacheClientImpl(Service& cacheService, kj::HttpHeaderId cacheNamespaceHeader)
+    CacheClientImpl(
+        IoChannelFactory::SubrequestChannel& cacheService, kj::HttpHeaderId cacheNamespaceHeader)
         : cacheService(kj::addRef(cacheService)),
           cacheNamespaceHeader(cacheNamespaceHeader) {}
 
@@ -2928,13 +2936,13 @@ class Server::WorkerService final: public Service,
     }
 
    private:
-    kj::Own<Service> cacheService;
+    kj::Own<IoChannelFactory::SubrequestChannel> cacheService;
     kj::HttpHeaderId cacheNamespaceHeader;
   };
 
   class CacheHttpClientImpl final: public kj::HttpClient {
    public:
-    CacheHttpClientImpl(Service& parent,
+    CacheHttpClientImpl(IoChannelFactory::SubrequestChannel& parent,
         kj::HttpHeaderId cacheNamespaceHeader,
         kj::Maybe<kj::String> cacheName,
         kj::Maybe<kj::String> cfBlobJson,
@@ -3807,11 +3815,11 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
 
     auto entrypointNames = workerService.getEntrypointNames();
 
-    auto services = kj::heapArrayBuilder<kj::Own<Service>>(def.subrequestChannels.size() +
-        IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT + entrypointNames.size() +
-        workerService.hasDefaultEntrypoint());
+    auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
+        def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
+        entrypointNames.size() + workerService.hasDefaultEntrypoint());
 
-    kj::Own<Service> globalService =
+    kj::Own<IoChannelFactory::SubrequestChannel> globalService =
         lookupService(def.globalOutbound.designator, kj::mv(def.globalOutbound.errorContext));
 
     // Bind both "next" and "null" to the global outbound. (The difference between these is a
@@ -3928,11 +3936,13 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     }
 
     result.tails = KJ_MAP(tail, def.tails) {
-      return lookupService(tail.designator, kj::mv(tail.errorContext));
+      return kj::Own<IoChannelFactory::SubrequestChannel>(
+          lookupService(tail.designator, kj::mv(tail.errorContext)));
     };
 
     result.streamingTails = KJ_MAP(tail, def.streamingTails) {
-      return lookupService(tail.designator, kj::mv(tail.errorContext));
+      return kj::Own<IoChannelFactory::SubrequestChannel>(
+          lookupService(tail.designator, kj::mv(tail.errorContext)));
     };
 
     return result;
