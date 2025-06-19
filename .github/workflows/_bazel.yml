@@ -99,8 +99,8 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 19
           # keep in sync with build/ci.bazelrc
-          sudo apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev libclang-rt-19-dev llvm-19
-          sed -i -e "s%llvm-symbolizer%/usr/lib/llvm-19/bin/llvm-symbolizer%" .bazelrc
+          sudo apt-get install -y -qq --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev libclang-rt-19-dev llvm-19
+          sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
           echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
           echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
       - name: Setup Windows
