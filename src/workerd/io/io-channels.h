@@ -139,7 +139,7 @@ class IoChannelFactory {
   // Object representing somehere where generic workers subrequests can be sent. Multiple requests
   // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
   // created.
-  class SubrequestChannel {
+  class SubrequestChannel: public kj::Refcounted {
    public:
     // Start a new request to this target.
     //

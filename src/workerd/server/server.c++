@@ -841,7 +841,7 @@ kj::Own<Server::Service> Server::makeExternalService(kj::StringPtr name,
       // HeaderTable::Builder is only available synchronously.
       auto rewriter = kj::heap<HttpRewriter>(conf.getHttp(), headerTableBuilder);
       auto addr = kj::heap<PromisedNetworkAddress>(network.parseAddress(addrStr, 80));
-      return kj::heap<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
+      return kj::refcounted<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
           headerTableBuilder.getFutureTable(), timer, entropySource,
           globalContext->byteStreamFactory, globalContext->httpOverCapnpFactory);
     }
@@ -854,7 +854,7 @@ kj::Own<Server::Service> Server::makeExternalService(kj::StringPtr name,
       auto rewriter = kj::heap<HttpRewriter>(httpsConf.getOptions(), headerTableBuilder);
       auto addr = kj::heap<PromisedNetworkAddress>(
           makeTlsNetworkAddress(httpsConf.getTlsOptions(), addrStr, certificateHost, 443));
-      return kj::heap<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
+      return kj::refcounted<ExternalHttpService>(kj::mv(addr), kj::mv(rewriter),
           headerTableBuilder.getFutureTable(), timer, entropySource,
           globalContext->byteStreamFactory, globalContext->httpOverCapnpFactory);
     }
@@ -869,7 +869,7 @@ kj::Own<Server::Service> Server::makeExternalService(kj::StringPtr name,
         addr = kj::heap<PromisedNetworkAddress>(
             makeTlsNetworkAddress(tcpConf.getTlsOptions(), addrStr, certificateHost, 0));
       }
-      return kj::heap<ExternalTcpService>(kj::mv(addr));
+      return kj::refcounted<ExternalTcpService>(kj::mv(addr));
     }
   }
   reportConfigError(kj::str("External service named \"", name,
@@ -969,7 +969,7 @@ kj::Own<Server::Service> Server::makeNetworkService(config::Network::Reader conf
     tlsNetwork = ownedTlsContext->wrapNetwork(*restrictedNetwork).attach(kj::mv(ownedTlsContext));
   }
 
-  return kj::heap<NetworkService>(globalContext->headerTable, timer, entropySource,
+  return kj::refcounted<NetworkService>(globalContext->headerTable, timer, entropySource,
       kj::mv(restrictedNetwork), kj::mv(tlsNetwork), tlsContext);
 }
 
@@ -1260,14 +1260,14 @@ kj::Own<Server::Service> Server::makeDiskDirectoryService(kj::StringPtr name,
       return makeInvalidConfigService();
     });
 
-    return kj::heap<DiskDirectoryService>(conf, kj::mv(openDir), headerTableBuilder);
+    return kj::refcounted<DiskDirectoryService>(conf, kj::mv(openDir), headerTableBuilder);
   } else {
     auto openDir = KJ_UNWRAP_OR(fs.getRoot().tryOpenSubdir(kj::mv(path)), {
       reportConfigError(kj::str("Directory named \"", name, "\" not found: ", pathStr));
       return makeInvalidConfigService();
     });
 
-    return kj::heap<DiskDirectoryService>(conf, kj::mv(openDir), headerTableBuilder);
+    return kj::refcounted<DiskDirectoryService>(conf, kj::mv(openDir), headerTableBuilder);
   }
 }
 
@@ -1875,7 +1875,7 @@ class Server::WorkerService final: public Service,
         return fakeOwn(*this);
       }
     }
-    return kj::heap<EntrypointService>(*this, name, kj::mv(props), *handlers);
+    return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers);
   }
 
   kj::Maybe<kj::Own<ActorClass>> getActorClass(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
@@ -2101,7 +2101,7 @@ class Server::WorkerService final: public Service,
         idImpl->clearName();
       }
 
-      return kj::heap<ActorChannelImpl>(getActorContainer(kj::mv(id)));
+      return kj::refcounted<ActorChannelImpl>(getActorContainer(kj::mv(id)));
     }
 
     class ActorContainer;
@@ -2307,7 +2307,7 @@ class Server::WorkerService final: public Service,
           kj::StringPtr name, StartInfo startInfo) override {
         auto facetClass = startInfo.actorClass.downcast<ActorClass>();
         auto facet = getFacetContainer(kj::str(name), kj::mv(startInfo.id), kj::mv(facetClass));
-        return kj::heap<ActorChannelImpl>(kj::mv(facet));
+        return kj::refcounted<ActorChannelImpl>(kj::mv(facet));
       }
 
       void abortFacet(kj::StringPtr name, kj::Exception reason) override {
@@ -3941,7 +3941,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       break;
   }
 
-  return kj::heap<WorkerService>(globalContext->threadContext, kj::mv(worker),
+  return kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), def.localActorConfigs, kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors), network, kj::mv(dockerPath));
@@ -4446,8 +4446,8 @@ kj::Promise<void> Server::run(
   TRACE_EVENT("workerd", "Server.run");
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
-  invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
-  invalidConfigActorClassSingleton = kj::heap<InvalidConfigActorClass>();
+  invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();
+  invalidConfigActorClassSingleton = kj::refcounted<InvalidConfigActorClass>();
 
   auto [fatalPromise, fatalFulfiller] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
@@ -4642,7 +4642,7 @@ void Server::startServices(jsg::V8System& v8System,
     kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
     auto tlsNetwork = tls->wrapNetwork(*publicNetwork);
 
-    auto service = kj::heap<NetworkService>(globalContext->headerTable, timer, entropySource,
+    auto service = kj::refcounted<NetworkService>(globalContext->headerTable, timer, entropySource,
         kj::mv(publicNetwork), kj::mv(tlsNetwork), *tls)
                        .attach(kj::mv(tls));
 
@@ -4811,7 +4811,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     kj::StringPtr entrypointPattern) {
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
-  invalidConfigServiceSingleton = kj::heap<InvalidConfigService>();
+  invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();
 
   auto [fatalPromise, fatalFulfiller] = kj::newPromiseAndFulfiller<void>();
   this->fatalFulfiller = kj::mv(fatalFulfiller);
