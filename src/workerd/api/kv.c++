@@ -82,17 +82,17 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
 
         switch (opType) {
           case LimitEnforcer::KvOpType::GET:
-            return "kv_get"_kjc;
+            return "kv.get"_kjc;
           case LimitEnforcer::KvOpType::GET_WITH:
-            return "kv_getWithMetadata"_kjc;
+            return "kv.getWithMetadata"_kjc;
           case LimitEnforcer::KvOpType::PUT:
-            return "kv_put"_kjc;
+            return "kv.put"_kjc;
           case LimitEnforcer::KvOpType::LIST:
-            return "kv_list"_kjc;
+            return "kv.list"_kjc;
           case LimitEnforcer::KvOpType::DELETE:
-            return "kv_delete"_kjc;
+            return "kv.delete"_kjc;
           case LimitEnforcer::KvOpType::GET_BULK:
-            return "kv_get_bulk"_kjc;
+            return "kv.getBulk"_kjc;
         }
       }
     }
@@ -102,46 +102,46 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
 
   kj::Vector<Span::Tag> tags;
   tags.add("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-  tags.add("cloudflare.kv.operation.name"_kjc, kj::str(operationName.slice(3)));
+  tags.add("db.operation.name"_kjc, kj::str(operationName.slice(3)));
 
   KJ_IF_SOME(_options, options) {
     KJ_SWITCH_ONEOF(_options) {
       KJ_CASE_ONEOF(o2, kj::OneOf<kj::String, GetOptions>) {
         KJ_SWITCH_ONEOF(o2) {
           KJ_CASE_ONEOF(type, kj::String) {
-            tags.add("cloudflare.kv.query.parameter.type"_kjc, kj::mv(type));
+            tags.add("cloudflare.kv.query.type"_kjc, kj::mv(type));
           }
           KJ_CASE_ONEOF(o, GetOptions) {
             KJ_IF_SOME(type, o.type) {
-              tags.add("cloudflare.kv.query.parameter.type"_kjc, kj::mv(type));
+              tags.add("cloudflare.kv.query.type"_kjc, kj::mv(type));
             }
             KJ_IF_SOME(cacheTtl, o.cacheTtl) {
-              tags.add("cloudflare.kv.query.parameter.cacheTtl"_kjc, (int64_t)cacheTtl);
+              tags.add("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
             }
           }
         }
       }
       KJ_CASE_ONEOF(o, ListOptions) {
         KJ_IF_SOME(l, o.limit) {
-          tags.add("cloudflare.kv.query.parameter.limit"_kjc, (int64_t)l);
+          tags.add("cloudflare.kv.query.limit"_kjc, (int64_t)l);
         }
         KJ_IF_SOME(prefix, o.prefix) {
           KJ_IF_SOME(p, prefix) {
-            tags.add("cloudflare.kv.query.parameter.prefix"_kjc, kj::mv(p));
+            tags.add("cloudflare.kv.query.prefix"_kjc, kj::mv(p));
           }
         }
         KJ_IF_SOME(cursor, o.cursor) {
           KJ_IF_SOME(c, cursor) {
-            tags.add("cloudflare.kv.query.parameter.cursor"_kjc, kj::mv(c));
+            tags.add("cloudflare.kv.query.cursor"_kjc, kj::mv(c));
           }
         }
       }
       KJ_CASE_ONEOF(o, PutOptions) {
         KJ_IF_SOME(expiration, o.expiration) {
-          tags.add("cloudflare.kv.query.parameter.expiration"_kjc, (int64_t)expiration);
+          tags.add("cloudflare.kv.query.expiration"_kjc, (int64_t)expiration);
         }
         KJ_IF_SOME(expirationTtl, o.expirationTtl) {
-          tags.add("cloudflare.kv.query.parameter.expirationTtl"_kjc, (int64_t)expirationTtl);
+          tags.add("cloudflare.kv.query.expiration_ttl"_kjc, (int64_t)expirationTtl);
         }
       }
     }
