@@ -278,6 +278,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
       bool forTest = false);
 
   void unlinkWorkerLoaders();
+
+  friend struct FutureSubrequestChannel;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
