@@ -9,10 +9,10 @@ a Local. For example using the Get method in
 ResetRoot from traced-handles.cc.
 
 diff --git a/src/heap/heap.cc b/src/heap/heap.cc
-index f1500d72aec046a21f8f45abb7eaf34b4ed683ca..34ebdff123a3cfd0ce4fee247c63d8041ef0f408 100644
+index 161a8c09d6028eea8b2790bf3de3882b0355f055..48baf842b9ddaf315b2a5120171b3685adb2e3b8 100644
 --- a/src/heap/heap.cc
 +++ b/src/heap/heap.cc
-@@ -1566,6 +1566,11 @@ void Heap::CollectGarbage(AllocationSpace space,
+@@ -1577,6 +1577,11 @@ void Heap::CollectGarbage(AllocationSpace space,
                            GarbageCollectionReason gc_reason,
                            const v8::GCCallbackFlags gc_callback_flags) {
    CHECK(isolate_->IsOnCentralStack());

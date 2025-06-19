@@ -79,6 +79,18 @@ http_archive(
 )
 
 git_repository(
+    name = "dragonbox",
+    build_file_content = """cc_library(
+            name = "dragonbox",
+            hdrs = glob(["include/dragonbox/*.h"]),
+            visibility = ["//visibility:public"],
+            include_prefix = "third_party/dragonbox/src",
+        )""",
+    commit = "6c7c925b571d54486b9ffae8d9d18a822801cbda",
+    remote = "https://github.com/jk-jeon/dragonbox.git",
+)
+
+git_repository(
     name = "fast_float",
     build_file_content = """cc_library(
             name = "fast_float",

@@ -20,7 +20,7 @@ inline void maybeSetV8ContinuationContext(
   } else {
     value = v8::Undefined(isolate);
   }
-  isolate->SetContinuationPreservedEmbedderData(value);
+  isolate->SetContinuationPreservedEmbedderDataV2(value);
 }
 }  // namespace
 
@@ -62,8 +62,8 @@ kj::Maybe<Ref<AsyncContextFrame>> AsyncContextFrame::currentRef(Lock& js) {
 }
 
 kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
-  auto value = isolate->GetContinuationPreservedEmbedderData();
-  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value)) {
+  auto value = isolate->GetContinuationPreservedEmbedderDataV2();
+  KJ_IF_SOME(wrappable, Wrappable::tryUnwrapOpaque(isolate, value.As<v8::Value>())) {
     AsyncContextFrame* frame = dynamic_cast<AsyncContextFrame*>(&wrappable);
     KJ_ASSERT(frame != nullptr);
     return *frame;
