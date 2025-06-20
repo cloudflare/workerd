@@ -171,6 +171,8 @@ class SpanId final {
   uint64_t id;
 };
 constexpr SpanId SpanId::nullId = nullptr;
+// Fixed spanId value to be used for tests
+constexpr uint64_t staticSpanId = 0x2a2a2a2a2a2a2a2aULL;
 
 // The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
 // The trace id represents a top-level request and should be shared across all
@@ -602,8 +604,8 @@ using CustomInfo = kj::Array<Attribute>;
 
 struct CompleteSpan {
   // Represents a completed span within user tracing.
-  uint64_t spanId;
-  uint64_t parentSpanId;
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
 
   kj::ConstString operationName;
   kj::Date startTime;
@@ -614,22 +616,19 @@ struct CompleteSpan {
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
   CompleteSpan clone() const;
-  explicit CompleteSpan(uint64_t spanId,
-      uint64_t parentSpanId,
+  explicit CompleteSpan(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime,
       kj::Date endTime,
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags)
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
       : spanId(spanId),
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
         startTime(startTime),
         endTime(endTime),
         tags(kj::mv(tags)) {}
-  explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
 };
 
 namespace tracing {
@@ -679,8 +678,7 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(
-      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(uint64_t spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
@@ -688,7 +686,7 @@ struct SpanOpen final {
 
   kj::String operationName;
   kj::Maybe<Info> info = kj::none;
-  uint64_t parentSpanId;
+  uint64_t spanId;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -791,10 +789,6 @@ struct TailEvent final {
       Hibernate,
       SpanOpen,
       SpanClose,
-      // TODO(o11y): We don't support proper span instrumentation at open/close time yet, provide
-      // completed spans internally for now and only synthesize spanopen/close events in the tail
-      // worker customEvent.
-      CompleteSpan,
       DiagnosticChannelEvent,
       Exception,
       Log,
@@ -1044,12 +1038,7 @@ class SpanBuilder {
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
       kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
-    if (observer != kj::none) {
-      this->observer = kj::mv(observer);
-      span.emplace(kj::mv(operationName), startTime);
-    }
-  }
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
   SpanBuilder(decltype(nullptr)) {}

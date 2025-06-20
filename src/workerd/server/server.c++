@@ -1677,8 +1677,8 @@ class WorkerTracerSpanObserver: public SpanObserver,
         tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       }
 
-      CompleteSpan completeSpan(0, 0, kj::ConstString(kj::str(span.operationName)), span.startTime,
-          span.endTime, kj::mv(tags));
+      CompleteSpan completeSpan(tracing::staticSpanId, tracing::staticSpanId,
+          kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime, kj::mv(tags));
       tracer->addSpan(kj::mv(completeSpan));
     }
   }
