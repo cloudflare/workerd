@@ -17,6 +17,10 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
     bool equals(const ActorId& other) const override;
     kj::Own<ActorId> clone() const override;
 
+    void clearName() {
+      name = kj::none;
+    }
+
    private:
     kj::byte id[SHA256_DIGEST_LENGTH];
     kj::Maybe<kj::String> name;

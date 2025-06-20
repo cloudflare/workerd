@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "workerd/api/pyodide/pyodide.h"
+
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
@@ -226,6 +228,15 @@ class WorkerdApi final: public Worker::Api {
       }
     };
     struct UnsafeEval {};
+
+    struct ActorClass {
+      uint channel;
+
+      ActorClass clone() const {
+        return *this;
+      }
+    };
+
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
@@ -242,7 +253,8 @@ class WorkerdApi final: public Worker::Api {
         AnalyticsEngine,
         Hyperdrive,
         UnsafeEval,
-        MemoryCache>
+        MemoryCache,
+        ActorClass>
         value;
 
     Global clone() const;
@@ -279,7 +291,8 @@ class WorkerdApi final: public Worker::Api {
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,
-      kj::Maybe<kj::String> fallbackService = kj::none);
+      kj::Maybe<kj::String> fallbackService = kj::none,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
 
  private:
   struct Impl;
@@ -288,5 +301,7 @@ class WorkerdApi final: public Worker::Api {
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
 }  // namespace workerd::server

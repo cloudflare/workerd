@@ -329,25 +329,25 @@ export function brotliCompress(
   processChunkCaptureError(new BrotliCompress(options), data, callback);
 }
 export class Gzip extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_GZIP);
   }
 }
 
 export class Gunzip extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_GUNZIP);
   }
 }
 
 export class Deflate extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_DEFLATE);
   }
 }
 
 export class DeflateRaw extends Zlib {
-  public constructor(options?: ZlibOptions) {
+  constructor(options?: ZlibOptions) {
     if (options?.windowBits === 8) {
       options.windowBits = 9;
     }
@@ -356,31 +356,31 @@ export class DeflateRaw extends Zlib {
 }
 
 export class Inflate extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_INFLATE);
   }
 }
 
 export class InflateRaw extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_INFLATERAW);
   }
 }
 
 export class Unzip extends Zlib {
-  public constructor(options: ZlibOptions) {
+  constructor(options: ZlibOptions) {
     super(options, CONST_UNZIP);
   }
 }
 
 export class BrotliCompress extends Brotli {
-  public constructor(options: BrotliOptions) {
+  constructor(options: BrotliOptions) {
     super(options, CONST_BROTLI_ENCODE);
   }
 }
 
 export class BrotliDecompress extends Brotli {
-  public constructor(options: BrotliOptions) {
+  constructor(options: BrotliOptions) {
     super(options, CONST_BROTLI_DECODE);
   }
 }

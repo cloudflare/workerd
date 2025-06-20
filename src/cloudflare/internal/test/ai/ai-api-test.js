@@ -99,6 +99,122 @@ export const tests = {
     }
 
     {
+      // Test one readable stream input
+      const encoder = new TextEncoder();
+      const arr = [1, 2, 3];
+      const resp = await env.ai.run('readableStreamIputs', {
+        audio: {
+          body: new ReadableStream({
+            start(controller) {
+              for (const ele of arr) {
+                controller.enqueue(encoder.encode(ele));
+              }
+              controller.close();
+            },
+          }),
+          contentType: 'audio/wav',
+        },
+      });
+
+      assert.deepStrictEqual(resp, {
+        inputs: {},
+        options: { userInputs: '{}', version: '3' },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%7D',
+      });
+    }
+
+    {
+      // Test one readable stream input with additional parameters
+      const encoder = new TextEncoder();
+      const arr = [1, 2, 3];
+      const resp = await env.ai.run('readableStreamIputs', {
+        audio: {
+          body: new ReadableStream({
+            start(controller) {
+              for (const ele of arr) {
+                controller.enqueue(encoder.encode(ele));
+              }
+              controller.close();
+            },
+          }),
+          contentType: 'audio/wav',
+        },
+        detect_language: true,
+        prompt: 'test prompt',
+      });
+
+      assert.deepStrictEqual(resp, {
+        inputs: {},
+        options: {
+          userInputs: '{"detect_language":true,"prompt":"test prompt"}',
+          version: '3',
+        },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%22detect_language%22%3Atrue%2C%22prompt%22%3A%22test+prompt%22%7D',
+      });
+    }
+
+    {
+      // Test errors from one readable stream input without content-type
+      await assert.rejects(
+        async () => {
+          const arr = [1, 2, 3];
+          const encoder = new TextEncoder();
+          const resp = await env.ai.run('readableStreamIputs', {
+            audio: {
+              body: new ReadableStream({
+                start(controller) {
+                  for (const ele of arr) {
+                    controller.enqueue(encoder.encode(ele));
+                  }
+                  controller.close();
+                },
+              }),
+            },
+          });
+        },
+        {
+          name: 'AiInternalError',
+          message: 'Content-Type is required with ReadableStream inputs',
+        }
+      );
+    }
+
+    {
+      // Test errors from two readable stream inputs
+      await assert.rejects(
+        async () => {
+          const arr = [1, 2, 3];
+          const stream = new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              for (const ele of arr) {
+                controller.enqueue(encoder.encode(ele));
+              }
+              controller.close();
+            },
+          });
+          const resp = await env.ai.run('readableStreamIputs', {
+            audio: {
+              body: stream,
+              contentType: 'audio/wav',
+            },
+            image: {
+              body: stream,
+              contentType: 'image/png',
+            },
+          });
+        },
+        {
+          name: 'AiInternalError',
+          message:
+            'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
+        }
+      );
+    }
+
+    {
       // Test gateway option
       const resp = await env.ai.run(
         'rawInputs',

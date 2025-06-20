@@ -5,24 +5,24 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export abstract class MIMEType {
-  public constructor(input: string);
-  public type: string;
-  public subtype: string;
-  public readonly essence: string;
-  public readonly params: MIMEParams;
-  public toString(): string;
-  public toJSON(): string;
+  constructor(input: string);
+  type: string;
+  subtype: string;
+  readonly essence: string;
+  readonly params: MIMEParams;
+  toString(): string;
+  toJSON(): string;
 }
 
 export abstract class MIMEParams {
-  public constructor();
-  public delete(name: string): void;
-  public get(name: string): string | undefined;
-  public has(name: string): boolean;
-  public set(name: string, value: string): void;
-  public entries(): Iterable<string[]>;
-  public keys(): Iterable<string>;
-  public values(): Iterable<string>;
+  constructor();
+  delete(name: string): void;
+  get(name: string): string | undefined;
+  has(name: string): boolean;
+  set(name: string, value: string): void;
+  entries(): Iterable<string[]>;
+  keys(): Iterable<string>;
+  values(): Iterable<string>;
 }
 
 export const kResourceTypeInspect: unique symbol;
@@ -120,4 +120,9 @@ export function isAnyArrayBuffer(
 export function isBoxedPrimitive(
   value: unknown
 ): value is number | string | boolean | bigint | symbol;
+
+export function getEnvObject(): Record<string, string>;
+export function getBuiltinModule(id: string): any;
 export function getCallSites(frames?: number): Record<string, string>[];
+export function processExitImpl(code: number): void;
+export const processPlatform: string;

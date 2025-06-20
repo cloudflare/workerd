@@ -95,8 +95,8 @@ kj::String currentDateStr() {
   return CompatDate::today().toString();
 }
 
-void compileCompatibilityFlags(kj::StringPtr compatDate,
-    capnp::List<capnp::Text>::Reader compatFlags,
+static void compileCompatibilityFlags(kj::StringPtr compatDate,
+    kj::HashSet<kj::String> flagSet,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,
@@ -124,14 +124,6 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
     case CompatibilityDateValidation::FUTURE_FOR_TEST:
       // No validation.
       break;
-  }
-
-  kj::HashSet<kj::String> flagSet;
-  flagSet.reserve(compatFlags.size());
-  for (auto flag: compatFlags) {
-    flagSet.upsert(kj::str(flag), [&](auto& existing, auto&& newValue) {
-      errorReporter.addError(kj::str("Compatibility flag specified multiple times: ", flag));
-    });
   }
 
   auto schema = capnp::Schema::from<CompatibilityFlags>();
@@ -250,6 +242,42 @@ void compileCompatibilityFlags(kj::StringPtr compatDate,
   for (auto& flag: flagSet) {
     errorReporter.addError(kj::str("No such compatibility flag: ", flag));
   }
+}
+
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    capnp::List<capnp::Text>::Reader compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation) {
+  kj::HashSet<kj::String> flagSet;
+  flagSet.reserve(compatFlags.size());
+  for (auto flag: compatFlags) {
+    flagSet.upsert(kj::str(flag), [&](auto& existing, auto&& newValue) {
+      errorReporter.addError(kj::str("Compatibility flag specified multiple times: ", flag));
+    });
+  }
+
+  return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
+      allowExperimentalFeatures, dateValidation);
+}
+
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    kj::ArrayPtr<const kj::String> compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation) {
+  kj::HashSet<kj::String> flagSet;
+  flagSet.reserve(compatFlags.size());
+  for (auto& flag: compatFlags) {
+    flagSet.upsert(kj::str(flag), [&](auto& existing, auto&& newValue) {
+      errorReporter.addError(kj::str("Compatibility flag specified multiple times: ", flag));
+    });
+  }
+
+  return compileCompatibilityFlags(compatDate, kj::mv(flagSet), output, errorReporter,
+      allowExperimentalFeatures, dateValidation);
 }
 
 namespace {

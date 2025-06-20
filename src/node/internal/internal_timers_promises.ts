@@ -217,16 +217,14 @@ declare global {
 // finalized. Note, also, that Scheduler is expected to be defined as a global,
 // but while the API is experimental we shouldn't expose it as such.
 class Scheduler {
-  public [kScheduler] = true;
+  [kScheduler] = true;
 
-  public yield(): Promise<void> {
+  yield(): Promise<void> {
     if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
     return setImmediate();
   }
 
-  public wait(
-    ...args: Parameters<typeof globalThis.scheduler.wait>
-  ): Promise<void> {
+  wait(...args: Parameters<typeof globalThis.scheduler.wait>): Promise<void> {
     if (!this[kScheduler]) throw new ERR_INVALID_THIS('Scheduler');
     return globalThis.scheduler.wait(...args);
   }

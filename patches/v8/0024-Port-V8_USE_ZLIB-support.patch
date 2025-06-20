@@ -1,12 +1,12 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Sun, 8 Jun 2025 16:40:37 -0400
-Subject: [bazel] Port V8_USE_ZLIB support
+Subject: Port V8_USE_ZLIB support
 
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 5db375abd94fda5f5b6d0f14db17a7f7ae3b9f05..180b3ac88932a3fc518928c309261b283af6b6a5 100644
+index 6888640c2896220af0ed869edc645ecffdf2958e..d2f6f0234dbebc32da7f1c588aaa138e57a14128 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -158,6 +158,11 @@ v8_flag(name = "v8_enable_verify_predictable")
@@ -29,10 +29,10 @@ index 5db375abd94fda5f5b6d0f14db17a7f7ae3b9f05..180b3ac88932a3fc518928c309261b28
      },
      defines = [
          "GOOGLE3",
-@@ -4429,6 +4435,8 @@ v8_library(
-         "@abseil-cpp//absl/container:flat_hash_map",
-         "@abseil-cpp//absl/container:flat_hash_set",
+@@ -4470,6 +4476,8 @@ v8_library(
          "@highway//:hwy",
+         "@fast_float",
+         "@simdutf",
 +        "@zlib",
 +        "@zlib//:compression_utils_portable",
      ],

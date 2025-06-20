@@ -109,24 +109,24 @@ type TestCase = {
 // to the evaled  WPT test code.
 class RunnerState {
   // URL corresponding to the current test file, based on the WPT directory structure.
-  public testUrl: URL;
+  testUrl: URL;
 
   // Filename of the current test. Used in error messages.
-  public testFileName: string;
+  testFileName: string;
 
   // The worker environment. Used to allow fetching resources in the test.
-  public env: Env;
+  env: Env;
 
   // Makes test options available from assertion functions
-  public options: TestRunnerOptions;
+  options: TestRunnerOptions;
 
   // A test is pushed to this list as soon as it is discovered
-  public subtests: Test[] = [];
+  subtests: Test[] = [];
 
   // Callbacks to be run once the entire test is done.
-  public completionCallbacks: UnknownFunc[] = [];
+  completionCallbacks: UnknownFunc[] = [];
 
-  public constructor(
+  constructor(
     testUrl: URL,
     testFileName: string,
     env: Env,
@@ -138,7 +138,7 @@ class RunnerState {
     this.options = options;
   }
 
-  public async validate(): Promise<void> {
+  async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
     await Promise.all(this.subtests.map((t) => t.promise));
 
@@ -245,15 +245,15 @@ globalThis.console.error = colorPrint(
 
 class WPTMetadata {
   // Specifies the Javascript global scopes for the test. (Not currently supported)
-  public global: string[] = [];
+  global: string[] = [];
   // Specifies additional JS scripts to execute.
-  public scripts: string[] = [];
+  scripts: string[] = [];
   // Adjusts the timeout for the tests in this file. (Not currently supported)
-  public timeout?: string;
+  timeout?: string;
   // Sets a human-readable title for the entire test file. (Not currently supported.)
-  public title?: string;
+  title?: string;
   // Specifies a variant of this test, which can be used in subsetTestByKey (Not currently supported.)
-  public variants: URLSearchParams[] = [];
+  variants: URLSearchParams[] = [];
 }
 
 function parseWptMetadata(code: string): WPTMetadata {
@@ -508,13 +508,13 @@ export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerC
 }
 
 class WPTTestResult {
-  public test: string;
-  public status: 'OK' | 'ERROR';
-  public subtests: WPTSubtestResult[] = [];
+  test: string;
+  status: 'OK' | 'ERROR';
+  subtests: WPTSubtestResult[] = [];
   // TODO(soon): Track elapsed time
-  public duration: number = 0;
+  duration: number = 0;
 
-  public constructor(result: RunnerState, options: TestRunnerOptions) {
+  constructor(result: RunnerState, options: TestRunnerOptions) {
     this.test = WPTTestResult.getTestNameFromUrl(result.testUrl);
     this.status = options.disabledTests === true ? 'ERROR' : 'OK';
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
@@ -528,12 +528,12 @@ class WPTTestResult {
 }
 
 class WPTSubtestResult {
-  public name: string;
-  public status: 'PASS' | 'FAIL';
-  public message?: string;
-  public isExpectedFailure?: true;
+  name: string;
+  status: 'PASS' | 'FAIL';
+  message?: string;
+  isExpectedFailure?: true;
 
-  public constructor(result: Test) {
+  constructor(result: Test) {
     this.name = sanitize_unpaired_surrogates(result.name);
     if (result.error instanceof Error) {
       this.message = result.error.message;
@@ -566,49 +566,49 @@ function generateReport(config: TestRunnerConfig): string {
 }
 
 class Stats {
-  public moduleBase: string;
-  public coverage = new CoverageStats();
-  public pass = new PassStats();
+  moduleBase: string;
+  coverage = new CoverageStats();
+  pass = new PassStats();
 
-  public constructor(moduleBase: string) {
+  constructor(moduleBase: string) {
     this.moduleBase = moduleBase;
   }
 
-  public toList(): unknown[] {
+  toList(): unknown[] {
     return [this.moduleBase, ...this.coverage.toList(), ...this.pass.toList()];
   }
 }
 class CoverageStats {
-  public ok: number = 0;
-  public disabled: number = 0;
+  ok: number = 0;
+  disabled: number = 0;
 
-  public get total(): number {
+  get total(): number {
     return this.ok + this.disabled;
   }
 
-  public get ok_percent(): number {
+  get ok_percent(): number {
     return (this.ok / this.total) * 100;
   }
 
-  public toList(): unknown[] {
+  toList(): unknown[] {
     return [this.ok, this.disabled, this.total, this.ok_percent.toFixed(0)];
   }
 }
 
 class PassStats {
-  public pass: number = 0;
-  public fail: number = 0;
-  public disabled: number = 0;
+  pass: number = 0;
+  fail: number = 0;
+  disabled: number = 0;
 
-  public get total(): number {
+  get total(): number {
     return this.pass + this.fail + this.disabled;
   }
 
-  public get pass_percent(): number {
+  get pass_percent(): number {
     return (this.pass / this.total) * 100;
   }
 
-  public toList(): unknown[] {
+  toList(): unknown[] {
     return [
       this.pass,
       this.fail,

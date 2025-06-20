@@ -134,7 +134,7 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
   do {
     tries++;
     KJ_IF_SOME(entropy, entropySource) {
-      entropy.generate(kj::arrayPtr(&ret, 1).asBytes());
+      entropy.generate(kj::asBytes(ret));
     } else {
       KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&ret), sizeof(ret)) == 1);
     }

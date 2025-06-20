@@ -43,7 +43,7 @@ export class FilterList {
   // We keep this set so we can warn the user about this.
   private unmatchedRegexps: Set<RegExp> = new Set();
 
-  public constructor(filters: (string | RegExp)[] | true | undefined) {
+  constructor(filters: (string | RegExp)[] | true | undefined) {
     if (filters === undefined) {
       return;
     }
@@ -64,7 +64,7 @@ export class FilterList {
     this.unmatchedRegexps = new Set(this.regexps);
   }
 
-  public has(input: string): boolean {
+  has(input: string): boolean {
     if (this.matchesAll) {
       return true;
     }
@@ -76,7 +76,7 @@ export class FilterList {
     return this.regexps.some((r) => r.test(input));
   }
 
-  public delete(input: string): boolean {
+  delete(input: string): boolean {
     if (this.matchesAll) {
       return true;
     }
@@ -95,7 +95,7 @@ export class FilterList {
     return false;
   }
 
-  public getUnmatched(): Set<string | RegExp> {
+  getUnmatched(): Set<string | RegExp> {
     return this.strings.union(this.unmatchedRegexps);
   }
 }

@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.7.152.7"
+VERSION = "13.8.258.19"
 
-INTEGRITY = "sha256-ijPP9GLRviiG16iKmcgyPUt9nP2GZdPv0KRRSwilnUY="
+INTEGRITY = "sha256-lKz2HkNJQdVv2fvAsgYFsADg+oV6PL1+9KjOotGbU98="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -16,7 +16,7 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Revert-TracedReference-deref-API-removal.patch",
+    "0011-Seal-the-HandleScope-when-performing-GC.patch",
     "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
     "0013-Update-illegal-invocation-error-message-in-v8.patch",
     "0014-Implement-cross-request-context-promise-resolve-hand.patch",
@@ -28,9 +28,9 @@ PATCHES = [
     "0020-Remove-unneded-latomic-linker-flag.patch",
     "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
     "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
-    "0023-Add-more-sandbox-APIs.patch",
-    "0024-bazel-Port-concurrent-mksnapshot-support.patch",
-    "0025-bazel-Port-V8_USE_ZLIB-support.patch",
+    "0023-Port-concurrent-mksnapshot-support.patch",
+    "0024-Port-V8_USE_ZLIB-support.patch",
+    "0025-Modify-where-to-look-for-dragonbox.patch",
 ]
 
 # V8 and its dependencies

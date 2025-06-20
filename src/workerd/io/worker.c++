@@ -1229,8 +1229,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
-      modular(source.is<ModulesSource>()),
-      python(modular && source.get<ModulesSource>().isPython),
+      modular(source.variant.is<ModulesSource>()),
+      python(modular && source.variant.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
@@ -1318,7 +1318,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
         try {
           try {
-            KJ_SWITCH_ONEOF(source) {
+            KJ_SWITCH_ONEOF(source.variant) {
               KJ_CASE_ONEOF(script, ScriptSource) {
                 // This path is used for the older, service worker syntax workers.
 
@@ -3260,6 +3260,7 @@ struct Worker::Actor::Impl {
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
   kj::Maybe<rpc::Container::Client> container;
+  kj::Maybe<FacetManager&> facetManager;
 
   struct NoClass {};
   struct Initializing {};
@@ -3420,12 +3421,14 @@ struct Worker::Actor::Impl {
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t>& hibernationEventType,
       kj::Maybe<rpc::Container::Client> container,
+      kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
         container(kj::mv(container)),
+        facetManager(facetManager),
         hooks(loopback->addRef(), timerChannel, *metrics),
         inputGate(hooks),
         outputGate(hooks),
@@ -3476,12 +3479,13 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Own<ActorObserver> metrics,
     kj::Maybe<kj::Own<HibernationManager>> manager,
     kj::Maybe<uint16_t> hibernationEventType,
-    kj::Maybe<rpc::Container::Client> container)
+    kj::Maybe<rpc::Container::Client> container,
+    kj::Maybe<FacetManager&> facetManager)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
   impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
-      hibernationEventType, kj::mv(container));
+      hibernationEventType, kj::mv(container), facetManager);
 
   KJ_IF_SOME(c, className) {
     KJ_IF_SOME(cls, worker.impl->actorClasses.find(c)) {
@@ -3541,7 +3545,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
           jsg::JsRef<jsg::JsValue>(
               js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-          kj::mv(storage), kj::mv(impl->container), containerRunning);
+          kj::mv(storage), kj::mv(impl->container), containerRunning, impl->facetManager);
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));
@@ -3634,6 +3638,20 @@ kj::Promise<void> Worker::Actor::onBroken() {
 
 const Worker::Actor::Id& Worker::Actor::getId() {
   return impl->actorId;
+}
+
+bool Worker::Actor::idsEqual(const Id& a, const Id& b) {
+  if (a.which() != b.which()) return false;
+
+  KJ_SWITCH_ONEOF(a) {
+    KJ_CASE_ONEOF(actorId, kj::Own<ActorIdFactory::ActorId>) {
+      return actorId->equals(*b.get<kj::Own<ActorIdFactory::ActorId>>());
+    }
+    KJ_CASE_ONEOF(str, kj::String) {
+      return str == b.get<kj::String>();
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 Worker::Actor::Id Worker::Actor::cloneId(Worker::Actor::Id& id) {

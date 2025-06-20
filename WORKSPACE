@@ -35,6 +35,7 @@ http_archive(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
     strip_prefix = "sqlite-src-3470000",
@@ -75,6 +76,18 @@ http_archive(
     strip_prefix = "google-tcmalloc-cf3dc2d",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
+)
+
+git_repository(
+    name = "dragonbox",
+    build_file_content = """cc_library(
+            name = "dragonbox",
+            hdrs = glob(["include/dragonbox/*.h"]),
+            visibility = ["//visibility:public"],
+            include_prefix = "third_party/dragonbox/src",
+        )""",
+    commit = "6c7c925b571d54486b9ffae8d9d18a822801cbda",
+    remote = "https://github.com/jk-jeon/dragonbox.git",
 )
 
 git_repository(

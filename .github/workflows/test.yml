@@ -18,6 +18,9 @@ permissions:
   contents: read
   # Read/write artifacts
   actions: write
+  # Required for adding comments to PR.
+  # Specifically for sticky-pull-request-comment workflow action.
+  pull-requests: write
 jobs:
   fixup:
     if: github.event_name == 'pull_request'

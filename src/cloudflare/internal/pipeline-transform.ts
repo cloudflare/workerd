@@ -91,10 +91,7 @@ export class PipelineTransformImpl<
 
   // stub overridden on the subclass
   // eslint-disable-next-line @typescript-eslint/require-await
-  public async run(
-    _records: I[],
-    _metadata: PipelineBatchMetadata
-  ): Promise<O[]> {
+  async run(_records: I[], _metadata: PipelineBatchMetadata): Promise<O[]> {
     throw new Error('should be implemented by parent');
   }
 

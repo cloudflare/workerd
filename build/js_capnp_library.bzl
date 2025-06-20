@@ -1,5 +1,5 @@
 """
-Bazel rule to compile .capnp files into JavaScript using capnp-ts.
+Bazel rule to compile .capnp files into JS/TS using capnp-es.
 Based on https://github.com/capnproto/capnproto/blob/3b2e368cecc4b1419b40c5970d74a7a342224fac/c++/src/capnp/cc_capnp_library.bzl.
 """
 
@@ -15,6 +15,42 @@ def _workspace_path(label, path):
     if label.workspace_root == "":
         return path
     return label.workspace_root + "/" + path
+
+def _capnp_plugin_gen(ctx, output_format, out_dir, inputs, includes, src_prefix, system_include):
+    """Generate output files of the given output_format ("js" or "ts")"""
+
+    if not (output_format == "js" or output_format == "ts"):
+        fail("Only js and ts output formats are supported")
+
+    # Filter the outputs to generate by requested output_format
+    outputs = [out for out in ctx.outputs.outs if out.path.endswith(".%s" % output_format)]
+    if (not outputs):
+        return
+
+    plugin_name = "_%s_plugin" % output_format
+    plugin_executable = getattr(ctx.executable, plugin_name)
+    plugin_files = getattr(ctx.files, plugin_name)
+
+    label = ctx.label
+
+    js_out = "-o%s:%s" % (plugin_executable.path, out_dir)
+    args = ctx.actions.args()
+    args.add_all(["compile", "--verbose", js_out])
+    args.add_all(["-I" + inc for inc in includes])
+    args.add_all(["-I", system_include])
+    if src_prefix != "":
+        args.add_all(["--src-prefix", src_prefix])
+
+    args.add_all([s for s in ctx.files.srcs])
+
+    ctx.actions.run(
+        inputs = inputs + plugin_files + ctx.files._capnpc_capnp + ctx.files._capnp_system,
+        tools = [plugin_executable],  # Include required js_binary runfiles
+        outputs = outputs,
+        executable = ctx.executable._capnpc,
+        arguments = [args],
+        mnemonic = "GenCapnp",
+    )
 
 def _capnp_gen_impl(ctx):
     label = ctx.label
@@ -35,23 +71,24 @@ def _capnp_gen_impl(ctx):
     if src_prefix != "":
         out_dir = out_dir + "/" + src_prefix
 
-    js_out = "-o%s:%s" % (ctx.executable._capnpc_es.path, out_dir)
-    args = ctx.actions.args()
-    args.add_all(["compile", "--verbose", js_out])
-    args.add_all(["-I" + inc for inc in includes])
-    args.add_all(["-I", system_include])
-    if src_prefix != "":
-        args.add_all(["--src-prefix", src_prefix])
+    _capnp_plugin_gen(
+        ctx,
+        output_format = "js",
+        out_dir = out_dir,
+        inputs = inputs,
+        includes = includes,
+        src_prefix = src_prefix,
+        system_include = system_include,
+    )
 
-    args.add_all([s for s in ctx.files.srcs])
-
-    ctx.actions.run(
-        inputs = inputs + ctx.files._capnpc_es + ctx.files._capnpc_capnp + ctx.files._capnp_system,
-        tools = [ctx.executable._capnpc_es],  # Include required js_binary runfiles
-        outputs = ctx.outputs.outs,
-        executable = ctx.executable._capnpc,
-        arguments = [args],
-        mnemonic = "GenCapnp",
+    _capnp_plugin_gen(
+        ctx,
+        output_format = "ts",
+        out_dir = out_dir,
+        inputs = inputs,
+        includes = includes,
+        src_prefix = src_prefix,
+        system_include = system_include,
     )
 
     return [
@@ -70,7 +107,8 @@ _capnp_gen = rule(
         "outs": attr.output_list(),
         "src_prefix": attr.string(),
         "_capnpc": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "@capnp-cpp//src/capnp:capnp_tool"),
-        "_capnpc_es": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "//:capnpc_es"),
+        "_js_plugin": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "//:capnpc_js_plugin"),
+        "_ts_plugin": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "//:capnpc_ts_plugin"),
         "_capnpc_capnp": attr.label(executable = True, allow_single_file = True, cfg = "exec", default = "@capnp-cpp//src/capnp:capnpc-capnp"),
         "_capnp_system": attr.label(default = "@capnp-cpp//src/capnp:capnp_system_library"),
     },
@@ -95,7 +133,7 @@ def js_capnp_library(
         srcs: list of files to compile
         data: additional files to provide to the compiler - data files and includes that need not to
             be compiled
-        outs: expected output files
+        outs: expected output files - .js and .ts files
         deps: other js_capnp_library rules to depend on
         src_prefix: src_prefix for capnp compiler to the source root
         visibility: rule visibility

@@ -1,26 +1,26 @@
 export class DurableObject {
-  public constructor(ctx: unknown, env: unknown);
+  constructor(ctx: unknown, env: unknown);
 
-  public ctx: unknown;
-  public env: unknown;
+  ctx: unknown;
+  env: unknown;
 }
 
 export class WorkerEntrypoint {
-  public constructor(ctx: unknown, env: unknown);
+  constructor(ctx: unknown, env: unknown);
 
-  public ctx: unknown;
-  public env: unknown;
+  ctx: unknown;
+  env: unknown;
 }
 
 export class WorkflowEntrypoint {
-  public constructor(ctx: unknown, env: unknown);
+  constructor(ctx: unknown, env: unknown);
 
-  public ctx: unknown;
-  public env: unknown;
+  ctx: unknown;
+  env: unknown;
 }
 
 export class RpcStub {
-  public constructor(server: object);
+  constructor(server: object);
 }
 
 export class RpcTarget {}

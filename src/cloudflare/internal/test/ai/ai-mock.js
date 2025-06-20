@@ -80,7 +80,17 @@ export default {
       });
     }
 
-    const data = await request.json();
+    const reqContentType = request.headers.get('content-type');
+
+    let data = {};
+    if (reqContentType === 'application/json') {
+      data = await request.json();
+    } else {
+      data = {
+        inputs: request.body,
+        options: Object.fromEntries(url.searchParams),
+      };
+    }
 
     const modelName = request.headers.get('cf-consn-model-id');
 
@@ -101,6 +111,19 @@ export default {
       return Response.json(
         {
           ...data,
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
+    }
+
+    if (modelName === 'readableStreamIputs') {
+      return Response.json(
+        {
+          inputs: {},
+          options: { ...data.options },
           requestUrl: request.url,
         },
         {
