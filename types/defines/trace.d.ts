@@ -117,6 +117,8 @@ interface Outcome {
 interface SpanOpen {
   readonly type: "spanOpen";
   readonly name: string;
+  // id for the span being opened by this SpanOpen event.
+  readonly spanId: string;
   readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
 }
 
