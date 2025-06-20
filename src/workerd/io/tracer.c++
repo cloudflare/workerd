@@ -35,7 +35,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
   // been closed.
   // This could be an assert, but just log an error in case this is prevalent in some edge case.
   if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close", event.is<CompleteSpan>(),
+    KJ_LOG(ERROR, "reported tail stream event after stream close", event.is<SpanOpen>(),
         event.is<tracing::Log>());
   }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
@@ -204,7 +204,22 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
         return topLevelContext.newChild();
       }
     }();
-    writer->report(context, span.clone());
+
+    // Compose span events
+    // TODO(o11y): Actually report the spanOpen event at span creation time
+    auto spanOpenContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.parentSpanId);
+    auto spanComponentContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
+
+    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    if (span.tags.size()) {
+      kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) {
+        return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      };
+      writer->report(spanComponentContext, kj::mv(attr));
+    }
+    writer->report(spanComponentContext, tracing::SpanClose());
   }
 
   trace->bytesUsed = newSize;
