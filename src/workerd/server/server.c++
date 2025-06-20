@@ -1700,32 +1700,60 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::uint fetchStatus = 0;
 };
 
+class SpanSubmitter final: public kj::Refcounted {
+ public:
+  SpanSubmitter(kj::Own<WorkerTracer> workerTracer)
+      : predictableSpanId(0),
+        workerTracer(kj::mv(workerTracer)) {}
+  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
+    // We largely recreate the span here which feels inefficient, but is hard to avoid given the
+    // mismatch between the Span type and the full span information required for OTel.
+    CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
+        span.startTime, span.endTime);
+    span2.tags.reserve(span.tags.size());
+    for (auto& tag: span.tags) {
+      span2.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+    }
+    if (isPredictableModeForTest()) {
+      span2.startTime = span2.endTime = kj::UNIX_EPOCH;
+    }
+
+    workerTracer->addSpan(kj::mv(span2));
+  }
+
+  tracing::SpanId makeSpanId() {
+    return tracing::SpanId(predictableSpanId++);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(SpanSubmitter);
+
+ private:
+  uint64_t predictableSpanId;
+  kj::Own<WorkerTracer> workerTracer;
+};
+
 class WorkerTracerSpanObserver: public SpanObserver,
                                 public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
  public:
-  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
-      : workerTracer(kj::mv(workerTracer)) {}
+  WorkerTracerSpanObserver(
+      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
+      : spanSubmitter(kj::mv(spanSubmitter)),
+        spanId(this->spanSubmitter->makeSpanId()),
+        parentSpanId(parentSpanId) {}
+
+  KJ_DISALLOW_COPY_AND_MOVE(WorkerTracerSpanObserver);
 
   [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return addRefToThis().toOwn();
+    return kj::refcounted<WorkerTracerSpanObserver>(kj::addRef(*spanSubmitter), spanId);
   }
 
   void report(const Span& span) override {
-    KJ_IF_SOME(tracer, this->workerTracer) {
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
-
-      for (const auto& tag: span.tags) {
-        tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
-      }
-
-      CompleteSpan completeSpan(tracing::SpanId::nullId, tracing::SpanId::nullId,
-          kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime, kj::mv(tags));
-      tracer->addSpan(kj::mv(completeSpan));
-    }
+    spanSubmitter->submitSpan(spanId, parentSpanId, span);
   }
 
  private:
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  kj::Own<SpanSubmitter> spanSubmitter;
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
@@ -2132,7 +2160,6 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
-    kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
     if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
       // Setting up legacy tail workers support, but only if we actually have tail workers
@@ -2176,11 +2203,13 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(w, workerTracer) {
       if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
-        auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
+        auto tracerSpanObserver =
+            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
         w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
       }
     }
-    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+    kj::Own<RequestObserver> observer =
+        kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),

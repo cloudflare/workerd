@@ -208,11 +208,11 @@ InvocationSpanContext InvocationSpanContext::newForInvocation(
       TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent));
 }
 
-TraceId TraceId::fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader) {
+TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
   return TraceId(reader.getLow(), reader.getHigh());
 }
 
-void TraceId::toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const {
+void TraceId::toCapnp(rpc::TraceId::Builder writer) const {
   writer.setLow(low);
   writer.setHigh(high);
 }
@@ -287,6 +287,32 @@ kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo) {
   return kj::str(
       "CustomInfo: ", kj::strArray(KJ_MAP(attr, customInfo) { return kj::str(attr); }, ", "));
+}
+
+SpanContext SpanContext::fromCapnp(rpc::SpanContext::Reader reader) {
+  auto info = reader.getInfo();
+  kj::Maybe<SpanId> spanId;
+  if (info.isSpanId()) {
+    spanId = info.getSpanId();
+  }
+
+  return SpanContext(TraceId::fromCapnp(reader.getTraceId()), spanId);
+}
+
+void SpanContext::toCapnp(rpc::SpanContext::Builder writer) const {
+  traceId.toCapnp(writer.initTraceId());
+  auto info = writer.initInfo();
+  KJ_IF_SOME(s, spanId) {
+    info.setSpanId(s);
+  }
+}
+
+SpanContext SpanContext::clone() const {
+  return SpanContext(traceId, spanId);
+}
+
+kj::String KJ_STRINGIFY(const SpanContext& context) {
+  return kj::str(context.getTraceId(), "-", context.getSpanId());
 }
 
 }  // namespace tracing
@@ -941,10 +967,10 @@ tracing::Return tracing::Return::clone() const {
   return Return();
 }
 
-tracing::SpanOpen::SpanOpen(uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info)
+tracing::SpanOpen::SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info)
     : operationName(kj::mv(operationName)),
       info(kj::mv(info)),
-      parentSpanId(parentSpanId) {}
+      spanId(spanId) {}
 
 namespace {
 kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader) {
@@ -970,11 +996,11 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
 tracing::SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      parentSpanId(reader.getParentSpanId()) {}
+      spanId(reader.getSpanId()) {}
 
 void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
-  builder.setParentSpanId(parentSpanId);
+  builder.setSpanId(spanId);
   KJ_IF_SOME(i, info) {
     auto infoBuilder = builder.initInfo();
     KJ_SWITCH_ONEOF(i) {
@@ -1011,7 +1037,7 @@ tracing::SpanOpen tracing::SpanOpen::clone() const {
       KJ_UNREACHABLE;
     });
   };
-  return SpanOpen(parentSpanId, kj::str(operationName), cloneInfo(info));
+  return SpanOpen(spanId, kj::str(operationName), cloneInfo(info));
 }
 
 kj::String KJ_STRINGIFY(const tracing::SpanOpen::Info& info) {
@@ -1163,13 +1189,6 @@ kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& r
   }
   return kj::none;
 }
-kj::Maybe<tracing::Onset::TriggerContext> getTriggerContextFromReader(
-    const rpc::Trace::Onset::Reader& reader) {
-  if (!reader.hasTrigger()) return kj::none;
-  auto trigger = reader.getTrigger();
-  return tracing::Onset::TriggerContext(tracing::TraceId::fromCapnp(trigger.getTraceId()),
-      tracing::TraceId::fromCapnp(trigger.getInvocationId()), tracing::SpanId(trigger.getSpanId()));
-}
 tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
   return tracing::Onset::WorkerInfo{
     .executionModel = reader.getExecutionModel(),
@@ -1183,23 +1202,24 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
 }
 }  // namespace
 
-tracing::Onset::Onset(tracing::Onset::Info&& info,
+tracing::Onset::Onset(tracing::SpanId spanId,
+    tracing::Onset::Info&& info,
     tracing::Onset::WorkerInfo&& workerInfo,
-    CustomInfo attributes,
-    kj::Maybe<TriggerContext> maybeTrigger)
-    : info(kj::mv(info)),
+    CustomInfo attributes)
+    : spanId(spanId),
+      info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
-      attributes(kj::mv(attributes)),
-      trigger(kj::mv(maybeTrigger)) {}
+      attributes(kj::mv(attributes)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
-    : info(readOnsetInfo(reader.getInfo())),
+    : spanId(reader.getSpanId()),
+      info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
-      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }),
-      trigger(getTriggerContextFromReader(reader)) {}
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   builder.setExecutionModel(workerInfo.executionModel);
+  builder.setSpanId(spanId);
   KJ_IF_SOME(name, workerInfo.scriptName) {
     builder.setScriptName(name);
   }
@@ -1220,12 +1240,6 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   }
   KJ_IF_SOME(e, workerInfo.entrypoint) {
     builder.setEntryPoint(e);
-  }
-  KJ_IF_SOME(t, trigger) {
-    auto ctx = builder.initTrigger();
-    t.traceId.toCapnp(ctx.initTraceId());
-    t.invocationId.toCapnp(ctx.getInvocationId());
-    ctx.setSpanId(t.spanId.getId());
   }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
@@ -1283,10 +1297,8 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
 }
 
 tracing::Onset tracing::Onset::clone() const {
-  return Onset(cloneEventInfo(info), workerInfo.clone(),
-      KJ_MAP(attr, attributes) { return attr.clone(); }, trigger.map([](const TriggerContext& ctx) {
-    return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
-  }));
+  return Onset(spanId, cloneEventInfo(info), workerInfo.clone(),
+      KJ_MAP(attr, attributes) { return attr.clone(); });
 }
 
 tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)
@@ -1309,26 +1321,25 @@ tracing::Outcome tracing::Outcome::clone() const {
   return Outcome(outcome, cpuTime, wallTime);
 }
 
-tracing::TailEvent::TailEvent(const tracing::InvocationSpanContext& context,
+tracing::TailEvent::TailEvent(tracing::SpanContext context,
+    TraceId invocationId,
     kj::Date timestamp,
     kj::uint sequence,
     Event&& event)
-    : traceId(context.getTraceId()),
-      invocationId(context.getInvocationId()),
-      spanId(context.getSpanId()),
+    : spanContext(kj::mv(context)),
+      invocationId(invocationId),
       timestamp(timestamp),
       sequence(sequence),
       event(kj::mv(event)) {}
 
 tracing::TailEvent::TailEvent(TraceId traceId,
     TraceId invocationId,
-    SpanId spanId,
+    kj::Maybe<SpanId> spanId,
     kj::Date timestamp,
     kj::uint sequence,
     Event&& event)
-    : traceId(kj::mv(traceId)),
+    : spanContext(kj::mv(traceId), kj::mv(spanId)),
       invocationId(kj::mv(invocationId)),
-      spanId(kj::mv(spanId)),
       timestamp(timestamp),
       sequence(sequence),
       event(kj::mv(event)) {}
@@ -1375,18 +1386,15 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
 }  // namespace
 
 tracing::TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
-    : traceId(TraceId::fromCapnp(reader.getContext().getTraceId())),
-      invocationId(TraceId::fromCapnp(reader.getContext().getInvocationId())),
-      spanId(SpanId(reader.getContext().getSpanId())),
+    : spanContext(SpanContext::fromCapnp(reader.getSpanContext())),
+      invocationId(TraceId::fromCapnp(reader.getInvocationId())),
       timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
       sequence(reader.getSequence()),
       event(readEventFromTailEvent(reader)) {}
 
 void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
-  auto context = builder.initContext();
-  traceId.toCapnp(context.initTraceId());
-  invocationId.toCapnp(context.initInvocationId());
-  context.setSpanId(spanId.getId());
+  spanContext.toCapnp(builder.initSpanContext());
+  invocationId.toCapnp(builder.initInvocationId());
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSequence(sequence);
   auto eventBuilder = builder.initEvent();
@@ -1458,7 +1466,8 @@ tracing::TailEvent tracing::TailEvent::clone() const {
     }
     KJ_UNREACHABLE;
   };
-  return TailEvent(traceId, invocationId, spanId, timestamp, sequence, cloneEvent(event));
+  return TailEvent(spanContext.getTraceId(), invocationId, spanContext.getSpanId(), timestamp,
+      sequence, cloneEvent(event));
 }
 
 // ======================================================================================
