@@ -30,6 +30,7 @@ PATCHES = [
     "0021-Port-concurrent-mksnapshot-support.patch",
     "0022-Port-V8_USE_ZLIB-support.patch",
     "0023-Modify-where-to-look-for-dragonbox.patch",
+    "0024-Disable-slow-handle-check.patch",
 ]
 
 # V8 and its dependencies
