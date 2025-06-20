@@ -229,6 +229,15 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
 
 class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
  public:
+  // The caller must call this before calling newActor(). If it returns a promise, then the
+  // caller must await the promise before calling other methods.
+  //
+  // In particular, this is needed with dynamically-loaded workers. The isolate may still be
+  // loading when the caller calls `getDurableObjectClass()` on it.
+  virtual kj::Maybe<kj::Promise<void>> whenReady() {
+    return kj::none;
+  }
+
   // Construct a new instance of the class. The parameters here are passed into `Worker::Actor`'s
   // constructor.
   virtual kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
@@ -240,7 +249,7 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
       kj::Maybe<rpc::Container::Client> container,
       kj::Maybe<Worker::Actor::FacetManager&> facetManager) = 0;
 
-  // Start a request on the actor.
+  // Start a request on the actor. (The actor must have been created using newActor().)
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
 };
@@ -2259,10 +2268,14 @@ class Server::WorkerService final: public Service,
         requireNotBroken();
 
         if (actor == kj::none) {
+          KJ_IF_SOME(promise, actorClass->whenReady()) {
+            co_await promise;
+          }
+
           start();
         }
 
-        return KJ_ASSERT_NONNULL(actor)->addRef();
+        co_return KJ_ASSERT_NONNULL(actor)->addRef();
       }
 
       kj::Promise<kj::Own<WorkerInterface>> startRequest(
@@ -3646,6 +3659,11 @@ class Server::WorkerLoaderNamespace {
       return kj::refcounted<SubrequestChannelImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
     }
 
+    kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+        kj::Maybe<kj::String> name, Frankenvalue props) override {
+      return kj::refcounted<ActorClassImpl>(addRefToThis(), kj::mv(name), kj::mv(props));
+    }
+
    private:
     kj::Maybe<kj::Own<WorkerService>> service;  // null if still starting up
     kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
@@ -3742,6 +3760,62 @@ class Server::WorkerLoaderNamespace {
             JSG_FAIL_REQUIRE(Error, "Worker has no default entrypoint.");
           }
         }
+      }
+    };
+
+    class ActorClassImpl final: public ActorClass {
+     public:
+      ActorClassImpl(
+          kj::Rc<WorkerStubImpl> isolate, kj::Maybe<kj::String> entrypointName, Frankenvalue props)
+          : isolate(kj::mv(isolate)),
+            entrypointName(kj::mv(entrypointName)),
+            props(kj::mv(props)) {}
+
+      kj::Maybe<kj::Promise<void>> whenReady() override {
+        if (inner != kj::none) return kj::none;
+
+        KJ_IF_SOME(service, isolate->service) {
+          inner = service->getActorClass(entrypointName, kj::mv(props));
+          return kj::none;
+        }
+
+        // Have to wait for the isolate to start up.
+        return isolate->startupTask.addBranch().then([this]() {
+          if (inner == kj::none) {
+            inner =
+                KJ_ASSERT_NONNULL(isolate->service)->getActorClass(entrypointName, kj::mv(props));
+          }
+        });
+      }
+
+      kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
+          Worker::Actor::Id actorId,
+          Worker::Actor::MakeActorCacheFunc makeActorCache,
+          Worker::Actor::MakeStorageFunc makeStorage,
+          kj::Own<Worker::Actor::Loopback> loopback,
+          kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager,
+          kj::Maybe<rpc::Container::Client> container,
+          kj::Maybe<Worker::Actor::FacetManager&> facetManager) override {
+        return getInner().newActor(tracker, kj::mv(actorId), kj::mv(makeActorCache),
+            kj::mv(makeStorage), kj::mv(loopback), kj::mv(manager), kj::mv(container),
+            facetManager);
+      }
+
+      kj::Own<WorkerInterface> startRequest(
+          IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) override {
+        return getInner().startRequest(kj::mv(metadata), kj::mv(actor));
+      }
+
+     private:
+      kj::Rc<WorkerStubImpl> isolate;
+      kj::Maybe<kj::String> entrypointName;
+      Frankenvalue props;  // moved away when `inner` is initialized
+
+      kj::Maybe<kj::Own<ActorClass>> inner;
+
+      ActorClass& getInner() {
+        return *KJ_ASSERT_NONNULL(
+            inner, "ActorClassChannel is not ready yet; should have awaited whenReady()");
       }
     };
   };

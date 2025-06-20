@@ -230,7 +230,8 @@ class WorkerStubChannel {
   virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
       kj::Maybe<kj::String> name, Frankenvalue props) = 0;
 
-  // TODO(now): Expose actor class entrypoints for use with facets.
+  virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
 
   // TODO(someday): Allow caller to enumerate entrypoints?
 };
