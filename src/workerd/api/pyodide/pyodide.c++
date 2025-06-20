@@ -421,6 +421,16 @@ kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
   return kj::heap<PyodideMetadataReader::State>(*this);
 }
 
+void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
+  // Verify that we don't have module named after the main module in the `vendor` subdir.
+  for (auto& name: moduleInfo.names) {
+    if (name.startsWith(kj::str("vendor/", mainModule))) {
+      JSG_FAIL_REQUIRE(
+          Error, kj::str("Python module vendor/", mainModule, " clashes with main module"));
+    }
+  }
+}
+
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     kj::HashSet<kj::String> workerModules,
     kj::ArrayPtr<kj::String> imports,

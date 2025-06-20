@@ -66,12 +66,9 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       from pathlib import Path
 
       VENDOR_PATH = "/session/metadata/vendor"
-      SESSION_PATH = "/session/metadata"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
-      if SESSION_PATH in sys.path:
-        sys.path.remove(SESSION_PATH)
       if VENDOR_PATH in sys.path:
         sys.path.remove(VENDOR_PATH)
 
@@ -84,7 +81,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       # that reproduces this (vendor_dir).
       for i, path in enumerate(sys.path):
         if 'site-packages' in path:
-          sys.path[i:i] = [SESSION_PATH, VENDOR_PATH]
+          sys.path.insert(i, VENDOR_PATH)
           break
       else:
         # If no site-packages found, fail
