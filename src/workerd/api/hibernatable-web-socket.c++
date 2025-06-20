@@ -65,6 +65,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   // Mark the request as delivered because we're about to run some JS.
   auto& context = incomingRequest->getContext();
   incomingRequest->delivered();
+
+  KJ_DEFER({ waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest))); });
+
   EventOutcome outcome = EventOutcome::OK;
 
   // We definitely have an actor by this point. Let's set the hibernation manager on the actor
@@ -136,8 +139,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     }
     outcome = EventOutcome::EXCEPTION;
   }
-
-  waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
 
   co_return Result{
     .outcome = outcome,
