@@ -638,8 +638,7 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(
-      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(uint64_t spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
@@ -647,7 +646,7 @@ struct SpanOpen final {
 
   kj::String operationName;
   kj::Maybe<Info> info = kj::none;
-  uint64_t parentSpanId;
+  uint64_t spanId;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
