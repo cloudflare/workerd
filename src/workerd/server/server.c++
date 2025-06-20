@@ -1670,10 +1670,20 @@ class WorkerTracerSpanObserver: public SpanObserver,
                                 public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
  public:
   WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
-      : workerTracer(kj::mv(workerTracer)) {}
+      : workerTracer(kj::mv(workerTracer)),
+        spanId(tracing::staticSpanId),
+        parentSpanId(tracing::staticSpanId) {}
+
+  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
+      tracing::SpanId spanId,
+      tracing::SpanId parentSpanId)
+      : workerTracer(kj::mv(workerTracer)),
+        spanId(spanId),
+        parentSpanId(parentSpanId) {}
 
   [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return addRefToThis().toOwn();
+    return kj::refcounted<WorkerTracerSpanObserver>(
+        mapAddRef(workerTracer), tracing::staticSpanId, spanId);
   }
 
   void report(const Span& span) override {
@@ -1684,14 +1694,16 @@ class WorkerTracerSpanObserver: public SpanObserver,
         tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       }
 
-      CompleteSpan completeSpan(tracing::staticSpanId, tracing::staticSpanId,
-          kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime, kj::mv(tags));
+      CompleteSpan completeSpan(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
+          span.startTime, span.endTime, kj::mv(tags));
       tracer->addSpan(kj::mv(completeSpan));
     }
   }
 
  private:
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
 };
 
 // IsolateLimitEnforcer that enforces no limits.
