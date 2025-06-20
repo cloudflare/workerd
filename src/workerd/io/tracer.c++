@@ -204,7 +204,17 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
         return topLevelContext.newChild();
       }
     }();
-    writer->report(context, span.clone());
+
+    // Compose span events
+    // TODO(o11y): Actually report the spanOpen event when span is created
+    writer->report(context, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    if (span.tags.size()) {
+      kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) {
+        return tracing::Attribute(kj::mv(tag.key), kj::mv(tag.value));
+      };
+      writer->report(context, kj::mv(attr));
+    }
+    writer->report(context, tracing::SpanClose());
   }
 
   trace->bytesUsed = newSize;
