@@ -914,10 +914,10 @@ tracing::Return tracing::Return::clone() const {
   return Return();
 }
 
-tracing::SpanOpen::SpanOpen(uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info)
+tracing::SpanOpen::SpanOpen(uint64_t spanId, kj::String operationName, kj::Maybe<Info> info)
     : operationName(kj::mv(operationName)),
       info(kj::mv(info)),
-      parentSpanId(parentSpanId) {}
+      spanId(spanId) {}
 
 namespace {
 kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader& reader) {
@@ -941,13 +941,13 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
 }  // namespace
 
 tracing::SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
-    // TODO(streaming-tail): Propagate parentSpanId properly
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      parentSpanId(0) {}
+      spanId(reader.getSpanId()) {}
 
 void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
+  builder.setSpanId(spanId);
   KJ_IF_SOME(i, info) {
     auto infoBuilder = builder.initInfo();
     KJ_SWITCH_ONEOF(i) {
@@ -984,7 +984,7 @@ tracing::SpanOpen tracing::SpanOpen::clone() const {
       KJ_UNREACHABLE;
     });
   };
-  return SpanOpen(parentSpanId, kj::str(operationName), cloneInfo(info));
+  return SpanOpen(spanId, kj::str(operationName), cloneInfo(info));
 }
 
 tracing::SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
