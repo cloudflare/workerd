@@ -18,10 +18,7 @@ import {
   NodeError,
 } from 'node-internal:internal_errors';
 
-import {
-  type EmitWarningOptions,
-  default as processImpl,
-} from 'node-internal:process';
+import { default as processImpl } from 'node-internal:process';
 import {
   _initialized as eventsInitialized,
   default as EventEmitter,
@@ -38,188 +35,89 @@ declare global {
 
 const { compatibilityFlags } = Cloudflare;
 
-export const platform = compatibilityFlags.unsupported_process_actual_platform
-  ? processImpl.platform
+export const versions = processImpl.versions;
+
+export const version = `v${processImpl.versions.node}`;
+
+export const title = 'workerd';
+
+export const argv = ['workerd'];
+
+export const argv0 = 'workerd';
+
+export const execArgv = [];
+
+export const arch = 'x64';
+
+export const platform = compatibilityFlags.unsupported_process_real_platform
+  ? processImpl.processPlatform
   : 'linux';
 
-export let versions = processImpl.versions,
-  version: string | undefined,
-  title: string | undefined,
-  argv: string[] | undefined,
-  argv0: string | undefined,
-  execArgv: string[] | undefined,
-  arch: string | undefined,
-  config: object | undefined,
-  pid: number | undefined,
-  ppid: number | undefined,
-  allowedNodeEnvironmentFlags: Set<string> | undefined;
-
-export let hrtime:
-  | ({
-      (time?: [number, number]): [number, number];
-      bigint(): bigint;
-    } & ((time?: [number, number]) => [number, number]))
-  | undefined;
-
-let _setSourceMapsEnabled:
-  | ((
-      _enabled: boolean,
-      _options?: { nodeModules: boolean; generatedCode: boolean }
-    ) => void)
-  | undefined;
-let _getSourceMapsSupport:
-  | (() => {
-      enabled: boolean;
-      nodeModules: boolean;
-      generatedCode: boolean;
-    })
-  | undefined;
-let _emitWarning:
-  | ((
-      warning: string | Error,
-      options?: ErrorConstructor | string | EmitWarningOptions,
-      codeOrCtor?: ErrorConstructor | string,
-      maybeCtor?: ErrorConstructor
-    ) => void)
-  | undefined;
-let _uptime: (() => number) | undefined;
-let _loadEnvFile: ((path: string | URL | Buffer) => void) | undefined;
-let _getegid: (() => number) | undefined;
-let _getgid: (() => number) | undefined;
-let _getgroups: (() => number[]) | undefined;
-let _geteuid: (() => number) | undefined;
-let _getuid: (() => number) | undefined;
-let _setegid: ((id: number | string) => void) | undefined;
-let _setgid: ((id: number | string) => void) | undefined;
-let _setgroups: ((groups: number[]) => void) | undefined;
-let _seteuid: ((id: number | string) => void) | undefined;
-let _setuid: ((id: number | string) => void) | undefined;
-let _initgroups:
-  | ((user: number | string, extractGroup: number | string) => void)
-  | undefined;
-let _abort: (() => void) | undefined;
-
-export {
-  _setSourceMapsEnabled as setSourceMapsEnabled,
-  _getSourceMapsSupport as getSourceMapsSupport,
-  _emitWarning as emitWarning,
-  _uptime as uptime,
-  _loadEnvFile as loadEnvFile,
-  _getegid as getegid,
-  _getgid as getgid,
-  _getgroups as getgroups,
-  _geteuid as geteuid,
-  _getuid as getuid,
-  _setegid as setegid,
-  _setgid as setgid,
-  _setgroups as setgroups,
-  _seteuid as seteuid,
-  _setuid as setuid,
-  _initgroups as initgroups,
-  _abort as abort,
+export const config = {
+  target_defaults: {},
+  variables: {},
 };
 
-// TODO(soon): Implement stdio along with TTY streams (and as a requirement for removing experimental).
-export const stdin = undefined;
-export const stdout = undefined;
-export const stderr = undefined;
+export const pid = 1;
+export const ppid = 0;
 
-// TODO(soon): Implement along with FS work (and as a requirement for removing experimental).
-export const chdir = undefined;
-export const cwd = undefined;
-export const umask = undefined;
-
-if (compatibilityFlags.enable_nodejs_process_v2) {
-  versions = processImpl.versions;
-
-  version = `v${processImpl.versions.node}`;
-
-  title = 'workerd';
-
-  argv = ['workerd'];
-
-  argv0 = 'workerd';
-
-  execArgv = [];
-
-  arch = 'x64';
-
-  config = {
-    target_defaults: {},
-    variables: {},
-  };
-
-  // For simplicity and polyfill expectations, we assign pid 1 to the process and pid 0 to the parent
-  pid = 1;
-  ppid = 0;
-
-  allowedNodeEnvironmentFlags = new Set();
-
-  hrtime = Object.assign(
-    function hrtime(time?: [number, number]): [number, number] {
-      if (time !== undefined) {
-        if (!Array.isArray(time))
-          throw new ERR_INVALID_ARG_TYPE('time', 'tuple of integers', time);
-        else if ((time as number[]).length !== 2)
-          throw new ERR_OUT_OF_RANGE('time', '2', time);
-      }
-      const nanoTime = BigInt(Date.now()) * 1_000_000n;
-      const nanosBigint = nanoTime % 1_000_000_000n;
-      let seconds = Number((nanoTime - nanosBigint) / 1_000_000_000n);
-      let nanos = Number(nanosBigint);
-      if (time) {
-        const [prevSeconds, prevNanos] = time;
-        seconds -= prevSeconds;
-        nanos -= prevNanos;
-        // We don't have nanosecond-level precision, but if we
-        // did (say with the introduction of randomness), this
-        // is how we would handle nanosecond underflow
-        if (nanos < 0) {
-          seconds -= 1;
-          nanos += 1e9;
-        }
-      }
-      return [seconds, nanos];
-    },
-    {
-      bigint: function (): bigint {
-        return BigInt(Date.now()) * 1_000_000n;
-      },
-    }
-  );
-
-  _setSourceMapsEnabled = setSourceMapsEnabled;
-  _getSourceMapsSupport = getSourceMapsSupport;
-  _emitWarning = emitWarning as (
-    warning: string | Error,
-    options?: ErrorConstructor | string | EmitWarningOptions,
-    codeOrCtor?: ErrorConstructor | string,
-    maybeCtor?: ErrorConstructor
-  ) => void;
-  _uptime = uptime;
-  _loadEnvFile = loadEnvFile;
-  _getegid = getegid;
-  _getgid = getgid;
-  _getgroups = getgroups;
-  _geteuid = geteuid;
-  _getuid = getuid;
-  _setegid = setegid;
-  _setgid = setgid;
-  _setgroups = setgroups;
-  _seteuid = seteuid;
-  _setuid = setuid;
-  _initgroups = initgroups;
-  _abort = abort;
+// On the virtual filesystem, we only support group 0
+export function getegid(): number {
+  return 0;
 }
 
-function setSourceMapsEnabled(
+export function getgid(): number {
+  return 0;
+}
+
+export function getgroups(): number[] {
+  return [0];
+}
+
+// On the virtual filesystem, we only support user 0
+export function geteuid(): number {
+  return 0;
+}
+
+export function getuid(): number {
+  return 0;
+}
+
+export function setegid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setegid' });
+}
+
+export function setgid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setgid' });
+}
+
+export function setgroups(_groups: number[]): void {
+  throw new ERR_EPERM({ syscall: 'setgroups' });
+}
+
+export function seteuid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'seteuid' });
+}
+
+export function setuid(id: number | string): void {
+  if (id !== 0) throw new ERR_EPERM({ syscall: 'setuid' });
+}
+
+export function initgroups(
+  _user: number | string,
+  _extractGroup: number | string
+): void {
+  throw new ERR_EPERM({ syscall: 'initgroups' });
+}
+
+export function setSourceMapsEnabled(
   _enabled: boolean,
   _options?: { nodeModules: boolean; generatedCode: boolean }
 ): void {
   // no-op since we do not support disabling source maps
 }
 
-function getSourceMapsSupport(): {
+export function getSourceMapsSupport(): {
   enabled: boolean;
   nodeModules: boolean;
   generatedCode: boolean;
@@ -234,28 +132,38 @@ function getSourceMapsSupport(): {
 // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
 export function nextTick(cb: Function, ...args: unknown[]): void {
   queueMicrotask(() => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    // eslint-disable-next-line
     cb(...args);
   });
+}
+
+interface EmitWarningOptions {
+  type?: string | undefined;
+  code?: string | undefined;
+  ctor?: ErrorConstructor | undefined;
+  detail?: string | undefined;
 }
 
 interface ErrorWithDetail extends Error {
   detail?: unknown;
 }
 
-function emitWarning(warning: string | Error, ctor?: ErrorConstructor): void;
-function emitWarning(
+export function emitWarning(
+  warning: string | Error,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
   warning: string | Error,
   type?: string,
   ctor?: ErrorConstructor
 ): void;
-function emitWarning(
+export function emitWarning(
   warning: string | Error,
   type?: string,
   code?: string,
   ctor?: ErrorConstructor
 ): void;
-function emitWarning(
+export function emitWarning(
   warning: string | Error,
   options?: ErrorConstructor | string | EmitWarningOptions,
   codeOrCtor?: ErrorConstructor | string,
@@ -330,7 +238,7 @@ function emitWarning(
 
   // Emit the warning event on the process object
   // Use nextTick to ensure the warning is emitted asynchronously
-  queueMicrotask(() => {
+  nextTick(() => {
     process.emit('warning', err);
   });
 }
@@ -507,24 +415,84 @@ export function getBuiltinModule(id: string): object {
 }
 
 export function exit(code: number): void {
-  processImpl.exitImpl(code);
+  processImpl.processExitImpl(code);
 }
 
-function abort(): void {
-  processImpl.exitImpl(1);
+export function abort(): void {
+  processImpl.processExitImpl(1);
 }
 
-// In future we may return accurate uptime information here, but returning
-// zero at least allows code paths to work correctly in most cases, and is
-// not a completely unreasonable interpretation of Cloudflare's execution
-// model assumptions.
-function uptime(): number {
+export function kill(_pid: number, _signal?: string | number): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export function ref(_maybeRefable: unknown): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export function unref(_maybeRefable: unknown): void {
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+// TODO(soon): Support via experimental FS
+// Non-throwing stub to ensure polyfills still engage
+export const chdir = undefined;
+// export function chdir(_dir: string): void {
+// }
+
+// TODO(soon): Support via experimental FS
+// Non-throwing stub to ensure polyfills still engage
+export const cwd = undefined;
+// export function cwd(): string {
+// }
+
+// TODO(soon): Support via experimental FS
+// Non-throwing stub to ensure polyfills still engage
+export const umask = undefined;
+// export function umask(_mask: string | number): void {
+// }
+
+export const hrtime: {
+  (time?: [number, number]): [number, number];
+  bigint(): bigint;
+} = function hrtime(time?: [number, number]): [number, number] {
+  if (time !== undefined) {
+    if (!Array.isArray(time))
+      throw new ERR_INVALID_ARG_TYPE('time', 'tuple of integers', time);
+    else if ((time as number[]).length !== 2)
+      throw new ERR_OUT_OF_RANGE('time', '2', time);
+  }
+  const nanoTime = BigInt(Date.now()) * 1_000_000n;
+  const nanosBigint = nanoTime % 1_000_000_000n;
+  let seconds = Number((nanoTime - nanosBigint) / 1_000_000_000n);
+  let nanos = Number(nanosBigint);
+  if (time) {
+    const [prevSeconds, prevNanos] = time;
+    seconds -= prevSeconds;
+    nanos -= prevNanos;
+    // We don't have nanosecond-level precision, but if we
+    // did (say with the introduction of randomness), this
+    // is how we would handle nanosecond underflow
+    if (nanos < 0) {
+      seconds -= 1;
+      nanos += 1e9;
+    }
+  }
+  return [seconds, nanos];
+};
+hrtime.bigint = function (): bigint {
+  return BigInt(Date.now()) * 1_000_000n;
+};
+
+export function uptime(): number {
   return 0;
 }
 
 // TODO(soon): Support with proper process.cwd() resolution along with
 //             test in process-nodejs-test.
-function loadEnvFile(path: string | URL | Buffer = '/bundle/.env'): void {
+export function loadEnvFile(
+  path: string | URL | Buffer = '/bundle/.env'
+): void {
   if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
     throw new ERR_UNSUPPORTED_OPERATION();
   }
@@ -533,60 +501,6 @@ function loadEnvFile(path: string | URL | Buffer = '/bundle/.env'): void {
     readFileSync(path instanceof URL ? path : path.toString(), 'utf8')
   );
   Object.assign(process.env, parsed);
-}
-
-// On the virtual filesystem, we only support group 0
-function getegid(): number {
-  return 0;
-}
-
-function getgid(): number {
-  return 0;
-}
-
-function getgroups(): number[] {
-  return [0];
-}
-
-// On the virtual filesystem, we only support user 0
-function geteuid(): number {
-  return 0;
-}
-
-function getuid(): number {
-  return 0;
-}
-
-// We support group 0 but no others, with the virtual filesystem.
-function setegid(id: number | string): void {
-  if (id !== 0) throw new ERR_EPERM({ syscall: 'setegid' });
-}
-
-// We support group 0 but no others, with the virtual filesystem.
-function setgid(id: number | string): void {
-  if (id !== 0) throw new ERR_EPERM({ syscall: 'setgid' });
-}
-
-// We support group 0 but no others, with the virtual filesystem.
-function seteuid(id: number | string): void {
-  if (id !== 0) throw new ERR_EPERM({ syscall: 'seteuid' });
-}
-
-// We support group 0 but no others, with the virtual filesystem.
-function setuid(id: number | string): void {
-  if (id !== 0) throw new ERR_EPERM({ syscall: 'setuid' });
-}
-
-// We don't support setting or initializing arbitrary groups on the virtual filesystem.
-function setgroups(_groups: number[]): void {
-  throw new ERR_EPERM({ syscall: 'setgroups' });
-}
-
-function initgroups(
-  _user: number | string,
-  _extractGroup: number | string
-): void {
-  throw new ERR_EPERM({ syscall: 'initgroups' });
 }
 
 // The following features does not include deprecated or experimental flags mentioned in
@@ -605,9 +519,15 @@ export const features = Object.freeze({
   tls: true,
 });
 
+export const allowedNodeEnvironmentFlags = new Set();
+
+// TODO(soon): Implement stdio along with TTY streams.
+export const stdin = undefined;
+export const stdout = undefined;
+export const stderr = undefined;
+
 // Unsupported features - implemented as 'undefined' so they can still be imported
 // statically via `import { channel } from 'node:process'` without breaking.
-// In future, these may yet be be possibly implemented or stubbed.
 export const exitCode = undefined,
   channel = undefined,
   connected = undefined,
@@ -628,10 +548,7 @@ export const exitCode = undefined,
   traceDeprecation = undefined,
   throwDeprecation = undefined,
   sourceMapsEnabled = undefined,
-  threadCpuUsage = undefined,
-  kill = undefined,
-  ref = undefined,
-  unref = undefined;
+  threadCpuUsage = undefined;
 
 interface Process extends EventEmitter {
   version: typeof version;
@@ -645,24 +562,24 @@ interface Process extends EventEmitter {
   config: typeof config;
   pid: typeof pid;
   ppid: typeof ppid;
-  getegid: typeof _getegid;
-  getgid: typeof _getgid;
-  getgroups: typeof _getgroups;
-  geteuid: typeof _geteuid;
-  getuid: typeof _getuid;
-  setegid: typeof _setegid;
-  setgid: typeof _setgid;
-  setgroups: typeof _setgroups;
-  seteuid: typeof _seteuid;
-  setuid: typeof _setuid;
-  initgroups: typeof _initgroups;
-  setSourceMapsEnabled: typeof _setSourceMapsEnabled;
-  getSourceMapsSupport: typeof _getSourceMapsSupport;
+  getegid: typeof getegid;
+  getgid: typeof getgid;
+  getgroups: typeof getgroups;
+  geteuid: typeof geteuid;
+  getuid: typeof getuid;
+  setegid: typeof setegid;
+  setgid: typeof setgid;
+  setgroups: typeof setgroups;
+  seteuid: typeof seteuid;
+  setuid: typeof setuid;
+  initgroups: typeof initgroups;
+  setSourceMapsEnabled: typeof setSourceMapsEnabled;
+  getSourceMapsSupport: typeof getSourceMapsSupport;
   nextTick: typeof nextTick;
-  emitWarning: typeof _emitWarning;
+  emitWarning: typeof emitWarning;
   env: typeof env;
   exit: typeof exit;
-  abort: typeof _abort;
+  abort: typeof abort;
   getBuiltinModule: typeof getBuiltinModule;
   features: typeof features;
   allowedNodeEnvironmentFlags: typeof allowedNodeEnvironmentFlags;
@@ -673,8 +590,8 @@ interface Process extends EventEmitter {
   cwd: typeof cwd;
   umask: typeof umask;
   hrtime: typeof hrtime;
-  uptime: typeof _uptime;
-  loadEnvFile: typeof _loadEnvFile;
+  uptime: typeof uptime;
+  loadEnvFile: typeof loadEnvFile;
   exitCode: undefined;
   channel: undefined;
   connected: undefined;
@@ -714,24 +631,23 @@ const process = {
   config,
   pid,
   ppid,
-  getegid: _getegid,
-  getgid: _getgid,
-  getgroups: _getgroups,
-  geteuid: _geteuid,
-  getuid: _getuid,
-  setegid: _setegid,
-  setgid: _setgid,
-  setgroups: _setgroups,
-  seteuid: _seteuid,
-  setuid: _setuid,
-  initgroups: _initgroups,
-  setSourceMapsEnabled: _setSourceMapsEnabled,
-  getSourceMapsSupport: _getSourceMapsSupport,
+  getegid,
+  getgid,
+  getgroups,
+  geteuid,
+  getuid,
+  setegid,
+  setgid,
+  setgroups,
+  seteuid,
+  setuid,
+  initgroups,
+  setSourceMapsEnabled,
+  getSourceMapsSupport,
   nextTick,
-  emitWarning: _emitWarning,
+  emitWarning,
   env,
   exit,
-  abort: _abort,
   getBuiltinModule,
   features,
   allowedNodeEnvironmentFlags,
@@ -742,8 +658,8 @@ const process = {
   cwd,
   umask,
   hrtime,
-  uptime: _uptime,
-  loadEnvFile: _loadEnvFile,
+  uptime,
+  loadEnvFile,
   exitCode,
   channel,
   connected,
@@ -778,7 +694,6 @@ export var _initialized = true;
 
 // Private export, not to be reexported
 export function _initProcess(): void {
-  if (!compatibilityFlags.enable_nodejs_process_v2) return;
   Object.setPrototypeOf(process, EventEmitter.prototype as object);
   EventEmitter.call(process);
 

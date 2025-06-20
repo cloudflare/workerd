@@ -32,7 +32,6 @@ export {
   getSourceMapsSupport,
   nextTick,
   emitWarning,
-  abort,
   env,
   exit,
   getBuiltinModule,

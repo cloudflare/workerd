@@ -12,7 +12,6 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "nodejs_compat_populate_process_env",
-          "enable_nodejs_process_v2",
           "experimental"
         ],
         bindings = [
