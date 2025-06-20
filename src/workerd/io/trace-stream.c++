@@ -460,9 +460,10 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
 
   // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
   if (isPredictableModeForTest()) {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(staticSpanId)));
   } else {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.parentSpanId)));
+    // TODO(o11y): Fix misleading name.
+    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.spanId)));
   }
 
   KJ_IF_SOME(info, spanOpen.info) {
