@@ -1,5 +1,6 @@
 #include "worker-loader.h"
 
+#include <workerd/api/actor.h>
 #include <workerd/api/http.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
@@ -60,7 +61,25 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
 jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
-  KJ_UNIMPLEMENTED("TODO(now): WorkerStub::getDurableObjectClass()");
+  Frankenvalue props;
+
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(p, o.props) {
+      props = Frankenvalue::fromJs(js, p);
+    }
+  }
+
+  kj::Maybe<kj::String> entrypointName;
+  KJ_IF_SOME(n, name) {
+    KJ_IF_SOME(n2, n) {
+      if (n2 != "default"_kj) {
+        entrypointName = kj::mv(n2);
+      }
+    }
+  }
+
+  return js.alloc<DurableObjectClass>(IoContext::current().addObject(
+      channel->getActorClass(kj::mv(entrypointName), kj::mv(props))));
 }
 
 class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {

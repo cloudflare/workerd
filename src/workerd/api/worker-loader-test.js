@@ -1,3 +1,4 @@
+import { DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
 
 export let basics = {
@@ -88,5 +89,47 @@ export let overrideGlobalOutbound = {
 
     let resp = await worker.getEntrypoint().fetch('https://example.com');
     assert.strictEqual(await resp.text(), 'hello from testOutbound');
+  },
+};
+
+export class FacetTestActor extends DurableObject {
+  async doTest() {
+    let worker = this.env.loader.get('facets', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            import {DurableObject} from "cloudflare:workers";
+            export class MyActor extends DurableObject {
+              i = 0;
+
+              increment(j = 1) {
+                this.i += j;
+                return this.i;
+              }
+            }
+          `,
+        },
+
+        // Set globalOutbound to redirect to our own `testOutbound` entrypoint.
+        globalOutbound: this.ctx.exports.testOutbound,
+      };
+    });
+
+    let cls = worker.getDurableObjectClass('MyActor');
+
+    let facet = this.ctx.facets.get('bar', { class: cls });
+
+    assert.strictEqual(await facet.increment(), 1);
+    assert.strictEqual(await facet.increment(4), 5);
+  }
+}
+
+export let facets = {
+  async test(ctrl, env, ctx) {
+    let id = ctx.exports.FacetTestActor.idFromName('foo');
+    let stub = ctx.exports.FacetTestActor.get(id);
+    await stub.doTest();
   },
 };

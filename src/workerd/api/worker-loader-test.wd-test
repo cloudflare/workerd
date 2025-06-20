@@ -12,6 +12,10 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "loader", workerLoader = (id = "my-loader")),
         ],
+        durableObjectNamespaces = [
+          (className = "FacetTestActor", uniqueKey = "FacetTestActor"),
+        ],
+        durableObjectStorage = (inMemory = void),
       )
     ),
   ],
