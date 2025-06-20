@@ -421,6 +421,31 @@ kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
   return kj::heap<PyodideMetadataReader::State>(*this);
 }
 
+void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
+  // Verify that we don't have module named after the main module in the `vendor` subdir.
+  // mainModule includes the .py extension, so we need to extract the base name
+  kj::ArrayPtr<const char> mainModuleBase = mainModule;
+  if (mainModule.endsWith(".py")) {
+    mainModuleBase = mainModuleBase.slice(0, mainModuleBase.size() - 3);
+  }
+
+  for (auto& name: moduleInfo.names) {
+    if (name.startsWith(kj::str("vendor/", mainModule))) {
+      JSG_FAIL_REQUIRE(
+          Error, kj::str("Python module vendor/", mainModule, " clashes with main module"));
+    }
+    if (name == kj::str("vendor/", mainModuleBase, "/__init__.py")) {
+      JSG_FAIL_REQUIRE(Error,
+          kj::str(
+              "Python module vendor/", mainModuleBase, "/__init__.py clashes with main module"));
+    }
+    if (name == kj::str("vendor/", mainModuleBase, ".so")) {
+      JSG_FAIL_REQUIRE(
+          Error, kj::str("Python module vendor/", mainModuleBase, ".so clashes with main module"));
+    }
+  }
+}
+
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
     kj::HashSet<kj::String> workerModules,
     kj::ArrayPtr<kj::String> imports,

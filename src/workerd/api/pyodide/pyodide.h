@@ -157,9 +157,13 @@ class PyodideMetadataReader: public jsg::Object {
           createBaselineSnapshot(createBaselineSnapshot),
           memorySnapshot(kj::mv(memorySnapshot)),
           durableObjectClasses(kj::mv(durableObjectClasses)),
-          entrypointClasses(kj::mv(entrypointClasses)) {}
+          entrypointClasses(kj::mv(entrypointClasses)) {
+      verifyNoMainModuleInVendor();
+    }
 
     State(const State& other);
+
+    void verifyNoMainModuleInVendor();
 
     kj::Own<State> clone();
   };
