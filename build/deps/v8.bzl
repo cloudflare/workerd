@@ -1,7 +1,7 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.8.258.19"
+VERSION = "13.9.192"
 
 INTEGRITY = "sha256-lKz2HkNJQdVv2fvAsgYFsADg+oV6PL1+9KjOotGbU98="
 
@@ -16,21 +16,20 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Seal-the-HandleScope-when-performing-GC.patch",
-    "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-    "0013-Update-illegal-invocation-error-message-in-v8.patch",
-    "0014-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0015-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0016-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0017-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0018-Enable-V8-shared-linkage.patch",
-    "0019-Modify-where-to-look-for-fast_float-and-simdutf.patch",
-    "0020-Remove-unneded-latomic-linker-flag.patch",
-    "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
-    "0023-Port-concurrent-mksnapshot-support.patch",
-    "0024-Port-V8_USE_ZLIB-support.patch",
-    "0025-Modify-where-to-look-for-dragonbox.patch",
+    "0010-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+    "0011-Update-illegal-invocation-error-message-in-v8.patch",
+    "0012-Implement-cross-request-context-promise-resolve-hand.patch",
+    "0013-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0014-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0015-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0016-Enable-V8-shared-linkage.patch",
+    "0017-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0018-Remove-unneded-latomic-linker-flag.patch",
+    "0019-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
+    "0020-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
+    "0021-Port-concurrent-mksnapshot-support.patch",
+    "0022-Port-V8_USE_ZLIB-support.patch",
+    "0023-Modify-where-to-look-for-dragonbox.patch",
 ]
 
 # V8 and its dependencies
