@@ -10,7 +10,6 @@ PATCHES = [
     "0002-Allow-manually-setting-ValueSerializer-format-versio.patch",
     "0003-Allow-Windows-builds-under-Bazel.patch",
     "0004-Disable-bazel-whole-archive-build.patch",
-    "0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch",
     "0006-Implement-Promise-Context-Tagging.patch",
     "0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch",
     "0008-increase-visibility-of-virtual-method.patch",
