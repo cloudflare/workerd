@@ -887,7 +887,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js, kj::String name, GetOp
     id = ioCtx.getActorOrThrow().cloneId();
   }
 
-  auto actorClass = ioCtx.getIoChannelFactory().getActorClass(options.$class->getChannel());
+  auto actorClass = options.$class->getChannel(ioCtx);
 
   kj::Own<Fetcher::OutgoingFactory> factory =
       kj::heap<FacetOutgoingFactory>(fm, kj::mv(actorClass), kj::mv(name), kj::mv(id));
