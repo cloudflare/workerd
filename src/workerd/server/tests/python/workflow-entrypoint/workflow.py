@@ -12,14 +12,21 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
 
     async def on_run(self, event, step):
         @step.do("my_first_step")
-        def workflow_step():
+        async def workflow_step():
             self.counter += 1
             console.log(f"hello from python {self.counter}")
 
             return event["foo"]
 
-        # Execute the decorated step and return its result so RPC receives it.
-        return await workflow_step()
+        await workflow_step()
+
+        async def step_with_callback():
+            self.counter += 1
+            console.log(f"hello from python {self.counter}")
+
+            return event["foo"]
+
+        return step.do("my_second_step", step_with_callback)
 
 async def test(ctrl, env, ctx):
     pass
