@@ -244,23 +244,22 @@ const SPECIAL_DO_HANDLER_NAMES = [
 
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
-  isDurableObject: boolean,
-  isWorkflow: boolean
+  className: string
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+      const isDurableObject = className === 'DurableObject';
+      const isWorkflow = className === 'WorkflowEntrypoint';
 
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
       const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop == 'fetch';
-      // TODO: find a better workaround for this. We can't keep considering any worker that implements a run method
-      // as a workflow. What consequences do we have here?
-      const isWorkflowHandler = isWorkflow || prop == 'run';
+      let isWorkflowHandler = isWorkflow && prop == 'run';
       if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
         prop = 'on_' + prop;
       }
@@ -268,16 +267,28 @@ function makeEntrypointProxyHandler(
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        if (typeof pyInstance[prop] !== 'function') {
-          throw new TypeError(`Method ${prop} does not exist`);
+        let targetProp = prop;
+
+        if (targetProp == 'run' && typeof pyInstance['on_run'] === 'function' && typeof pyInstance['run'] !== 'function') {
+          // unfortunately we can't solely rely on the subclass
+          // we're also considering everything that implements an `on_run` method to be a workflow
+          // and handling it appropriately on the `run` prop
+          // Note(caio): if a normal run method exists, we handle it normally to avoid breaking changes
+          // (this is not ideal)
+          isWorkflowHandler = true;
+          targetProp = 'on_run';
+        }
+
+        if (typeof pyInstance[targetProp] !== 'function') {
+          throw new TypeError(`Method ${targetProp} does not exist`);
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(true, pyInstance[targetProp], args);
         }
 
         if (isWorkflowHandler) {
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(true, pyInstance[targetProp], args);
         }
 
         const introspectionMod = await getIntrospectionMod();
@@ -285,7 +296,7 @@ function makeEntrypointProxyHandler(
         return await doPyCall(introspectionMod.wrapper_func, [
           isFetch,
           pyInstance,
-          prop,
+          targetProp,
           ...args,
         ]);
       };
@@ -298,8 +309,6 @@ function makeEntrypointClass(
   classKind: AnyClass,
   methods: string[]
 ): any {
-  const isDurableObject = classKind.name === 'DurableObject';
-  const isWorkflow = classKind.name === 'WorkflowEntrypoint';
   const result = class EntrypointWrapper extends classKind {
     constructor(...args: any[]) {
       super(...args);
@@ -309,7 +318,7 @@ function makeEntrypointClass(
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject, isWorkflow)
+        makeEntrypointProxyHandler(pyInstancePromise, className)
       );
     }
   };
@@ -321,7 +330,7 @@ function makeEntrypointClass(
       // Remove the "on_" prefix.
       method = method.slice(3);
     }
-    result.prototype[method] = function (): void {};
+    result.prototype[method] = function (): void { };
   }
   return result;
 }
