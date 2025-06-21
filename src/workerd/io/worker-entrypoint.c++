@@ -12,6 +12,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/duration-exceeded-lambda.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -289,10 +290,23 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() waiting on context",
       PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
+  // Using a DurationExceededLambda here instead of a DurationExceededLogger to avoid doing a string
+  // heap allocation in the happy path where the duration isn't exceeded.
+  util::DurationExceededLambda contextWaitDurationLambda(kj::systemPreciseMonotonicClock(),
+      5 * kj::SECONDS,
+      [maybeActor = context.getActor()](kj::Duration actualDuration) mutable -> void {
+    kj::Maybe<const Worker::Actor::Id&> maybeActorId = maybeActor.map(
+        [](Worker::Actor& actor) -> const Worker::Actor::Id& { return actor.getId(); });
+    KJ_LOG(WARNING, "NOSENTRY workerEntryPoint waiting on context took longer than expected.",
+        actualDuration, maybeActorId);
+  });
+
   return context
       .run([this, &context, method, url, &headers, &requestBody,
                &metrics = incomingRequest->getMetrics(), &wrappedResponse = *wrappedResponse,
-               entrypointName = entrypointName](Worker::Lock& lock) mutable {
+               entrypointName = entrypointName,
+               contextWaitDurationLambda = kj::mv(contextWaitDurationLambda)](
+               Worker::Lock& lock) mutable {
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
