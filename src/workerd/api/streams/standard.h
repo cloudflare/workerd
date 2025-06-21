@@ -336,6 +336,10 @@ class WritableImpl {
     kj::Maybe<jsg::Function<StreamQueuingStrategy::SizeAlgorithm>> size;
 
     Algorithms() {};
+    ~Algorithms() {
+      // Clear all algorithm references to break circular references
+      clear();
+    }
     Algorithms(Algorithms&& other) = default;
     Algorithms& operator=(Algorithms&& other) = default;
 
@@ -576,6 +580,8 @@ class WritableStreamDefaultController: public jsg::Object {
   explicit WritableStreamDefaultController(
       jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
 
+  ~WritableStreamDefaultController() noexcept(false);
+
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
   jsg::Promise<void> close(jsg::Lock& js);
@@ -604,6 +610,9 @@ class WritableStreamDefaultController: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
   void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
+
+  // Clear algorithms to break circular references during destruction
+  void clearAlgorithms();
 
  private:
   kj::Maybe<IoContext&> ioContext;

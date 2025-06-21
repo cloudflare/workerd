@@ -867,3 +867,54 @@ export class ERR_DIR_CLOSED extends NodeError {
     super('ERR_DIR_CLOSED', 'Directory is closed');
   }
 }
+
+export class ERR_HTTP_HEADERS_SENT extends NodeError {
+  constructor(action: string) {
+    super(
+      'ERR_HTTP_HEADERS_SENT',
+      `Cannot ${action} headers after they are sent to the client`
+    );
+  }
+}
+
+export class ERR_HTTP_CONTENT_LENGTH_MISMATCH extends NodeError {
+  constructor(actual: number, expected: number) {
+    super(
+      'ERR_HTTP_CONTENT_LENGTH_MISMATCH',
+      `Request body length does not match content-length header. Expected: ${expected}, Actual: ${actual}`
+    );
+  }
+}
+
+export class ERR_HTTP_BODY_NOT_ALLOWED extends NodeError {
+  constructor() {
+    super(
+      'ERR_HTTP_BODY_NOT_ALLOWED',
+      'Request with GET/HEAD method cannot have body'
+    );
+  }
+}
+
+export class ERR_HTTP_TRAILER_INVALID extends NodeError {
+  constructor() {
+    super(
+      'ERR_HTTP_TRAILER_INVALID',
+      'Trailers are invalid with this transfer encoding'
+    );
+  }
+}
+
+export class ERR_INVALID_PROTOCOL extends NodeTypeError {
+  constructor(actual: string, expected: string) {
+    super(
+      'ERR_INVALID_PROTOCOL',
+      `Protocol "${actual}" not supported. Expected "${expected}"`
+    );
+  }
+}
+
+export class ERR_UNESCAPED_CHARACTERS extends NodeTypeError {
+  constructor(field: string) {
+    super('ERR_UNESCAPED_CHARACTERS', `${field} contains unescaped characters`);
+  }
+}
