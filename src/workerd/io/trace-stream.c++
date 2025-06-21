@@ -908,18 +908,21 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // Synthesize sub-events
         auto open = SpanOpen(span.parentSpanId, kj::str(span.operationName));
         auto close = SpanClose();
-        kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) -> tracing::Attribute {
-          return tracing::Attribute(kj::mv(tag.key), kj::mv(tag.value));
-        };
         InvocationSpanContext context(event.traceId, event.invocationId, event.spanId);
 
         // TODO(o11y): Replace this with proper instrumentation so that SpanOpen/SpanClose/
         // Attributes events are created and reported individually. Sequence is not supported here yet.
         auto openEvent = TailEvent(context, span.startTime, 0, kj::mv(open));
         auto closeEvent = TailEvent(context, span.endTime, 0, kj::mv(close));
-        auto attrEvent = TailEvent(context, span.startTime, 0, kj::mv(attr));
+
         processEvent(openEvent);
-        processEvent(attrEvent);
+        if (span.tags.size()) {
+          kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) {
+            return tracing::Attribute(kj::mv(tag.key), kj::mv(tag.value));
+          };
+          auto attrEvent = TailEvent(context, span.startTime, 0, kj::mv(attr));
+          processEvent(attrEvent);
+        }
         processEvent(closeEvent);
       } else {
         processEvent(event);
@@ -1156,7 +1159,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
   auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
 
-  return kj::heap<tracing::TailStreamWriter>(
+  return kj::refcounted<tracing::TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lambda holds a bare

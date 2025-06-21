@@ -124,9 +124,6 @@ class RequestObserver: public kj::Refcounted {
   virtual SpanParent getSpan() {
     return nullptr;
   }
-  virtual SpanParent getUserSpan() {
-    return nullptr;
-  }
 
   virtual void setOutcome(EventOutcome outcome) {}
 

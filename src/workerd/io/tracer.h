@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final {
+class TailStreamWriter final: public kj::Refcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
@@ -80,9 +80,12 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
+  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
+
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
+  kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
 
   friend class WorkerTracer;
 };
@@ -136,6 +139,8 @@ class BaseTracer: public kj::Refcounted {
     return self->addRef();
   }
 
+  virtual SpanParent getUserRequestSpan() = 0;
+
   // A weak reference for the internal span submitter. We use this so that the span submitter can
   // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
   // which would interfere with span submission (traces get submitted when the worker returns its
@@ -174,10 +179,16 @@ class WorkerTracer: public BaseTracer {
       tracing::EventInfo&& info) override;
   void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
+  SpanParent getUserRequestSpan() override;
+  // Allow setting the user request span after the tracer has been created so its observer can
+  // reference the tracer. This can only be set once.
+  void setUserRequestSpan(SpanBuilder&& span);
 
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
+  // The root span for the new tracing format.
+  SpanBuilder userRequestSpan;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
