@@ -6,10 +6,10 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 6888640c2896220af0ed869edc645ecffdf2958e..d2f6f0234dbebc32da7f1c588aaa138e57a14128 100644
+index b6c035a6792c8eb404a9d34c1da54814a7673078..43233263eb66a47b9ed332a912b2ff6412a7bf40 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -158,6 +158,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+@@ -157,6 +157,11 @@ v8_flag(name = "v8_enable_verify_predictable")
  
  v8_flag(name = "v8_enable_test_features")
  
@@ -21,7 +21,7 @@ index 6888640c2896220af0ed869edc645ecffdf2958e..d2f6f0234dbebc32da7f1c588aaa138e
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -492,6 +497,7 @@ v8_config(
+@@ -491,6 +496,7 @@ v8_config(
          "v8_enable_drumbrake_tracing": "V8_ENABLE_DRUMBRAKE_TRACING",
          "v8_jitless": "V8_JITLESS",
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
@@ -29,7 +29,7 @@ index 6888640c2896220af0ed869edc645ecffdf2958e..d2f6f0234dbebc32da7f1c588aaa138e
      },
      defines = [
          "GOOGLE3",
-@@ -4470,6 +4476,8 @@ v8_library(
+@@ -4473,6 +4479,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",
