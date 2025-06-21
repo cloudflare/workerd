@@ -62,6 +62,7 @@ class Container: public jsg::Object {
  private:
   IoOwn<rpc::Container::Client> rpcClient;
   bool running;
+  bool monitoring;
 
   kj::Maybe<jsg::Value> destroyReason;
 

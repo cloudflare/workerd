@@ -48,6 +48,16 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   IoContext::current().addTask(req.sendIgnoringResult());
+  IoContext::current().addTask(rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+                                   .sendIgnoringResult()
+                                   .then([this, self = JSG_THIS]() { running = false; },
+                                       [this, self = JSG_THIS](kj::Exception&& error) {
+    running = false;
+
+    if (!monitoring) {
+      IoContext::current().abort(kj::mv(error));
+    }
+  }));
 
   running = true;
 }
@@ -55,10 +65,13 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
+  monitoring = true;
+
   return IoContext::current()
       .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).sendIgnoringResult())
       .then(js, [this](jsg::Lock& js) {
     running = false;
+    monitoring = false;
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
@@ -66,6 +79,7 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
+    monitoring = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
