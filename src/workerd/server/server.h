@@ -164,6 +164,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
+  class WorkerLoaderNamespace;
+  kj::HashMap<kj::StringPtr, kj::Own<WorkerLoaderNamespace>> workerLoaderNamespaces;
+
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
   // Initialized in startAlarmScheduler().
@@ -254,6 +257,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   struct ErrorReporter;
   struct ConfigErrorReporter;
+  struct DynamicErrorReporter;
   struct WorkerDef;
   kj::Own<WorkerService> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
@@ -272,6 +276,10 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
+
+  void unlinkWorkerLoaders();
+
+  friend struct FutureSubrequestChannel;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

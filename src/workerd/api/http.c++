@@ -2601,6 +2601,21 @@ kj::Own<WorkerInterface> Fetcher::getClient(
   KJ_UNREACHABLE;
 }
 
+kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {
+  KJ_SWITCH_ONEOF(channelOrClientFactory) {
+    KJ_CASE_ONEOF(channel, uint) {
+      return ioContext.getIoChannelFactory().getSubrequestChannel(channel);
+    }
+    KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
+      return outgoingFactory->getSubrequestChannel();
+    }
+    KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
+      return outgoingFactory->getSubrequestChannel(ioContext);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 kj::Url Fetcher::parseUrl(jsg::Lock& js, kj::StringPtr url) {
   // We need to prep the request's URL for transmission over HTTP. fetch() accepts URLs that have
   // "." and ".." components as well as fragments (stuff after '#'), all of which needs to be

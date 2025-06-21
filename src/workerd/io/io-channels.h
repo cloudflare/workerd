@@ -5,8 +5,11 @@
 #pragma once
 
 #include <workerd/io/actor-id.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-source.h>
 
 #include <capnp/capability.h>  // for Capability
 #include <kj/debug.h>
@@ -63,6 +66,9 @@ class TimerChannel {
   // not implement any Spectre mitigations.
   virtual kj::Promise<void> afterLimitTimeout(kj::Duration t) = 0;
 };
+
+class WorkerStubChannel;
+struct DynamicWorkerSource;
 
 // Each IoContext has a set of "channels" on which outgoing I/O can be initiated. All outgoing
 // I/O occurs through these channels. Think of these kind of like file descriptors. They are
@@ -136,17 +142,37 @@ class IoChannelFactory {
   virtual kj::Promise<void> writeLogfwdr(
       uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) = 0;
 
-  // Stub for a remote actor. Allows sending requests to the actor. Multiple requests may be
-  // sent, and they will be delivered in the order they are sent (e-order). This is an I/O type
-  // so it is only valid within the `IoContext` where it was created.
-  class ActorChannel {
+  // Object representing somehere where generic workers subrequests can be sent. Multiple requests
+  // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
+  // created.
+  class SubrequestChannel: public kj::Refcounted {
    public:
-    // Start a new request to this actor.
+    // Start a new request to this target.
     //
     // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
     // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
     // `dynamicDispatchTarget` do not.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+  };
+
+  // Obtain an object representing a particular subrequest channel.
+  //
+  // getSubrequestChannel(i).startRequest(meta) is exactly equivalent to startSubrequest(i, meta).
+  // The reason to use this instead is when the channel is not necessarily going to be used to
+  // start a subrequest immediately, but instead is going to be passed around as a capability.
+  //
+  // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) {
+    // TODO(cleanup): Remove this once the production runtime has implemented this.
+    KJ_UNIMPLEMENTED("This runtime doesn't support getSubrequestChannel().");
+  }
+
+  // Stub for a remote actor. Allows sending requests to the actor.
+  class ActorChannel: public SubrequestChannel {
+   public:
+    // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
+    // easy to imagine that actor stubs may have more functionality than just sending requests
+    // someday, so we keep this as a separate type.
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.
@@ -166,10 +192,65 @@ class IoChannelFactory {
   virtual kj::Own<ActorChannel> getColoLocalActor(
       uint channel, kj::StringPtr id, SpanParent parentSpan) = 0;
 
+  // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
+  // token which can be passed into other interfaces that might use the actor class, particularly
+  // Worker::Actor::FacetManager.
+  class ActorClassChannel: public kj::Refcounted {
+   public:
+    // This class has no actual methods!
+  };
+
+  // Get an actor class binding corresponding to the given channel number.
+  virtual kj::Own<ActorClassChannel> getActorClass(uint channel) {
+    // TODO(cleanup): Remove this once the production runtime has implemented this.
+    KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
+  }
+
   // Aborts all actors except those in namespaces marked with `preventEviction`.
   virtual void abortAllActors(kj::Maybe<kj::Exception&> reason) {
     KJ_UNIMPLEMENTED("Only implemented by single-tenant workerd runtime");
   }
+
+  // Use a dynamic Worker loader binding to obtain an Worker by name. If the named Worker
+  // doesn't already exist, the callback will be called to fetch the source code from which the
+  // Worker should be created.
+  virtual kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
+      kj::String name,
+      kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
+    JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
+  }
+};
+
+// Represents a dynamically-loaded Worker to which requests can be sent.
+//
+// This object is returned before the Worker actually loads, so if any errors occur while loading,
+// any requests sent to the Worker will fail, propagating the exception.
+class WorkerStubChannel {
+ public:
+  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
+
+  virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+      kj::Maybe<kj::String> name, Frankenvalue props) = 0;
+
+  // TODO(someday): Allow caller to enumerate entrypoints?
+};
+
+// Source code needed to dynamically load a Worker.
+struct DynamicWorkerSource {
+  WorkerSource source;
+  CompatibilityFlags::Reader compatibilityFlags;
+
+  // `env` object to pass to the loaded worker. Can contain anything that can be serialized to
+  // a `Frankenvalue` (which should eventually include all binding types, RPC stubs, etc.).
+  Frankenvalue env;
+
+  // Where should global fetch() (and connect()) be sent?
+  kj::Own<IoChannelFactory::SubrequestChannel> globalOutbound;
+
+  // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
+  // `StringPtr`s; `ownContent` owns the backing buffer for them.)
+  kj::Own<void> ownContent;
 };
 
 }  // namespace workerd

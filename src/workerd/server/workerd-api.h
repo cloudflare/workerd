@@ -237,6 +237,14 @@ class WorkerdApi final: public Worker::Api {
       }
     };
 
+    struct WorkerLoader {
+      uint channel;
+
+      WorkerLoader clone() const {
+        return *this;
+      }
+    };
+
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
@@ -254,7 +262,8 @@ class WorkerdApi final: public Worker::Api {
         Hyperdrive,
         UnsafeEval,
         MemoryCache,
-        ActorClass>
+        ActorClass,
+        WorkerLoader>
         value;
 
     Global clone() const;
