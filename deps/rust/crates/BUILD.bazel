@@ -140,6 +140,18 @@ alias(
 )
 
 alias(
+    name = "futures-0.3.31",
+    actual = "@crates_vendor__futures-0.3.31//:futures",
+    tags = ["manual"],
+)
+
+alias(
+    name = "futures",
+    actual = "@crates_vendor__futures-0.3.31//:futures",
+    tags = ["manual"],
+)
+
+alias(
     name = "lol_html_c_api-1.3.0",
     actual = "@crates_vendor__lol_html_c_api-1.3.0//:lolhtml",
     tags = ["manual"],
@@ -284,14 +296,14 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.103",
-    actual = "@crates_vendor__syn-2.0.103//:syn",
+    name = "syn-2.0.104",
+    actual = "@crates_vendor__syn-2.0.104//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.103//:syn",
+    actual = "@crates_vendor__syn-2.0.104//:syn",
     tags = ["manual"],
 )
 
