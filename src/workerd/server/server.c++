@@ -1665,42 +1665,83 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::uint fetchStatus = 0;
 };
 
-class WorkerTracerSpanObserver: public SpanObserver,
-                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+class SpanSubmitter final: public kj::Refcounted {
  public:
-  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
-      : workerTracer(kj::mv(workerTracer)),
-        spanId(tracing::staticSpanId),
-        parentSpanId(tracing::staticSpanId) {}
+  SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span);
 
-  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer,
-      tracing::SpanId spanId,
-      tracing::SpanId parentSpanId)
-      : workerTracer(kj::mv(workerTracer)),
-        spanId(spanId),
-        parentSpanId(parentSpanId) {}
+  tracing::SpanId makeSpanId();
+  KJ_DISALLOW_COPY(SpanSubmitter);
 
-  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return kj::refcounted<WorkerTracerSpanObserver>(
-        mapAddRef(workerTracer), tracing::staticSpanId, spanId);
-  }
+ private:
+  uint64_t predictableSpanId;
+  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+};
 
-  void report(const Span& span) override {
-    KJ_IF_SOME(tracer, this->workerTracer) {
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
+SpanSubmitter::SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+    : predictableSpanId(2),
+      workerTracer(kj::mv(workerTracer)) {}
+
+void SpanSubmitter::submitSpan(
+    tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
+
+  // TODO(o11y): Investigate under which conditions the worker tracer terminates before the
+  // top-level span, document or mitigate these limitations.
+  KJ_IF_SOME(tracer, this->workerTracer) {
+    /*kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
       for (const auto& tag: span.tags) {
         tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       }
 
       CompleteSpan completeSpan(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
-          span.startTime, span.endTime, kj::mv(tags));
-      tracer->addSpan(kj::mv(completeSpan));
+          span.startTime, span.endTime, kj::mv(tags));*/
+
+    // We largely recreate the span here which feels inefficient, but is hard to avoid given the
+    // mismatch between the Span type and the full span information required for OTel.
+    CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
+        span.startTime, span.endTime);
+    span2.tags.reserve(span.tags.size());
+    for (auto& tag: span.tags) {
+      span2.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
     }
+    if (isPredictableModeForTest()) {
+      span2.startTime = span2.endTime = kj::UNIX_EPOCH;
+    }
+
+    tracer->addSpan(kj::mv(span2));
+  }
+}
+
+tracing::SpanId SpanSubmitter::makeSpanId() {
+  return tracing::SpanId(predictableSpanId++);
+}
+
+class WorkerTracerSpanObserver: public SpanObserver,
+                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+ public:
+  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+      : spanSubmitter(kj::refcounted<SpanSubmitter>(kj::mv(workerTracer))),
+        spanId(1),
+        parentSpanId(tracing::SpanId::nullId) {}
+
+  WorkerTracerSpanObserver(
+      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId spanId, tracing::SpanId parentSpanId)
+      : spanSubmitter(kj::mv(spanSubmitter)),
+        spanId(spanId),
+        parentSpanId(parentSpanId) {}
+
+  [[nodiscard]] kj::Own<SpanObserver> newChild() override {
+    return kj::refcounted<WorkerTracerSpanObserver>(
+        kj::addRef(*spanSubmitter), spanSubmitter->makeSpanId(), spanId);
+  }
+
+  void report(const Span& span) override {
+    spanSubmitter->submitSpan(spanId, parentSpanId, span);
   }
 
  private:
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  kj::Own<SpanSubmitter> spanSubmitter;
   tracing::SpanId spanId;
   tracing::SpanId parentSpanId;
 };
