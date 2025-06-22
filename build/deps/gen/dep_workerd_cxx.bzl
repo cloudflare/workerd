@@ -2,11 +2,11 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-URL = "https://github.com/cloudflare/workerd-cxx/tarball/4c89d9e695254119f51f89ae5ec3172641b8e9c9"
-STRIP_PREFIX = "cloudflare-workerd-cxx-4c89d9e"
-SHA256 = "31d82ef63bafe74b81861aa98d4272ab3ac745d5f7904e118759c7c69f99208b"
+URL = "https://github.com/cloudflare/workerd-cxx/tarball/33a35299d325c744edbb58da39e6f29eed42b024"
+STRIP_PREFIX = "cloudflare-workerd-cxx-33a3529"
+SHA256 = "a9749efd3d8e60c1a5e02d138eab6caa1eabe565e97acb69022d19770217a26d"
 TYPE = "tgz"
-COMMIT = "4c89d9e695254119f51f89ae5ec3172641b8e9c9"
+COMMIT = "33a35299d325c744edbb58da39e6f29eed42b024"
 
 def dep_workerd_cxx():
     http_archive(

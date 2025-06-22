@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 package(default_visibility = ["//visibility:public"])
 
 rust_proc_macro(
-    name = "cssparser_macros",
+    name = "futures_macro",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,20 +28,21 @@ rust_proc_macro(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_root = "lib.rs",
+    crate_root = "src/lib.rs",
     edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=cssparser-macros",
+        "crate-name=futures-macro",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.6.1",
+    version = "0.3.31",
     deps = [
+        "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
         "@crates_vendor__quote-1.0.40//:quote",
         "@crates_vendor__syn-2.0.104//:syn",
     ],
