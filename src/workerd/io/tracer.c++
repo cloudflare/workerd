@@ -230,10 +230,20 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
     // Compose span events
     // TODO(o11y): Actually report the spanOpen event at span creation time
+    // Important: We'll pass in a zero parentSpanId for the top level span, to indicate that it
+    // should take the spanId from the top level spanId as defined in this system.
+    // TODO: spanId or parentSpanId?
     writer->report(
-        context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)), span.startTime);
+        context, tracing::SpanOpen(span.spanId, kj::str(span.operationName), span.startTime));
+    // writer->report(context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)));
+    //auto spanOpenContext = tracing::InvocationSpanContext(
+    //    topLevelContext.getTraceId(), topLevelContext.getInvocationId() span.parentSpanId);
+    //auto spanComponentContext = tracing::InvocationSpanContext(
+    //    topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
+
+    //writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
     // If a span manages to exceed the size limit, truncate it by not providing span attributes.
-    if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
+    if (span.tags.size()  && messageSize <= MAX_TRACE_BYTES) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
