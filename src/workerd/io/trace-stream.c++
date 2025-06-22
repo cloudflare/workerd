@@ -454,14 +454,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
-
-  // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
-  if (isPredictableModeForTest()) {
-    obj.set(js, SPANID_STR, js.str(kj::hex(staticSpanId)));
-  } else {
-    // TODO(o11y): Fix misleading name.
-    obj.set(js, SPANID_STR, js.str(kj::hex(spanOpen.spanId)));
-  }
+  obj.set(js, SPANID_STR, js.str(kj::hex(spanOpen.spanId)));
 
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
