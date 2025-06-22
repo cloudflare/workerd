@@ -518,7 +518,6 @@ class Isolate: public IsolateBase {
     dropWrappers([this]() { wrappers.clear(); });
   }
 
- public:
   kj::Exception unwrapException(
       Lock& js, v8::Local<v8::Context> context, v8::Local<v8::Value> exception) override {
     return getWrapperByContext(context)->template unwrap<kj::Exception>(

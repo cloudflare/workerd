@@ -778,7 +778,8 @@ class UnhandledRejectionHandler {
   };
 
   struct UnhandledRejectionCallbacks {
-    inline const UnhandledRejection& keyForRow(const UnhandledRejection& row) const {
+    inline const UnhandledRejection& keyForRow(
+        const UnhandledRejection& row KJ_LIFETIMEBOUND) const {
       return row;
     }
     inline bool matches(const UnhandledRejection& a, const UnhandledRejection& b) const {
