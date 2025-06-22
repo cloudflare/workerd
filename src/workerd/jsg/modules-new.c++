@@ -909,7 +909,7 @@ class StaticModuleBundle final: public ModuleBundle {
             };
           }
           KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
-            Module& module = *resolved;
+            const Module& module = *resolved;
             lock->upsert(context.specifier.clone(), kj::mv(resolved));
             return Resolved{
               .module = checkModule(context, module),

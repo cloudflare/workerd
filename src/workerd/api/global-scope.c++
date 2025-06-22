@@ -791,7 +791,7 @@ jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
     jsg::Function<void()> function, double msDelay) {
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /** repeats = */ false, kj::mv(function), msDelay);
+      /* repeat */ false, kj::mv(function), msDelay);
   return timeoutId.toNumber();
 }
 
@@ -976,7 +976,7 @@ jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
     function(js, kj::mv(args));
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
+      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
   return js.alloc<Immediate>(context, timeoutId);
 }
 

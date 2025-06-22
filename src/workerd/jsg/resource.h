@@ -997,7 +997,7 @@ struct DeserializeInvoker<TypeWrapper,
 // SFINAE to detect if a type has a static method called `constructor`.
 template <typename T, typename Constructor = decltype(&T::constructor)>
 constexpr bool hasConstructorMethod(T*) {
-  static_assert(!std::is_member_function_pointer<Constructor>::value,
+  static_assert(!std::is_member_function_pointer_v<Constructor>,
       "JSG resource type `constructor` member functions must be static.");
   // TODO(cleanup): Write our own isMemberFunctionPointer and put it in KJ so we don't have to pull
   //   in <type_traits>. (See the "Motivation" section of Boost.CallableTraits for why I didn't just

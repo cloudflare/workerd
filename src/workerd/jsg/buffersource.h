@@ -25,9 +25,8 @@ namespace workerd::jsg {
   V(BigUint64Array, 8, true)
 
 template <typename T>
-concept BufferSourceType = requires(T a) {
-  kj::isSameType<v8::ArrayBuffer, T>() || std::is_base_of<v8::ArrayBufferView, T>::value;
-};
+concept BufferSourceType = requires(
+    T a) { kj::isSameType<v8::ArrayBuffer, T>() || std::is_base_of_v<v8::ArrayBufferView, T>; };
 
 template <BufferSourceType T>
 static constexpr size_t getBufferSourceElementSize() {
