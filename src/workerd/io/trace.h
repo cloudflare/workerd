@@ -546,6 +546,8 @@ struct Hibernate final {
 
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
 // can also be used to describe the start of a fetch subrequest.
+// TODO(o11y): Write KJ_STRINGIFY() for EventInfo to beef up logging for events reported after
+// stream close.
 using EventInfo = kj::OneOf<FetchEventInfo,
     JsRpcEventInfo,
     ScheduledEventInfo,
