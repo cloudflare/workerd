@@ -4,6 +4,7 @@
 
 from workers import WorkflowEntrypoint
 
+
 class WorkflowEntrypointExample(WorkflowEntrypoint):
     def __init__(self, state, env):
         self.state = state
@@ -24,6 +25,7 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
             return event["foo"]
 
         return step.do("my_second_step", step_with_callback)
+
 
 async def test(ctrl, env, ctx):
     pass

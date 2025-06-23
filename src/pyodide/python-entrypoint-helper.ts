@@ -242,10 +242,25 @@ const SPECIAL_DO_HANDLER_NAMES = [
   'webSocketError',
 ];
 
+interface CompatibilityFlags {
+  python_workflows?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+interface CloudflareGlobal {
+  Cloudflare?: {
+    compatibilityFlags?: CompatibilityFlags;
+  };
+}
+
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
   className: string
 ): ProxyHandler<any> {
+  const compatibilityFlags: CompatibilityFlags =
+    (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
+  const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;
+
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
@@ -269,7 +284,11 @@ function makeEntrypointProxyHandler(
         const pyInstance = await pyInstancePromise;
         let targetProp = prop;
 
-        if (targetProp == 'run' && typeof pyInstance['on_run'] === 'function' && typeof pyInstance['run'] !== 'function') {
+        if (
+          targetProp == 'run' &&
+          typeof pyInstance['on_run'] === 'function' &&
+          typeof pyInstance['run'] !== 'function'
+        ) {
           // unfortunately we can't solely rely on the subclass
           // we're also considering everything that implements an `on_run` method to be a workflow
           // and handling it appropriately on the `run` prop
@@ -287,7 +306,8 @@ function makeEntrypointProxyHandler(
           return await doPyCallHelper(true, pyInstance[targetProp], args);
         }
 
-        if (isWorkflowHandler) {
+        if (workflowsEnabled && isWorkflowHandler) {
+          // we're hiding this behind a compat flag for now
           return await doPyCallHelper(true, pyInstance[targetProp], args);
         }
 

@@ -1,4 +1,4 @@
-import { RpcTarget } from "cloudflare:workers";
+import { RpcTarget } from 'cloudflare:workers';
 import * as assert from 'node:assert';
 
 class Context extends RpcTarget {
@@ -12,9 +12,12 @@ export default {
     // JS types
     const stubStep = new Context();
 
-    const resp = await env.PythonWorkflow.run({
-      foo: "bar",
-    }, stubStep);
-    assert.deepStrictEqual(resp, "bar");
+    const resp = await env.PythonWorkflow.run(
+      {
+        foo: 'bar',
+      },
+      stubStep
+    );
+    assert.deepStrictEqual(resp, 'bar');
   },
 };

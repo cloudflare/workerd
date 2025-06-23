@@ -3,15 +3,13 @@
 # programming language.
 import datetime
 import functools
-import asyncio
 import http.client
-import json
 import inspect
+import json
 from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
-from operator import call
 from types import LambdaType
 from typing import Any, TypedDict, Unpack
 
@@ -941,14 +939,16 @@ class _WorkflowStepWrapper:
         if callback is None:
             # Return a decorator that will execute the function when called
             def decorator(func):
-                @functools.wraps(callback)
+                @functools.wraps(func)
                 async def wrapper(*args, **kwargs):
-                    return self._do_call(name, config, func)
+                    return _do_call(self, name, config, func)
+
                 return wrapper
+
             return decorator
 
         # Original callback-based implementation
-        return self._do_call(name, config, callback)
+        return _do_call(self, name, config, callback)
 
     def wait_for_event(self, name, type, timeout=None):
         options = {"type": type}
@@ -957,19 +957,19 @@ class _WorkflowStepWrapper:
         event = self._js_step.waitForEvent(name, to_js(options))
         return python_from_rpc(event)
 
-    def _do_call(self, name, config, callback):
-        async def _callback():
-            result = callback()
-            if inspect.isawaitable(result):
-                result = await result
-            return result
+def _do_call(entrypoint, name, config, callback):
+    async def _callback():
+        result = callback()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
-        if config is None:
-            result = self._js_step.do(name, _callback)
-        else:
-            result = self._js_step.do(name, to_js(config), _callback)
+    if config is None:
+        result = entrypoint._js_step.do(name, _callback)
+    else:
+        result = entrypoint._js_step.do(name, to_js(config), _callback)
 
-        return python_from_rpc(result)
+    return python_from_rpc(result)
 
 def _wrap_subclass(cls):
     # Override the class __init__ so that we can wrap the `env` in the constructor.
@@ -983,6 +983,7 @@ def _wrap_subclass(cls):
 
     cls.__init__ = wrapped_init
 
+
 def _wrap_workflow_step(cls):
     run_fn = getattr(cls, "on_run", None)
     if run_fn is None:
@@ -993,7 +994,8 @@ def _wrap_workflow_step(cls):
         # Not a workflow subclass, so don't wrap `on_run`.
         return
 
-    async def wrapped_run(self, event = None, step = None, /, *args, **kwargs):
+    @functools.wraps(run_fn)
+    async def wrapped_run(self, event=None, step=None, /, *args, **kwargs):
         if event is not None:
             event = python_from_rpc(event)
         if step is not None:
@@ -1002,7 +1004,8 @@ def _wrap_workflow_step(cls):
         result = run_fn(self, event, step, *args, **kwargs)
 
         if inspect.iscoroutine(result):
-            return python_from_rpc(await result)
+            result = await result
+
         return python_from_rpc(result)
 
     cls.on_run = wrapped_run
