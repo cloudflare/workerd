@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index be2889dfc52358a678c5ff121d08de9155bf693e..f445eed022d8183a97c9258fd837fc9d9e114170 100644
+index 1305a90ee5933f5eb86991c847e82d580f7f5d39..1b880df6060175c74c9640a5cced54998d405733 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4407,17 +4407,19 @@ cc_library(
+@@ -4409,17 +4409,19 @@ cc_library(
      ],
  )
  
@@ -42,7 +42,7 @@ index be2889dfc52358a678c5ff121d08de9155bf693e..f445eed022d8183a97c9258fd837fc9d
  
  v8_library(
      name = "v8_libshared",
-@@ -4448,14 +4450,14 @@ v8_library(
+@@ -4450,15 +4452,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",
@@ -53,6 +53,7 @@ index be2889dfc52358a678c5ff121d08de9155bf693e..f445eed022d8183a97c9258fd837fc9d
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
          "@abseil-cpp//absl/container:flat_hash_set",
+         "@abseil-cpp//absl/functional:overload",
          "@highway//:hwy",
 +        "@fast_float",
 +        "@simdutf",
@@ -60,7 +61,7 @@ index be2889dfc52358a678c5ff121d08de9155bf693e..f445eed022d8183a97c9258fd837fc9d
  )
  
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index 918cb873481ada2c6b7cb26aaf3df070122519e7..ad61a1df8a2e692679238a2e7d1f0bfe74c2b976 100644
+index 189d424835ababe424dfade41f392466d65218fb..3713cff4219efc65e62fb005d5c6070db1e66356 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -2,6 +2,7 @@
@@ -80,18 +81,19 @@ index 918cb873481ada2c6b7cb26aaf3df070122519e7..ad61a1df8a2e692679238a2e7d1f0bfe
  namespace v8 {
  namespace internal {
 diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index 3056a07d334109330f9f92d96b5055ab8d665e09..495ae33c4ee13657c3f335e49f3c7b8d97d19332 100644
+index c1bbd1ead74ba42d571452c722a96864fba0a5c2..80e365b8f350527437beef36546d0f8d947e00be 100644
 --- a/src/objects/string-inl.h
 +++ b/src/objects/string-inl.h
-@@ -11,6 +11,7 @@
- #include <optional>
+@@ -12,6 +12,8 @@
  #include <type_traits>
  
+ #include "absl/functional/overload.h"
 +#include "simdutf.h"
- #include "src/base/template-utils.h"
++#include "src/base/template-utils.h"
  #include "src/common/assert-scope.h"
  #include "src/common/globals.h"
-@@ -38,7 +39,6 @@
+ #include "src/execution/isolate-utils.h"
+@@ -38,7 +40,6 @@
  #include "src/torque/runtime-macro-shims.h"
  #include "src/torque/runtime-support.h"
  #include "src/utils/utils.h"
@@ -100,7 +102,7 @@ index 3056a07d334109330f9f92d96b5055ab8d665e09..495ae33c4ee13657c3f335e49f3c7b8d
  // Has to be the last include (doesn't have include guards):
  #include "src/objects/object-macros.h"
 diff --git a/src/objects/string.h b/src/objects/string.h
-index 77fbde31a0ef8ba1cc08308b7171137e3dda1e16..e0f9db948ab2b2bd8cbdf7081fb89ca9b2b2f860 100644
+index 482e5261d9041e4b9415ed82d63bc86ff4d076d2..23cb19a32c297e8c76a704f7826945283a3aff36 100644
 --- a/src/objects/string.h
 +++ b/src/objects/string.h
 @@ -8,6 +8,7 @@
