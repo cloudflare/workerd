@@ -74,8 +74,8 @@ SqliteMetadata::Initialized& SqliteMetadata::ensureInitialized() {
   if (!tableCreated) {
     db.run(R"(
       CREATE TABLE IF NOT EXISTS _cf_METADATA (
-        key INTEGER PRIMARY KEY,
-        value BLOB
+        "key" INTEGER PRIMARY KEY,
+        "value" BLOB
       );
     )");
     tableCreated = true;
