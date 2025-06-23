@@ -13,17 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Setup Linux
-        if: runner.os == 'Linux'
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 19
-          sudo apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
       - name: Configure download mirrors
         shell: bash
         run: |
