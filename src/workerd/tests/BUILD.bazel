@@ -6,10 +6,11 @@ load("//:build/wd_test.bzl", "wd_test")
 wd_cc_library(
     name = "bench-tools",
     hdrs = ["bench-tools.h"],
+    tags = ["workerd-benchmark"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj:kj-test",
-        "@com_google_benchmark//:benchmark",
+        "@workerd-google-benchmark//:benchmark",
     ],
 )
 
@@ -90,4 +91,18 @@ wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
     data = ["unknown-import-assertions-test.js"],
+)
+
+filegroup(
+    name = "all_benchmarks",
+    srcs = [
+        ":bench-api-headers",
+        ":bench-fast-api",
+        ":bench-global-scope",
+        ":bench-json",
+        ":bench-kj-headers",
+        ":bench-mimetype",
+        ":bench-regex",
+    ],
+    visibility = ["//visibility:public"],
 )

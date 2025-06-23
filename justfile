@@ -99,3 +99,6 @@ generate-types:
 
 create-external:
   tools/unix/create-external.sh
+
+bench-all:
+  bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
