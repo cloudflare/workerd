@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.8.258.19"
+VERSION = "13.9.205.1"
 
-INTEGRITY = "sha256-lKz2HkNJQdVv2fvAsgYFsADg+oV6PL1+9KjOotGbU98="
+INTEGRITY = "sha256-+/weqtRFD5U7tzYbfTybc8InXpHbH4lsQfVPMv0tCNQ="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -16,21 +16,21 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Seal-the-HandleScope-when-performing-GC.patch",
-    "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-    "0013-Update-illegal-invocation-error-message-in-v8.patch",
-    "0014-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0015-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0016-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0017-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0018-Enable-V8-shared-linkage.patch",
-    "0019-Modify-where-to-look-for-fast_float-and-simdutf.patch",
-    "0020-Remove-unneded-latomic-linker-flag.patch",
-    "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
-    "0023-Port-concurrent-mksnapshot-support.patch",
-    "0024-Port-V8_USE_ZLIB-support.patch",
-    "0025-Modify-where-to-look-for-dragonbox.patch",
+    "0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+    "0012-Update-illegal-invocation-error-message-in-v8.patch",
+    "0013-Implement-cross-request-context-promise-resolve-hand.patch",
+    "0014-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0016-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0017-Enable-V8-shared-linkage.patch",
+    "0018-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0019-Remove-unneded-latomic-linker-flag.patch",
+    "0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
+    "0021-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
+    "0022-Port-concurrent-mksnapshot-support.patch",
+    "0023-Port-V8_USE_ZLIB-support.patch",
+    "0024-Modify-where-to-look-for-dragonbox.patch",
+    "0025-Disable-slow-handle-check.patch",
     "0026-Workaround-for-builtin-can-allocate-issue.patch",
 ]
 
