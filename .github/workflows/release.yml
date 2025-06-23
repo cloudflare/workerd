@@ -97,7 +97,7 @@ jobs:
             target-arch: ARM64
           - title: windows
             os-name: Windows
-            image: windows-2022
+            image: windows-2025
             bazel-config: release_windows
             target-arch: X64
     name: build (${{ matrix.title }})
