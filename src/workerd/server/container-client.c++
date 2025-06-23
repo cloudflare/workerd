@@ -133,7 +133,7 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
     auto maybeMappedPort = portMappings.find(containerPort);
     if (maybeMappedPort == kj::none) {
       throw JSG_KJ_EXCEPTION(DISCONNECTED, Error,
-          "connect(): Connection refused: container port not found. Make sure you exposed the port in your container definition.");
+          "connect(): Connection refused: container port not found. Make sure you have exposed the port in your container definition. Your container may also still be starting up.");
     }
     auto mappedPort = KJ_ASSERT_NONNULL(maybeMappedPort);
 
