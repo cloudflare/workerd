@@ -43,7 +43,7 @@ build:ci-test --config=v8-codegen-opt
 # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
 # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
 # this is already the default for Linux/Windows.
-build:ci-limit-storage --build_tag_filters=-off-by-default,-benchmark
+build:ci-limit-storage --build_tag_filters=-off-by-default,-workerd-benchmark
 build:ci-limit-storage --copt="-g1"
 build:ci-limit-storage --copt="-fno-standalone-debug"
 

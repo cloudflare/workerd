@@ -9,7 +9,7 @@
 -Iexternal/abseil-cpp/
 -Iexternal/simdutf/
 -Iexternal/nbytes/include/
--Iexternal/com_google_benchmark/include/
+-Iexternal/codspeed/google_benchmark/include/
 -Iexternal/perfetto/include/
 -Iexternal/perfetto/include/perfetto/base/build_configs/bazel/
 -Iexternal/ssl/include
