@@ -99,6 +99,14 @@ v8::Maybe<bool> Serializer::IsHostObject(v8::Isolate* isolate, v8::Local<v8::Obj
   KJ_ASSERT(!treatClassInstancesAsPlainObjects);
   KJ_ASSERT(!prototypeOfObject.IsEmpty());
 
+  // After v8 13.9, native errors needs to be handeld as a non-host objects.
+  // Meaning, we need to let default v8 serializer to handle native errors, rather than our
+  // own.
+  // Ref: https://github.com/v8/v8/commit/e3df60f3f5abe85f819ff2fad6a41d0709e30a61
+  if (object->IsNativeError()) {
+    return v8::Just(false);
+  }
+
   // If the object's prototype is Object.prototype, then it is a plain object, which we'll allow
   // to be serialized normally. Otherwise, it is a class instance, which we should treat as a host
   // object. Inside `WriteHostObject()` we will throw DataCloneError due to the object not having
