@@ -2,13 +2,12 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/uuid.h>
 
 #include <kj/hash.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
-#include <kj/timer.h>
+#include <kj/time.h>
 
 #include <list>
 #include <set>

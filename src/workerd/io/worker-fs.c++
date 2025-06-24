@@ -1073,7 +1073,7 @@ bool TmpDirStoreScope::hasCurrent() {
 
 TmpDirStoreScope& TmpDirStoreScope::current() {
   KJ_ASSERT(hasCurrent(), "no current TmpDirStoreScope");
-  return *static_cast<TmpDirStoreScope*>(tmpDirStorageScope);
+  return *tmpDirStorageScope;
 }
 
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)

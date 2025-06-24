@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/http.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>

@@ -1,5 +1,7 @@
 #include "dh.h"
 
+#include "impl.h"
+
 #include <workerd/io/io-context.h>
 
 #include <ncrypto.h>

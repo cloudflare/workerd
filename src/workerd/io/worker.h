@@ -12,20 +12,15 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
-#include <workerd/io/outcome.capnp.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker-fs.h>
-#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
-#include <workerd/util/xthreadnotifier.h>
 
-#include <capnp/schema.capnp.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 

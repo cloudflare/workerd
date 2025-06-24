@@ -156,7 +156,7 @@ KJ_TEST("FacetTreeIndex corruption handling") {
     // Write valid entry: parent=0, name="valid"
     uint16_t parent = 0;
     uint16_t nameLen = 5;
-    byte entry[4 + 5];
+    byte entry[4 + 5] = {0};
     memcpy(entry, &parent, 2);
     memcpy(entry + 2, &nameLen, 2);
     memcpy(entry + 4, "valid", 5);
@@ -165,7 +165,7 @@ KJ_TEST("FacetTreeIndex corruption handling") {
     // Write corrupted entry: parent=999 (invalid), name="corrupt"
     uint16_t badParent = 999;
     uint16_t badNameLen = 7;
-    byte badEntry[4 + 7];
+    byte badEntry[4 + 7] = {0};
     memcpy(badEntry, &badParent, 2);
     memcpy(badEntry + 2, &badNameLen, 2);
     memcpy(badEntry + 4, "corrupt", 7);
@@ -175,7 +175,7 @@ KJ_TEST("FacetTreeIndex corruption handling") {
     // Write valid entry after corruption that should be ignored
     uint16_t ignoredParent = 0;
     uint16_t ignoredNameLen = 7;
-    byte ignoredEntry[4 + 7];
+    byte ignoredEntry[4 + 7] = {0};
     memcpy(ignoredEntry, &ignoredParent, 2);
     memcpy(ignoredEntry + 2, &ignoredNameLen, 2);
     memcpy(ignoredEntry + 4, "ignored", 7);

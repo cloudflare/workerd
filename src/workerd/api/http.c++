@@ -190,7 +190,7 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
     KJ_DREQUIRE(!('A' <= c && c <= 'Z'));
   }
 #endif
-  return headers.find(name) != headers.end();
+  return headers.contains(name);
 }
 
 kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
@@ -306,7 +306,7 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 
 bool Headers::has(jsg::ByteString name) {
   requireValidHeaderName(name);
-  return headers.find(toLower(kj::mv(name))) != headers.end();
+  return headers.contains(toLower(kj::mv(name)));
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {

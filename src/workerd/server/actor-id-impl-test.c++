@@ -11,8 +11,8 @@
 #include <kj/encoding.h>
 #include <kj/test.h>
 
-constexpr kj::byte zero32[SHA256_DIGEST_LENGTH] = {
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+constexpr kj::byte zero32[SHA256_DIGEST_LENGTH] = {0};
+
 KJ_TEST("ActorIdImpl equals test") {
   using ActorIdImpl = workerd::server::ActorIdFactoryImpl::ActorIdImpl;
   struct ActorEqualsTest {
@@ -25,7 +25,7 @@ KJ_TEST("ActorIdImpl equals test") {
         const char* rightString,
         bool expectedResult)
         : expectedResult(expectedResult) {
-      kj::byte idParamCopier[SHA256_DIGEST_LENGTH];
+      kj::byte idParamCopier[SHA256_DIGEST_LENGTH] = {0};
       memset(idParamCopier, leftFill, SHA256_DIGEST_LENGTH);
       if (leftString == nullptr) {
         actorLeft = ActorIdImpl(idParamCopier, kj::none);
@@ -59,10 +59,10 @@ kj::String computeProperTestMac(const char* strId, const char* strKey) {
   auto id = kj::decodeHex(kj::heapString(strId));
   KJ_ASSERT(!id.hadErrors);
   KJ_ASSERT(id.size() == SHA256_DIGEST_LENGTH);
-  kj::byte key[SHA256_DIGEST_LENGTH];
+  kj::byte key[SHA256_DIGEST_LENGTH] = {0};
   auto stringPtrKey = kj::StringPtr(strKey);
   SHA256(stringPtrKey.asBytes().begin(), stringPtrKey.size(), key);
-  kj::byte hmacOut[SHA256_DIGEST_LENGTH];
+  kj::byte hmacOut[SHA256_DIGEST_LENGTH] = {0};
   unsigned int len = SHA256_DIGEST_LENGTH;
   HMAC(EVP_sha256(), key, sizeof(key), id.begin(), BASE_LENGTH, hmacOut, &len);
   KJ_ASSERT(len == SHA256_DIGEST_LENGTH);

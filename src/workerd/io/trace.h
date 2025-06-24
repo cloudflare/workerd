@@ -10,7 +10,6 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
 
-#include <kj/async.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>

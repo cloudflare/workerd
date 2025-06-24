@@ -127,7 +127,7 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(
     auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
-    for (auto entry: value) {
+    for (const auto& entry: value) {
       auto& bytesRef =
           entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedReadBytes : uncachedReadBytes;
       bytesRef += entry.key.size() + entry.value.size();
@@ -164,7 +164,7 @@ getMultipleResultsToMap(size_t numInputKeys) {
       auto map = js.map();
       uint32_t cachedUnits = 0;
       uint32_t uncachedUnits = 0;
-      for (auto entry: value) {
+      for (const auto& entry: value) {
         auto& unitsRef =
             entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedUnits : uncachedUnits;
         unitsRef += billingUnits(entry.key.size() + entry.value.size());
