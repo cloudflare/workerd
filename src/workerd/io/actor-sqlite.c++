@@ -474,9 +474,19 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
 
-  for (auto& pair: pairs) {
-    kv.put(pair.key, pair.value);
+  db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
+
+  for (const auto& pair: pairs) {
+    try {
+      kv.put(pair.key, pair.value);
+    } catch (kj::Exception e) {
+      db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+      db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+      kj::throwFatalException(kj::mv(e));
+    }
   }
+
+  db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
   return kj::none;
 }
 
