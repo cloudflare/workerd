@@ -1,0 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <erikcorry@chromium.org>
+Date: Fri, 20 Jun 2025 16:44:42 +0200
+Subject: Workaround for builtin-can-allocate issue
+
+
+diff --git a/src/snapshot/builtins-effects-dummy.cc b/src/snapshot/builtins-effects-dummy.cc
+index 495c65aabdf13c22f053ab492971d42f6c84cc8f..7df94c00f137098c3d76e455c08a3d3074f51b12 100644
+--- a/src/snapshot/builtins-effects-dummy.cc
++++ b/src/snapshot/builtins-effects-dummy.cc
+@@ -13,6 +13,6 @@ namespace v8::internal {
+ // TODO(dmercadier): try to compile builtins in an order such that callees are
+ // compiled before callers, so that we can make use of the CanAllocate
+ // information for callees when computing callers.
+-bool BuiltinCanAllocate(Builtin builtin) { return true; }
++bool BuiltinCanAllocate(Builtin builtin) { return false; }
+ 
+ }  // namespace v8::internal

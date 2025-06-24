@@ -31,6 +31,7 @@ PATCHES = [
     "0023-Port-concurrent-mksnapshot-support.patch",
     "0024-Port-V8_USE_ZLIB-support.patch",
     "0025-Modify-where-to-look-for-dragonbox.patch",
+    "0026-Workaround-for-builtin-can-allocate-issue.patch",
 ]
 
 # V8 and its dependencies
