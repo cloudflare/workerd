@@ -7554,6 +7554,22 @@ export declare type EmailExportedHandler<Env = unknown> = (
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
+/**
+ * Hello World binding to serve as an explanatory example. DO NOT USE
+ */
+export interface HelloWorldBinding {
+  /**
+   * Retrieve the current stored value
+   */
+  get(): Promise<{
+    value: string;
+    ms?: number;
+  }>;
+  /**
+   * Set a new stored value
+   */
+  set(value: string): Promise<void>;
+}
 export interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
