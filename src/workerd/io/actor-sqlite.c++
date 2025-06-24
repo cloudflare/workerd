@@ -379,6 +379,16 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
   }
 }
 
+void ActorSqlite::checkKeyValSize(Key& key, Value& value) {
+  auto limitLength = kv.getLimitLength() - 1;
+  JSG_REQUIRE(key.size() <= limitLength, RangeError,
+      kj::str("Keys cannot be larger than ", limitLength, " bytes. ", "A key of size ", key.size(),
+          " was provided."));
+  JSG_REQUIRE(value.size() <= limitLength, RangeError,
+      kj::str("Values cannot be larger than ", limitLength, " bytes. ", "A value of size ",
+          value.size(), " was provided."));
+}
+
 // =======================================================================================
 // ActorCacheInterface implementation
 
@@ -451,12 +461,19 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
+  checkKeyValSize(key, value);
+
   kv.put(key, value);
   return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
+
+  for (auto& pair: pairs) {
+    // We check limits in a separate loop to fail the whole operation when any pair fails a check
+    checkKeyValSize(pair.key, pair.value);
+  }
 
   for (auto& pair: pairs) {
     kv.put(pair.key, pair.value);

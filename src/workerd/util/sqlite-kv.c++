@@ -87,6 +87,10 @@ uint SqliteKv::deleteAll() {
   return count;
 }
 
+uint32_t SqliteKv::getLimitLength() {
+  return sqlite3_limit(db, SQLITE_LIMIT_LENGTH, -1);
+}
+
 void SqliteKv::beforeSqliteReset() {
   // We'll need to recreate the table on the next operation.
   tableCreated = false;

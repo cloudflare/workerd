@@ -57,6 +57,8 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   uint deleteAll();
 
+  uint32_t getLimitLength();
+
   // TODO(perf): Should we provide multi-get, multi-put, and multi-delete? It's a bit tricky to
   //   implement them as single SQL queries, while still using prepared statements. The c-array
   //   extension might help here, though it can only support arrays of NUL-terminated strings, not
