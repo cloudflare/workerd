@@ -5,7 +5,7 @@
 
 #include <workerd/jsg/jsg.h>
 
-#include <kj/string.h>
+#include <kj/common.h>
 
 namespace workerd::api {
 

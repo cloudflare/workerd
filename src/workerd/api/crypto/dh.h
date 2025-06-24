@@ -1,10 +1,8 @@
 #pragma once
 
-#include "impl.h"
-
 #include <workerd/jsg/jsg.h>
 
-#include <openssl/dh.h>
+#include <openssl/base.h>
 
 #include <kj/common.h>
 

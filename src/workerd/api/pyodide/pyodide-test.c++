@@ -242,7 +242,6 @@ w["h
   KJ_REQUIRE(result.size() == 0);
 }
 
-using pyodide::ArtifactBundler;
 using pyodide::PythonModuleInfo;
 
 template <typename... Params>

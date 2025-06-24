@@ -9,6 +9,7 @@
 
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>
+#include <kj/debug.h>
 
 namespace workerd {
 

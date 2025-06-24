@@ -20,8 +20,6 @@
 
 #include <capnp/dynamic.h>
 
-#include <unordered_set>
-
 namespace workerd::api::node {
 
 // To be exposed only as an internal module for use by other built-ins.

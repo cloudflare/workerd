@@ -54,7 +54,7 @@ SharedMemoryCache::~SharedMemoryCache() noexcept(false) {
 
 void SharedMemoryCache::suggest(const Limits& limits) const {
   auto data = this->data.lockExclusive();
-  bool isKnownLimit = data->suggestedLimits.find(limits) != data->suggestedLimits.end();
+  bool isKnownLimit = data->suggestedLimits.contains(limits);
   data->suggestedLimits.insert(limits);
   if (!isKnownLimit) {
     resize(*data);

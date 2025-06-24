@@ -5,6 +5,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/compat/url.h>
+#include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
 #include <kj/thread.h>

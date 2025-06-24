@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 

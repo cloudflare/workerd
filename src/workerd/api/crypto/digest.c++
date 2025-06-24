@@ -240,7 +240,7 @@ kj::OneOf<jsg::Ref<CryptoKey>, CryptoKeyPair> CryptoKey::Impl::generateHmac(jsg:
       "HMAC key length must be a non-zero unsigned long integer (requested ", length, ").");
 
   auto keyDataArray = kj::heapArray<kj::byte>(
-      integerCeilDivision<std::make_unsigned<decltype(length)>::type>(length, 8u));
+      integerCeilDivision<std::make_unsigned_t<decltype(length)>>(length, 8u));
   IoContext::current().getEntropySource().generate(keyDataArray);
   zeroOutTrailingKeyBits(keyDataArray, length);
 

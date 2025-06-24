@@ -1,5 +1,6 @@
 #include "unsafe.h"
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/script.h>
 

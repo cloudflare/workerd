@@ -8,12 +8,10 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
-#include <capnp/message.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/string.h>
-#include <kj/tuple.h>
 
 namespace workerd::server {
 
