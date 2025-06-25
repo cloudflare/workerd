@@ -416,6 +416,10 @@ function decodeSnapshot(
   if (!reader) {
     return undefined;
   }
+  if (reader.getMemorySnapshotSize() === 0) {
+    // TODO: This code path happens in the validator. It shouldn't.
+    return undefined;
+  }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
   if (header[0] !== SNAPSHOT_MAGIC) {
