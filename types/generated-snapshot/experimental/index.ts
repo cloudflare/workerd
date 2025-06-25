@@ -6145,7 +6145,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
     Options extends AiOptions,
