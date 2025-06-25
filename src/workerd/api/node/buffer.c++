@@ -78,6 +78,8 @@ uint32_t writeInto(jsg::Lock& js,
     uint32_t offset,
     uint32_t length,
     Encoding encoding) {
+  KJ_ASSERT(offset <= buffer.size());
+  KJ_ASSERT(length <= buffer.size() - offset);
   auto dest = buffer.slice(offset, kj::min(offset + length, buffer.size()));
   if (dest.size() == 0 || string.length(js) == 0) {
     return 0;
@@ -198,9 +200,11 @@ int BufferUtil::compare(jsg::Lock& js,
   // The options allow comparing subranges within the two inputs.
   KJ_IF_SOME(options, maybeOptions) {
     auto end = options.aEnd.orDefault(ptrOne.size());
+    end = kj::min(end, ptrOne.size());
     auto start = kj::min(end, options.aStart.orDefault(0));
     ptrOne = ptrOne.slice(start, end);
     end = options.bEnd.orDefault(ptrTwo.size());
+    end = kj::min(end, ptrTwo.size());
     start = kj::min(end, options.bStart.orDefault(0));
     ptrTwo = ptrTwo.slice(start, end);
   }
@@ -411,6 +415,7 @@ jsg::Optional<uint32_t> indexOfString(jsg::Lock& js,
 
 jsg::JsString toStringImpl(
     jsg::Lock& js, kj::ArrayPtr<kj::byte> bytes, uint32_t start, uint32_t end, Encoding encoding) {
+  KJ_ASSERT(end <= bytes.size());
   if (end < start) end = start;
   auto slice = bytes.slice(start, end);
   if (slice.size() == 0) return js.str();
@@ -508,6 +513,8 @@ void BufferUtil::swap(jsg::Lock& js, jsg::BufferSource buffer, int size) {
 
 jsg::JsString BufferUtil::toString(
     jsg::Lock& js, jsg::BufferSource bytes, uint32_t start, uint32_t end, EncodingValue encoding) {
+  end = kj::min(bytes.size(), end);
+  if (end <= start) return js.str();
   return toStringImpl(js, bytes, start, end, static_cast<Encoding>(encoding));
 }
 
@@ -517,6 +524,8 @@ uint32_t BufferUtil::write(jsg::Lock& js,
     uint32_t offset,
     uint32_t length,
     EncodingValue encoding) {
+  length = kj::min(length, buffer.size() - offset);
+  if (length == 0) return 0;
   return writeInto(js, buffer, string, offset, length, static_cast<Encoding>(encoding));
 }
 
