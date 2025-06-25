@@ -5884,7 +5884,7 @@ type AiModelListType = Record<string, any>;
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
     Options extends AiOptions,
