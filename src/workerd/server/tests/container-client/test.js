@@ -223,8 +223,8 @@ export const testBasics = {
 // Test exit code monitor functionality
 export const testExitCode = {
   async test(_ctrl, env) {
-    const id = env.CONTAINER.idFromName('testExitCode');
-    const stub = env.CONTAINER.get(id);
+    const id = env.MY_CONTAINER.idFromName('testExitCode');
+    const stub = env.MY_CONTAINER.get(id);
     await stub.testExitCode();
   },
 };
