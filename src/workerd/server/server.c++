@@ -2025,7 +2025,7 @@ class Server::WorkerService final: public Service,
       auto tailStreamWriter = tracing::initializeTailStreamWriter(
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
       KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
+        tracer->addTailStreamWriter(kj::atomicAddRef(*t));
       }
       workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,

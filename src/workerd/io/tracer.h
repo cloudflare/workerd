@@ -11,7 +11,7 @@ namespace workerd {
 namespace tracing {
 
 // A utility class that receives tracing events and generates/reports TailEvents.
-class TailStreamWriter final: public kj::Refcounted {
+class TailStreamWriter final: public kj::AtomicRefcounted {
  public:
   // If the Reporter returns false, then the writer should transition into a
   // closed state.
