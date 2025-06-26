@@ -375,7 +375,7 @@ build:release_windows --config=release
 # configuration, but for clang-cl this is equivalent to only -O2 and a few other things. -O3 is
 # not exposed directly in the clang-cl driver, but we can access regular clang
 # flags using the /clang prefix anyway. https://clang.llvm.org/docs/UsersManual.html#the-clang-option
-build:release_windows --copt="/clang:-O3"
+build:release_windows --copt="/clang:-O2"
 # clang-cl does not enable strict aliasing by default to match MSVC's approach, unlike clang on
 # Unix which turns it on for opt builds.
 build:release_windows --copt="-fstrict-aliasing"
