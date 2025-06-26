@@ -8,8 +8,6 @@ Checks: >
   bugprone-move-forwarding-reference,
   bugprone-return-const-ref-from-parameter,
   bugprone-use-after-move,
-  clang-analyzer-optin.cplusplus.VirtualCall,
-  clang-analyzer-security.insecureAPI.strcpy,
   misc-header-include-cycle,
   readability-duplicate-include,
 WarningsAsErrors: '*'
