@@ -50,7 +50,7 @@ build:ci-windows --config=v8-codegen-opt-windows
 # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
 # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
 # this is already the default for Linux/Windows.
-build:ci-limit-storage --build_tag_filters=-off-by-default,-workerd-benchmark
+build:ci-limit-storage --build_tag_filters=-off-by-default,-requires-container-engine,-workerd-benchmark
 build:ci-limit-storage --copt="-g1"
 build:ci-limit-storage --copt="-fno-standalone-debug"
 
@@ -78,6 +78,10 @@ build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
+# Build container tests on Linux CI
+test:ci-linux --build_tag_filters=-off-by-default
+test:ci-linux-arm --build_tag_filters=-off-by-default
+
 # Speculatively disable asynchronous remote cache uploads on macOS to debug CI job freezes. This is
 # a no-op when remote caching is disabled, so we can always enable it on macOS.
 build:macos --noremote_cache_async
@@ -101,6 +105,10 @@ build:ci-windows-debug --config=debug
 test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
+
+# Run container tests on Linux CI
+test:ci-linux --test_tag_filters=-off-by-default,-requires-fuzzilli
+test:ci-linux-arm --test_tag_filters=-off-by-default,-requires-fuzzilli
 
 # Enable reporting whenever WPT tests are run
 test:ci-test --config=wpt-test
