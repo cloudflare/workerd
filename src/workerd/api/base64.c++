@@ -1,12 +1,14 @@
 #include "base64.h"
 
+#include "simdutf.h"
+
 #include <kj/debug.h>
 
 namespace workerd::api {
 
 kj::StringPtr simd_error_to_string(simdutf::error_code err) {
   auto err_str = simdutf::error_to_string(err);
-  return kj::StringPtr(err_str.begin(), err_str.size());
+  return kj::StringPtr(err_str.data(), err_str.size());
 }
 
 kj::Array<kj::byte> Base64Module::decodeArray(kj::Array<kj::byte> input) {
