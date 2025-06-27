@@ -29,6 +29,9 @@ runs:
         echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
         echo "build:linux --action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
         echo "build:linux --host_action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+    - name: Setup Docker on Linux
+      if: runner.os == 'Linux'
+      uses: docker/setup-docker-action@v4
     - name: Setup Windows
       shell: pwsh
       if: runner.os == 'Windows'
