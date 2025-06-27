@@ -1,4 +1,4 @@
-declare module "cloudflare:base64" {
+declare module "cloudflare-internal:base64" {
   function _encodeArray(input: ArrayBufferLike | ArrayBufferView): ArrayBuffer;
   function _encodeArrayToString(input: ArrayBufferLike | ArrayBufferView): string ;
   function _decodeArray(input: ArrayBufferLike | ArrayBufferView): ArrayBuffer;

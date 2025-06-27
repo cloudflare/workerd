@@ -30,16 +30,15 @@ kj::Array<kj::byte> Base64Module::encodeArray(kj::Array<kj::byte> input) {
   return buf.slice(0, out_size).attach(kj::mv(buf));
 }
 
-kj::String Base64Module::encodeArrayToString(kj::Array<kj::byte> input) {
-  auto size = simdutf::base64_length_from_binary(input.size()) + 1;
+jsg::JsString Base64Module::encodeArrayToString(jsg::Lock& js, kj::Array<kj::byte> input) {
+  auto size = simdutf::base64_length_from_binary(input.size());
   auto buf = kj::heapArray<kj::byte>(size);
   auto out_size = simdutf::binary_to_base64(
       input.asChars().begin(), input.size(), buf.asChars().begin(), simdutf::base64_default);
-  KJ_ASSERT(out_size + 1 <= size);
-  buf[out_size] = 0;
+  KJ_ASSERT(out_size <= size);
 
+  return js.str(buf.first(out_size));
   // As we've base64 encoded, `buf` is guaranteed to contain valid UTF-8
-  return kj::String(buf.releaseAsChars());
 }
 
 }  // namespace workerd::api

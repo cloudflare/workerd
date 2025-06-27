@@ -13,7 +13,7 @@ class Base64Module final: public jsg::Object {
 
   kj::Array<kj::byte> decodeArray(kj::Array<kj::byte>);
   kj::Array<kj::byte> encodeArray(kj::Array<kj::byte>);
-  kj::String encodeArrayToString(kj::Array<kj::byte>);
+  jsg::JsString encodeArrayToString(jsg::Lock&, kj::Array<kj::byte>);
 
   JSG_RESOURCE_TYPE(Base64Module) {
     JSG_METHOD(encodeArray);
