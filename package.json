@@ -14,7 +14,8 @@
     "esbuild": "^0.25.10",
     "eslint": "^9.37.0",
     "expect-type": "^1.2.2",
-    "typescript-eslint": "^8.46.1"
+    "typescript-eslint": "^8.46.1",
+    "ws": "^8.18.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
