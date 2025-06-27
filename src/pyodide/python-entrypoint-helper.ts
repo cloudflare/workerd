@@ -15,6 +15,7 @@ import {
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
   SHOULD_SNAPSHOT_TO_DISK,
+  workflowsEnabled,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
@@ -242,25 +243,10 @@ const SPECIAL_DO_HANDLER_NAMES = [
   'webSocketError',
 ];
 
-interface CompatibilityFlags {
-  python_workflows?: boolean;
-  [key: string]: boolean | undefined;
-}
-
-interface CloudflareGlobal {
-  Cloudflare?: {
-    compatibilityFlags?: CompatibilityFlags;
-  };
-}
-
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
   className: string
 ): ProxyHandler<any> {
-  const compatibilityFlags: CompatibilityFlags =
-    (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
-  const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;
-
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
@@ -273,8 +259,8 @@ function makeEntrypointProxyHandler(
       const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
-      const isFetch = prop == 'fetch';
-      let isWorkflowHandler = isWorkflow && prop == 'run';
+      const isFetch = prop === 'fetch';
+      const isWorkflowHandler = isWorkflow && prop === 'run';
       if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
         prop = 'on_' + prop;
       }
@@ -282,21 +268,7 @@ function makeEntrypointProxyHandler(
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        let targetProp = prop;
-
-        if (
-          targetProp == 'run' &&
-          typeof pyInstance['on_run'] === 'function' &&
-          typeof pyInstance['run'] !== 'function'
-        ) {
-          // unfortunately we can't solely rely on the subclass
-          // we're also considering everything that implements an `on_run` method to be a workflow
-          // and handling it appropriately on the `run` prop
-          // Note(caio): if a normal run method exists, we handle it normally to avoid breaking changes
-          // (this is not ideal)
-          isWorkflowHandler = true;
-          targetProp = 'on_run';
-        }
+        const targetProp = prop;
 
         if (typeof pyInstance[targetProp] !== 'function') {
           throw new TypeError(`Method ${targetProp} does not exist`);
@@ -338,7 +310,7 @@ function makeEntrypointClass(
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, className)
+        makeEntrypointProxyHandler(pyInstancePromise, classKind.name)
       );
     }
   };
@@ -350,7 +322,7 @@ function makeEntrypointClass(
       // Remove the "on_" prefix.
       method = method.slice(3);
     }
-    result.prototype[method] = function (): void { };
+    result.prototype[method] = function (): void {};
   }
   return result;
 }

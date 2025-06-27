@@ -936,31 +936,33 @@ class _WorkflowStepWrapper:
         self._js_step = js_step
 
     def do(self, name, callback=None, config=None):
-        if callback is None:
-            # Return a decorator that will execute the function when called
-            def decorator(func):
-                @functools.wraps(func)
-                async def wrapper(*args, **kwargs):
-                    return _do_call(self, name, config, func)
+        if callback:
 
-                return wrapper
+            async def wrapper():
+                return _do_call(self, name, config, callback)
 
-            return decorator
+            return wrapper()
 
-        # Original callback-based implementation
-        return _do_call(self, name, config, callback)
+        # Return a decorator that will execute the function when called
+        def decorator(func):
+            async def wrapper():
+                return _do_call(self, name, config, func)
 
-    def wait_for_event(self, name, type, timeout=None):
-        options = {"type": type}
-        if timeout is not None:
-            options["timeout"] = timeout
-        event = self._js_step.waitForEvent(name, to_js(options))
-        return python_from_rpc(event)
+            return wrapper
+
+        return decorator
+
+    def sleep(self, *args, **kwargs):
+        return self._js_step.sleep(*args, **kwargs)
+
+    def sleep_until(self, *args, **kwargs):
+        return self._js_step.sleepUntil(*args, **kwargs)
+
 
 def _do_call(entrypoint, name, config, callback):
     async def _callback():
         result = callback()
-        if inspect.isawaitable(result):
+        if inspect.iscoroutine(result):
             result = await result
         return result
 
@@ -970,6 +972,7 @@ def _do_call(entrypoint, name, config, callback):
         result = entrypoint._js_step.do(name, to_js(config), _callback)
 
     return python_from_rpc(result)
+
 
 def _wrap_subclass(cls):
     # Override the class __init__ so that we can wrap the `env` in the constructor.
@@ -1006,7 +1009,7 @@ def _wrap_workflow_step(cls):
         if inspect.iscoroutine(result):
             result = await result
 
-        return python_from_rpc(result)
+        return result
 
     cls.on_run = wrapped_run
 
@@ -1049,3 +1052,7 @@ class WorkflowEntrypoint:
     def __init_subclass__(cls, **_kwargs):
         _wrap_subclass(cls)
         _wrap_workflow_step(cls)
+
+
+class NonRetryableError(Exception):
+    pass

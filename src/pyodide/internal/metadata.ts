@@ -41,3 +41,18 @@ export const TRANSITIVE_REQUIREMENTS =
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 export const DURABLE_OBJECT_CLASSES = MetadataReader.getDurableObjectClasses();
 export const WORKER_ENTRYPOINT_CLASSES = MetadataReader.getEntrypointClasses();
+
+export interface CompatibilityFlags {
+  python_workflows?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+export interface CloudflareGlobal {
+  Cloudflare?: {
+    compatibilityFlags?: CompatibilityFlags;
+  };
+}
+
+const compatibilityFlags: CompatibilityFlags =
+  (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
+export const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;

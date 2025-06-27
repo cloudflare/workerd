@@ -12,6 +12,7 @@ from _workers import (
     FormDataValue,
     Headers,
     JSBody,
+    NonRetryableError,
     Request,
     RequestInitCfProperties,
     Response,
