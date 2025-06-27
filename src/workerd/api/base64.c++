@@ -38,7 +38,6 @@ jsg::JsString Base64Module::encodeArrayToString(jsg::Lock& js, kj::Array<kj::byt
   KJ_ASSERT(out_size <= size);
 
   return js.str(buf.first(out_size));
-  // As we've base64 encoded, `buf` is guaranteed to contain valid UTF-8
 }
 
 }  // namespace workerd::api
