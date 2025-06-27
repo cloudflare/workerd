@@ -37,7 +37,6 @@ export class DurableObjectExample extends DurableObject {
 
     // Start container with valid configuration
     await container.start({
-      entrypoint: ['node', 'app.js'],
       env: { A: 'B', C: 'D', L: 'F' },
       enableInternet: true,
     });
@@ -141,7 +140,6 @@ export class DurableObjectExample extends DurableObject {
 
     if (!container.running) {
       await container.start({
-        entrypoint: ['node', 'app.js'],
         env: { WS_ENABLED: 'true' },
         enableInternet: true,
       });
