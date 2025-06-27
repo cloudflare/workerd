@@ -1,0 +1,18 @@
+---
+# TODO: We currently disable default checks with -*. While many checks provide little value or
+# produce false positives, try to incrementally enable most of them.
+# TODO: these checks are in progress of cleaning up
+Checks: >
+  -*,
+  bugprone-capturing-this-in-member-variable,
+  bugprone-move-forwarding-reference,
+  bugprone-return-const-ref-from-parameter,
+  bugprone-use-after-move,
+  misc-header-include-cycle,
+  readability-duplicate-include,
+WarningsAsErrors: '*'
+
+CheckOptions:
+  # JSG has very entrenched include cycles
+  - key: misc-header-include-cycle.IgnoredFilesList
+    value: "jsg/jsg.h|jsg/dom-exception.h"

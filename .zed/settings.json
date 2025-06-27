@@ -19,7 +19,8 @@
         "arguments": [
           "--background-index",
           "--header-insertion=never",
-          "--query-driver=**"
+          "--query-driver=**",
+          "--clang-tidy"
         ]
       }
     },
