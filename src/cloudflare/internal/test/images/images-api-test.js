@@ -4,8 +4,16 @@
 // @ts-ignore
 import * as assert from 'node:assert';
 
-function inputStream(body) {
-  return new Blob([body]).stream();
+function inputStream(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
 }
 
 /**
@@ -13,13 +21,27 @@ function inputStream(body) {
  *
  */
 
+/**
+ * @param {Env} env
+ * @param {string[]} chunks
+ * @returns {Promise<string>}
+ */
+async function decodeBase64ThroughImagesBinding(env, chunks) {
+  const result = await env.images
+    .input(inputStream(chunks), { encoding: 'base64' })
+    .output({ format: 'image/avif' });
+
+  const body = await result.response().json();
+  return body.image;
+}
+
 export const test_images_info_bitmap = {
   /**
    * @param {unknown} _
    * @param {Env} env
    */
   async test(_, env) {
-    const info = await env.images.info(inputStream('png'));
+    const info = await env.images.info(inputStream(['png']));
     assert.deepStrictEqual(info, {
       format: 'image/png',
       fileSize: 123,
@@ -35,7 +57,7 @@ export const test_images_info_bitmap_base64 = {
    * @param {Env} env
    */
   async test(_, env) {
-    const info = await env.images.info(inputStream(btoa('png')), {
+    const info = await env.images.info(inputStream([btoa('png')]), {
       encoding: 'base64',
     });
     assert.deepStrictEqual(info, {
@@ -53,7 +75,7 @@ export const test_images_info_svg = {
    * @param {Env} env
    */
   async test(_, env) {
-    const info = await env.images.info(inputStream('<svg></svg>'));
+    const info = await env.images.info(inputStream(['<svg></svg>']));
     assert.deepStrictEqual(info, {
       format: 'image/svg+xml',
     });
@@ -72,7 +94,7 @@ export const test_images_info_error = {
     let e;
 
     try {
-      await env.images.info(inputStream('BAD'));
+      await env.images.info(inputStream(['BAD']));
     } catch (e2) {
       e = e2;
     }
@@ -90,10 +112,8 @@ export const test_images_transform = {
    */
 
   async test(_, env) {
-    const blob = new Blob(['png']);
-
     const result = await env.images
-      .input(blob.stream())
+      .input(inputStream(['png']))
       .transform({ rotate: 90 })
       .output({ format: 'image/avif' });
 
@@ -117,16 +137,16 @@ export const test_images_nested_draw = {
 
   async test(_, env) {
     const result = await env.images
-      .input(inputStream('png'))
+      .input(inputStream(['png']))
       .transform({ rotate: 90 })
-      .draw(env.images.input(inputStream('png1')).transform({ rotate: 180 }))
+      .draw(env.images.input(inputStream(['png1'])).transform({ rotate: 180 }))
       .draw(
         env.images
-          .input(inputStream('png2'))
-          .draw(inputStream('png3'))
+          .input(inputStream(['png2']))
+          .draw(inputStream(['png3']))
           .transform({ rotate: 270 })
       )
-      .draw(inputStream('png4'))
+      .draw(inputStream(['png4']))
       .output({ format: 'image/avif' });
 
     // Would be image/avif in real life, but mock always returns JSON
@@ -162,11 +182,11 @@ export const test_images_transformer_draw_twice_disallowed = {
      */
     let e;
 
-    let t = env.images.input(inputStream('png1'));
+    let t = env.images.input(inputStream(['png1']));
 
     try {
       await env.images
-        .input(inputStream('png'))
+        .input(inputStream(['png']))
         .draw(t)
         .draw(t)
         .output({ format: 'image/avif' });
@@ -195,13 +215,13 @@ export const test_images_transformer_already_consumed_disallowed = {
      */
     let e;
 
-    let t = env.images.input(inputStream('png1'));
+    let t = env.images.input(inputStream(['png1']));
 
     await t.output({});
 
     try {
       await env.images
-        .input(inputStream('png'))
+        .input(inputStream(['png']))
         .draw(t)
         .output({ format: 'image/avif' });
     } catch (e1) {
@@ -231,7 +251,7 @@ export const test_images_transform_bad = {
 
     try {
       await env.images
-        .input(inputStream('BAD'))
+        .input(inputStream(['BAD']))
         .transform({ rotate: 90 })
         .output({ format: 'image/avif' });
     } catch (e2) {
@@ -258,7 +278,7 @@ export const test_images_transform_consumed = {
 
     try {
       let transformer = env.images
-        .input(inputStream('png'))
+        .input(inputStream(['png']))
         .transform({ rotate: 90 });
 
       await transformer.output({ format: 'image/avif' });
@@ -296,7 +316,7 @@ export const test_images_base64_input = {
       const input = inputs[testName];
 
       const result = await env.images
-        .input(inputStream(input), { encoding: 'base64' })
+        .input(inputStream([input]), { encoding: 'base64' })
         .transform({ rotate: 90 })
         .output({ format: 'image/avif' });
 
@@ -332,7 +352,7 @@ export const test_images_base64_output = {
       const input = inputs[testName];
 
       const result = await env.images
-        .input(inputStream(input))
+        .input(inputStream([input]))
         .transform({ rotate: 90 })
         .output({ format: 'image/avif' });
 
@@ -349,5 +369,84 @@ export const test_images_base64_output = {
         transforms: [{ imageIndex: 0, rotate: 90 }],
       });
     }
+  },
+};
+
+export const test_images_base64_empty_input = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    assert.strictEqual(await decodeBase64ThroughImagesBinding(env, []), '');
+  },
+};
+
+export const test_images_base64_padding = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QQ==']),
+      'A'
+    );
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QWI=']),
+      'Ab'
+    );
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QWJj']),
+      'Abc'
+    );
+  },
+};
+
+export const test_images_base64_chunk_boundaries = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QUFB', 'QUFB']),
+      'AAAAAA'
+    );
+  },
+};
+
+export const test_images_base64_small_chunks = {
+  /**
+   * @param {unknown} _
+   * @param {Env} env
+   */
+  async test(_, env) {
+    // 1 byte chunks
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, [
+        'Q',
+        'U',
+        'F',
+        'B',
+        'Q',
+        'U',
+        'F',
+        'B',
+      ]),
+      'AAAAAA'
+    );
+
+    // 2 byte chunks
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QU', 'FB', 'QU', 'FB']),
+      'AAAAAA'
+    );
+
+    // 3 byte chunks
+    assert.strictEqual(
+      await decodeBase64ThroughImagesBinding(env, ['QUF', 'BQU', 'FB']),
+      'AAAAAA'
+    );
   },
 };
