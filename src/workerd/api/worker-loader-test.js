@@ -159,7 +159,8 @@ export let isolateUniqueness = {
 
     let assertNotCalled = () => {
       throw new Error(
-          "Code loader callback called when it should have reused an existing isolate.");
+        'Code loader callback called when it should have reused an existing isolate.'
+      );
     };
 
     let name = 'isolateUniqueness';
@@ -206,5 +207,170 @@ export let isolateUniqueness = {
     assert.strictEqual(await anonymousAgain.increment(), 3);
 
     assert.strictEqual(loadCount, 5);
+  },
+};
+
+// Test non-string module types
+export let moduleTypes = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('moduleTypes', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'main.js',
+        modules: {
+          'main.js': {
+            js: `
+              import {WorkerEntrypoint} from "cloudflare:workers";
+              import textModule from './text.txt';
+              import jsonModule from './data.json';
+              import cjsModule from './cjs.cjs';
+              import dataModule from './binary.dat';
+
+              export default class extends WorkerEntrypoint {
+                getTextModule() { return textModule; }
+                getJsonModule() { return jsonModule; }
+                getCjsModule() { return cjsModule.greet('Alice'); }
+                getDataModule() { return dataModule; }
+              }
+            `,
+          },
+          'text.txt': {
+            text: 'Hello from text module!',
+          },
+          'data.json': {
+            json: { message: 'Hello from JSON module!', value: 42 },
+          },
+          'cjs.cjs': {
+            cjs: `
+              module.exports = {
+                greet: function(name) {
+                  return 'Hello from CommonJS, ' + name;
+                }
+              };
+            `,
+          },
+          'binary.dat': {
+            data: new TextEncoder().encode('Hello from binary data!'),
+          },
+        },
+      };
+    });
+
+    let entrypoint = worker.getEntrypoint();
+
+    assert.strictEqual(
+      await entrypoint.getTextModule(),
+      'Hello from text module!'
+    );
+
+    let jsonData = await entrypoint.getJsonModule();
+    assert.strictEqual(jsonData.message, 'Hello from JSON module!');
+    assert.strictEqual(jsonData.value, 42);
+
+    assert.strictEqual(
+      await entrypoint.getCjsModule(),
+      'Hello from CommonJS, Alice'
+    );
+
+    let dataModule = await entrypoint.getDataModule();
+    let decoder = new TextDecoder();
+    assert.strictEqual(decoder.decode(dataModule), 'Hello from binary data!');
+  },
+};
+
+// Test setting compat date / flags works
+export let compatDateFlags = {
+  async test(ctrl, env, ctx) {
+    let getCode = (compatibilityDate, compatibilityFlags) => {
+      return {
+        compatibilityDate,
+        compatibilityFlags,
+        allowExperimental: true,
+        mainModule: 'main.js',
+        modules: {
+          'main.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              hasNodeCompat() {
+                return typeof process !== 'undefined';
+              }
+              canUseRequestCache() {
+                try {
+                  new Request("https://foo", {cache: "no-store"});
+                  return true;
+                } catch {
+                  return false;
+                }
+              }
+            }
+          `,
+        },
+      };
+    };
+
+    // Test old date (2023), with node compat turned on.
+    {
+      let worker = env.loader.get('compatDateFlags1', () =>
+        getCode('2023-01-01', ['nodejs_compat', 'nodejs_compat_v2'])
+      );
+      let entrypoint = await worker.getEntrypoint();
+      assert.strictEqual(await entrypoint.hasNodeCompat(), true);
+      assert.strictEqual(await entrypoint.canUseRequestCache(), false);
+    }
+
+    // Test newer date (2025), with node compat not enabled.
+    {
+      let worker = env.loader.get('compatDateFlags2', () =>
+        getCode('2025-01-01', [])
+      );
+      let entrypoint = await worker.getEntrypoint();
+      assert.strictEqual(await entrypoint.hasNodeCompat(), false);
+      assert.strictEqual(await entrypoint.canUseRequestCache(), true);
+    }
+  },
+};
+
+// Test code loader callback that does something asynchronous
+export let asyncCodeLoader = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('asyncCodeLoader', async () => {
+      // Simulate async work
+      await new Promise((resolve) => setTimeout(resolve, 1));
+
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'main.js',
+        modules: {
+          'main.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              getMessage() {
+                return 'Hello from async loaded worker!';
+              }
+            }
+          `,
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().getMessage();
+    assert.strictEqual(result, 'Hello from async loaded worker!');
+  },
+};
+
+// Test what happens if the code getter callback throws an exception
+export let codeLoaderException = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('codeLoaderException', () => {
+      throw new Error('Code loader failed!');
+    });
+
+    let ep = worker.getEntrypoint();
+    try {
+      await ep.someMethod();
+      assert.fail('Expected exception to be thrown');
+    } catch (error) {
+      assert.strictEqual(error.message, 'Code loader failed!');
+    }
   },
 };
