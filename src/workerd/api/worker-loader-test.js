@@ -137,21 +137,31 @@ export let facets = {
 // Test isolate uniqueness when loading the same name multiple times.
 export let isolateUniqueness = {
   async test(ctrl, env, ctx) {
-    let workerCode = {
-      compatibilityDate: '2025-01-01',
-      mainModule: 'foo.js',
-      modules: {
-        'foo.js': `
-          import {WorkerEntrypoint} from "cloudflare:workers";
-          let i = 0;
-          export default class extends WorkerEntrypoint {
-            increment() {
-              return i++;
+    let loadCount = 0;
+    let loadCodeCallback = () => {
+      ++loadCount;
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
+            let i = 0;
+            export default class extends WorkerEntrypoint {
+              increment() {
+                return i++;
+              }
             }
-          }
-        `,
-      },
+          `,
+        },
+      };
     };
+
+    let assertNotCalled = () => {
+      throw new Error(
+          "Code loader callback called when it should have reused an existing isolate.");
+    };
+
     let name = 'isolateUniqueness';
     let name2 = 'isolateUniquenessOtherName';
 
@@ -159,17 +169,17 @@ export let isolateUniqueness = {
     // - Two loaders with the same ID.
     // - One with a unique ID.
     // - One with no ID (anonymous).
-    let shared1 = env.sharedLoader1.get(name, () => workerCode).getEntrypoint();
-    let shared2 = env.sharedLoader2.get(name, () => workerCode).getEntrypoint();
-    let unique = env.uniqueLoader.get(name, () => workerCode).getEntrypoint();
-    let anonymous = env.loader.get(name, () => workerCode).getEntrypoint();
+    let shared1 = env.sharedLoader1.get(name, loadCodeCallback).getEntrypoint();
+    let shared2 = env.sharedLoader2.get(name, assertNotCalled).getEntrypoint();
+    let unique = env.uniqueLoader.get(name, loadCodeCallback).getEntrypoint();
+    let anonymous = env.loader.get(name, loadCodeCallback).getEntrypoint();
 
     // Also try loading a different name from various loaders.
     let anonymousOtherName = env.loader
-      .get(name2, () => workerCode)
+      .get(name2, loadCodeCallback)
       .getEntrypoint();
     let sharedOtherName = env.sharedLoader1
-      .get(name2, () => workerCode)
+      .get(name2, loadCodeCallback)
       .getEntrypoint();
 
     // Same name from loaders with the same ID should go to the same isolate.
@@ -191,8 +201,10 @@ export let isolateUniqueness = {
     assert.strictEqual(await sharedOtherName.increment(), 1);
 
     // Load the same name from the same loader -> same isolate.
-    let anonymousAgain = env.loader.get(name, () => workerCode).getEntrypoint();
+    let anonymousAgain = env.loader.get(name, assertNotCalled).getEntrypoint();
     assert.strictEqual(await anonymousAgain.increment(), 2);
     assert.strictEqual(await anonymousAgain.increment(), 3);
+
+    assert.strictEqual(loadCount, 5);
   },
 };
