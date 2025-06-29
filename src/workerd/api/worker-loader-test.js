@@ -133,3 +133,66 @@ export let facets = {
     await stub.doTest();
   },
 };
+
+// Test isolate uniqueness when loading the same name multiple times.
+export let isolateUniqueness = {
+  async test(ctrl, env, ctx) {
+    let workerCode = {
+      compatibilityDate: '2025-01-01',
+      mainModule: 'foo.js',
+      modules: {
+        'foo.js': `
+          import {WorkerEntrypoint} from "cloudflare:workers";
+          let i = 0;
+          export default class extends WorkerEntrypoint {
+            increment() {
+              return i++;
+            }
+          }
+        `,
+      },
+    };
+    let name = 'isolateUniqueness';
+    let name2 = 'isolateUniquenessOtherName';
+
+    // Load the same name from all four of our loaders:
+    // - Two loaders with the same ID.
+    // - One with a unique ID.
+    // - One with no ID (anonymous).
+    let shared1 = env.sharedLoader1.get(name, () => workerCode).getEntrypoint();
+    let shared2 = env.sharedLoader2.get(name, () => workerCode).getEntrypoint();
+    let unique = env.uniqueLoader.get(name, () => workerCode).getEntrypoint();
+    let anonymous = env.loader.get(name, () => workerCode).getEntrypoint();
+
+    // Also try loading a different name from various loaders.
+    let anonymousOtherName = env.loader
+      .get(name2, () => workerCode)
+      .getEntrypoint();
+    let sharedOtherName = env.sharedLoader1
+      .get(name2, () => workerCode)
+      .getEntrypoint();
+
+    // Same name from loaders with the same ID should go to the same isolate.
+    assert.strictEqual(await shared1.increment(), 0);
+    assert.strictEqual(await shared1.increment(), 1);
+    assert.strictEqual(await shared2.increment(), 2);
+    assert.strictEqual(await shared2.increment(), 3);
+
+    // Different IDs -> different isolates.
+    assert.strictEqual(await anonymous.increment(), 0);
+    assert.strictEqual(await anonymous.increment(), 1);
+    assert.strictEqual(await unique.increment(), 0);
+    assert.strictEqual(await unique.increment(), 1);
+
+    // Different names -> different isolates.
+    assert.strictEqual(await anonymousOtherName.increment(), 0);
+    assert.strictEqual(await anonymousOtherName.increment(), 1);
+    assert.strictEqual(await sharedOtherName.increment(), 0);
+    assert.strictEqual(await sharedOtherName.increment(), 1);
+
+    // Load the same name from the same loader -> same isolate.
+    let anonymousAgain = env.loader.get(name, () => workerCode).getEntrypoint();
+    assert.strictEqual(await anonymousAgain.increment(), 2);
+    assert.strictEqual(await anonymousAgain.increment(), 3);
+  },
+};

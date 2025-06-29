@@ -10,7 +10,10 @@ const unitTests :Workerd.Config = (
         compatibilityDate = "2025-01-01",
         compatibilityFlags = ["nodejs_compat","experimental"],
         bindings = [
-          (name = "loader", workerLoader = (id = "my-loader")),
+          (name = "loader", workerLoader = ()),
+          (name = "sharedLoader1", workerLoader = (id = "shared")),
+          (name = "sharedLoader2", workerLoader = (id = "shared")),
+          (name = "uniqueLoader", workerLoader = (id = "nonshared")),
         ],
         durableObjectNamespaces = [
           (className = "FacetTestActor", uniqueKey = "FacetTestActor"),

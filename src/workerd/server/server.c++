@@ -1832,7 +1832,7 @@ class Server::WorkerService final: public Service,
     AlarmScheduler& alarmScheduler;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
-    kj::Array<WorkerLoaderNamespace*> workerLoaders;
+    kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
   };
   using LinkCallback =
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
@@ -3194,7 +3194,8 @@ struct FutureActorClassChannel {
 };
 
 struct FutureWorkerLoaderChannel {
-  kj::String id;
+  kj::String name;  // for error logging, not necessarily unique
+  kj::Maybe<kj::String> id;
 };
 
 static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
@@ -3535,15 +3536,18 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       }
 
       auto loaderConf = binding.getWorkerLoader();
-      if (!loaderConf.hasId()) {
-        errorReporter.addError(
-            kj::str("Worker loader binding '", bindingName, "' must declare an ID."));
-        return kj::none;
+
+      FutureWorkerLoaderChannel channel;
+      if (loaderConf.hasId()) {
+        channel.name = kj::str(loaderConf.getId());
+        channel.id = kj::str(channel.name);
+      } else {
+        channel.name = kj::str(bindingName);
       }
 
-      uint channel = workerLoaderChannels.size();
-      workerLoaderChannels.add(FutureWorkerLoaderChannel{kj::str(loaderConf.getId())});
-      return makeGlobal(Global::WorkerLoader{.channel = channel});
+      uint channelNumber = workerLoaderChannels.size();
+      workerLoaderChannels.add(kj::mv(channel));
+      return makeGlobal(Global::WorkerLoader{.channel = channelNumber});
     }
   }
   errorReporter.addError(kj::str(errorContext,
@@ -3606,7 +3610,7 @@ struct Server::WorkerDef {
       compileBindings;
 };
 
-class Server::WorkerLoaderNamespace {
+class Server::WorkerLoaderNamespace: public kj::Refcounted {
  public:
   WorkerLoaderNamespace(Server& server, kj::String namespaceName)
       : server(server),
@@ -3826,6 +3830,9 @@ class Server::WorkerLoaderNamespace {
 void Server::unlinkWorkerLoaders() {
   for (auto& loader: workerLoaderNamespaces) {
     loader.value->unlink();
+  }
+  for (auto& loader: anonymousWorkerLoaderNamespaces) {
+    loader->unlink();
   }
 }
 
@@ -4249,14 +4256,19 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     result.streamingTails = KJ_MAP(tail, def.streamingTails) { return kj::mv(tail).lookup(*this); };
 
     result.workerLoaders = KJ_MAP(il, def.workerLoaderChannels) {
-      return workerLoaderNamespaces
-          .findOrCreate(il.id, [&]() -> decltype(workerLoaderNamespaces)::Entry {
-        kj::StringPtr key = il.id;
-        return {
-          .key = key,
-          .value = kj::heap<WorkerLoaderNamespace>(*this, kj::mv(il.id)),
-        };
-      }).get();
+      KJ_IF_SOME(id, il.id) {
+        return workerLoaderNamespaces
+            .findOrCreate(id, [&]() -> decltype(workerLoaderNamespaces)::Entry {
+          return {
+            .key = kj::mv(id),
+            .value = kj::rc<WorkerLoaderNamespace>(*this, kj::mv(il.name)),
+          };
+        }).addRef();
+      } else {
+        return anonymousWorkerLoaderNamespaces
+            .add(kj::rc<WorkerLoaderNamespace>(*this, kj::mv(il.name)))
+            .addRef();
+      }
     };
 
     return result;

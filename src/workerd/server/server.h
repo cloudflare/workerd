@@ -165,7 +165,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
   class WorkerLoaderNamespace;
-  kj::HashMap<kj::StringPtr, kj::Own<WorkerLoaderNamespace>> workerLoaderNamespaces;
+  kj::HashMap<kj::String, kj::Rc<WorkerLoaderNamespace>> workerLoaderNamespaces;
+  kj::Vector<kj::Rc<WorkerLoaderNamespace>> anonymousWorkerLoaderNamespaces;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 

@@ -428,9 +428,11 @@ struct Worker {
         # Worker must have a name, and if a Worker with that name already exists, it'll be reused.
 
         id @27 :Text;
-        # The identifier associated with this Worker loader. Multiple Workers can bind to the
-        # same ID in order to access the same loader, so that if they request the same name from
-        # it, they'll end up sharing the same loaded Worker.
+        # Optional: The identifier associated with this Worker loader. Multiple Workers can bind to
+        # the same ID in order to access the same loader, so that if they request the same name
+        # from it, they'll end up sharing the same loaded Worker.
+        #
+        # (If omitted, the binding will not share a cache with any other binding.)
       }
 
       # TODO(someday): dispatch, other new features
