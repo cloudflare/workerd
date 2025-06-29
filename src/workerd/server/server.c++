@@ -3623,10 +3623,12 @@ class Server::WorkerLoaderNamespace {
     return isolates
         .findOrCreate(name,
             [&]() -> decltype(isolates)::Entry {
-      auto displayName = kj::str(namespaceName, ':', name);
+      // This name isn't actually used in any maps nor is it ever revealed back to the app, but it
+      // may be used in error logs.
+      auto isolateName = kj::str(namespaceName, ':', name);
 
       return {.key = kj::mv(name),
-        .value = kj::rc<WorkerStubImpl>(server, kj::mv(displayName), kj::mv(fetchSource))};
+        .value = kj::rc<WorkerStubImpl>(server, kj::mv(isolateName), kj::mv(fetchSource))};
     })
         .addRef()
         .toOwn();
@@ -3644,9 +3646,9 @@ class Server::WorkerLoaderNamespace {
                               public kj::EnableAddRefToThis<WorkerStubImpl> {
    public:
     WorkerStubImpl(Server& server,
-        kj::String displayName,
+        kj::String isolateName,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource)
-        : startupTask(start(server, kj::mv(displayName), kj::mv(fetchSource)).fork()) {}
+        : startupTask(start(server, kj::mv(isolateName), kj::mv(fetchSource)).fork()) {}
 
     void unlink() {
       KJ_IF_SOME(s, service) {
@@ -3669,7 +3671,7 @@ class Server::WorkerLoaderNamespace {
     kj::ForkedPromise<void> startupTask;        // resolves when `service` is non-null
 
     kj::Promise<void> start(Server& server,
-        kj::String displayName,
+        kj::String isolateName,
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
       auto source = co_await fetchSource();
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
@@ -3710,7 +3712,7 @@ class Server::WorkerLoaderNamespace {
 
       DynamicErrorReporter errorReporter;
 
-      auto service = server.makeWorkerImpl(displayName, kj::mv(def), {}, errorReporter);
+      auto service = server.makeWorkerImpl(isolateName, kj::mv(def), {}, errorReporter);
       errorReporter.throwIfErrors();
 
       service->link(errorReporter);
