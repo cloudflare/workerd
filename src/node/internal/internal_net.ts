@@ -650,12 +650,12 @@ Socket.prototype._final = function (
   );
 };
 
-// @ts-expect-error TS2322 No easy way to enable this.
 Socket.prototype.end = function (
   this: Socket,
-  data: string | Uint8Array,
-  encoding?: NodeJS.BufferEncoding,
-  cb?: () => void
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+  data?: string | Uint8Array | NodeJS.BufferEncoding | VoidFunction,
+  encoding?: NodeJS.BufferEncoding | VoidFunction,
+  cb?: VoidFunction
 ): Socket {
   // @ts-expect-error this fails after upgrading to @types/node@22.14
   Duplex.prototype.end.call(this, data, encoding, cb);
@@ -1404,7 +1404,7 @@ export function tryReadStart(socket: Socket): void {
 function writeAfterFIN(
   this: Socket,
   chunk: Uint8Array | string,
-  encoding?: NodeJS.BufferEncoding | null,
+  encoding?: NodeJS.BufferEncoding | null | ((err?: Error) => void),
   cb?: (err?: Error) => void
 ): boolean {
   if (!this.writableEnded) {
@@ -1431,7 +1431,6 @@ function writeAfterFIN(
 
 function onReadableStreamEnd(this: Socket): void {
   if (!this.allowHalfOpen) {
-    // @ts-expect-error TS2554 Required due to @types/node
     this.write = writeAfterFIN;
   }
 }

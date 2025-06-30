@@ -1,4 +1,4 @@
-export type { addAbortSignal } from 'node:stream';
+export { addAbortSignal } from 'node:stream';
 import type { FinishedOptions } from 'node:stream';
 
 // Exported symbols
