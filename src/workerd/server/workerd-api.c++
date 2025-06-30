@@ -9,6 +9,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
+#include <workerd/api/base64.h>
 #include <workerd/api/cache.h>
 #include <workerd/api/commonjs.h>
 #include <workerd/api/container.h>
@@ -96,6 +97,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_HTML_REWRITER_ISOLATE_TYPES,
     EW_HTTP_ISOLATE_TYPES,
     EW_SOCKETS_ISOLATE_TYPES,
+    EW_BASE64_ISOLATE_TYPES,
     EW_KV_ISOLATE_TYPES,
     EW_PYODIDE_ISOLATE_TYPES,
     EW_QUEUE_ISOLATE_TYPES,
