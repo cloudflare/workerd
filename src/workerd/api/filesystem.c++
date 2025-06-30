@@ -1655,61 +1655,60 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
       inner.addRef(), keepExistingData ? inner->clone(js) : workerd::File::newWritable(js));
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
-  stream->getController().setup(js,
-      UnderlyingSink{.type = kj::str("bytes"),
-        .write =
-            [state = sharedState.addRef(), &deHandler](
-                jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
-    // TODO(node-fs): The spec allows the write parameter to be a WriteParams struct
-    // as an alternative to a BufferSource. We should implement this before shipping
-    // this feature.
-    return js.tryCatch([&] {
-      KJ_IF_SOME(inner, state->temp) {
-        // Make sure what we got can be interpreted as bytes...
-        std::shared_ptr<v8::BackingStore> backing;
-        if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
-          jsg::BufferSource source(js, chunk);
-          if (source.size() == 0) return js.resolvedPromise();
-          KJ_SWITCH_ONEOF(inner->write(js, state->position, source)) {
-            KJ_CASE_ONEOF(written, uint32_t) {
-              state->position += written;
+  // clang-format off
+  stream->getController().setup(js, UnderlyingSink{
+    .type = kj::str("bytes"),
+    .write = [state = sharedState.addRef(), &deHandler](
+        jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+      // TODO(node-fs): The spec allows the write parameter to be a WriteParams struct
+      // as an alternative to a BufferSource. We should implement this before shipping
+      // this feature.
+      return js.tryCatch([&] {
+        KJ_IF_SOME(inner, state->temp) {
+          // Make sure what we got can be interpreted as bytes...
+          std::shared_ptr<v8::BackingStore> backing;
+          if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
+            jsg::BufferSource source(js, chunk);
+            if (source.size() == 0) return js.resolvedPromise();
+            KJ_SWITCH_ONEOF(inner->write(js, state->position, source)) {
+              KJ_CASE_ONEOF(written, uint32_t) {
+                state->position += written;
+              }
+              KJ_CASE_ONEOF(err, workerd::FsError) {
+                return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
+              }
             }
-            KJ_CASE_ONEOF(err, workerd::FsError) {
+            return js.resolvedPromise();
+          }
+          return js.rejectedPromise<void>(
+              js.typeError("WritableStream received a value that is not an ArrayBuffer,"
+                          "ArrayBufferView, or string type."));
+        } else {
+          auto ex = js.domException(kj::str("InvalidStateError"), kj::str("File handle closed"));
+          return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+        }
+      }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    },
+    .abort = [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
+      // When aborted, we just drop any of the written data on the floor.
+      state->clear();
+      return js.resolvedPromise();
+    },
+    .close = [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
+      KJ_DEFER(state->clear());
+      return js.tryCatch([&] {
+        KJ_IF_SOME(temp, state->temp) {
+          KJ_IF_SOME(file, state->file) {
+            KJ_IF_SOME(err, file->replace(js, kj::mv(temp))) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
             }
           }
-          return js.resolvedPromise();
         }
-        return js.rejectedPromise<void>(
-            js.typeError("WritableStream received a value that is not an ArrayBuffer,"
-                         "ArrayBufferView, or string type."));
-      } else {
-        auto ex = js.domException(kj::str("InvalidStateError"), kj::str("File handle closed"));
-        return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
-      }
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  },
-        .abort =
-            [state = sharedState.addRef()](jsg::Lock& js, auto reason) mutable {
-    // When aborted, we just drop any of the written data on the floor.
-    state->clear();
-    return js.resolvedPromise();
-  },
-        .close =
-            [state = sharedState.addRef(), &deHandler](jsg::Lock& js) mutable {
-    KJ_DEFER(state->clear());
-    return js.tryCatch([&] {
-      KJ_IF_SOME(temp, state->temp) {
-        KJ_IF_SOME(file, state->file) {
-          KJ_IF_SOME(err, file->replace(js, kj::mv(temp))) {
-            return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
-          }
-        }
-      }
-      return js.resolvedPromise();
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  }},
-      kj::none);
+        return js.resolvedPromise();
+      }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    }
+  }, kj::none);
+  // clang-format on
 
   return js.resolvedPromise(kj::mv(stream));
 }
