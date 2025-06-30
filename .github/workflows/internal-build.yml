@@ -99,17 +99,35 @@ jobs:
             git push origin --delete "$mirror_branch" 2>/dev/null || echo "Mirror branch didn't exist"
             
             # Create branch directly from merge commit SHA
-            git checkout -b "$mirror_branch" "$merge_sha"
-            git push origin "$mirror_branch"
+            if ! git checkout -b "$mirror_branch" "$merge_sha"; then
+              echo "Failed to create mirror branch from merge commit"
+              exit 1
+            fi
+            
+            if ! git push origin "$mirror_branch"; then
+              echo "Failed to push mirror branch to origin"
+              exit 1
+            fi
           else
             echo "Rerun detected - using existing mirror branch"
             # Just checkout the existing mirror branch
-            git fetch origin "$mirror_branch"
-            git checkout "$mirror_branch"
+            if ! git fetch origin "$mirror_branch"; then
+              echo "Failed to fetch existing mirror branch"
+              exit 1
+            fi
+            
+            if ! git checkout "$mirror_branch"; then
+              echo "Failed to checkout existing mirror branch"
+              exit 1
+            fi
           fi
           
           # Get the HEAD SHA of the mirror branch (same as merge_sha, but now exists in main repo)
-          mirror_head_sha=$(git rev-parse HEAD)
+          if ! mirror_head_sha=$(git rev-parse HEAD); then
+            echo "Failed to get mirror branch HEAD SHA"
+            exit 1
+          fi
+          
           echo "mirror_head_sha=$mirror_head_sha" >> $GITHUB_OUTPUT
           echo "mirror_branch=$mirror_branch" >> $GITHUB_OUTPUT
 
