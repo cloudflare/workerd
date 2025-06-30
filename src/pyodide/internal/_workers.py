@@ -4,6 +4,7 @@
 import datetime
 import functools
 import http.client
+import inspect
 import json
 from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
@@ -930,6 +931,49 @@ def handler(func):
     return wrapper
 
 
+class _WorkflowStepWrapper:
+    def __init__(self, js_step):
+        self._js_step = js_step
+
+    def do(self, name, callback=None, config=None):
+        if callback:
+
+            async def wrapper():
+                return _do_call(self, name, config, callback)
+
+            return wrapper()
+
+        # Return a decorator that will execute the function when called
+        def decorator(func):
+            async def wrapper():
+                return _do_call(self, name, config, func)
+
+            return wrapper
+
+        return decorator
+
+    def sleep(self, *args, **kwargs):
+        return self._js_step.sleep(*args, **kwargs)
+
+    def sleep_until(self, *args, **kwargs):
+        return self._js_step.sleepUntil(*args, **kwargs)
+
+
+def _do_call(entrypoint, name, config, callback):
+    async def _callback():
+        result = callback()
+        if inspect.iscoroutine(result):
+            result = await result
+        return result
+
+    if config is None:
+        result = entrypoint._js_step.do(name, _callback)
+    else:
+        result = entrypoint._js_step.do(name, to_js(config), _callback)
+
+    return python_from_rpc(result)
+
+
 def _wrap_subclass(cls):
     # Override the class __init__ so that we can wrap the `env` in the constructor.
     original_init = cls.__init__
@@ -941,6 +985,33 @@ def _wrap_subclass(cls):
         original_init(self, *args, **kwargs)
 
     cls.__init__ = wrapped_init
+
+
+def _wrap_workflow_step(cls):
+    run_fn = getattr(cls, "on_run", None)
+    if run_fn is None:
+        return
+
+    # Only patch `on_run` for subclasses of WorkflowEntrypoint.
+    if not issubclass(cls, WorkflowEntrypoint):
+        # Not a workflow subclass, so don't wrap `on_run`.
+        return
+
+    @functools.wraps(run_fn)
+    async def wrapped_run(self, event=None, step=None, /, *args, **kwargs):
+        if event is not None:
+            event = python_from_rpc(event)
+        if step is not None:
+            step = _WorkflowStepWrapper(step)
+
+        result = run_fn(self, event, step, *args, **kwargs)
+
+        if inspect.iscoroutine(result):
+            result = await result
+
+        return result
+
+    cls.on_run = wrapped_run
 
 
 class DurableObject:
@@ -980,3 +1051,8 @@ class WorkflowEntrypoint:
 
     def __init_subclass__(cls, **_kwargs):
         _wrap_subclass(cls)
+        _wrap_workflow_step(cls)
+
+
+class NonRetryableError(Exception):
+    pass

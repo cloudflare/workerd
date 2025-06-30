@@ -15,6 +15,7 @@ import {
   DURABLE_OBJECT_CLASSES,
   WORKER_ENTRYPOINT_CLASSES,
   SHOULD_SNAPSHOT_TO_DISK,
+  workflowsEnabled,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
@@ -244,32 +245,42 @@ const SPECIAL_DO_HANDLER_NAMES = [
 
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
-  isDurableObject: boolean
+  className: string
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+      const isDurableObject = className === 'DurableObject';
+      const isWorkflow = className === 'WorkflowEntrypoint';
 
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
       const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
-      const isFetch = prop == 'fetch';
-      if (isKnownHandler || isKnownDoHandler) {
+      const isFetch = prop === 'fetch';
+      const isWorkflowHandler = isWorkflow && prop === 'run';
+      if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
         prop = 'on_' + prop;
       }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        if (typeof pyInstance[prop] !== 'function') {
-          throw new TypeError(`Method ${prop} does not exist`);
+        const targetProp = prop;
+
+        if (typeof pyInstance[targetProp] !== 'function') {
+          throw new TypeError(`Method ${targetProp} does not exist`);
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(true, pyInstance[targetProp], args);
+        }
+
+        if (workflowsEnabled && isWorkflowHandler) {
+          // we're hiding this behind a compat flag for now
+          return await doPyCallHelper(true, pyInstance[targetProp], args);
         }
 
         const introspectionMod = await getIntrospectionMod();
@@ -277,7 +288,7 @@ function makeEntrypointProxyHandler(
         return await doPyCall(introspectionMod.wrapper_func, [
           isFetch,
           pyInstance,
-          prop,
+          targetProp,
           ...args,
         ]);
       };
@@ -290,7 +301,6 @@ function makeEntrypointClass(
   classKind: AnyClass,
   methods: string[]
 ): any {
-  const isDurableObject = classKind.name === 'DurableObject';
   const result = class EntrypointWrapper extends classKind {
     constructor(...args: any[]) {
       super(...args);
@@ -300,7 +310,7 @@ function makeEntrypointClass(
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject)
+        makeEntrypointProxyHandler(pyInstancePromise, classKind.name)
       );
     }
   };

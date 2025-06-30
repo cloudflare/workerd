@@ -832,4 +832,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # throw an error when unknown import attributes are encountered. In the new module registry
   # implementation the recommended behavior is what is implemented. With this compat flag
   # enabled, the original module registry implementation will follow the recommended behavior.
+
+  pythonWorkflows @95 :Bool
+      $compatEnableFlag("python_workflows")
+      $experimental;
+  # Enables support for Python workflows.
+  # This is still in development and may change in the future.
 }
