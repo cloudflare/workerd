@@ -4,6 +4,7 @@
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
+import base64 from 'cloudflare-internal:base64';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -89,23 +90,7 @@ export class AiInternalError extends Error {
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
-  // TODO(soon): This is better implemented using the node::buffer API
-  // but we cannot get to that from here currently. Once the node:buffer
-  // API (actually, `node-internal:internal_buffer`) is available to be imported
-  // here we should update this code to use it instead.
-  const arrayBuffer = await blob.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-
-  let binary = '';
-  const chunk = 1024;
-  for (let i = 0; i < uint8Array.length; i += chunk) {
-    binary += String.fromCharCode.apply(
-      null,
-      uint8Array.subarray(i, i + chunk) as unknown as number[]
-    );
-  }
-
-  return btoa(binary);
+  return base64.encodeArrayToString(await blob.arrayBuffer());
 }
 
 // TODO: merge this function with the one with images-api.ts
