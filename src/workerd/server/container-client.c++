@@ -341,8 +341,9 @@ kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
       "Stopping container failed with: ", response.body);
 }
 
-// This method assumes that the container is already running to avoid sending
-// unnecessary requests for checking the status of the container (via /inspect).
+// Destroys the container.
+// No-op when the container does not exist.
+// Wait for the container to actually be stopped and removed when it exists.
 // if the container doesn't exist it will return 404.
 // Ref: https://docs.docker.com/reference/api/engine/version/v1.50/#tag/Container/operation/ContainerDelete
 kj::Promise<void> ContainerClient::destroyContainer() {
