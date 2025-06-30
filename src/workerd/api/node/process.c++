@@ -95,11 +95,10 @@ jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
   // Node.js version - represents the most current Node.js version supported
   // by the platform, as defined in node-version.h
   versions.set(js, "node"_kj, js.str(nodeVersion));
-
   return versions;
 }
 
-void ProcessModule::processExitImpl(jsg::Lock& js, int code) {
+void ProcessModule::exitImpl(jsg::Lock& js, int code) {
   if (IoContext::hasCurrent()) {
     handleProcessExit(js, code);
   }
