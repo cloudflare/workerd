@@ -48,6 +48,7 @@ void registerModules(Registry& registry, auto featureFlags) {
     registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
+  registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
   registerRpcModules(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
@@ -61,6 +62,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));
