@@ -1,7 +1,9 @@
 name: Run internal build
 
+# Trigger edgeworker CI builds for workerd PRs
+# Uses pull_request_target to access secrets for fork handling
 on:
-  pull_request:
+  pull_request_target:
 
 concurrency:
   # Cancel existing builds for the same PR.
@@ -10,8 +12,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  internal-build:
-    if: "${{! github.event.pull_request.head.repo.fork}}" # Don't run on forks
+  # Handle forks from Cloudflare org members by creating mirror branches  
+  handle-fork:
+    if: "${{ github.event.pull_request.head.repo.fork }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare org membership
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          author="${{ github.event.pull_request.user.login }}"
+          echo "Fork detected. Checking if $author is a Cloudflare org member..."
+          
+          if gh api orgs/cloudflare/members/$author --silent 2>/dev/null; then
+            echo "✓ Cloudflare org member confirmed"
+          else
+            echo "✗ Not a Cloudflare org member"
+            echo ""
+            echo "This workflow only runs for forks from Cloudflare organization members."
+            echo "If you're an external contributor, please ask the auto-assigned reviewers"
+            echo "to run the internal build workflow on your behalf."
+            exit 1
+          fi
+
+      - name: Validate merge commit exists
+        run: |
+          if [[ "${{ github.event.pull_request.merge_commit_sha }}" == "" ]]; then
+            echo "No merge commit SHA - PR may have conflicts"
+            exit 1
+          fi
+
+      - name: Checkout base repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # Create mirror branch in main repo from fork's merge commit
+      # This allows workerd-robot to find the commit in the main repo
+      - name: Create mirror branch from merge commit
+        id: mirror_branch
+        run: |
+          mirror_branch="workerd-robot/${{ github.event.pull_request.user.login }}/${{ github.event.pull_request.head.ref }}"
+          merge_sha="${{ github.event.pull_request.merge_commit_sha }}"
+          run_attempt="${{ github.run_attempt }}"
+          
+          echo "Mirror branch: $mirror_branch"
+          echo "Merge commit SHA: $merge_sha"
+          echo "Run attempt: $run_attempt"
+          
+          if [[ "$run_attempt" == "1" ]]; then
+            echo "First run - creating fresh mirror branch"
+            # Delete existing mirror if present
+            git push origin --delete "$mirror_branch" 2>/dev/null || echo "Mirror branch didn't exist"
+            
+            # Create branch directly from merge commit SHA
+            git checkout -b "$mirror_branch" "$merge_sha"
+            git push origin "$mirror_branch"
+          else
+            echo "Rerun detected - using existing mirror branch"
+            # Just checkout the existing mirror branch
+            git fetch origin "$mirror_branch"
+            git checkout "$mirror_branch"
+          fi
+          
+          # Get the HEAD SHA of the mirror branch (same as merge_sha, but now exists in main repo)
+          mirror_head_sha=$(git rev-parse HEAD)
+          echo "mirror_head_sha=$mirror_head_sha" >> $GITHUB_OUTPUT
+          echo "mirror_branch=$mirror_branch" >> $GITHUB_OUTPUT
+
+      - name: Run internal build for fork
+        env:
+          CI_URL: ${{ secrets.CI_URL }}
+          CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
+          CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          python3 -u ./tools/cross/internal_build.py \
+            ${{ github.event.pull_request.number }} \
+            "${{ steps.mirror_branch.outputs.mirror_head_sha }}" \
+            ${{ github.event.pull_request.head.sha }} \
+            ${{ github.run_attempt }} \
+            "${{ steps.mirror_branch.outputs.mirror_branch }}" \
+            $CI_URL \
+            $CI_CLIENT_ID \
+            $CI_CLIENT_SECRET
+
+  # Handle regular PRs from the main repo (not forks)
+  handle-regular-pr:
+    if: "${{ !github.event.pull_request.head.repo.fork }}"
     runs-on: ubuntu-latest
     steps:
       # Try to checkout the merge commit - will fail if PR isn't mergeable
