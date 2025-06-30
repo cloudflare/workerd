@@ -12,6 +12,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Test GitHub token permissions for org membership checks
+  test-token-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test API endpoints
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Testing GitHub token permissions for org membership checks..."
+          echo "Using ketanhwr as test user"
+          echo ""
+          
+          echo "Testing /members/ endpoint:"
+          if gh api /orgs/cloudflare/members/ketanhwr --silent 2>/dev/null; then
+            echo "✓ ketanhwr is a public member"
+          else
+            echo "✗ ketanhwr is not a public member (or API failed)"
+          fi
+          
+          echo ""
+          echo "Testing /memberships/ endpoint:"
+          if gh api /orgs/cloudflare/memberships/ketanhwr --silent 2>/dev/null; then
+            echo "✓ ketanhwr has membership (private or public)"
+          else
+            echo "✗ ketanhwr has no membership or token lacks read:org permissions"
+          fi
+
   # Handle forks from Cloudflare org members by creating mirror branches  
   handle-fork:
     if: "${{ github.event.pull_request.head.repo.fork }}"
