@@ -862,6 +862,13 @@ export class ERR_EEXIST extends NodeSyscallError {
   }
 }
 
+export class ERR_EPERM extends NodeSyscallError {
+  constructor(options: { syscall: string; errno?: number }) {
+    super('EPERM', 'Operation not permitted', options.syscall);
+    this.errno = options.errno || 1; // EPERM
+  }
+}
+
 export class ERR_DIR_CLOSED extends NodeError {
   constructor() {
     super('ERR_DIR_CLOSED', 'Directory is closed');

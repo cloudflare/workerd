@@ -838,4 +838,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables support for Python workflows.
   # This is still in development and may change in the future.
+
+  unsupportedProcessRealPlatform @96 :Bool
+      $compatEnableFlag("unsupported_process_real_platform")
+      $experimental;
+  # Enables support for process.platform to expose the actual system platform
+  # This will never ever be supported and is a WPT test path only.
 }

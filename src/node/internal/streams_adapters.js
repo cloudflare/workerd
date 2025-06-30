@@ -53,7 +53,7 @@ import { normalizeEncoding } from 'node-internal:internal_utils';
 
 import { validateBoolean, validateObject } from 'node-internal:validators';
 
-import * as process from 'node-internal:process';
+import * as process from 'node-internal:internal_process';
 
 const encoder = new TextEncoder();
 

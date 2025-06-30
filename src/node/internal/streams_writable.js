@@ -32,7 +32,7 @@ import { Stream } from 'node-internal:streams_legacy';
 
 import { Buffer } from 'node-internal:internal_buffer';
 
-import * as process from 'node-internal:process';
+import * as process from 'node-internal:internal_process';
 
 import {
   nop,
