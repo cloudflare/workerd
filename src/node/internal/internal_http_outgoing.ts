@@ -57,7 +57,7 @@ export class OutgoingMessage extends Writable {
     return this;
   }
 
-  setHeaders(headers: HeadersInit): this {
+  setHeaders(headers: HeadersInit | null | undefined): this {
     if (this[kHeadersSent]) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
