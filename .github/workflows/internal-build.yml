@@ -52,10 +52,15 @@ jobs:
       # This allows workerd-robot to find the commit in the main repo
       - name: Create mirror branch from merge commit
         id: mirror_branch
+        env:
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          mirror_branch="workerd-robot/${{ github.event.pull_request.user.login }}/${{ github.event.pull_request.head.ref }}"
-          merge_sha="${{ github.event.pull_request.merge_commit_sha }}"
-          run_attempt="${{ github.run_attempt }}"
+          mirror_branch="workerd-robot/$PR_USER/$PR_HEAD_REF"
+          merge_sha="$MERGE_SHA"
+          run_attempt="$RUN_ATTEMPT"
           
           echo "Mirror branch: $mirror_branch"
           echo "Merge commit SHA: $merge_sha"
@@ -86,16 +91,21 @@ jobs:
           CI_URL: ${{ secrets.CI_URL }}
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MIRROR_HEAD_SHA: ${{ steps.mirror_branch.outputs.mirror_head_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          MIRROR_BRANCH: ${{ steps.mirror_branch.outputs.mirror_branch }}
         run: |
           python3 -u ./tools/cross/internal_build.py \
-            ${{ github.event.pull_request.number }} \
-            "${{ steps.mirror_branch.outputs.mirror_head_sha }}" \
-            ${{ github.event.pull_request.head.sha }} \
-            ${{ github.run_attempt }} \
-            "${{ steps.mirror_branch.outputs.mirror_branch }}" \
-            $CI_URL \
-            $CI_CLIENT_ID \
-            $CI_CLIENT_SECRET
+            "$PR_NUMBER" \
+            "$MIRROR_HEAD_SHA" \
+            "$PR_HEAD_SHA" \
+            "$RUN_ATTEMPT" \
+            "$MIRROR_BRANCH" \
+            "$CI_URL" \
+            "$CI_CLIENT_ID" \
+            "$CI_CLIENT_SECRET"
 
   # Handle regular PRs from the main repo (not forks)
   handle-regular-pr:
@@ -125,13 +135,18 @@ jobs:
           CI_URL: ${{ secrets.CI_URL }}
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ steps.get_sha.outputs.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           python3 -u ./tools/cross/internal_build.py \
-            ${{github.event.pull_request.number}} \
-            ${{steps.get_sha.outputs.sha}} \
-            ${{github.event.pull_request.head.sha}} \
-            ${{github.run_attempt}} \
-            "${{github.event.pull_request.head.ref}}" \
-            $CI_URL \
-            $CI_CLIENT_ID \
-            $CI_CLIENT_SECRET
+            "$PR_NUMBER" \
+            "$MERGE_SHA" \
+            "$PR_HEAD_SHA" \
+            "$RUN_ATTEMPT" \
+            "$PR_HEAD_REF" \
+            "$CI_URL" \
+            "$CI_CLIENT_ID" \
+            "$CI_CLIENT_SECRET"
