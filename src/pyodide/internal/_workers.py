@@ -240,6 +240,7 @@ class Response(FetchResponse):
         status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
+        web_socket: "js.WebSocket | None" = None,
     ):
         """
         Represents the response to a request.
@@ -288,6 +289,7 @@ class Response(FetchResponse):
         status: HTTPStatus | int | None = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
+        web_socket: "js.WebSocket | None" = None,
     ):
         options = {}
         if status:
@@ -298,7 +300,8 @@ class Response(FetchResponse):
             options["statusText"] = status_text
         if headers:
             options["headers"] = _to_js_headers(headers)
-
+        if web_socket:
+            options["webSocket"] = web_socket
         return options
 
     """
