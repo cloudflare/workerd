@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/api/base64.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
