@@ -262,7 +262,7 @@ class Response(FetchResponse):
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
-        elif not isinstance(body, str | FormData):
+        elif not isinstance(body, str | FormData) and body is not None:
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
 
         # Handle constructing a Response from a JS Response.
