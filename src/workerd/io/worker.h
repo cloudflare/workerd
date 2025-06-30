@@ -810,7 +810,7 @@ class Worker::Actor final: public kj::Refcounted {
 
     // These methods are C++ equivalents of the JavaScript ctx.facets API.
     virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
-        kj::StringPtr name, StartInfo startInfo) = 0;
+        kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
     virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
     virtual void deleteFacet(kj::StringPtr name) = 0;
   };

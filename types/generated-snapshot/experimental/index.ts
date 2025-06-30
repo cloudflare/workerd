@@ -693,11 +693,16 @@ export declare class WebSocketRequestResponsePair {
   get response(): string;
 }
 export interface DurableObjectFacets {
-  get(name: string, options: DurableObjectFacetsGetOptions): Fetcher;
+  get(
+    name: string,
+    getStartupOptions: () =>
+      | DurableObjectFacetsStartupOptions
+      | Promise<DurableObjectFacetsStartupOptions>,
+  ): Fetcher;
   abort(name: string, reason: any): void;
   delete(name: string): void;
 }
-export interface DurableObjectFacetsGetOptions {
+export interface DurableObjectFacetsStartupOptions {
   $class: DurableObjectClass;
   id?: DurableObjectId | string;
 }

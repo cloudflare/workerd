@@ -4712,43 +4712,60 @@ KJ_TEST("Server: Durable Object facets") {
                 `    let results = [];
                 `
                 `    if (request.url.endsWith("/part1")) {
-                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      let foo = this.ctx.facets.get("foo",
+                `          () => ({class: this.env.COUNTER, id: "abc"}));
                 `      results.push(await foo.increment(true));  // increments foo
                 `      results.push(await foo.increment());  // increments foo
                 `      results.push(await foo.increment());  // increments foo
                 `      await foo.assertId("abc");
                 `
-                `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
+                `      let bar = this.ctx.facets.get("bar", () => ({class: this.env.NESTED}));
                 `      results.push(await bar.increment("foo", true));  // increments bar.foo
                 `      results.push(await bar.increment("bar", true));  // increments bar.bar
                 `      results.push(await bar.increment("foo"));        // increments bar.foo
                 `      await bar.assertId(this.ctx.id.toString());
                 `
                 `      // Get foo again to make sure we get the same object.
-                `      let foo2 = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      let foo2 = this.ctx.facets.get("foo", () => {
+                `        throw new Error("callback should not be called when already running");
+                `      });
                 `      results.push(await foo2.increment());  // increments foo
                 `      results.push(await foo.increment());   // increments foo
                 `      await foo.assertId("abc");
                 `    } else if (request.url.endsWith("/part2")) {
+                `      let callbackCount = 0;
+                `
                 `      // Get in a different order from before to make sure ID assignment is
                 `      // consistent.
-                `      let bar = this.ctx.facets.get("bar", {class: this.env.NESTED});
+                `      let bar = this.ctx.facets.get("bar", () => {
+                `        ++callbackCount;
+                `        return {class: this.env.NESTED};
+                `      });
                 `      results.push(await bar.increment("bar", true));  // increments bar.bar
                 `      results.push(await bar.increment("foo", true));  // increments bar.foo
-                `      let foo = this.ctx.facets.get("foo", {class: this.env.COUNTER, id: "abc"});
+                `      let foo = this.ctx.facets.get("foo", async () => {
+                `        await Promise.resolve();  // prove that callback can be async
+                `        ++callbackCount;
+                `        return {class: this.env.COUNTER, id: "abc"};
+                `      });
                 `      results.push(await foo.increment(true));  // increments foo
                 `
+                `      if (callbackCount !== 2) {
+                `        throw new Error(`callbackCount = ${callbackCount} (expected 2)`);
+                `      }
+                `
+                `      // Force "foo" to abort, so we can start it up with a different class.
+                `      this.ctx.facets.abort("foo", new Error("test abort facet"));
+                `
                 `      let foo2 = this.ctx.facets.get(
-                `          "foo", {class: this.env.EXFILTRATOR, id: "abc"});
+                `          "foo", () => ({class: this.env.EXFILTRATOR, id: "abc"}));
                 `      results.push(await foo2.exfiltrate());
                 `
                 `      try {
                 `        await foo.increment();
                 `        throw new Error("broken stub didn't throw?");
                 `      } catch (err) {
-                `        if (err.message != "The facet is restarting because the parent " +
-                `            "specified different parameters to facets.get(). You may need to " +
-                `            "recreate the stub to talk to the new version.") {
+                `        if (err.message != "test abort facet") {
                 `          throw err;
                 `        }
                 `      }
@@ -4781,7 +4798,7 @@ KJ_TEST("Server: Durable Object facets") {
                 `}
                 `export class NestedFacet extends DurableObject {
                 `  increment(name, first) {
-                `    let facet = this.ctx.facets.get(name, {class: this.env.COUNTER});
+                `    let facet = this.ctx.facets.get(name, () => ({class: this.env.COUNTER}));
                 `    return facet.increment(first);
                 `  }
                 `  assertId(id) {

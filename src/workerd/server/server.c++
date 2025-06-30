@@ -2365,10 +2365,11 @@ class Server::WorkerService final: public Service,
       }
 
       kj::Own<ActorContainer> getFacetContainer(
-          kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
+          kj::String childKey, kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
         auto makeContainer = [&]() {
-          return kj::refcounted<ActorContainer>(kj::mv(childKey), ns, *this,
-              ClassAndId(kj::mv(childActorClass), kj::mv(childId)), timer);
+          auto promise = callFacetStartCallback(kj::mv(getStartInfo));
+          return kj::refcounted<ActorContainer>(
+              kj::mv(childKey), ns, *this, kj::mv(promise), timer);
         };
 
         bool isNew = false;
@@ -2376,36 +2377,15 @@ class Server::WorkerService final: public Service,
         auto& entry = facets.findOrCreateEntry(childKey, [&]() mutable {
           isNew = true;
           auto container = makeContainer();
-          return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
-            container->getKey(), kj::mv(container)};
+          return ActorMap::Entry{container->getKey(), kj::mv(container)};
         });
-
-        // TODO(now): This KJ_ASSERT_NONNULL isn't really valid but this block is going away in the
-        //   next commit anyway.
-        auto& [entryClass, entryId] =
-            KJ_ASSERT_NONNULL(entry.value->classAndId.tryGet<ClassAndId>());
-        if (!isNew &&
-            (entryClass.get() != childActorClass.get() ||
-                !Worker::Actor::idsEqual(entryId, childId))) {
-          // TODO(facets): Should this be a softer restart?
-          entry.value->abort(JSG_KJ_EXCEPTION(FAILED, Error,
-              "The facet is restarting because the parent specified different parameters to "
-              "facets.get(). You may need to recreate the stub to talk to the new version."));
-
-          auto container = makeContainer();
-
-          // Update the key to point at the copy owned by the new container.
-          entry.key = container->getKey();
-          entry.value = kj::mv(container);
-        }
 
         return entry.value->addRef();
       }
 
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
-          kj::StringPtr name, StartInfo startInfo) override {
-        auto facetClass = startInfo.actorClass.downcast<ActorClass>();
-        auto facet = getFacetContainer(kj::str(name), kj::mv(startInfo.id), kj::mv(facetClass));
+          kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) override {
+        auto facet = getFacetContainer(kj::str(name), kj::mv(getStartInfo));
         return kj::refcounted<ActorChannelImpl>(kj::mv(facet));
       }
 
@@ -2728,6 +2708,14 @@ class Server::WorkerService final: public Service,
             kj::mv(containerClient), *this);
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
+      }
+
+      // Helper coroutine to call `getStartInfo()`, the start callback for a facet, while making
+      // sure the function stays alive until the returned promise resolves.
+      static kj::Promise<ClassAndId> callFacetStartCallback(
+          kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
+        auto info = co_await getStartInfo();
+        co_return ClassAndId(info.actorClass.downcast<ActorClass>(), kj::mv(info.id));
       }
     };
 
