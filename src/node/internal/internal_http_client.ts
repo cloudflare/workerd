@@ -338,10 +338,16 @@ export class ClientRequest extends OutgoingMessage {
 
     this[kHeadersSent] = true;
 
-    // HTTP on fetch has two major design limitations.
+    // Our fetch implementation has the following limitations.
     //
-    // 1. Content decoding is handled automatically by fetch, but expectation is that it's not handled in http.
+    // 1. Content decoding is handled automatically by fetch,
+    //    but expectation is that it's not handled in http.
     // 2. Redirects are always followed.
+    // 3. Nothing is directly waiting for fetch promise here.
+    //    It's up to the user of the HTTP API to arrange for
+    //    the request to be held open until the fetch completes,
+    //    typically by passing some promise to ctx.waitUntil()
+    //    and resolving that promise when the request is complete.
     //
     // TODO(soon): Address these concerns and limitations.
     fetch(url, {
