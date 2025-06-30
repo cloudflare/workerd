@@ -750,3 +750,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/request-signal-passthrough.js"],
 )
+
+wd_test(
+    src = "worker-loader-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-test.js"],
+)

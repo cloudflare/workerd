@@ -40,6 +40,7 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg.h>
@@ -118,6 +119,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
+    EW_WORKER_LOADER_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -1004,6 +1006,12 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
       value = lock.wrap(context, lock.alloc<api::DurableObjectClass>(actorClass.channel));
     }
+
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      value = lock.wrap(context,
+          lock.alloc<api::WorkerLoader>(
+              workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
+    }
   }
 
   return value;
@@ -1093,6 +1101,9 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
 
     KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
       result.value = actorClass.clone();
+    }
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      result.value = workerLoader.clone();
     }
   }
 

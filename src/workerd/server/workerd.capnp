@@ -419,6 +419,22 @@ struct Worker {
         limits @25 :MemoryCacheLimits;
       }
 
+      workerLoader :group {
+        # A binding representing the ability to dynamically load Workers from code presented at
+        # runtime.
+        #
+        # A Worker loader is not just a function that loads a Worker, but also serves as a
+        # cache of Workers, automatically unloading Workers that are not in use. To that end, each
+        # Worker must have a name, and if a Worker with that name already exists, it'll be reused.
+
+        id @27 :Text;
+        # Optional: The identifier associated with this Worker loader. Multiple Workers can bind to
+        # the same ID in order to access the same loader, so that if they request the same name
+        # from it, they'll end up sharing the same loaded Worker.
+        #
+        # (If omitted, the binding will not share a cache with any other binding.)
+      }
+
       # TODO(someday): dispatch, other new features
     }
 

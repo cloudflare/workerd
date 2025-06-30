@@ -218,4 +218,16 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
   KJ_UNREACHABLE;
 }
 
+kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoContext& ioctx) {
+  KJ_SWITCH_ONEOF(channel) {
+    KJ_CASE_ONEOF(number, uint) {
+      return ioctx.getIoChannelFactory().getActorClass(number);
+    }
+    KJ_CASE_ONEOF(object, IoOwn<IoChannelFactory::ActorClassChannel>) {
+      return kj::addRef(*object);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 }  // namespace workerd::api

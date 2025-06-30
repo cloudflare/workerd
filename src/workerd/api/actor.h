@@ -263,17 +263,17 @@ class DurableObjectNamespace: public jsg::Object {
 class DurableObjectClass: public jsg::Object {
  public:
   DurableObjectClass(uint channel): channel(channel) {}
+  DurableObjectClass(IoOwn<IoChannelFactory::ActorClassChannel> channel)
+      : channel(kj::mv(channel)) {}
 
-  uint getChannel() const {
-    return channel;
-  }
+  kj::Own<IoChannelFactory::ActorClassChannel> getChannel(IoContext& ioctx);
 
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()
   }
 
  private:
-  uint channel;
+  kj::OneOf<uint, IoOwn<IoChannelFactory::ActorClassChannel>> channel;
 };
 
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
