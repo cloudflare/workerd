@@ -499,7 +499,7 @@ class ReadableStreamController {
   // If maybeJs is set, the reader's closed promise will be resolved.
   virtual void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) = 0;
 
-  virtual kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) = 0;
+  virtual kj::Maybe<PipeController&> tryPipeLock() = 0;
 
   virtual void visitForGc(jsg::GcVisitor& visitor) {};
 
