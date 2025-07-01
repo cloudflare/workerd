@@ -73,7 +73,7 @@ export class SignHandle {
     rsaPadding?: number,
     pssSaltLength?: number,
     dsaSigEnc?: number
-  ): ArrayBuffer;
+  ): Uint8Array;
 }
 
 export class VerifyHandle {

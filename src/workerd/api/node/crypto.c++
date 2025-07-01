@@ -275,7 +275,7 @@ jsg::BackingStore signFinal(jsg::Lock& js,
   auto data = mdctx.digestFinal(mdctx.getExpectedSize());
   JSG_REQUIRE(data, Error, "Failed to generate digest");
 
-  auto sig = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, pkey.size());
+  auto sig = jsg::BackingStore::alloc<v8::Uint8Array>(js, pkey.size());
   ncrypto::Buffer<kj::byte> sig_buf{
     .data = sig.asArrayPtr().begin(),
     .len = sig.size(),
@@ -295,6 +295,10 @@ jsg::BackingStore signFinal(jsg::Lock& js,
 
   JSG_REQUIRE(pkctx.setSignatureMd(mdctx), Error, "Failed to set signature digest");
   JSG_REQUIRE(pkctx.signInto(data, &sig_buf), Error, "Failed to generate signature");
+
+  if (sig_buf.len < sig.size()) {
+    sig.limit(sig_buf.len);
+  }
 
   return kj::mv(sig);
 }
