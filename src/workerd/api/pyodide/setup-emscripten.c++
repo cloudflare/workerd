@@ -81,14 +81,11 @@ EmscriptenRuntime EmscriptenRuntime::initialize(
       pyodideAsmWasmReader = module.getData();
     }
   }
-  auto context = js.v8Context();
-  Worker::setupContext(js, context, Worker::ConsoleMode::INSPECTOR_ONLY);
   auto module = loadEmscriptenSetupModule(js, KJ_ASSERT_NONNULL(emsciptenSetupJsReader));
   instantiateEmscriptenSetupModule(js, module);
   auto instantiateEmscriptenModule = getInstantiateEmscriptenModule(js, module);
   auto emscriptenModule = callInstantiateEmscriptenModule(js, instantiateEmscriptenModule,
       isWorkerd, KJ_ASSERT_NONNULL(pythonStdlibZipReader), KJ_ASSERT_NONNULL(pyodideAsmWasmReader));
-  auto contextToken = jsg::JsValue(context->GetSecurityToken());
-  return EmscriptenRuntime{contextToken.addRef(js), emscriptenModule.addRef(js)};
+  return EmscriptenRuntime{emscriptenModule.addRef(js)};
 }
 }  // namespace workerd::api::pyodide

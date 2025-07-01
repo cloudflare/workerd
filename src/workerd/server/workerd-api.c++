@@ -367,7 +367,6 @@ struct WorkerdApi::Impl final {
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
-  kj::Maybe<api::pyodide::EmscriptenRuntime> maybeEmscriptenRuntime;
 
   class Configuration {
    public:
@@ -414,18 +413,6 @@ struct WorkerdApi::Impl final {
       // case we also need to tell JSG.
       if (maybeOwnedModuleRegistry != kj::none) {
         jsgIsolate.setUsingNewModuleRegistry();
-      }
-      if (features->getPythonWorkers()) {
-        auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
-        auto version = getPythonBundleName(pythonRelease);
-        auto bundle = KJ_ASSERT_NONNULL(
-            fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
-        jsg::NewContextOptions options{.enableWeakRef = features->getJsWeakRef()};
-        auto context = lock.newContext<api::ServiceWorkerGlobalScope>(options);
-        v8::Context::Scope scope(context.getHandle(lock));
-        // Init emscripten synchronously, the python script will import setup-emscripten and
-        // call setEmscriptenModele
-        maybeEmscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(lock, true, bundle);
       }
     });
   }
@@ -764,15 +751,18 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     if (source.isPython) {
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
-      // Inject SetupEmscripten module
-      modules->addBuiltinModule("internal:setup-emscripten",
-          lockParam.alloc<SetupEmscripten>(KJ_ASSERT_NONNULL(impl->maybeEmscriptenRuntime)),
-          workerd::jsg::ModuleRegistry::Type::INTERNAL);
-
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = KJ_ASSERT_NONNULL(
           fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+      // Inject SetupEmscripten module
+      {
+        auto emscriptenRuntime =
+            api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
+        modules->addBuiltinModule("internal:setup-emscripten",
+            jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
+            workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      }
 
       // Get Python requirements and fetch packages
       KJ_IF_SOME(a, artifacts) {
@@ -1110,13 +1100,6 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
   return result;
 }
 
-kj::Maybe<const api::pyodide::EmscriptenRuntime&> WorkerdApi::getEmscriptenRuntime() const {
-  return impl->maybeEmscriptenRuntime.map(
-      [](auto& emscriptenRuntime) -> const api::pyodide::EmscriptenRuntime& {
-    return emscriptenRuntime;
-  });
-}
-
 const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
   return kj::downcast<const WorkerdApi>(api);
 }
@@ -1306,10 +1289,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       pyodideBundleBuilder.addSynthetic(bootrapSpecifier,
           jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::SetupEmscripten,
               JsgWorkerdIsolate_TypeWrapper>(
-              [](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
-        auto& api = Worker::Api::current();
-        return js.alloc<api::pyodide::SetupEmscripten>(
-            KJ_ASSERT_NONNULL(api.getEmscriptenRuntime()));
+              [bundle](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
+        auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(js, true, bundle);
+        return js.alloc<api::pyodide::SetupEmscripten>(kj::mv(emscriptenRuntime));
       }));
 
       pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);

@@ -484,8 +484,8 @@ class SimplePythonLimiter: public jsg::Object {
 
 class SetupEmscripten: public jsg::Object {
  public:
-  SetupEmscripten(const EmscriptenRuntime& emscriptenRuntime)
-      : emscriptenRuntime(emscriptenRuntime) {};
+  SetupEmscripten(EmscriptenRuntime emscriptenRuntime)
+      : emscriptenRuntime(kj::mv(emscriptenRuntime)) {};
 
   jsg::JsValue getModule(jsg::Lock& js);
 
@@ -494,7 +494,7 @@ class SetupEmscripten: public jsg::Object {
   }
 
  private:
-  const EmscriptenRuntime& emscriptenRuntime;
+  EmscriptenRuntime emscriptenRuntime;
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
