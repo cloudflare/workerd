@@ -675,11 +675,12 @@ Buffer.prototype.inspect = function inspect(
   ctx: InspectOptionsStylized
 ) {
   let str = '';
-  const max = INSPECT_MAX_BYTES;
+  const max = Math.min(this.byteLength, INSPECT_MAX_BYTES);
+
   str = this.toString('hex', 0, max)
     .replace(/(.{2})/g, '$1 ')
     .trim();
-  const remaining = this.length - max;
+  const remaining = this.byteLength - max;
   if (remaining > 0) {
     str += ` ... ${remaining} more byte${remaining > 1 ? 's' : ''}`;
   }
