@@ -1760,13 +1760,17 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       target = jsg::JsObject(result.As<v8::Object>());
     }
 
-    TargetInfo targetInfo{.target = target,
+    // clang-format off
+    TargetInfo targetInfo{
+      .target = target,
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
-      return {
-        .env = handler->env.getHandle(js),
-        .ctx = lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()),
-      };
-    })};
+        return {
+          .env = handler->env.getHandle(js),
+          .ctx = lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()),
+        };
+      })
+    };
+    // clang-format on
 
     // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
     // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup

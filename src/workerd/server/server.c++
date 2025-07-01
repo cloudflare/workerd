@@ -3693,25 +3693,26 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           .errorContext = kj::str("Worker's globalOutbound"),
         },
 
-        .compileBindings =
-            [env = kj::mv(source.env)](
-                jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
-        if (!env.empty()) {
-          // Copy properties of the provided `env` object into `target`.
-          js.withinHandleScope([&]() {
-            auto targetObj = jsg::JsObject(target);
-            auto sourceObj = KJ_REQUIRE_NONNULL(
-                env.toJs(js).tryCast<jsg::JsObject>(), "'env' must be an object");
-            auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
-                jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
-            auto propCount = props.size();
-            for (auto i: kj::zeroTo(propCount)) {
-              auto prop = props.get(js, i);
-              targetObj.set(js, prop, sourceObj.get(js, prop));
-            }
-          });
-        }
-      },
+        // clang-format off
+        .compileBindings = [env = kj::mv(source.env)](
+            jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
+          if (!env.empty()) {
+            // Copy properties of the provided `env` object into `target`.
+            js.withinHandleScope([&]() {
+              auto targetObj = jsg::JsObject(target);
+              auto sourceObj = KJ_REQUIRE_NONNULL(
+                  env.toJs(js).tryCast<jsg::JsObject>(), "'env' must be an object");
+              auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+                  jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
+              auto propCount = props.size();
+              for (auto i: kj::zeroTo(propCount)) {
+                auto prop = props.get(js, i);
+                targetObj.set(js, prop, sourceObj.get(js, prop));
+              }
+            });
+          }
+        },
+        // clang-format on
       };
 
       DynamicErrorReporter errorReporter;
@@ -3922,11 +3923,12 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     .actorStorageConf = conf.getDurableObjectStorage(),
     .containerEngineConf = conf.getContainerEngine(),
 
-    .compileBindings =
-        [globals = kj::mv(globals)](
-            jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
-    return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
-  },
+    // clang-format off
+    .compileBindings = [globals = kj::mv(globals)](
+        jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
+      return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);
+    },
+    // clang-format on
   };
 
   return makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);

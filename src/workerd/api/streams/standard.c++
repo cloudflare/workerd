@@ -4072,37 +4072,33 @@ jsg::Ref<ReadableStream> ReadableStream::from(
   };
   auto rcGenerator = kj::refcounted<RefcountedGenerator>(kj::mv(generator));
 
-  return constructor(js,
-      UnderlyingSource{
-        .pull =
-            [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto controller) mutable {
-    auto& c = controller.template get<DefaultController>();
-    return generator->generator.next(js).then(js,
-        JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
-            (controller),
-            (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
-              KJ_IF_SOME(v, value) {
-              controller->enqueue(js, v.getHandle(js));
-              } else {
-              controller->close(js);
-              }
-              return js.resolvedPromise();
-            }),
-        JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
-            (controller), (jsg::Lock& js, jsg::Value reason) {
-              controller->error(js, reason.getHandle(js));
-              return js.rejectedPromise<void>(kj::mv(reason));
-            }));
-  },
-        .cancel =
-            [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto reason) mutable {
-    return generator->generator.return_(js, kj::none)
-        .then(js, [generator = kj::mv(generator)](auto& lock) {});
-  },
-      },
-      StreamQueuingStrategy{
-        .highWaterMark = 0,
-      });
+  // clang-format off
+  return constructor(js, UnderlyingSource{
+    .pull = [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto controller) mutable {
+      auto& c = controller.template get<DefaultController>();
+      return generator->generator.next(js).then(js,
+          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
+              (controller),
+              (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
+                KJ_IF_SOME(v, value) {
+                controller->enqueue(js, v.getHandle(js));
+                } else {
+                controller->close(js);
+                }
+                return js.resolvedPromise();
+              }),
+          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
+              (controller), (jsg::Lock& js, jsg::Value reason) {
+                controller->error(js, reason.getHandle(js));
+                return js.rejectedPromise<void>(kj::mv(reason));
+              }));
+    },
+    .cancel = [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto reason) mutable {
+      return generator->generator.return_(js, kj::none)
+          .then(js, [generator = kj::mv(generator)](auto& lock) {});
+    },
+  }, StreamQueuingStrategy{ .highWaterMark = 0 });
+  // clang-format on
 }
 
 }  // namespace workerd::api
