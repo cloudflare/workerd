@@ -688,11 +688,16 @@ declare class WebSocketRequestResponsePair {
   get response(): string;
 }
 interface DurableObjectFacets {
-  get(name: string, options: DurableObjectFacetsGetOptions): Fetcher;
+  get(
+    name: string,
+    getStartupOptions: () =>
+      | DurableObjectFacetsStartupOptions
+      | Promise<DurableObjectFacetsStartupOptions>,
+  ): Fetcher;
   abort(name: string, reason: any): void;
   delete(name: string): void;
 }
-interface DurableObjectFacetsGetOptions {
+interface DurableObjectFacetsStartupOptions {
   $class: DurableObjectClass;
   id?: DurableObjectId | string;
 }

@@ -392,17 +392,21 @@ class DurableObjectFacets: public jsg::Object {
   DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
       : facetManager(kj::mv(facetManager)) {}
 
-  struct GetOptions {
+  struct StartupOptions {
     jsg::Ref<DurableObjectClass> $class;
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
   };
 
-  // Get a facet by name, starting it if it isn't already running (or restarting it if the options
-  // change). Returns a `Fetcher` instead of a `DurableObject` becasue the returend stub does not
-  // have the `id` or `name` methods that a DO stub normally has.
-  jsg::Ref<Fetcher> get(jsg::Lock& js, kj::String name, GetOptions options);
+  // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
+  // only if the facet wasn't already running, to get information needed to start the facet.
+  //
+  // Returns a `Fetcher` instead of a `DurableObject` becasue the returend stub does not have the
+  // `id` or `name` methods that a DO stub normally has.
+  jsg::Ref<Fetcher> get(jsg::Lock& js,
+      kj::String name,
+      jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions);
 
   void abort(jsg::Lock& js, kj::String name, jsg::JsValue reason);
   void delete_(jsg::Lock& js, kj::String name);
@@ -665,6 +669,6 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
       api::DurableObjectStorageOperations::PutOptions,                                             \
       api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair,     \
-      api::DurableObjectFacets, api::DurableObjectFacets::GetOptions
+      api::DurableObjectFacets, api::DurableObjectFacets::StartupOptions
 
 }  // namespace workerd::api

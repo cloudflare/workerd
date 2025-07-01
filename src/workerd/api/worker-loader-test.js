@@ -119,7 +119,9 @@ export class FacetTestActor extends DurableObject {
 
     let cls = worker.getDurableObjectClass('MyActor');
 
-    let facet = this.ctx.facets.get('bar', { class: cls });
+    let facet = this.ctx.facets.get('bar', () => {
+      return { class: cls };
+    });
 
     assert.strictEqual(await facet.increment(), 1);
     assert.strictEqual(await facet.increment(4), 5);

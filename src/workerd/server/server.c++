@@ -2169,22 +2169,54 @@ class Server::WorkerService final: public Service,
                                 public kj::Refcounted,
                                 public Worker::Actor::FacetManager {
      public:
+      // Information which is needed before start() can be called, but may not be available yet
+      // when the ActorContainer is constructed (especially in the case of facets).
+      struct ClassAndId {
+        kj::Own<ActorClass> actorClass;
+        Worker::Actor::Id id;
+
+        ClassAndId(kj::Own<ActorClass> actorClass, Worker::Actor::Id id)
+            : actorClass(kj::mv(actorClass)),
+              id(kj::mv(id)) {}
+      };
+
       ActorContainer(kj::String key,
-          Worker::Actor::Id id,
           ActorNamespace& ns,
           kj::Maybe<ActorContainer&> parent,
-          kj::Own<ActorClass> actorClass,
+          kj::OneOf<ClassAndId, kj::Promise<ClassAndId>> classAndIdParam,
           kj::Timer& timer)
           : key(kj::mv(key)),
-            id(kj::mv(id)),
             tracker(kj::refcounted<RequestTracker>(*this)),
             ns(ns),
             root(parent.map([](ActorContainer& p) -> ActorContainer& { return p.root; })
                      .orDefault(*this)),
             parent(parent),
-            actorClass(kj::mv(actorClass)),
             timer(timer),
-            lastAccess(timer.now()) {}
+            lastAccess(timer.now()) {
+        KJ_SWITCH_ONEOF(classAndIdParam) {
+          KJ_CASE_ONEOF(value, ClassAndId) {
+            // `classAndId` is immediately available.
+            classAndId = kj::mv(value);
+          }
+          KJ_CASE_ONEOF(promise, kj::Promise<ClassAndId>) {
+            // We are receiving a promise for a `ClassAndId` to come later. Arrange to initialize
+            // `classAndId` from the promise. Create a `ForkedPromise<void>` that resolves when
+            // initialization is complete.
+            classAndId = promise
+                             .then([this](ClassAndId value) {
+              auto& forked = KJ_ASSERT_NONNULL(classAndId.tryGet<kj::ForkedPromise<void>>());
+              if (!forked.hasBranches()) {
+                // HACK: We're about to replace the ForkedPromise but it has no one waiting on it,
+                //   so we'd end up cancelling ourselves. Add a branch and detach it so this doesn't
+                //   happen.
+                forked.addBranch().detach([](auto&&) {});
+              }
+
+              classAndId = kj::mv(value);
+            }).fork();
+          }
+        }
+      }
 
       ~ActorContainer() noexcept(false) {
         // Shutdown the tracker so we don't use active/inactive hooks anymore.
@@ -2268,11 +2300,17 @@ class Server::WorkerService final: public Service,
         requireNotBroken();
 
         if (actor == kj::none) {
+          KJ_IF_SOME(promise, classAndId.tryGet<kj::ForkedPromise<void>>()) {
+            co_await promise;
+          }
+
+          auto& [actorClass, id] = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>());
+
           KJ_IF_SOME(promise, actorClass->whenReady()) {
             co_await promise;
           }
 
-          start();
+          start(actorClass, id);
         }
 
         co_return KJ_ASSERT_NONNULL(actor)->addRef();
@@ -2286,6 +2324,9 @@ class Server::WorkerService final: public Service,
           // Need to start the cleanup loop.
           ns.cleanupTask = ns.cleanupLoop();
         }
+
+        // Since `getActor()` completed, `classAndId` must be resolved.
+        auto& actorClass = KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).actorClass;
 
         co_return actorClass->startRequest(kj::mv(metadata), kj::mv(actor))
             .attach(kj::defer([self = kj::addRef(*this)]() mutable { self->updateAccessTime(); }));
@@ -2324,10 +2365,11 @@ class Server::WorkerService final: public Service,
       }
 
       kj::Own<ActorContainer> getFacetContainer(
-          kj::String childKey, Worker::Actor::Id childId, kj::Own<ActorClass> childActorClass) {
+          kj::String childKey, kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
         auto makeContainer = [&]() {
+          auto promise = callFacetStartCallback(kj::mv(getStartInfo));
           return kj::refcounted<ActorContainer>(
-              kj::mv(childKey), kj::mv(childId), ns, *this, kj::mv(childActorClass), timer);
+              kj::mv(childKey), ns, *this, kj::mv(promise), timer);
         };
 
         bool isNew = false;
@@ -2335,32 +2377,15 @@ class Server::WorkerService final: public Service,
         auto& entry = facets.findOrCreateEntry(childKey, [&]() mutable {
           isNew = true;
           auto container = makeContainer();
-          return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
-            container->getKey(), kj::mv(container)};
+          return ActorMap::Entry{container->getKey(), kj::mv(container)};
         });
-
-        if (!isNew &&
-            (entry.value->actorClass.get() != childActorClass.get() ||
-                !Worker::Actor::idsEqual(entry.value->id, childId))) {
-          // TODO(facets): Should this be a softer restart?
-          entry.value->abort(JSG_KJ_EXCEPTION(FAILED, Error,
-              "The facet is restarting because the parent specified different parameters to "
-              "facets.get(). You may need to recreate the stub to talk to the new version."));
-
-          auto container = makeContainer();
-
-          // Update the key to point at the copy owned by the new container.
-          entry.key = container->getKey();
-          entry.value = kj::mv(container);
-        }
 
         return entry.value->addRef();
       }
 
       kj::Own<IoChannelFactory::ActorChannel> getFacet(
-          kj::StringPtr name, StartInfo startInfo) override {
-        auto facetClass = startInfo.actorClass.downcast<ActorClass>();
-        auto facet = getFacetContainer(kj::str(name), kj::mv(startInfo.id), kj::mv(facetClass));
+          kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) override {
+        auto facet = getFacetContainer(kj::str(name), kj::mv(getStartInfo));
         return kj::refcounted<ActorChannelImpl>(kj::mv(facet));
       }
 
@@ -2391,18 +2416,20 @@ class Server::WorkerService final: public Service,
       kj::Maybe<kj::Own<Worker::Actor>> actor;
 
       kj::String key;
-      Worker::Actor::Id id;
       kj::Own<RequestTracker> tracker;
       ActorNamespace& ns;
       ActorContainer& root;
       kj::Maybe<ActorContainer&> parent;
-      kj::Own<ActorClass> actorClass;
       kj::Timer& timer;
       kj::TimePoint lastAccess;
       kj::Maybe<kj::Own<Worker::Actor::HibernationManager>> manager;
       kj::Maybe<kj::Promise<void>> shutdownTask;
       kj::Maybe<kj::Promise<void>> onBrokenTask;
       kj::Maybe<kj::Exception> brokenReason;
+
+      // If this is a `ForkedPromise<void>`, await the promise. When it has resolved, then
+      // `classAndId` will have been replaced with the resolved `ClassAndId` value.
+      kj::OneOf<ClassAndId, kj::ForkedPromise<void>> classAndId;
 
       // FacetTreeIndex for this actor. Only initialized on the root.
       kj::Maybe<kj::Own<FacetTreeIndex>> facetTreeIndex;
@@ -2573,7 +2600,7 @@ class Server::WorkerService final: public Service,
         actor = kj::none;
       }
 
-      void start() {
+      void start(kj::Own<ActorClass>& actorClass, Worker::Actor::Id& id) {
         KJ_REQUIRE(actor == nullptr);
 
         auto makeActorCache = [this](const ActorCache::SharedLru& sharedLru, OutputGate& outputGate,
@@ -2682,6 +2709,14 @@ class Server::WorkerService final: public Service,
         onBrokenTask = monitorOnBroken(*actor);
         this->actor = kj::mv(actor);
       }
+
+      // Helper coroutine to call `getStartInfo()`, the start callback for a facet, while making
+      // sure the function stays alive until the returned promise resolves.
+      static kj::Promise<ClassAndId> callFacetStartCallback(
+          kj::Function<kj::Promise<StartInfo>()> getStartInfo) {
+        auto info = co_await getStartInfo();
+        co_return ClassAndId(info.actorClass.downcast<ActorClass>(), kj::mv(info.id));
+      }
     };
 
     kj::Own<ActorContainer> getActorContainer(Worker::Actor::Id id) {
@@ -2700,8 +2735,8 @@ class Server::WorkerService final: public Service,
 
       return actors
           .findOrCreate(key, [&]() mutable {
-        auto container = kj::refcounted<ActorContainer>(
-            kj::mv(key), kj::mv(id), *this, kj::none, kj::addRef(*actorClass), timer);
+        auto container = kj::refcounted<ActorContainer>(kj::mv(key), *this, kj::none,
+            ActorContainer::ClassAndId(kj::addRef(*actorClass), kj::mv(id)), timer);
 
         return kj::HashMap<kj::StringPtr, kj::Own<ActorContainer>>::Entry{
           container->getKey(), kj::mv(container)};

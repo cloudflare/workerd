@@ -823,13 +823,11 @@ void DurableObjectTransaction::maybeRollback() {
 class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   FacetOutgoingFactory(Worker::Actor::FacetManager& facetManager,
-      kj::Own<IoChannelFactory::ActorClassChannel> actorClass,
       kj::String name,
-      Worker::Actor::Id id)
+      kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo)
       : facetManager(facetManager),
         name(kj::mv(name)),
-        actorClass(kj::mv(actorClass)),
-        id(kj::mv(id)) {}
+        getStartInfo(kj::mv(getStartInfo)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -842,11 +840,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name,
-            {
-              .actorClass = kj::mv(actorClass),
-              .id = kj::mv(id),
-            });
+        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
@@ -861,36 +855,48 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   Worker::Actor::FacetManager& facetManager;
   kj::String name;
 
-  // These are moved away when `actorChannel` is initialized.
-  kj::Own<IoChannelFactory::ActorClassChannel> actorClass;
-  Worker::Actor::Id id;
+  // This is moved away when `actorChannel` is initialized.
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
-jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js, kj::String name, GetOptions options) {
+jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
+    kj::String name,
+    jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions) {
   auto& fm = getFacetManager();
   auto& ioCtx = IoContext::current();
 
-  Worker::Actor::Id id;
-  KJ_IF_SOME(i, options.id) {
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(doId, jsg::Ref<DurableObjectId>) {
-        id = doId->getInner().clone();
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
+      ioCtx.makeReentryCallback(
+          [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
+    return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
+      Worker::Actor::Id id;
+      KJ_IF_SOME(i, options.id) {
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(doId, jsg::Ref<DurableObjectId>) {
+            id = doId->getInner().clone();
+          }
+          KJ_CASE_ONEOF(strId, kj::String) {
+            id = kj::mv(strId);
+          }
+        }
+      } else {
+        // Child inherits parent ID.
+        id = ioCtx.getActorOrThrow().cloneId();
       }
-      KJ_CASE_ONEOF(strId, kj::String) {
-        id = kj::mv(strId);
-      }
-    }
-  } else {
-    // Child inherits parent ID.
-    id = ioCtx.getActorOrThrow().cloneId();
-  }
 
-  auto actorClass = options.$class->getChannel(ioCtx);
+      auto actorClass = options.$class->getChannel(ioCtx);
+
+      return Worker::Actor::FacetManager::StartInfo{
+        .actorClass = kj::mv(actorClass),
+        .id = kj::mv(id),
+      };
+    });
+  });
 
   kj::Own<Fetcher::OutgoingFactory> factory =
-      kj::heap<FacetOutgoingFactory>(fm, kj::mv(actorClass), kj::mv(name), kj::mv(id));
+      kj::heap<FacetOutgoingFactory>(fm, kj::mv(name), kj::mv(getStartInfo));
 
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
