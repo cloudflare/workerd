@@ -20,10 +20,6 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 NODE_VERSION = "22.15.1"
 
-load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
-
-bazel_skylib_workspace()
-
 # ========================================================================================
 # Simple dependencies
 

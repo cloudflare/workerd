@@ -2,13 +2,6 @@
   "$schema": "deps.schema.json",
   "repositories": [
     {
-      "name": "bazel_skylib",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "bazel-skylib",
-      "file_regex": "^bazel-skylib-[0-9\\.]+\\.tar\\.gz$"
-    },
-    {
       "name": "rules_python",
       "type": "github_release",
       "owner": "bazelbuild",

@@ -5,6 +5,8 @@ bazel_dep(name = "rules_java", version = "8.13.0")
 # bazel_features variables, but requiring a more recent version fixes this.
 bazel_dep(name = "bazel_features", version = "1.32.0")
 
+bazel_dep(name = "bazel_skylib", version = "1.8.0")
+
 # needed by perfetto, but not actually used.
 bazel_dep(name = "rules_android", version = "0.6.4")
 
