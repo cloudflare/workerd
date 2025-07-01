@@ -88,9 +88,7 @@ class ReadableLockImpl {
  private:
   class PipeLocked final: public PipeController {
    public:
-    explicit PipeLocked(Controller& inner, jsg::Ref<WritableStream> ref)
-        : inner(inner),
-          writableStreamRef(kj::mv(ref)) {}
+    explicit PipeLocked(Controller& inner, jsg::Ref<WritableStream> ref): inner(inner) {}
 
     bool isClosed() override {
       return inner.state.template is<StreamStates::Closed>();
@@ -130,13 +128,10 @@ class ReadableLockImpl {
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-    JSG_MEMORY_INFO(PipeLocked) {
-      tracker.trackField("writableStreamRef", writableStreamRef);
-    }
+    JSG_MEMORY_INFO(PipeLocked) {}
 
    private:
     Controller& inner;
-    jsg::Ref<WritableStream> writableStreamRef;
 
     friend Controller;
   };
@@ -359,9 +354,7 @@ jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Loc
 }
 
 template <typename Controller>
-void ReadableLockImpl<Controller>::PipeLocked::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(writableStreamRef);
-}
+void ReadableLockImpl<Controller>::PipeLocked::visitForGc(jsg::GcVisitor& visitor) {}
 
 // ======================================================================================
 

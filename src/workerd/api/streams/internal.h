@@ -124,8 +124,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   class PipeLocked: public PipeController {
    public:
     PipeLocked(ReadableStreamInternalController& inner, jsg::Ref<WritableStream> ref)
-        : inner(inner),
-          ref(kj::mv(ref)) {}
+        : inner(inner) {}
 
     bool isClosed() override;
 
@@ -143,9 +142,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
 
-    void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(ref);
-    }
+    void visitForGc(jsg::GcVisitor& visitor) {}
 
     kj::StringPtr jsgGetMemoryName() const;
     size_t jsgGetMemorySelfSize() const;
@@ -153,7 +150,6 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
    private:
     ReadableStreamInternalController& inner;
-    jsg::Ref<WritableStream> ref;
   };
 
   kj::Maybe<ReadableStream&> owner;

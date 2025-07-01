@@ -2551,9 +2551,7 @@ size_t ReadableStreamInternalController::PipeLocked::jsgGetMemorySelfSize() cons
 }
 
 void ReadableStreamInternalController::PipeLocked::jsgGetMemoryInfo(
-    jsg::MemoryTracker& tracker) const {
-  tracker.trackField("ref", ref);
-}
+    jsg::MemoryTracker& tracker) const {}
 
 kj::StringPtr ReadableStreamInternalController::jsgGetMemoryName() const {
   return "ReadableStreamInternalController"_kjc;
