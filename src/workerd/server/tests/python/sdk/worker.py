@@ -446,6 +446,12 @@ async def response_unit_tests(env):
     except Exception as err:
         assert str(err) == "Unsupported type in Response: Test"
 
+    response_ws = Response(
+        "test", status=201, web_socket=js.WebSocket.new("ws://example.com")
+    )
+    # TODO: it doesn't seem possible to access webSocket even in JS
+    assert response_ws.status == 201
+
 
 async def test(ctrl, env):
     await can_return_custom_fetch_response(env)
