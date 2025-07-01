@@ -92,7 +92,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
   void releaseReader(Reader& reader, kj::Maybe<jsg::Lock&> maybeJs) override;
   // See the comment for releaseReader in common.h for details on the use of maybeJs
 
-  kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
+  kj::Maybe<PipeController&> tryPipeLock() override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -123,8 +123,7 @@ class ReadableStreamInternalController: public ReadableStreamController {
 
   class PipeLocked: public PipeController {
    public:
-    PipeLocked(ReadableStreamInternalController& inner, jsg::Ref<WritableStream> ref)
-        : inner(inner) {}
+    PipeLocked(ReadableStreamInternalController& inner): inner(inner) {}
 
     bool isClosed() override;
 
@@ -141,12 +140,6 @@ class ReadableStreamInternalController: public ReadableStreamController {
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
-
-    void visitForGc(jsg::GcVisitor& visitor) {}
-
-    kj::StringPtr jsgGetMemoryName() const;
-    size_t jsgGetMemorySelfSize() const;
-    void jsgGetMemoryInfo(jsg::MemoryTracker& info) const;
 
    private:
     ReadableStreamInternalController& inner;

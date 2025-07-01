@@ -1216,8 +1216,7 @@ kj::Maybe<jsg::Promise<void>> WritableStreamInternalController::tryPipeFrom(
 
   // With either type of source, our first step is to acquire the source pipe lock. This
   // will help abstract most of the details of which type of source we're working with.
-  auto& sourceLock =
-      KJ_ASSERT_NONNULL(source->getController().tryPipeLock(KJ_ASSERT_NONNULL(owner).addRef()));
+  auto& sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
   // Let's also acquire the destination pipe lock.
   writeState = PipeLocked{*source};
@@ -2043,17 +2042,15 @@ void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
 void ReadableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(locked, readState.tryGet<ReaderLocked>()) {
     visitor.visit(locked);
-  } else KJ_IF_SOME(locked, readState.tryGet<PipeLocked>()) {
-    locked.visitForGc(visitor);
   }
 }
 
-kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamInternalController::tryPipeLock(
-    jsg::Ref<WritableStream> destination) {
+kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamInternalController::
+    tryPipeLock() {
   if (isLockedToReader()) {
     return kj::none;
   }
-  readState.init<PipeLocked>(*this, kj::mv(destination));
+  readState.init<PipeLocked>(*this);
   return readState.get<PipeLocked>();
 }
 
@@ -2543,16 +2540,6 @@ void WritableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
   }
 }
 
-kj::StringPtr ReadableStreamInternalController::PipeLocked::jsgGetMemoryName() const {
-  return "ReadableStreamInternalController::PipeLocked"_kjc;
-}
-size_t ReadableStreamInternalController::PipeLocked::jsgGetMemorySelfSize() const {
-  return sizeof(PipeLocked);
-}
-
-void ReadableStreamInternalController::PipeLocked::jsgGetMemoryInfo(
-    jsg::MemoryTracker& tracker) const {}
-
 kj::StringPtr ReadableStreamInternalController::jsgGetMemoryName() const {
   return "ReadableStreamInternalController"_kjc;
 }
@@ -2578,9 +2565,7 @@ void ReadableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
   KJ_SWITCH_ONEOF(readState) {
     KJ_CASE_ONEOF(unlocked, Unlocked) {}
     KJ_CASE_ONEOF(locked, Locked) {}
-    KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
-      tracker.trackField("pipeLocked", pipeLocked);
-    }
+    KJ_CASE_ONEOF(pipeLocked, PipeLocked) {}
     KJ_CASE_ONEOF(readerLocked, ReaderLocked) {
       tracker.trackField("readerLocked", readerLocked);
     }

@@ -62,7 +62,7 @@ class ReadableLockImpl {
   void onClose(jsg::Lock& js);
   void onError(jsg::Lock& js, v8::Local<v8::Value> reason);
 
-  kj::Maybe<PipeController&> tryPipeLock(Controller& self, jsg::Ref<WritableStream> destination);
+  kj::Maybe<PipeController&> tryPipeLock(Controller& self);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -76,9 +76,7 @@ class ReadableLockImpl {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(locked, Locked) {}
       KJ_CASE_ONEOF(unlocked, Unlocked) {}
-      KJ_CASE_ONEOF(pipeLocked, PipeLocked) {
-        tracker.trackField("pipeLocked", pipeLocked);
-      }
+      KJ_CASE_ONEOF(pipeLocked, PipeLocked) {}
       KJ_CASE_ONEOF(readerLocked, ReaderLocked) {
         tracker.trackField("readerLocked", readerLocked);
       }
@@ -88,7 +86,7 @@ class ReadableLockImpl {
  private:
   class PipeLocked final: public PipeController {
    public:
-    explicit PipeLocked(Controller& inner, jsg::Ref<WritableStream> ref): inner(inner) {}
+    explicit PipeLocked(Controller& inner): inner(inner) {}
 
     bool isClosed() override {
       return inner.state.template is<StreamStates::Closed>();
@@ -125,10 +123,6 @@ class ReadableLockImpl {
     kj::Maybe<kj::Promise<void>> tryPumpTo(WritableStreamSink& sink, bool end) override;
 
     jsg::Promise<ReadResult> read(jsg::Lock& js) override;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-
-    JSG_MEMORY_INFO(PipeLocked) {}
 
    private:
     Controller& inner;
@@ -275,11 +269,11 @@ void ReadableLockImpl<Controller>::releaseReader(
 
 template <typename Controller>
 kj::Maybe<ReadableStreamController::PipeController&> ReadableLockImpl<Controller>::tryPipeLock(
-    Controller& self, jsg::Ref<WritableStream> destination) {
+    Controller& self) {
   if (isLockedToReader()) {
     return kj::none;
   }
-  state.template init<PipeLocked>(self, kj::mv(destination));
+  state.template init<PipeLocked>(self);
   return state.template get<PipeLocked>();
 }
 
@@ -288,9 +282,7 @@ void ReadableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(locked, Locked) {}
     KJ_CASE_ONEOF(locked, Unlocked) {}
-    KJ_CASE_ONEOF(locked, PipeLocked) {
-      visitor.visit(locked);
-    }
+    KJ_CASE_ONEOF(locked, PipeLocked) {}
     KJ_CASE_ONEOF(locked, ReaderLocked) {
       visitor.visit(locked);
     }
@@ -352,9 +344,6 @@ template <typename Controller>
 jsg::Promise<ReadResult> ReadableLockImpl<Controller>::PipeLocked::read(jsg::Lock& js) {
   return KJ_ASSERT_NONNULL(inner.read(js, kj::none));
 }
-
-template <typename Controller>
-void ReadableLockImpl<Controller>::PipeLocked::visitForGc(jsg::GcVisitor& visitor) {}
 
 // ======================================================================================
 
@@ -430,7 +419,7 @@ bool WritableLockImpl<Controller>::pipeLock(
     return false;
   }
 
-  auto& sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock(owner.addRef()));
+  auto& sourceLock = KJ_ASSERT_NONNULL(source->getController().tryPipeLock());
 
   state.template init<PipeLocked>(PipeLocked{
     .source = sourceLock,
@@ -690,7 +679,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
 
   Tee tee(jsg::Lock& js) override;
 
-  kj::Maybe<PipeController&> tryPipeLock(jsg::Ref<WritableStream> destination) override;
+  kj::Maybe<PipeController&> tryPipeLock() override;
 
   void visitForGc(jsg::GcVisitor& visitor) override;
 
@@ -2522,9 +2511,8 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
   }
 }
 
-kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsController::tryPipeLock(
-    jsg::Ref<WritableStream> destination) {
-  return lock.tryPipeLock(*this, kj::mv(destination));
+kj::Maybe<ReadableStreamController::PipeController&> ReadableStreamJsController::tryPipeLock() {
+  return lock.tryPipeLock(*this);
 }
 
 void ReadableStreamJsController::visitForGc(jsg::GcVisitor& visitor) {
