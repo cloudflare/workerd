@@ -192,3 +192,41 @@ export const testHttpMethods = {
     deepStrictEqual(httpCommon.methods, methods.toSorted());
   },
 };
+
+// Tests are taken from
+// https://github.com/nodejs/node/blob/c514e8f781b2acedb6a2b42208d8f8f4d8392f09/test/parallel/test-http-common.js
+export const testHttpCommon = {
+  async test() {
+    const checkIsHttpToken = httpCommon._checkIsHttpToken;
+    const checkInvalidHeaderChar = httpCommon._checkInvalidHeaderChar;
+
+    // checkIsHttpToken
+    ok(checkIsHttpToken('t'));
+    ok(checkIsHttpToken('tt'));
+    ok(checkIsHttpToken('ttt'));
+    ok(checkIsHttpToken('tttt'));
+    ok(checkIsHttpToken('ttttt'));
+    ok(checkIsHttpToken('content-type'));
+    ok(checkIsHttpToken('etag'));
+
+    strictEqual(checkIsHttpToken(''), false);
+    strictEqual(checkIsHttpToken(' '), false);
+    strictEqual(checkIsHttpToken('あ'), false);
+    strictEqual(checkIsHttpToken('あa'), false);
+    strictEqual(checkIsHttpToken('aaaaあaaaa'), false);
+
+    // checkInvalidHeaderChar
+    ok(checkInvalidHeaderChar('あ'));
+    ok(checkInvalidHeaderChar('aaaaあaaaa'));
+
+    strictEqual(checkInvalidHeaderChar(''), false);
+    strictEqual(checkInvalidHeaderChar(1), false);
+    strictEqual(checkInvalidHeaderChar(' '), false);
+    strictEqual(checkInvalidHeaderChar(false), false);
+    strictEqual(checkInvalidHeaderChar('t'), false);
+    strictEqual(checkInvalidHeaderChar('tt'), false);
+    strictEqual(checkInvalidHeaderChar('ttt'), false);
+    strictEqual(checkInvalidHeaderChar('tttt'), false);
+    strictEqual(checkInvalidHeaderChar('ttttt'), false);
+  },
+};

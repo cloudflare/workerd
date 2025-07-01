@@ -8,11 +8,53 @@ import {
   validateHeaderValue,
 } from 'node-internal:internal_http';
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
+import { ClientRequest } from 'node-internal:internal_http_client';
+import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import { Agent, globalAgent } from 'node-internal:internal_http_agent';
+import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
+import type { RequestOptions } from 'node:http';
 
-export { validateHeaderName, validateHeaderValue, METHODS, STATUS_CODES };
+const { WebSocket } = globalThis;
+
+export function request(
+  url: string | URL | RequestOptions,
+  options?: RequestOptions | IncomingMessageCallback,
+  cb?: IncomingMessageCallback
+): ClientRequest {
+  return new ClientRequest(url, options, cb);
+}
+
+export function get(
+  url: string | URL | RequestOptions,
+  options?: RequestOptions | IncomingMessageCallback,
+  cb?: IncomingMessageCallback
+): ClientRequest {
+  const req = request(url, options, cb);
+  req.end();
+  return req;
+}
+
+export {
+  validateHeaderName,
+  validateHeaderValue,
+  METHODS,
+  STATUS_CODES,
+  ClientRequest,
+  WebSocket,
+  OutgoingMessage,
+  Agent,
+  globalAgent,
+};
 export default {
   validateHeaderName,
   validateHeaderValue,
   METHODS,
   STATUS_CODES,
+  ClientRequest,
+  request,
+  get,
+  WebSocket,
+  OutgoingMessage,
+  Agent,
+  globalAgent,
 };

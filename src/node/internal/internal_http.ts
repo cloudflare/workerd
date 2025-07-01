@@ -26,17 +26,26 @@ const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
  *  field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
  *  field-vchar    = VCHAR / obs-text
  */
-export function _checkInvalidHeaderChar(val: string): boolean {
+export function _checkInvalidHeaderChar(val: string | string[]): boolean {
+  if (Array.isArray(val)) {
+    return val.some((v) => headerCharRegex.test(v));
+  }
   return headerCharRegex.test(val);
 }
 
-export function validateHeaderName(name: string, label: string): void {
+export function validateHeaderName(
+  name: string,
+  label: string = 'Header name'
+): void {
   if (typeof name !== 'string' || !name || !_checkIsHttpToken(name)) {
-    throw new ERR_INVALID_HTTP_TOKEN(label || 'Header name', name);
+    throw new ERR_INVALID_HTTP_TOKEN(label, name);
   }
 }
 
-export function validateHeaderValue(name: string, value?: string): void {
+export function validateHeaderValue(
+  name: string,
+  value: string | string[] | undefined
+): void {
   if (value === undefined) {
     throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name);
   }

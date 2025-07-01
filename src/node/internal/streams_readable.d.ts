@@ -1,3 +1,8 @@
-import { Readable } from 'node:stream';
+import { Readable as _Readable } from 'node:stream';
 
-export { Readable };
+export declare class Readable extends _Readable {
+  destroyed: boolean;
+  _readableState?: {
+    readingMore: boolean;
+  };
+}
