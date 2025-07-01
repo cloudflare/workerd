@@ -74,6 +74,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
+  kj::Promise<void> destroyContainer();
 };
 
 }  // namespace workerd::server
