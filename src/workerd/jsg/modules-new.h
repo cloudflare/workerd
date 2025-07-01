@@ -252,11 +252,10 @@ class Module {
   // Determines if this module can be resolved in the given context.
   virtual bool evaluateContext(const ResolveContext& context) const KJ_WARN_UNUSED_RESULT;
 
-  // Instantiates the given module. The return value follows the established v8
-  // rules for Maybe. If the returned maybe is empty, then an exception should
+  // Instantiates the given module. If false is returned, then an exception should
   // have been scheduled on the isolate via the lock. Do not throw C++ exceptions
   // from this method unless they are fatal.
-  v8::Maybe<bool> instantiate(Lock& js,
+  bool instantiate(Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer) const KJ_WARN_UNUSED_RESULT;
 
