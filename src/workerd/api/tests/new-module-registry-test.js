@@ -208,6 +208,37 @@ export const wasmModuleTest = {
   },
 };
 
+const testDynamicImportInHandler = {
+  async test(_ctrl, { handler }) {
+    const res = await handler.fetch('http://test.me/dynamic-import');
+    strictEqual(await res.text(), 'threw');
+  },
+  async doTest() {
+    try {
+      // Modules are not allowed to do top level I/O even when imported inside an handler
+      await import('bad');
+      return new Response('imported');
+    } catch {
+      return new Response('threw');
+    }
+  },
+};
+
+/**
+ * Run tests inside a request handler.
+ */
+export default {
+  async fetch(request) {
+    const { pathname } = new URL(request.url);
+    switch (pathname) {
+      case '/dynamic-import':
+        return testDynamicImportInHandler.doTest();
+      default:
+        throw new Error(`Unexpected test request ${pathname}`);
+    }
+  },
+};
+
 // TODO(now): Tests
 // * [x] Include tests for all known module types
 //   * [x] ESM

@@ -49,6 +49,9 @@ const unitTests :Workerd.Config = (
           "new_module_registry",
           "experimental",
         ],
+        bindings = [
+          (name = "handler", service = "new-module-registry-test")
+        ]
       ),
     ),
   ],
