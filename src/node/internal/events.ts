@@ -42,6 +42,8 @@ import {
   validateObject,
 } from 'node-internal:validators';
 
+import type publicProcessType from 'node-internal:public_process';
+
 import { process } from 'node-internal:internal_process';
 
 import { spliceOne } from 'node-internal:internal_utils';
@@ -514,7 +516,8 @@ function _addListener(
       // Because process is the internal process here, emitWarning will only ever
       // be defined when using the enable_nodejs_process_v2 flag, so the warning
       // is only logged under that condition.
-      process.emitWarning?.(w);
+      if ((process as typeof publicProcessType).emitWarning)
+        (process as typeof publicProcessType).emitWarning(w);
     }
   }
 

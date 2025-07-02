@@ -18,7 +18,8 @@ import {
   type ErrorWithDetail,
   default as processImpl,
 } from 'node-internal:process';
-import type processType from 'node-internal:public_process';
+import type publicProcessType from 'node-internal:public_process';
+import type legacyProcessType from 'node-internal:legacy_process';
 
 export const platform = processImpl.platform;
 
@@ -304,7 +305,9 @@ export function emitWarning(
   // Emit the warning event on the process object
   // Use nextTick to ensure the warning is emitted asynchronously
   queueMicrotask(() => {
-    process.emit('warning', err);
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if ((process as typeof publicProcessType).emit)
+      (process as typeof publicProcessType).emit('warning', err);
   });
 }
 
@@ -313,7 +316,9 @@ export function emitWarning(
 // process module regardless of whether legacy_process or public_process was selected,
 // since these are different process modules and implementations.
 // Internal APIs using process should therefore import this binding.
-export let process: typeof processType;
-export function _setProcess(_process: typeof processType) {
+export let process: typeof legacyProcessType | typeof publicProcessType;
+export function _setProcess(
+  _process: typeof legacyProcessType | typeof publicProcessType
+): void {
   process = _process;
 }
