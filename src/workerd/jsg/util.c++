@@ -575,7 +575,6 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
   v8::HandleScope outerScope(isolate);
   kj::Vector<v8::Local<v8::Value>> queue;
   queue.reserve(128);
-  kj::HashSet<int> visitedHashes;
   queue.add(value);
 
   while (!queue.empty()) {
@@ -584,10 +583,6 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
 
     if (item->IsArray()) {
       auto arr = item.As<v8::Array>();
-      int hash = arr->GetIdentityHash();
-      if (visitedHashes.contains(hash)) continue;
-      visitedHashes.insert(hash);
-
       uint32_t length = arr->Length();
 
       // Process array elements in batches to reduce V8 API call overhead
@@ -607,22 +602,6 @@ void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> valu
       check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
     } else if (item->IsObject()) {
       auto obj = item.As<v8::Object>();
-
-      int hash = obj->GetIdentityHash();
-      if (visitedHashes.contains(hash)) continue;
-      visitedHashes.insert(hash);
-
-      // Fast path: skip if object is already frozen
-      v8::PropertyAttribute attrs;
-      if (obj->GetRealNamedPropertyAttributes(
-                 context, v8::String::NewFromUtf8Literal(isolate, "__proto__"))
-              .To(&attrs)) {
-        if ((attrs & v8::DontDelete) && (attrs & v8::ReadOnly)) {
-          // Likely already frozen, verify with a sample property check
-          continue;
-        }
-      }
-
       auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
           v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
       if (!names.IsEmpty()) {
