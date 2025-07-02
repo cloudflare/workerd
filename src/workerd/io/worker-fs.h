@@ -54,11 +54,11 @@
 // │   └── random
 // └── tmp
 //
-// We can access the filesystem using VirtualFileSystem::tryGetCurrent():
+// We can access the filesystem using VirtualFileSystem::current():
 //
 // ```cpp
 // jsg::Lock& js = ...
-// KJ_IF_SOME(vfs, VirtualFileSystem::tryGetCurrent(js)) {
+// auto& vfs = VirtualFileSystem::current(js);
 // // Resolve the root of the file system
 // KJ_IF_SOME(node, vfs.resolve(js, "file:///path/to/thing"_url)) {
 //   KJ_SWITCH_ONEOF(node) {
@@ -518,7 +518,7 @@ class VirtualFileSystem {
   virtual const jsg::Url& getDevRoot() const KJ_WARN_UNUSED_RESULT = 0;
 
   // Get the current virtual file system for the current isolate lock.
-  static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&) KJ_WARN_UNUSED_RESULT;
+  static const VirtualFileSystem& current(jsg::Lock&) KJ_WARN_UNUSED_RESULT;
 
   // ==========================================================================
   // File Descriptor support
