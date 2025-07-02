@@ -136,8 +136,7 @@ Stat::Stat(const workerd::Stat& stat)
 
 kj::Maybe<Stat> FileSystemModule::stat(
     jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, StatOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalizedPath(kj::mv(path));
@@ -188,8 +187,7 @@ kj::Maybe<Stat> FileSystemModule::stat(
 
 void FileSystemModule::setLastModified(
     jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, kj::Date lastModified, StatOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalizedPath(kj::mv(path));
@@ -249,8 +247,7 @@ void FileSystemModule::setLastModified(
 }
 
 void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd, uint32_t size) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalizedPath(kj::mv(path));
@@ -305,8 +302,7 @@ void FileSystemModule::truncate(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd
 }
 
 kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
   KJ_IF_SOME(node, vfs.resolve(js, normalizedPath, {.followLinks = false})) {
     KJ_SWITCH_ONEOF(node) {
@@ -340,8 +336,7 @@ kj::String FileSystemModule::readLink(jsg::Lock& js, FilePath path, ReadLinkOpti
 
 void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptions options) {
   // The from argument is where we are creating the link, while the to is the target.
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedFrom(kj::mv(from));
   NormalizedFilePath normalizedTo(kj::mv(to));
 
@@ -412,8 +407,7 @@ void FileSystemModule::link(jsg::Lock& js, FilePath from, FilePath to, LinkOptio
 }
 
 void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
@@ -453,8 +447,7 @@ void FileSystemModule::unlink(jsg::Lock& js, FilePath path) {
 }
 
 int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
   KJ_SWITCH_ONEOF(vfs.openFd(js, normalizedPath,
                       workerd::VirtualFileSystem::OpenOptions{
@@ -475,15 +468,13 @@ int FileSystemModule::open(jsg::Lock& js, FilePath path, OpenOptions options) {
 }
 
 void FileSystemModule::close(jsg::Lock& js, int fd) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   vfs.closeFd(js, fd);
 }
 
 uint32_t FileSystemModule::write(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
 
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
     static const auto getPosition = [](jsg::Lock& js, auto& opened, auto& file,
@@ -540,8 +531,7 @@ uint32_t FileSystemModule::write(
 
 uint32_t FileSystemModule::read(
     jsg::Lock& js, int fd, kj::Array<jsg::BufferSource> data, WriteOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_IF_SOME(opened, vfs.tryGetFd(js, fd)) {
     if (!opened->read) {
       throwUVException(js, UV_EBADF, "read"_kj);
@@ -583,8 +573,7 @@ uint32_t FileSystemModule::read(
 }
 
 jsg::BufferSource FileSystemModule::readAll(jsg::Lock& js, kj::OneOf<int, FilePath> pathOrFd) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   KJ_SWITCH_ONEOF(pathOrFd) {
     KJ_CASE_ONEOF(path, FilePath) {
       NormalizedFilePath normalized(kj::mv(path));
@@ -653,8 +642,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
     kj::OneOf<int, FilePath> pathOrFd,
     jsg::BufferSource data,
     WriteAllOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
 
   if (data.size() > kMax) {
     throwUVException(js, UV_EFBIG, "writeAll"_kj);
@@ -814,8 +802,7 @@ uint32_t FileSystemModule::writeAll(jsg::Lock& js,
 void FileSystemModule::renameOrCopy(
     jsg::Lock& js, FilePath src, FilePath dest, RenameOrCopyOptions options) {
   // The source must exist, the destination must not.
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedSrc(kj::mv(src));
   NormalizedFilePath normalizedDest(kj::mv(dest));
 
@@ -931,8 +918,7 @@ void FileSystemModule::renameOrCopy(
 
 jsg::Optional<kj::String> FileSystemModule::mkdir(
     jsg::Lock& js, FilePath path, MkdirOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
   const jsg::Url& url = normalizedPath;
 
@@ -1077,8 +1063,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
 
 void FileSystemModule::rm(jsg::Lock& js, FilePath path, RmOptions options) {
   // TODO(node-fs): Implement the force option.
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
   const jsg::Url& url = normalizedPath;
   auto relative = url.getRelative();
@@ -1193,8 +1178,7 @@ void readdirImpl(jsg::Lock& js,
 
 kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
     jsg::Lock& js, FilePath path, ReadDirOptions options) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   NormalizedFilePath normalizedPath(kj::mv(path));
 
   KJ_IF_SOME(node, vfs.resolve(js, normalizedPath, {.followLinks = false})) {
@@ -1221,8 +1205,7 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
 }
 
 jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
-  auto& vfs = JSG_REQUIRE_NONNULL(
-      workerd::VirtualFileSystem::tryGetCurrent(js), Error, "No current virtual file system"_kj);
+  auto& vfs = workerd::VirtualFileSystem::current(js);
   return js.alloc<FileFdHandle>(js, vfs, fd);
 }
 
@@ -1386,13 +1369,8 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
 
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
-  KJ_IF_SOME(vfs, workerd::VirtualFileSystem::tryGetCurrent(js)) {
-    return js.resolvedPromise(
-        js.alloc<FileSystemDirectoryHandle>(jsg::USVString(), vfs.getRoot(js)));
-  }
-
-  auto ex = js.domException(kj::str("SecurityError"), kj::str("No current virtual file system"));
-  return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(exception.wrap(js, kj::mv(ex)));
+  auto& vfs = workerd::VirtualFileSystem::current(js);
+  return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(jsg::USVString(), vfs.getRoot(js)));
 }
 
 FileSystemDirectoryHandle::FileSystemDirectoryHandle(
