@@ -166,7 +166,6 @@ export function addAbortListener(signal: AbortSignal, listener: any) {
 
 export default EventEmitter;
 
-// NOTE: all properties of event emitter must also be re-exported by the events.ts wrapper
 EventEmitter.on = on;
 EventEmitter.once = once;
 EventEmitter.getEventListeners = getEventListeners;

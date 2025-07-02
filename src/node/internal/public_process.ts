@@ -4,7 +4,7 @@
 //
 
 // Process is implemented under node-internal: so that we can have node:process
-// resolve to node-internal:process OR node-internal:legacy_process depending
+// resolve to node-internal:public_process OR node-internal:legacy_process depending
 // on whether the enable_nodejs_process_v2 compat flag is set.
 
 import { default as EventEmitter } from 'node-internal:events';

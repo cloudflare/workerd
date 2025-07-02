@@ -31,8 +31,7 @@ import { EventEmitter } from 'node-internal:events';
 import { Stream } from 'node-internal:streams_legacy';
 
 import { Buffer } from 'node-internal:internal_buffer';
-
-import * as process from 'node-internal:internal_process';
+import { process } from 'node-internal:internal_process';
 
 import {
   nop,
