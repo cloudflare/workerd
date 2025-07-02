@@ -716,7 +716,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
       }
 
       // Handle process module redirection based on enable_nodejs_process_v2 flag
-      if ((spec == "node:process" || spec == "process")) {
+      if (spec == "node:process") {
         auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
                                                         : "node-internal:legacy_process"_kj;
         KJ_IF_SOME(url, referrer.tryResolve(processSpec)) {
@@ -804,7 +804,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     }
 
     // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if ((spec == "node:process" || spec == "process")) {
+    if (spec == "node:process") {
       auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
                                                       : "node-internal:legacy_process"_kj;
       KJ_IF_SOME(url, referrerUrl.tryResolve(processSpec)) {
