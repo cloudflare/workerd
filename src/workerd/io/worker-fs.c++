@@ -1143,7 +1143,7 @@ kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
 
-const VirtualFileSystem& VirtualFileSystem::current(jsg::Lock&) {
+kj::Maybe<const VirtualFileSystem&> VirtualFileSystem::tryGetCurrent(jsg::Lock&) {
   // Note that the jsg::Lock& argument here is not actually used. We require
   // that a jsg::Lock reference is passed in as proof that current() is called
   // from within a valid isolate lock so that the Worker::Api::current()
