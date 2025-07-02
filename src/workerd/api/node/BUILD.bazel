@@ -284,6 +284,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/process-legacy-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/process-legacy-nodejs-test.js"],
+)
+
+wd_test(
     src = "tests/querystring-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/querystring-nodejs-test.js"],

@@ -201,6 +201,10 @@ void Lock::setNodeJsCompatEnabled() {
   IsolateBase::from(v8Isolate).setNodeJsCompatEnabled({}, true);
 }
 
+void Lock::setNodeJsProcessV2Enabled() {
+  IsolateBase::from(v8Isolate).setNodeJsProcessV2Enabled({}, true);
+}
+
 void Lock::setThrowOnUnrecognizedImportAssertion() {
   IsolateBase::from(v8Isolate).setThrowOnUnrecognizedImportAssertion();
 }

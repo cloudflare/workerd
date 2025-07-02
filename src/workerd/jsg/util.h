@@ -509,6 +509,7 @@ using WontImplement = Unimplemented;
 
 kj::Maybe<kj::String> checkNodeSpecifier(kj::StringPtr specifier);
 bool isNodeJsCompatEnabled(jsg::Lock& js);
+bool isNodeJsProcessV2Enabled(jsg::Lock& js);
 
 // The following counter is used to track the number of times a method is called.
 // This is mostly useful for validating/testing v8 fast api methods, but also for

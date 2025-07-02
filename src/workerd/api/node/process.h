@@ -37,11 +37,10 @@ class ProcessModule final: public jsg::Object {
   // then it becomes a non-op.
   void exitImpl(jsg::Lock& js, int code);
 
-  // IMPORTANT: This function will always return "linux" on production.
+  // IMPORTANT: This function will always return "linux" on production unless
+  // the unsupported_process_actual_platform compat flag is enabled.
   // This is only added for Node.js compatibility and running OS specific tests
-  kj::StringPtr getPlatform() const {
-    return platform;
-  }
+  kj::StringPtr getPlatform(jsg::Lock& js) const;
 
   jsg::JsObject getEnvObject(jsg::Lock& js);
 

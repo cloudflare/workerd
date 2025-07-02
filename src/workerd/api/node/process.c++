@@ -29,10 +29,26 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
 
   auto registry = jsg::ModuleRegistry::from(js);
   if (registry == nullptr) return js.undefined();
+
+  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  if (specifier == "node:process" || specifier == "process") {
+    auto featureFlags = FeatureFlags::get(js);
+    if (featureFlags.getEnableNodeJsProcessV2()) {
+      specifier = kj::str("node-internal:public_process");
+    } else {
+      specifier = kj::str("node-internal:legacy_process");
+    }
+  }
+
   auto path = kj::Path::parse(specifier);
 
+  // Use INTERNAL_ONLY for node-internal: modules, BUILTIN_ONLY for others
+  auto resolveOption = specifier.startsWith("node-internal:")
+      ? jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY
+      : jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY;
+
   KJ_IF_SOME(info,
-      registry->resolve(js, path, kj::none, jsg::ModuleRegistry::ResolveOption::BUILTIN_ONLY,
+      registry->resolve(js, path, kj::none, resolveOption,
           jsg::ModuleRegistry::ResolveMethod::IMPORT, rawSpecifier.asPtr())) {
     auto module = info.module.getHandle(js);
     jsg::instantiateModule(js, module);
@@ -96,6 +112,15 @@ jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
   // by the platform, as defined in node-version.h
   versions.set(js, "node"_kj, js.str(nodeVersion));
   return versions;
+}
+
+kj::StringPtr ProcessModule::getPlatform(jsg::Lock& js) const {
+  auto flags = FeatureFlags::get(js);
+  if (flags.getUnsupportedProcessActualPlatform()) {
+    return platform;
+  }
+  // Always return "linux" for production compatibility
+  return "linux"_kj;
 }
 
 void ProcessModule::exitImpl(jsg::Lock& js, int code) {

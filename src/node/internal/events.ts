@@ -1033,8 +1033,3 @@ export function on(
     iterator.return();
   }
 }
-
-// Initialize the process global as an event emitter, if process executed first
-if (process._initialized) process._initProcess();
-
-export var _initialized = true;

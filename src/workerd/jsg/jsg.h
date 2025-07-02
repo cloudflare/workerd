@@ -2713,6 +2713,7 @@ class Lock {
   void setCaptureThrowsAsRejections(bool capture);
 
   void setNodeJsCompatEnabled();
+  void setNodeJsProcessV2Enabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
