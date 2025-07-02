@@ -45,7 +45,7 @@ import {
   aggregateTwoErrors,
 } from 'node-internal:internal_errors';
 
-import { process } from 'node-internal:internal_process';
+import process from 'node:process';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {

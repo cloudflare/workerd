@@ -27,7 +27,7 @@ import {
   emitWarning,
   env,
   features,
-  _setProcess,
+  _setEventsProcess,
 } from 'node-internal:internal_process';
 
 export { platform, nextTick, emitWarning, env, features };
@@ -403,6 +403,6 @@ process.on('newListener', (name) => {
   }
 });
 
-_setProcess(process);
+_setEventsProcess(process);
 
 export default process;

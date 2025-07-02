@@ -35,7 +35,7 @@ import {
   newReadableWritablePairFromDuplex,
 } from 'node-internal:streams_adapters';
 
-import { process } from 'node-internal:internal_process';
+import process from 'node:process';
 
 import {
   addAbortSignal,

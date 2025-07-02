@@ -306,19 +306,18 @@ export function emitWarning(
   // Use nextTick to ensure the warning is emitted asynchronously
   queueMicrotask(() => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if ((process as typeof publicProcessType).emit)
-      (process as typeof publicProcessType).emit('warning', err);
+    if ((_process as typeof publicProcessType).emit)
+      (_process as typeof publicProcessType).emit('warning', err);
   });
 }
 
-// In case of using nodejs_process_v2 without the node compat flag for setting the
-// process global, this process variable can always be imported to correctly be the
-// process module regardless of whether legacy_process or public_process was selected,
-// since these are different process modules and implementations.
-// Internal APIs using process should therefore import this binding.
-export let process: typeof legacyProcessType | typeof publicProcessType;
-export function _setProcess(
-  _process: typeof legacyProcessType | typeof publicProcessType
+// Events has a cycle with process, so to resolve that we lazily bind
+// this _process for events usage only. All other internal importers should
+// import 'node:process' directly rather, as _eventsProcess is only guaranteed
+// to be available when that has been imported.
+export let _process: typeof legacyProcessType | typeof publicProcessType;
+export function _setEventsProcess(
+  process: typeof legacyProcessType | typeof publicProcessType
 ): void {
-  process = _process;
+  _process = process;
 }

@@ -41,12 +41,8 @@ import {
   validateFunction,
   validateObject,
 } from 'node-internal:validators';
-
-import type publicProcessType from 'node-internal:public_process';
-
-import { process } from 'node-internal:internal_process';
-
 import { spliceOne } from 'node-internal:internal_utils';
+import { nextTick, emitWarning } from 'node-internal:internal_process';
 
 import { default as async_hooks } from 'node-internal:async_hooks';
 const { AsyncResource } = async_hooks;
@@ -306,7 +302,7 @@ function addCatch(
       then.call(promise, undefined, function (err) {
         // The callback is called with nextTick to avoid a follow-up
         // rejection from this promise.
-        process.nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
+        nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
       });
     }
   } catch (err) {
@@ -512,11 +508,9 @@ function _addListener(
           count: existing.length,
         }
       );
-      // Because process is the internal process here, emitWarning will only ever
-      // be defined when using the enable_nodejs_process_v2 flag, so the warning
-      // is only logged under that condition.
-      if ((process as typeof publicProcessType).emitWarning)
-        (process as typeof publicProcessType).emitWarning(w);
+      // Only the newer process version compat adds process.emitWarning support.
+      if (Cloudflare.compatibilityFlags['enable_nodejs_process_v2'])
+        emitWarning(w);
     }
   }
 

@@ -13,7 +13,7 @@ import {
   nextTick,
   env,
   features,
-  _setProcess,
+  _setEventsProcess,
 } from 'node-internal:internal_process';
 
 export { platform, nextTick, env, features };
@@ -35,6 +35,6 @@ const process = {
   features,
 };
 
-_setProcess(process);
+_setEventsProcess(process);
 
 export default process;
