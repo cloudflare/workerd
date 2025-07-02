@@ -1229,7 +1229,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     IsolateObserver::StartType startType,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts)
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    SpanParent parentSpan)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
       modular(source.variant.is<ModulesSource>()),
@@ -1354,7 +1355,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
                   impl->configureDynamicImports(lock, modules);
                   isolate->getApi().compileModules(
-                      lock, modulesSource, *isolate, kj::mv(artifacts));
+                      lock, modulesSource, *isolate, kj::mv(artifacts), kj::mv(parentSpan));
                 }
                 impl->unboundScriptOrMainModule = kj::Path::parse(modulesSource.mainModule);
               }
@@ -3948,12 +3949,13 @@ uint Worker::Isolate::getLockSuccessCount() const {
 kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
     Script::Source source,
     IsolateObserver::StartType startType,
+    SpanParent parentSpan,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
   // Script doesn't already exist, so compile it.
   return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, kj::mv(source), startType,
-      logNewScript, errorReporter, kj::mv(artifacts));
+      logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan));
 }
 
 void Worker::Isolate::completedRequest() const {

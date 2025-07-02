@@ -271,9 +271,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     false     /* isTracing */,
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
-    kj::mv(memorySnapshot),
-    KJ_MAP(c, source.inferredActorClassesForPython) { return kj::str(c); },
-    KJ_MAP(c, source.inferredEntrypointClassesForPython) { return kj::str(c); }
+    kj::mv(memorySnapshot)
   );
   // clang-format on
 }
@@ -554,27 +552,6 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
       Worker::Script::ModulesSource result{
         .mainModule = modules[0].getName(), .modules = kj::mv(moduleArray), .isPython = isPython};
 
-      if (isPython) {
-        // Special hack for Python: Infer the set of exported classes based on whan the config
-        // references.
-        result.inferredActorClassesForPython =
-            KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
-          return kj::str(objectNamespace.getClassName());
-        };
-
-        // To get the entrypoint classes, we iterate through bindings looking for services with
-        // entrypoint field set. This doesn't allow us to discern between worker entrypoints and
-        // workflow entrypoints, but is the best we can do until we rewrite how workerd loads
-        // packages.
-        auto entrypointClasses = kj::Vector<kj::String>();
-        for (auto binding: conf.getBindings()) {
-          if (binding.isService() && binding.getService().hasEntrypoint()) {
-            entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
-          }
-        }
-        result.inferredEntrypointClassesForPython = entrypointClasses.releaseAsArray();
-      }
-
       return result;
     }
     case config::Worker::SERVICE_WORKER_SCRIPT: {
@@ -741,7 +718,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     const Worker::Script::ModulesSource& source,
     const Worker::Isolate& isolate,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    SpanParent parentSpan) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);

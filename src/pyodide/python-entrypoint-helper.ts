@@ -6,14 +6,11 @@ import { loadPyodide } from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
-  IS_TRACING,
   IS_WORKERD,
   LOCKFILE,
   TRANSITIVE_REQUIREMENTS,
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
-  DURABLE_OBJECT_CLASSES,
-  WORKER_ENTRYPOINT_CLASSES,
   SHOULD_SNAPSHOT_TO_DISK,
   workflowsEnabled,
 } from 'pyodide-internal:metadata';
@@ -395,57 +392,28 @@ export async function initPython(): Promise<PythonInitResult> {
     workflowEntrypoints: [],
   };
 
-  // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
-  // needs to be called inside an IO context.
-  if (IS_TRACING) {
-    // Currently when tracing we cannot perform IO in the
-    // top-level. So we have some custom logic for handlers here in that case.
-    //
-    // Because of the above we have limited info, so we cannot get the method names of the classes
-    // that are exported. But this doesn't matter as it's only useful for the validator.
-    const toClassInfo = (x: string): ExporterClassInfo => {
-      return { className: x, methodNames: [] };
-    };
-    pythonEntrypointClasses.durableObjects = (DURABLE_OBJECT_CLASSES ?? []).map(
-      toClassInfo
-    );
-    // We currently have no way to discern between worker entrypoint classes and workflow entrypoint
-    // classes in workerd. But workflow entrypoints appear to be just a special case of worker
-    // entrypoints, so this should still work just fine.
-    pythonEntrypointClasses.workerEntrypoints = (
-      WORKER_ENTRYPOINT_CLASSES ?? []
-    ).map(toClassInfo);
-
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
+  const mainModule = await getMainModule();
+  for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+    const pyHandlerName = 'on_' + handlerName;
+    // We add all handlers when running in workerd, so that we can handle the case where the
+    // handler is not defined in our own code and throw a more helpful error. See
+    // undefined-handler.wd-test.
+    if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
       handlers[handlerName] = makeHandler(pyHandlerName);
     }
-
-    handlers.test = makeHandler('test');
-  } else {
-    const mainModule = await getMainModule();
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
-      // We add all handlers when running in workerd, so that we can handle the case where the
-      // handler is not defined in our own code and throw a more helpful error. See
-      // undefined-handler.wd-test.
-      if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
-        handlers[handlerName] = makeHandler(pyHandlerName);
-      }
-    }
-
-    if (typeof mainModule.test === 'function') {
-      handlers.test = makeHandler('test');
-    }
-
-    // In order to get the entrypoint classes exported by the worker, we use a Python module
-    // to introspect the user's main module. So we are effectively using Python to analyse the
-    // classes exported by the user worker here. The class names are then exported from here and
-    // used to create the equivalent JS classes via makeEntrypointClass.
-    const introspectionMod = await getIntrospectionMod();
-    pythonEntrypointClasses =
-      introspectionMod.collect_entrypoint_classes(mainModule);
   }
+
+  if (typeof mainModule.test === 'function') {
+    handlers.test = makeHandler('test');
+  }
+
+  // In order to get the entrypoint classes exported by the worker, we use a Python module
+  // to introspect the user's main module. So we are effectively using Python to analyse the
+  // classes exported by the user worker here. The class names are then exported from here and
+  // used to create the equivalent JS classes via makeEntrypointClass.
+  const introspectionMod = await getIntrospectionMod();
+  pythonEntrypointClasses =
+    introspectionMod.collect_entrypoint_classes(mainModule);
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

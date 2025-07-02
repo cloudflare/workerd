@@ -345,7 +345,8 @@ TestFixture::TestFixture(SetupParams&& params)
           IsolateObserver::StartType::COLD,
           false,
           kj::none,
-          kj::none)),
+          kj::none,
+          SpanParent(nullptr))),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {

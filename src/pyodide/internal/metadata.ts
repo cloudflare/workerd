@@ -39,8 +39,6 @@ export const TRANSITIVE_REQUIREMENTS =
 
 // Entrypoints
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
-export const DURABLE_OBJECT_CLASSES = MetadataReader.getDurableObjectClasses();
-export const WORKER_ENTRYPOINT_CLASSES = MetadataReader.getEntrypointClasses();
 
 export interface CompatibilityFlags {
   python_workflows?: boolean;

@@ -74,7 +74,8 @@ class WorkerdApi final: public Worker::Api {
   void compileModules(jsg::Lock& lock,
       const Worker::Script::ModulesSource& source,
       const Worker::Isolate& isolate,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const override;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan) const override;
 
   kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Worker::Script::ScriptSource& source,

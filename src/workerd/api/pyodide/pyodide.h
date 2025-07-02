@@ -128,8 +128,6 @@ class PyodideMetadataReader: public jsg::Object {
     bool snapshotToDisk;
     bool createBaselineSnapshot;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
-    kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
-    kj::Maybe<kj::Array<kj::String>> entrypointClasses;
 
     State(kj::String mainModule,
         kj::Array<kj::String> names,
@@ -142,9 +140,7 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
-        kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
-        kj::Maybe<kj::Array<kj::String>> entrypointClasses)
+        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           requirements(kj::mv(requirements)),
@@ -155,9 +151,7 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          memorySnapshot(kj::mv(memorySnapshot)),
-          durableObjectClasses(kj::mv(durableObjectClasses)),
-          entrypointClasses(kj::mv(entrypointClasses)) {
+          memorySnapshot(kj::mv(memorySnapshot)) {
       verifyNoMainModuleInVendor();
     }
 
@@ -232,20 +226,6 @@ class PyodideMetadataReader: public jsg::Object {
 
   kj::HashSet<kj::String> getTransitiveRequirements();
 
-  kj::Maybe<kj::ArrayPtr<kj::String>> getDurableObjectClasses() {
-    KJ_IF_SOME(cls, state->durableObjectClasses) {
-      return cls.asPtr();
-    }
-    return kj::none;
-  }
-
-  kj::Maybe<kj::ArrayPtr<kj::String>> getEntrypointClasses() {
-    KJ_IF_SOME(cls, state->entrypointClasses) {
-      return cls.asPtr();
-    }
-    return kj::none;
-  }
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
@@ -267,8 +247,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getTransitiveRequirements);
-    JSG_METHOD(getDurableObjectClasses);
-    JSG_METHOD(getEntrypointClasses);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 

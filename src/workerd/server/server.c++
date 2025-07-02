@@ -4095,7 +4095,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       : ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, kj::mv(def.source), IsolateObserver::StartType::COLD,
-      false, errorReporter, kj::mv(artifactBundler));
+      SpanParent(nullptr), false, errorReporter, kj::mv(artifactBundler));
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
