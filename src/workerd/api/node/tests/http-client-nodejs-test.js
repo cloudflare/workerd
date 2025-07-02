@@ -5,7 +5,6 @@
 import http from 'node:http';
 import https from 'node:https';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
-import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {

@@ -3,7 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import http from 'node:http';
-import { strictEqual } from 'node:assert';
+import { strictEqual, ok } from 'node:assert';
+
+export const checkPortsSetCorrectly = {
+  test(_ctrl, env) {
+    const keys = ['PONG_SERVER_PORT'];
+    for (const key of keys) {
+      strictEqual(typeof env[key], 'string');
+      ok(env[key].length > 0);
+    }
+  },
+};
 
 // Test is taken from test/parallel/test-http-agent-getname.js
 export const testHttpAgentGetName = {
@@ -48,5 +58,20 @@ export const testHttpAgentGetName = {
 
     for (const family of [4, 6])
       strictEqual(agent.getName({ family }), `localhost:::${family}`);
+  },
+};
+
+// Test is taken from test/parallel/test-http-agent-null.js
+export const testHttpAgentNull = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    http.get(
+      {
+        agent: null,
+        port: env.PONG_SERVER_PORT,
+      },
+      resolve
+    );
+    await promise;
   },
 };
