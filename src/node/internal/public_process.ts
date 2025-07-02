@@ -14,7 +14,7 @@ import {
   ERR_OUT_OF_RANGE,
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
-import { default as processImpl } from 'node-internal:process';
+import processImpl from 'node-internal:process';
 import type { Buffer } from 'node:buffer';
 import { parseEnv } from 'node-internal:internal_utils';
 import type * as NodeFS from 'node:fs';
@@ -27,6 +27,7 @@ import {
   emitWarning,
   env,
   features,
+  _setProcess,
 } from 'node-internal:internal_process';
 
 export { platform, nextTick, emitWarning, env, features };
@@ -401,5 +402,7 @@ process.on('newListener', (name) => {
     addedRejectionHandled = true;
   }
 });
+
+_setProcess(process);
 
 export default process;

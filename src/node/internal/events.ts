@@ -42,7 +42,7 @@ import {
   validateObject,
 } from 'node-internal:validators';
 
-import * as process from 'node-internal:internal_process';
+import { process } from 'node-internal:internal_process';
 
 import { spliceOne } from 'node-internal:internal_utils';
 

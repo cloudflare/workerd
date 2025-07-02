@@ -13,6 +13,7 @@ import {
   nextTick,
   env,
   features,
+  _setProcess,
 } from 'node-internal:internal_process';
 
 export { platform, nextTick, env, features };
@@ -25,7 +26,7 @@ export function exit(code: number): void {
   processImpl.exitImpl(code);
 }
 
-export default {
+const process = {
   nextTick,
   env,
   exit,
@@ -33,3 +34,7 @@ export default {
   platform,
   features,
 };
+
+_setProcess(process);
+
+export default process;

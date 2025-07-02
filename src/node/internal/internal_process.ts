@@ -18,6 +18,7 @@ import {
   type ErrorWithDetail,
   default as processImpl,
 } from 'node-internal:process';
+import type processType from 'node-internal:public_process';
 
 export const platform = processImpl.platform;
 
@@ -305,4 +306,14 @@ export function emitWarning(
   queueMicrotask(() => {
     process.emit('warning', err);
   });
+}
+
+// In case of using nodejs_process_v2 without the node compat flag for setting the
+// process global, this process variable can always be imported to correctly be the
+// process module regardless of whether legacy_process or public_process was selected,
+// since these are different process modules and implementations.
+// Internal APIs using process should therefore import this binding.
+export let process: typeof processType;
+export function _setProcess(_process: typeof processType) {
+  process = _process;
 }
