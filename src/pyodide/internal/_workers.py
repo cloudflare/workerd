@@ -177,7 +177,6 @@ async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
         except JsException as e:
             raise OSError(e.message) from None
     else:
-        kwargs["fetcher"] = None
         return await pyfetch(url, **kwargs)
 
 
