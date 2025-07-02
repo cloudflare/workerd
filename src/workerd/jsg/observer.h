@@ -129,6 +129,11 @@ struct CompilationObserver {
   virtual kj::Own<void> onJsonCompilationStart(v8::Isolate* isolate, size_t inputSize) const {
     return kj::Own<void>();
   }
+
+  virtual void onCompileCacheFound(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheRejected(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheGenerated(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheGenerationFailed(v8::Isolate* isolate) const {}
 };
 
 struct InternalExceptionObserver {

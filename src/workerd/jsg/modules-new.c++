@@ -26,31 +26,14 @@ kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module
 };
 
 // Ensure that the given module has been instantiated or errored.
+// If false is returned, then an exception should have been scheduled
+// on the isolate.
 bool ensureInstantiated(Lock& js,
     v8::Local<v8::Module> module,
     const CompilationObserver& observer,
-    const Module* self) {
-  if (module->GetStatus() == v8::Module::kUninstantiated) {
-    bool result;
-    if (!self->instantiate(js, module, observer).To(&result)) {
-      // If we got here, instantiation threw an error. Let's return
-      // false and allow that error to propagate.
-      return false;
-    }
-    // If we got here the instantiation may or may not have succeeded.
-    // Let's check...
-    if (!result) {
-      // Nope, it failed. Let's throw an error.
-      // Note here we are scheduling the exception on the isolate directly
-      // rather than via the lock. This is because throwing via the lock
-      // also throws JsExceptionThrown, which is not what we want. Here
-      // we only want to schedule the exception in the isolate
-      js.v8Isolate->ThrowError(
-          js.str(kj::str("Failed to instantiate module: ", self->specifier())));
-      return false;
-    }
-  }
-  return true;
+    const Module& self) {
+  return module->GetStatus() != v8::Module::kUninstantiated ||
+      self.instantiate(js, module, observer);
 }
 
 constexpr ResolveContext::Type moduleTypeToResolveContextType(Module::Type type) {
@@ -108,54 +91,78 @@ class EsModule final: public Module {
     v8::ScriptOrigin origin(js.str(specifier().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
-    v8::ScriptCompiler::CachedData* data = nullptr;
     auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
 
     v8::Local<v8::Module> module;
     {
+      v8::ScriptCompiler::CachedData* data = nullptr;
+
       // Check to see if we have cached compilation data for this module.
+      // Importantly, we want to allow multiple threads to be capable of
+      // reading and using the cached data without blocking each other
+      // (which is fine since using the cache does not modify it).
       auto lock = cachedData.lockShared();
       KJ_IF_SOME(c, *lock) {
         // We new new here because v8 will take ownership of the CachedData instance,
         // even tho we are maintaining ownership of the underlying buffer.
         data = new v8::ScriptCompiler::CachedData(
             c->data, c->length, v8::ScriptCompiler::CachedData::BufferPolicy::BufferNotOwned);
+        auto check = data->CompatibilityCheck(js.v8Isolate);
+        if (check != v8::ScriptCompiler::CachedData::kSuccess) {
+          // The cached data is not compatible with the current isolate. Let's
+          // not try using it.
+          delete data;
+        } else {
+          observer.onCompileCacheFound(js.v8Isolate);
+        }
       }
 
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
-      // Do not use data after this point.
+      // (but not the actual buffer it holds). Do not use data after this point.
       v8::ScriptCompiler::Source source(js.strExtern(this->source), origin, data);
 
       auto maybeCached = source.GetCachedData();
       if (maybeCached != nullptr) {
         if (!maybeCached->rejected) {
-          // We found valid cached data and need to set the option to consume it to avoid
+          // We found valid cached data and set the option to consume it to avoid
           // compiling again below...
           options = v8::ScriptCompiler::CompileOptions::kConsumeCodeCache;
         } else {
           // In this case we'll just log a warning and continue on. This is potentially
           // a signal that something with the compile cache is not working correctly but
           // it is not a fatal error. If we spot this in the wild, it warrants some
-          // investigation.
-          LOG_WARNING_ONCE("NOSENTRY Cached data for ESM module was rejected");
+          // investigation but is not critical.
+          LOG_WARNING_ONCE("NOSENTRY Cached data for an ESM module was rejected");
+          observer.onCompileCacheRejected(js.v8Isolate);
         }
       }
 
+      // Let's just double check that our options are valid. They should be
+      // since we're either consuming cached data or not using any options at all.
+      KJ_ASSERT(v8::ScriptCompiler::CompileOptionsIsValid(options));
       if (!v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, options).ToLocal(&module)) {
         return v8::MaybeLocal<v8::Module>();
       }
     }
 
-    // If the options are still kNoCompileOptions, then we did not have or use cached
-    // data. We should generate the cache now, if possible. We lock to ensure that
-    // we do not generate the cache multiple times needlessly. When the lock is acquired
-    // we check again to see if the cache is still empty, and skip generating if it is not.
+    // If options is still kNoCompileOptions at this point, it means that we did not
+    // find any cached data for this module, or the cached data was rejected. In the
+    // case it was rejected, we just move on. If there is no cached data, we try
+    // generating it and store it. Multiple threads can end up lining up here to
+    // acquire the lock and generate the cache. We'll test to see if the cached
+    // data is still empty once the lock is acquired, and if it is not, we'll skip
+    // generation.
     if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
       auto lock = cachedData.lockExclusive();
-      if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
-        kj::Own<v8::ScriptCompiler::CachedData> cached(
-            ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
-        *lock = kj::mv(cached);
+      if (*lock == kj::none) {
+        if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {
+          kj::Own<v8::ScriptCompiler::CachedData> cached(
+              ptr, kj::_::HeapDisposer<v8::ScriptCompiler::CachedData>::instance);
+          *lock = kj::mv(cached);
+          observer.onCompileCacheGenerated(js.v8Isolate);
+        } else {
+          observer.onCompileCacheGenerationFailed(js.v8Isolate);
+        }
       }
     }
 
@@ -172,7 +179,7 @@ class EsModule final: public Module {
       v8::Local<v8::Module> module,
       const CompilationObserver& observer,
       kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
-    if (!ensureInstantiated(js, module, observer, this)) {
+    if (!ensureInstantiated(js, module, observer, *this)) {
       return v8::MaybeLocal<v8::Value>();
     };
 
@@ -254,7 +261,7 @@ class SyntheticModule final: public Module {
       v8::Local<v8::Module> module,
       const CompilationObserver& observer,
       kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
-    if (!ensureInstantiated(js, module, observer, this)) {
+    if (!ensureInstantiated(js, module, observer, *this)) {
       return v8::MaybeLocal<v8::Value>();
     }
 
@@ -398,10 +405,10 @@ class IsolateModuleRegistry final {
         js.throwException(JsValue(module->GetException()));
       }
 
-      // TODO(new-module-registry): Circular dependencies should be fine
-      // when we are talking strictly about CJS/Node.js style modules.
-      // For ESM, it becomes more problematic because v8 will not allow
-      // us to grab the default export while the module is still evaluating.
+      // Circular dependencies should be fine when we are talking strictly
+      // about CJS/Node.js style modules. For ESM, it becomes more problematic
+      // because v8 will not allow us to grab the default export while the module
+      // is still evaluating.
 
       if (entry.module.isEsm() && status == v8::Module::kEvaluating) {
         JSG_FAIL_REQUIRE(Error, "Circular dependency when resolving module: ", specifier);
@@ -1294,12 +1301,16 @@ Module::Module(Url specifier, Type type, Flags flags)
       type_(type),
       flags_(flags) {}
 
-v8::Maybe<bool> Module::instantiate(
+bool Module::instantiate(
     Lock& js, v8::Local<v8::Module> module, const CompilationObserver& observer) const {
   if (module->GetStatus() != v8::Module::kUninstantiated) {
-    return v8::Just(true);
+    return true;
   }
-  return module->InstantiateModule(js.v8Context(), resolveCallback);
+  // InstantiateModule is one of those methods that returns a Maybe<bool> but
+  // never returns Just(false). It either returns Just(true) or an empty Maybe
+  // to signal that the instantiation failed. Eventually I would expect V8 to
+  // replace the return value with a Maybe<void>.
+  return module->InstantiateModule(js.v8Context(), resolveCallback).IsJust();
 }
 
 bool Module::isEval() const {
