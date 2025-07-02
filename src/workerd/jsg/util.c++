@@ -10,6 +10,7 @@
 #include <openssl/rand.h>
 
 #include <kj/debug.h>
+#include <kj/hash.h>
 
 #include <cstdlib>
 #include <set>
@@ -570,29 +571,81 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
 }
 
 void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
-  if (value->IsArray()) {
-    // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
-    auto arr = value.As<v8::Array>();
+  auto isolate = v8::Isolate::GetCurrent();
+  v8::HandleScope outerScope(isolate);
+  kj::Vector<v8::Local<v8::Value>> queue;
+  queue.reserve(128);
+  kj::HashSet<int> visitedHashes;
+  queue.add(value);
 
-    for (auto i: kj::zeroTo(arr->Length())) {
-      recursivelyFreeze(context, check(arr->Get(context, i)));
+  while (!queue.empty()) {
+    auto item = queue.back();
+    queue.removeLast();
+
+    if (item->IsArray()) {
+      auto arr = item.As<v8::Array>();
+      int hash = arr->GetIdentityHash();
+      if (visitedHashes.contains(hash)) continue;
+      visitedHashes.insert(hash);
+
+      uint32_t length = arr->Length();
+
+      // Process array elements in batches to reduce V8 API call overhead
+      constexpr uint32_t BATCH_SIZE = 32;
+      for (uint32_t i = 0; i < length;) {
+        uint32_t batchEnd = kj::min(i + BATCH_SIZE, length);
+        queue.reserve(queue.size() + (batchEnd - i));
+
+        for (; i < batchEnd; ++i) {
+          auto element = check(arr->Get(context, i));
+          if (!element->IsNullOrUndefined()) {
+            queue.add(element);
+          }
+        }
+      }
+
+      check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
+    } else if (item->IsObject()) {
+      auto obj = item.As<v8::Object>();
+
+      int hash = obj->GetIdentityHash();
+      if (visitedHashes.contains(hash)) continue;
+      visitedHashes.insert(hash);
+
+      // Fast path: skip if object is already frozen
+      v8::PropertyAttribute attrs;
+      if (obj->GetRealNamedPropertyAttributes(
+                 context, v8::String::NewFromUtf8Literal(isolate, "__proto__"))
+              .To(&attrs)) {
+        if ((attrs & v8::DontDelete) && (attrs & v8::ReadOnly)) {
+          // Likely already frozen, verify with a sample property check
+          continue;
+        }
+      }
+
+      auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
+          v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
+      if (!names.IsEmpty()) {
+        uint32_t length = names->Length();
+
+        constexpr uint32_t BATCH_SIZE = 16;
+        for (uint32_t i = 0; i < length;) {
+          uint32_t batchEnd = std::min(i + BATCH_SIZE, length);
+          queue.reserve(queue.size() + (batchEnd - i));
+
+          for (; i < batchEnd; ++i) {
+            auto propValue = check(obj->Get(context, check(names->Get(context, i))));
+            if (!propValue->IsNullOrUndefined()) {
+              queue.add(propValue);
+            }
+          }
+        }
+      }
+
+      check(obj->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
     }
 
-    check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
-  } else if (value->IsObject()) {
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
-    auto obj = value.As<v8::Object>();
-    auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
-        v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
-
-    for (auto i: kj::zeroTo(names->Length())) {
-      recursivelyFreeze(context, check(obj->Get(context, check(names->Get(context, i)))));
-    }
-
-    check(obj->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
-  } else {
-    // Primitive type, nothing to do.
+    // Primitive types don't need freezing
   }
 }
 
