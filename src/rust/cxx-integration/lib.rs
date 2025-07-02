@@ -7,10 +7,6 @@ mod ffi {
 
         fn trigger_panic(msg: &str);
     }
-
-    unsafe extern "C++" {
-        include!("workerd/rust/cxx-integration/cxx-bridge.h");
-    }
 }
 
 pub fn init() {

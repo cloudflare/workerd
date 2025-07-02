@@ -5,8 +5,11 @@
 
 #include "ada.h"
 
-#include <workerd/rust/cxx-integration/cxx-bridge.h>
 #include <workerd/rust/net/lib.rs.h>
+
+#include <kj-rs/kj-rs.h>
+
+using namespace kj_rs;
 
 namespace workerd::api::node {
 

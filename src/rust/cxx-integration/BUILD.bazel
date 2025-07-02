@@ -10,6 +10,7 @@ wd_rust_crate(
     deps = [
         "@crates_vendor//:tokio",
         "@crates_vendor//:tracing",
+        "@workerd-cxx//kj-rs",
     ],
 )
 
