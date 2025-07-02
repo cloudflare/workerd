@@ -363,6 +363,13 @@ class JsObject final: public JsBase<v8::Object, JsObject> {
   void set(Lock& js, kj::StringPtr name, const JsValue& value);
   void setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value);
   void setNonEnumerable(Lock& js, const JsSymbol& name, const JsValue& value);
+
+  // Like set but uses the defineProperty API instead in order to override
+  // the default property attributes. This is useful for defining properties
+  // that otherwise would not be normally settable, such as the name of an
+  // error object.
+  void defineProperty(Lock& js, kj::StringPtr name, const JsValue& value);
+
   JsValue get(Lock& js, const JsValue& name) KJ_WARN_UNUSED_RESULT;
   JsValue get(Lock& js, kj::StringPtr name) KJ_WARN_UNUSED_RESULT;
 

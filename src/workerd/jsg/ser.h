@@ -117,6 +117,13 @@ class Serializer final: v8::ValueSerializer::Delegate {
     //   itself, but it may not be worth it to support for only that use case.
     bool treatClassInstancesAsPlainObjects = true;
 
+    bool treatErrorsAsHostObjects = false;
+
+    // When the treatErrorsAsHostObjects option is set, the preserveStackInErrors option
+    // controls whether the stack property in the error object is preserved in the
+    // serialization. If false, the stack property is not serialized.
+    bool preserveStackInErrors = true;
+
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Serializer.
     kj::Maybe<ExternalHandler&> externalHandler;
@@ -203,6 +210,8 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   bool released = false;
   bool treatClassInstancesAsPlainObjects;
+  bool treatErrorsAsHostObjects = false;
+  bool preserveStackInErrors = true;
 
   // Initialized to point at the prototype of `Object` if and only if
   // `treatClassInstancesAsPlainObjects` is false (in which case we will need to check against this
@@ -229,6 +238,13 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   struct Options {
     kj::Maybe<uint32_t> version;
     bool readHeader = true;
+
+    // When the serialized data used the treatErrorsAsHostObjects option is set,
+    // and we are deserializing a custom serialized error, this option controls
+    // whether to include the serialized stack property in the deserialized error.
+    // If false, the stack property is not restored and will instead be set to
+    // the captured stack at the time of deserialization.
+    bool preserveStackInErrors = true;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Deserializer.
@@ -287,6 +303,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   size_t totalInputSize;
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
+  bool preserveStackInErrors = true;
 };
 
 // Intended for use with v8::ValueSerializer data released into a kj::Array.

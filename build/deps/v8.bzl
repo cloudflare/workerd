@@ -32,6 +32,7 @@ PATCHES = [
     "0024-Modify-where-to-look-for-dragonbox.patch",
     "0025-Disable-slow-handle-check.patch",
     "0026-Workaround-for-builtin-can-allocate-issue.patch",
+    "0027-Implement-additional-Exception-construction-methods.patch",
 ]
 
 # V8 and its dependencies
