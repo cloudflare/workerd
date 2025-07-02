@@ -413,10 +413,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
-  const auto [running, _ports] = co_await inspectContainer();
-  if (running) {
-    co_await destroyContainer();
-  }
+  co_await destroyContainer();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {
