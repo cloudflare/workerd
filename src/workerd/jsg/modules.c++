@@ -36,13 +36,13 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
   }
 
   js.tryCatch([&] {
-    auto spec = kj::str(specifier);
-
     auto registry = getModulesForResolveCallback(js.v8Isolate);
     KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
 
     auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
         "referrer passed to resolveCallback isn't in modules table");
+
+    auto spec = kj::str(specifier);
 
     if (isNodeJsCompatEnabled(js)) {
       KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
