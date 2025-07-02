@@ -4,8 +4,11 @@
 #include "dns.h"
 
 #include <workerd/jsg/exception.h>
-#include <workerd/rust/cxx-integration/cxx-bridge.h>
 #include <workerd/rust/dns/lib.rs.h>
+
+#include <kj-rs/kj-rs.h>
+
+using namespace kj_rs;
 
 namespace workerd::api::node {
 

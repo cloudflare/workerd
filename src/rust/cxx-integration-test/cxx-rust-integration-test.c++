@@ -6,6 +6,9 @@
 
 #include <kj/async.h>
 #include <kj/test.h>
+#include <kj-rs/kj-rs.h>
+
+using namespace kj_rs;
 
 // Test generic rust/c++ integration boundary.
 // See src/rust/cxx-integration-tests for rust backend.
