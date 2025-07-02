@@ -923,11 +923,11 @@ def handler(func):
     def wrapper(*args, **kwargs):
         # TODO: support transforming kwargs
         if len(args) > 0 and _is_js_instance(args[0], "Request"):
-            args = (Request(args[0]),) + args[1:]
+            args = (Request(args[0]), *args[1:])
 
         # Wrap `env` so that bindings can be used without to_js.
         if len(args) > 1:
-            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+            args = (args[0], _EnvWrapper(args[1]), *args[2:])
 
         return func(*args, **kwargs)
 
@@ -983,7 +983,7 @@ def _wrap_subclass(cls):
 
     def wrapped_init(self, *args, **kwargs):
         if len(args) > 1:
-            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+            args = (args[0], _EnvWrapper(args[1]), *args[2:])
 
         original_init(self, *args, **kwargs)
 

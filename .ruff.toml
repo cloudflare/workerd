@@ -29,6 +29,7 @@ ignore = [
   "TRY003", # Avoid specifying long messages outside the exception class
   "UP038",  # Use X | Y in isinstance check instead of (X, Y)
   "PLR0911", # too many return statements
+  "PLC0415", # `import` should be at the top-level of a file
 ]
 
 [lint.per-file-ignores]

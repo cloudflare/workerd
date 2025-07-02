@@ -94,34 +94,6 @@
       "repo": "rules_ts",
       "file_regex": "^rules_ts-.*\\.tar\\.gz$"
     },
-    //clang-format
-    {
-      "name": "clang-format-linux-amd64",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "llvm-.*-linux-amd64-clang-format",
-      "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
-    },
-    {
-      "name": "clang-format-linux-arm64",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "llvm-.*-linux-arm64-clang-format",
-      "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
-    },
-    {
-      "name": "clang-format-darwin-arm64",
-      "type": "github_release",
-      "owner": "cloudflare",
-      "repo": "workerd-tools",
-      "file_regex": "llvm-.*-darwin-arm64-clang-format",
-      "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
-    },
     // microbenchmark
     {
       "type": "github_release",
