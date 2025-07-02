@@ -35,30 +35,31 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         "Unrecognized import attributes specified");
   }
 
-  auto spec = kj::str(specifier);
-
-  auto registry = getModulesForResolveCallback(js.v8Isolate);
-  KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
-
-  // Handle process module redirection based on enable_nodejs_process_v2 flag
-  if ((spec == "node:process" || spec == "process")) {
-    auto specifierPath =
-        kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                     : "node-internal:legacy_process"_kj);
-    KJ_IF_SOME(info,
-        registry->resolve(
-            js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-      return info.module.getHandle(js.v8Isolate);
-    }
-  }
-
   js.tryCatch([&] {
+    auto spec = kj::str(specifier);
+
+    auto registry = getModulesForResolveCallback(js.v8Isolate);
+    KJ_REQUIRE(registry != nullptr, "didn't expect resolveCallback() now");
+
     auto ref = KJ_ASSERT_NONNULL(registry->resolve(js, referrer),
         "referrer passed to resolveCallback isn't in modules table");
 
     if (isNodeJsCompatEnabled(js)) {
       KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
         spec = kj::mv(nodeSpec);
+      }
+    }
+
+    // Handle process module redirection based on enable_nodejs_process_v2 flag
+    if (spec == "node:process") {
+      auto specifierPath =
+          kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                       : "node-internal:legacy_process"_kj);
+      KJ_IF_SOME(info,
+          registry->resolve(
+              js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+        result = info.module.getHandle(js.v8Isolate);
+        return;
       }
     }
 
