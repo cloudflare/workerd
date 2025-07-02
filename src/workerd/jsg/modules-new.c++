@@ -715,6 +715,23 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
         }
       }
 
+      // Handle process module redirection based on enable_nodejs_process_v2 flag
+      if ((spec == "node:process" || spec == "process")) {
+        auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                        : "node-internal:legacy_process"_kj;
+        KJ_IF_SOME(url, referrer.tryResolve(processSpec)) {
+          auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+          ResolveContext context = {
+            .type = ResolveContext::Type::BUILTIN_ONLY,
+            .source = ResolveContext::Source::DYNAMIC_IMPORT,
+            .specifier = normalized,
+            .referrer = referrer,
+            .rawSpecifier = processSpec,
+          };
+          return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), processSpec);
+        }
+      }
+
       KJ_IF_SOME(url, referrer.tryResolve(spec.asPtr())) {
         auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
         return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), spec);
@@ -783,6 +800,23 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     if (isNodeJsCompatEnabled(js)) {
       KJ_IF_SOME(nodeSpec, checkNodeSpecifier(spec)) {
         spec = kj::mv(nodeSpec);
+      }
+    }
+
+    // Handle process module redirection based on enable_nodejs_process_v2 flag
+    if ((spec == "node:process" || spec == "process")) {
+      auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                      : "node-internal:legacy_process"_kj;
+      KJ_IF_SOME(url, referrerUrl.tryResolve(processSpec)) {
+        auto normalized = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+        ResolveContext resolveContext = {
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = ResolveContext::Source::STATIC_IMPORT,
+          .specifier = normalized,
+          .referrer = referrerUrl,
+          .rawSpecifier = processSpec,
+        };
+        return registry.resolve(js, resolveContext);
       }
     }
 

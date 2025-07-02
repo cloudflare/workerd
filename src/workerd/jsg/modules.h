@@ -676,6 +676,29 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     }
   }
 
+  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  if (spec == "node:process") {
+    auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                    : "node-internal:legacy_process"_kj;
+    try {
+      // Use resolveInternalImport for internal modules
+      auto moduleNamespace = registry->resolveInternalImport(js, processSpec);
+      v8::Local<v8::Promise::Resolver> resolver;
+      if (v8::Promise::Resolver::New(context).ToLocal(&resolver) &&
+          resolver->Resolve(context, moduleNamespace.getHandle(js)).IsJust()) {
+        return resolver->GetPromise();
+      }
+      return v8::Local<v8::Promise>();
+    } catch (JsExceptionThrown&) {
+      if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
+        return v8::MaybeLocal<v8::Promise>();
+      }
+      return makeRejected(tryCatch.Exception());
+    } catch (kj::Exception& ex) {
+      return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+    }
+  }
+
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.
