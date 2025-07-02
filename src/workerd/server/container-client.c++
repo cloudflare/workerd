@@ -271,12 +271,17 @@ kj::Promise<void> ContainerClient::createContainer(
     }
   }
 
-  // Add environment variables if provided
+  auto envSize = environment.map([](auto& env) { return env.size(); }).orDefault(0);
+  auto jsonEnv = jsonRoot.initEnv(envSize + kj::size(defaultEnv));
+
   KJ_IF_SOME(env, environment) {
-    auto jsonEnv = jsonRoot.initEnv(env.size());
     for (uint32_t i: kj::zeroTo(env.size())) {
       jsonEnv.set(i, env[i]);
     }
+  }
+
+  for (uint32_t i: kj::zeroTo(kj::size(defaultEnv))) {
+    jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
