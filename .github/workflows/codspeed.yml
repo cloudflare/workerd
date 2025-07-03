@@ -52,10 +52,8 @@ jobs:
           echo 'set -e' >> run_benchmarks.sh
           targets=$(bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label 2>/dev/null | grep -E '^//src/workerd/tests:bench-' | grep -v '@')
           for target in $targets; do
-            # Get the binary path for each benchmark target
-            binary_path=$(bazel cquery ${{ env.BAZEL_ARGS }} --output=files "$target")
             echo "echo 'Running benchmark: $target'" >> run_benchmarks.sh
-            echo "$binary_path" >> run_benchmarks.sh
+            echo "bazel run ${{ env.BAZEL_ARGS }} $target" >> run_benchmarks.sh
           done
           chmod +x run_benchmarks.sh
 
