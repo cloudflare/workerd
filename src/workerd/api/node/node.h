@@ -65,7 +65,9 @@ bool isNodeJsCompatEnabled(auto featureFlags) {
   return featureFlags.getNodeJsCompat() || featureFlags.getNodeJsCompatV2();
 }
 
-bool isExperimentalNodeJsCompatModule(kj::StringPtr name);
+constexpr bool isExperimentalNodeJsCompatModule(kj::StringPtr name) {
+  return name == "node:fs"_kj;
+}
 
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
