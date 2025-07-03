@@ -31,7 +31,7 @@ jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier
   if (registry == nullptr) return js.undefined();
 
   // Handle process module redirection based on enable_nodejs_process_v2 flag
-  if (specifier == "node:process" || specifier == "process") {
+  if (isNode && specifier == "node:process") {
     auto featureFlags = FeatureFlags::get(js);
     if (featureFlags.getEnableNodeJsProcessV2()) {
       specifier = kj::str("node-internal:public_process");

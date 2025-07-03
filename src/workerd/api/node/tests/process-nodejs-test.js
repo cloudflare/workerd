@@ -84,12 +84,12 @@ export const processKeys = {
   test() {
     assert.deepStrictEqual(Object.keys(processMod), keys);
     keys.splice(keys.indexOf('default'), 1);
-    // assert.deepStrictEqual(
-    //   Object.keys(process)
-    //     .filter((v) => v[0] !== '_')
-    //     .sort(),
-    //   keys
-    // );
+    assert.deepStrictEqual(
+      Object.keys(process)
+        .filter((v) => v[0] !== '_')
+        .sort(),
+      keys
+    );
     assert.deepStrictEqual(
       Object.keys(processMod.default)
         .filter((v) => v[0] !== '_')
@@ -99,6 +99,13 @@ export const processKeys = {
     const processBuiltin = processMod.getBuiltinModule('process');
     assert.deepStrictEqual(
       Object.keys(processBuiltin)
+        .filter((v) => v[0] !== '_')
+        .sort(),
+      keys
+    );
+    const processBuiltinScheme = processMod.getBuiltinModule('node:process');
+    assert.deepStrictEqual(
+      Object.keys(processBuiltinScheme)
         .filter((v) => v[0] !== '_')
         .sort(),
       keys
@@ -527,32 +534,6 @@ export const processEmitWarning = {
 
     await new Promise(process.nextTick);
     assert(calledWarningHandler);
-  },
-};
-
-// TODO(soon): Support process.TZ timezone
-// process.env.TZ https://github.com/nodejs/node/blob/5f7dbf45a3d3e3070d5f58f9a9c2c43dbecc8672/test/parallel/test-process-env-tz.js
-export const processTZ = {
-  test() {
-    // const date = new Date('2018-04-14T12:34:56.789Z');
-    // process.env.TZ = 'Europe/Amsterdam';
-    // // Text representation of timezone depends on locale in environment
-    // assert.match(
-    //   date.toString(),
-    //   /^Sat Apr 14 2018 14:34:56 GMT\+0200 \(.+\)$/);
-    // process.env.TZ = 'Europe/London';
-    // assert.match(
-    //   date.toString(),
-    //   /^Sat Apr 14 2018 13:34:56 GMT\+0100 \(.+\)$/);
-    // process.env.TZ = 'Etc/UTC';
-    // assert.match(
-    //   date.toString(),
-    //   /^Sat Apr 14 2018 12:34:56 GMT\+0000 \(.+\)$/);
-    // // Just check that deleting the environment variable doesn't crash the process.
-    // // We can't really check the result of date.toString() because we don't know
-    // // the default time zone.
-    // delete process.env.TZ;
-    // date.toString();
   },
 };
 
