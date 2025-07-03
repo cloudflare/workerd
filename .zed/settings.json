@@ -29,6 +29,10 @@
       }
     }
   },
+  "file_types": {
+    "Cap'n Proto": ["*.wd-test"],
+    "Starlark": ["BUILD.*"]
+  },
   "lsp": {
     "clangd": {
       "binary": {
