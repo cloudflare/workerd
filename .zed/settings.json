@@ -11,7 +11,27 @@
           "args": ["-i", "{buffer_path}"]
         }
       }
+    },
+    "Python": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/ruff",
+          "arguments": ["format", "--stdin-filename", "{buffer_path}"]
+        }
+      }
+    },
+    "Starlark": {
+      "formatter": {
+        "external": {
+          "command": "bazel-bin/build/deps/formatters/buildifier",
+          "arguments": ["--lint=fix", "--path", "{buffer_path}"]
+        }
+      }
     }
+  },
+  "file_types": {
+    "Cap'n Proto": ["*.wd-test"],
+    "Starlark": ["BUILD.*"]
   },
   "lsp": {
     "clangd": {
