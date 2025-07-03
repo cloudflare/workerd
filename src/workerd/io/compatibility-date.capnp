@@ -240,7 +240,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat");
+      $compatDisableFlag("no_nodejs_compat")
+      $impliedByAfterDate(name = "enableNodeJsProcessV2", date = "2000-01-01");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
@@ -465,7 +466,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
       $compatDisableFlag("no_nodejs_compat_v2")
-      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
+      $impliedByAfterDate(names = ["nodeJsCompat", "enableNodeJsProcessV2"], date = "2024-09-23");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
@@ -838,4 +839,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $experimental;
   # Enables support for Python workflows.
   # This is still in development and may change in the future.
+
+  unsupportedProcessActualPlatform @96 :Bool
+      $compatEnableFlag("unsupported_process_actual_platform")
+      $experimental;
+  # By default, Workerd will always expose "linux" as the process.platform.
+  # This flag enables support for process.platform to expose the actual system platform.
+  # This is unsupported, as this feature will never ever be supported as non-experimental and is a
+  # temporary WPT test path only.
+
+  enableNodeJsProcessV2 @97 :Bool
+      $compatEnableFlag("enable_nodejs_process_v2")
+      $experimental;
+  # Switches from the partial process implementation with only "nextTick", "env", "exit",
+  # "getBuiltinModule", "platform" and "features" property implementations, to the full-featured
+  # Node.js-compatibile process implementation with all process properties either stubbed or
+  # implemented. Implies nodejs_compat + nodejs_compat_v2 (which sets the process global).
 }

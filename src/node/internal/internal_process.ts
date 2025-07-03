@@ -6,24 +6,35 @@
 // is only an approximation of process.nextTick semantics. Hopefully it's good
 // enough because we really do not want to implement Node.js' idea of a nextTick
 // queue.
-/* eslint-disable */
 
 import { validateObject } from 'node-internal:validators';
+import {
+  ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  NodeError,
+} from 'node-internal:internal_errors';
+import {
+  type EmitWarningOptions,
+  type ErrorWithDetail,
+  default as processImpl,
+} from 'node-internal:process';
+import type publicProcessType from 'node-internal:public_process';
+import type legacyProcessType from 'node-internal:legacy_process';
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+export const platform = processImpl.platform;
 
-import { default as utilImpl } from 'node-internal:util';
-
-export function nextTick(cb: Function, ...args: unknown[]) {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+export function nextTick(cb: Function, ...args: unknown[]): void {
   queueMicrotask(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
     cb(...args);
   });
 }
 
 // Decide if a value can round-trip to JSON without losing any information.
 function isJsonSerializable(
-  value: any,
-  seen: Set<Object> = new Set()
+  value: unknown,
+  seen: Set<unknown> = new Set()
 ): boolean {
   switch (typeof value) {
     case 'boolean':
@@ -69,7 +80,9 @@ function isJsonSerializable(
             isJsonSerializable(prop, seen)
           );
         case Array.prototype:
-          return value.every((elem: unknown) => isJsonSerializable(elem, seen));
+          return (value as Array<unknown>).every((elem: unknown) =>
+            isJsonSerializable(elem, seen)
+          );
         default:
           return false;
       }
@@ -80,9 +93,9 @@ function isJsonSerializable(
   }
 }
 
-function getInitialEnv() {
-  let env: Record<string, string> = {};
-  for (let [key, value] of Object.entries(utilImpl.getEnvObject())) {
+function getInitialEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(processImpl.getEnvObject())) {
     // Workers environment variables can have a variety of types, but process.env vars are
     // strictly strings. We want to convert our workers env into process.env, but allowing
     // process.env to contain non-strings would probably break Node apps.
@@ -129,14 +142,16 @@ export const env = new Proxy(getInitialEnv(), {
   // When defined using defineProperty, the property descriptor must be writable,
   // configurable, and enumerable using just a falsy check. Getters and setters
   // are not permitted.
-  set(obj: object, prop: PropertyKey, value: any) {
+  set(obj: object, prop: PropertyKey, value: unknown): boolean {
+    if (typeof prop === 'symbol' || typeof value === 'symbol')
+      throw new TypeError(`Cannot convert a symbol value to a string`);
     return Reflect.set(obj, prop, `${value}`);
   },
   defineProperty(
     obj: object,
     prop: PropertyKey,
     descriptor: PropertyDescriptor
-  ) {
+  ): boolean {
     validateObject(descriptor, 'descriptor');
     if (Reflect.has(descriptor, 'get') || Reflect.has(descriptor, 'set')) {
       throw new ERR_INVALID_ARG_VALUE(
@@ -167,6 +182,8 @@ export const env = new Proxy(getInitialEnv(), {
       );
     }
     if (Reflect.has(descriptor, 'value')) {
+      if (typeof prop === 'symbol' || typeof descriptor.value === 'symbol')
+        throw new TypeError(`Cannot convert a symbol value to a string`);
       Reflect.set(descriptor, 'value', `${descriptor.value}`);
     } else {
       throw new ERR_INVALID_ARG_VALUE(
@@ -175,19 +192,11 @@ export const env = new Proxy(getInitialEnv(), {
         'process.env value must be specified explicitly'
       );
     }
+    if (typeof prop === 'symbol')
+      throw new TypeError(`Cannot convert a symbol value to a string`);
     return Reflect.defineProperty(obj, prop, descriptor);
   },
 });
-
-export function getBuiltinModule(id: string): any {
-  return utilImpl.getBuiltinModule(id);
-}
-
-export function exit(code: number) {
-  utilImpl.processExitImpl(code);
-}
-
-export const platform = utilImpl.processPlatform;
 
 // The following features does not include deprecated or experimental flags mentioned in
 // https://nodejs.org/docs/latest/api/process.html
@@ -205,11 +214,110 @@ export const features = Object.freeze({
   tls: true,
 });
 
-export default {
-  nextTick,
-  env,
-  exit,
-  getBuiltinModule,
-  platform,
-  features,
-};
+export function emitWarning(
+  warning: string | Error,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  type?: string,
+  code?: string,
+  ctor?: ErrorConstructor
+): void;
+export function emitWarning(
+  warning: string | Error,
+  options?: ErrorConstructor | string | EmitWarningOptions,
+  codeOrCtor?: ErrorConstructor | string,
+  maybeCtor?: ErrorConstructor
+): void {
+  let err: Error;
+  let name = 'Warning';
+  let detail: string | undefined;
+  let code: string | undefined;
+  let ctor: ErrorConstructor | undefined;
+
+  // Handle different overloads
+  if (typeof options === 'object' && !Array.isArray(options)) {
+    // emitWarning(warning, options)
+    if (options.type) name = options.type;
+    if (options.code) code = options.code;
+    if (options.detail) detail = options.detail;
+    ctor = options.ctor;
+  } else if (typeof options === 'string') {
+    // emitWarning(warning, type, ...)
+    name = options;
+    if (typeof codeOrCtor === 'string') {
+      // emitWarning(warning, type, code, ctor)
+      code = codeOrCtor;
+      if (typeof maybeCtor === 'function') {
+        ctor = maybeCtor;
+      } else if ((maybeCtor as unknown) !== undefined) {
+        throw new ERR_INVALID_ARG_TYPE('ctor', 'function', maybeCtor);
+      }
+    } else if (typeof codeOrCtor === 'function') {
+      // emitWarning(warning, type, ctor)
+      ctor = codeOrCtor;
+    } else if ((codeOrCtor as unknown) !== undefined) {
+      throw new ERR_INVALID_ARG_TYPE('ctor', 'function', codeOrCtor);
+    }
+  } else if (typeof options === 'function') {
+    // emitWarning(warning, ctor)
+    ctor = options;
+  } else if (options !== undefined) {
+    throw new ERR_INVALID_ARG_TYPE('options', 'object', options);
+  }
+
+  // Convert string warning to Error
+  if (typeof warning === 'string') {
+    // Use the provided constructor if available, otherwise use Error
+    const ErrorConstructor = ctor || Error;
+    err = new ErrorConstructor(warning);
+    err.name = name;
+  } else if (warning instanceof Error) {
+    err = warning;
+    // Override name if provided
+    if (name && name !== 'Warning') {
+      err.name = name;
+    }
+  } else {
+    throw new ERR_INVALID_ARG_TYPE('warning', 'string or Error', warning);
+  }
+
+  // Add code if provided
+  if (code) {
+    (err as NodeError).code = code;
+  }
+
+  // Add detail if provided
+  if (detail && typeof detail === 'string') {
+    (err as ErrorWithDetail).detail = detail;
+  }
+
+  // Capture stack trace using the provided constructor or emitWarning itself
+  // This excludes the constructor (and frames above it) from the stack trace
+  Error.captureStackTrace(err, ctor || emitWarning);
+
+  // Emit the warning event on the process object
+  // Use nextTick to ensure the warning is emitted asynchronously
+  queueMicrotask(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if ((_process as typeof publicProcessType).emit)
+      (_process as typeof publicProcessType).emit('warning', err);
+  });
+}
+
+// Events has a cycle with process, so to resolve that we lazily bind
+// this _process for events usage only. All other internal importers should
+// import 'node:process' directly rather, as _eventsProcess is only guaranteed
+// to be available when that has been imported.
+export let _process: typeof legacyProcessType | typeof publicProcessType;
+export function _setEventsProcess(
+  process: typeof legacyProcessType | typeof publicProcessType
+): void {
+  _process = process;
+}

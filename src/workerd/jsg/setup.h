@@ -147,6 +147,10 @@ class IsolateBase {
     nodeJsCompatEnabled = enabled;
   }
 
+  inline void setNodeJsProcessV2Enabled(kj::Badge<Lock>, bool enabled) {
+    nodeJsProcessV2Enabled = enabled;
+  }
+
   inline bool areWarningsLogged() const {
     return maybeLogger != kj::none;
   }
@@ -156,6 +160,10 @@ class IsolateBase {
 
   inline bool isNodeJsCompatEnabled() const {
     return nodeJsCompatEnabled;
+  }
+
+  inline bool isNodeJsProcessV2Enabled() const {
+    return nodeJsProcessV2Enabled;
   }
 
   inline bool shouldSetToStringTag() const {
@@ -287,6 +295,7 @@ class IsolateBase {
   bool captureThrowsAsRejections = false;
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
+  bool nodeJsProcessV2Enabled = false;
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;

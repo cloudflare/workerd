@@ -1012,6 +1012,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getNodeJsCompatV2()) {
       lock->setNodeJsCompatEnabled();
     }
+    if (features.getEnableNodeJsProcessV2()) {
+      lock->setNodeJsProcessV2Enabled();
+    }
     if (features.getThrowOnUnrecognizedImportAssertion()) {
       lock->setThrowOnUnrecognizedImportAssertion();
     }

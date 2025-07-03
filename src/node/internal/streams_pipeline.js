@@ -36,7 +36,7 @@ import {
   destroyer as destroyerImpl,
 } from 'node-internal:streams_util';
 
-import * as process from 'node-internal:process';
+import process from 'node:process';
 
 import { PassThrough } from 'node-internal:streams_transform';
 import { Duplex } from 'node-internal:streams_duplex';

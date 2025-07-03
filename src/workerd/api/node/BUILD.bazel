@@ -10,6 +10,7 @@ wd_cc_library(
         "crypto-keys.c++",
         "diagnostics-channel.c++",
         "module.c++",
+        "process.c++",
         "timers.c++",
         "util.c++",
         "zlib-util.c++",
@@ -19,6 +20,7 @@ wd_cc_library(
         "diagnostics-channel.h",
         "module.h",
         "node.h",
+        "process.h",
         "timers.h",
         "util.h",
         "zlib-util.h",
@@ -52,6 +54,7 @@ wd_cc_library(
         "buffer-string-search.h",
         "dns.h",
         "i18n.h",
+        "node-version.h",
         "url.h",
     ],
     implementation_deps = [
@@ -278,6 +281,12 @@ wd_test(
     src = "tests/process-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tests/process-legacy-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/process-legacy-nodejs-test.js"],
 )
 
 wd_test(

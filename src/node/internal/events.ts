@@ -41,10 +41,8 @@ import {
   validateFunction,
   validateObject,
 } from 'node-internal:validators';
-
-import * as process from 'node-internal:process';
-
 import { spliceOne } from 'node-internal:internal_utils';
+import { nextTick, emitWarning } from 'node-internal:internal_process';
 
 import { default as async_hooks } from 'node-internal:async_hooks';
 const { AsyncResource } = async_hooks;
@@ -163,6 +161,7 @@ export function addAbortListener(signal: AbortSignal, listener: any) {
 }
 
 export default EventEmitter;
+
 EventEmitter.on = on;
 EventEmitter.once = once;
 EventEmitter.getEventListeners = getEventListeners;
@@ -303,7 +302,7 @@ function addCatch(
       then.call(promise, undefined, function (err) {
         // The callback is called with nextTick to avoid a follow-up
         // rejection from this promise.
-        process.nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
+        nextTick(emitUnhandledRejectionOrErr, that, err, type, args);
       });
     }
   } catch (err) {
@@ -495,24 +494,34 @@ function _addListener(
           `added to an EventEmitter. Use ` +
           'emitter.setMaxListeners() to increase limit'
       );
-      // TODO(soon): Implement process.emitWarning and inspect
-      // // No error code for this since it is a Warning
-      // // eslint-disable-next-line no-restricted-syntax
-      // const w = new Error(
-      //   "Possible EventEmitter memory leak detected. " +
-      //     `${existing.length} ${String(type)} listeners ` +
-      //     `added to ${inspect(target, { depth: -1 })}. Use ` +
-      //     "emitter.setMaxListeners() to increase limit",
-      // );
-      // w.name = "MaxListenersExceededWarning";
-      // w.emitter = target;
-      // w.type = type;
-      // w.count = existing.length;
-      // process.emitWarning(w);
+      const w: EventEmitterError = Object.assign(
+        new Error(
+          'Possible EventEmitter memory leak detected. ' +
+            `${existing.length} ${String(type)} listeners ` +
+            `added to ${inspect(target, { depth: -1 })}. Use ` +
+            'emitter.setMaxListeners() to increase limit'
+        ),
+        {
+          name: 'MaxListenersExceededWarning',
+          emitter: target,
+          type: type,
+          count: existing.length,
+        }
+      );
+      // Only the newer process version compat adds process.emitWarning support.
+      if (Cloudflare.compatibilityFlags['enable_nodejs_process_v2'])
+        emitWarning(w);
     }
   }
 
   return target;
+}
+
+interface EventEmitterError extends Error {
+  name: string;
+  emitter: unknown;
+  type: string | symbol;
+  count: number;
 }
 
 EventEmitter.prototype.addListener = function addListener(

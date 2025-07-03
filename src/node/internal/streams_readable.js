@@ -43,7 +43,7 @@ import {
   kOnConstructed,
 } from 'node-internal:streams_util';
 
-import * as process from 'node-internal:process';
+import process from 'node:process';
 
 import { EventEmitter } from 'node-internal:events';
 

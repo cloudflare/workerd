@@ -50,6 +50,19 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
       }
     }
 
+    // Handle process module redirection based on enable_nodejs_process_v2 flag
+    if (spec == "node:process") {
+      auto specifierPath =
+          kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                       : "node-internal:legacy_process"_kj);
+      KJ_IF_SOME(info,
+          registry->resolve(
+              js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+        result = info.module.getHandle(js.v8Isolate);
+        return;
+      }
+    }
+
     // If the referrer module is a built-in, it is only permitted to resolve
     // internal modules. If the worker bundle provided an override for a builtin,
     // then internalOnly will be false.

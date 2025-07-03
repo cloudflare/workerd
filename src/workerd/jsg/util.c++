@@ -775,4 +775,8 @@ bool isNodeJsCompatEnabled(jsg::Lock& js) {
   return IsolateBase::from(js.v8Isolate).isNodeJsCompatEnabled();
 }
 
+bool isNodeJsProcessV2Enabled(jsg::Lock& js) {
+  return IsolateBase::from(js.v8Isolate).isNodeJsProcessV2Enabled();
+}
+
 }  // namespace workerd::jsg

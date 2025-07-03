@@ -8,6 +8,7 @@
 #include <workerd/api/node/buffer.h>
 #include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
+#include <workerd/api/node/process.h>
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/url.h>
 #include <workerd/api/node/util.h>
@@ -49,6 +50,7 @@ class CompatibilityFlags: public jsg::Object {
   V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
   V(ModuleUtil, "node-internal:module")                                                            \
+  V(ProcessModule, "node-internal:process")                                                        \
   V(UtilModule, "node-internal:util")                                                              \
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
@@ -156,5 +158,6 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
 #define EW_NODE_ISOLATE_TYPES                                                                      \
   api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
-      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES, EW_NODE_URL_ISOLATE_TYPES,           \
-      EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES
+      EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
+      EW_NODE_TIMERS_ISOLATE_TYPES

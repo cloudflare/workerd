@@ -91,6 +91,9 @@ generate-types:
   cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
   cp -r bazel-bin/types/definitions/experimental types/generated-snapshot/
 
+update-reported-node-version:
+  python3 tools/update_node_version.py src/workerd/api/node/node-version.h
+
 # called by rust-analyzer discoverConfig (quiet recipe with no output)
 @_rust-analyzer:
   rm -rf ./rust-project.json
