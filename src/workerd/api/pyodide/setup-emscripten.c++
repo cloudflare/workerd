@@ -54,7 +54,7 @@ jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
     capnp::Data::Reader pyodideAsmWasmReader) {
   AllowV8BackgroundThreadsScope scope;
   js.setAllowEval(true);
-  KJ_DEFER(js.setAllowEval(false));
+  // KJ_DEFER(js.setAllowEval(false));
 
   auto pythonStdlibZip = v8::ArrayBuffer::New(js.v8Isolate, pythonStdlibZipReader.size(),
       v8::BackingStoreInitializationMode::kUninitialized);
