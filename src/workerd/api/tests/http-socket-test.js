@@ -12,7 +12,7 @@ export default {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
 
-      const response = await httpClient.fetch('/ping');
+      const response = await httpClient.fetch('https://example.com/ping');
       assert.equal(response.status, 200);
       const text = await response.text();
       assert.equal(text, 'pong');
@@ -23,7 +23,7 @@ export default {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
 
-      const response = await httpClient.fetch('/json');
+      const response = await httpClient.fetch('https://example.com/json');
       assert.equal(response.status, 200);
       assert.equal(response.headers.get('content-type'), 'application/json');
       const data = await response.json();
@@ -36,7 +36,7 @@ export default {
       const httpClient = convertSocketToFetcher(socket);
 
       const postData = 'Hello, world!';
-      const response = await httpClient.fetch('/echo', {
+      const response = await httpClient.fetch('https://example.com/echo', {
         method: 'POST',
         body: postData,
       });
@@ -50,7 +50,7 @@ export default {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
 
-      const response = await httpClient.fetch('/headers', {
+      const response = await httpClient.fetch('https://example.com/headers', {
         headers: {
           'X-Custom-Header': 'custom-value',
           'X-Another-Header': 'another-value',
@@ -67,7 +67,7 @@ export default {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
 
-      const response = await httpClient.fetch('/status/404');
+      const response = await httpClient.fetch('https://example.com/status/404');
       assert.equal(response.status, 404);
       const text = await response.text();
       assert.equal(text, 'Not Found');
@@ -78,7 +78,7 @@ export default {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
 
-      const response = await httpClient.fetch('/status/500');
+      const response = await httpClient.fetch('https://example.com/status/500');
       assert.equal(response.status, 500);
       const text = await response.text();
       assert.equal(text, 'Internal Server Error');
@@ -90,13 +90,13 @@ export default {
       const httpClient = convertSocketToFetcher(socket);
 
       // First request
-      const response1 = await httpClient.fetch('/ping');
+      const response1 = await httpClient.fetch('https://example.com/ping');
       assert.equal(response1.status, 200);
       const text1 = await response1.text();
       assert.equal(text1, 'pong');
       try {
         // Second request on same connection
-        const response2 = await httpClient.fetch('/json');
+        const response2 = await httpClient.fetch('https://example.com/json');
         assert.equal(response2.status, 200);
         const data = await response2.json();
         assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
@@ -117,8 +117,8 @@ export default {
       const httpClient = convertSocketToFetcher(socket);
       try {
         const responses = await Promise.all([
-          httpClient.fetch('/ping'),
-          httpClient.fetch('/json'),
+          httpClient.fetch('https://example.com/ping'),
+          httpClient.fetch('https://example.com/json'),
         ]);
       } catch (error) {
         assert(error instanceof Error, 'Expected an Error to be thrown');
@@ -137,7 +137,7 @@ export default {
       const httpClient = convertSocketToFetcher(socket);
 
       // First, successfully use the HTTP client
-      const response = await httpClient.fetch('/ping');
+      const response = await httpClient.fetch('https://example.com/ping');
       assert.equal(response.status, 200);
 
       // Now try to use the socket directly - this should fail because the streams are detached
@@ -189,7 +189,7 @@ export default {
 
       // Try to send a request with the HTTP client after closing the socket
       // This should still work since the HTTP client should have its own stream
-      const response1 = await httpClient.fetch('/ping');
+      const response1 = await httpClient.fetch('https://example.com/ping');
       assert.equal(response1.status, 200);
     }
 

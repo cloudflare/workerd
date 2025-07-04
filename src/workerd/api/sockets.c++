@@ -610,7 +610,7 @@ jsg::Ref<Fetcher> SocketsModule::convertSocketToFetcher(jsg::Lock& js, jsg::Ref<
 
   // Create a Fetcher that uses our custom factory
   return js.alloc<Fetcher>(
-      ioctx.addObject(kj::mv(outgoingFactory)), Fetcher::RequiresHostAndProtocol::NO);
+      ioctx.addObject(kj::mv(outgoingFactory)), Fetcher::RequiresHostAndProtocol::YES);
 }
 
 }  // namespace workerd::api
