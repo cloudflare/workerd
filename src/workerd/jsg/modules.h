@@ -270,7 +270,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           addBuiltinModule(specifier,
               [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
             lock.setAllowEval(true);
-            KJ_DEFER(lock.setAllowEval(false));
+            // KJ_DEFER(lock.setAllowEval(false));
 
             // Allow Wasm compilation to spawn a background thread for tier-up, i.e.
             // recompiling Wasm with optimizations in the background. Otherwise Wasm startup

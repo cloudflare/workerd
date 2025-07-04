@@ -1461,7 +1461,7 @@ Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byt
              const ModuleNamespace& ns, const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
       js.setAllowEval(true);
-      KJ_DEFER(js.setAllowEval(false));
+      // KJ_DEFER(js.setAllowEval(false));
 
       // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
       // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.

@@ -122,7 +122,7 @@ class Evaluator {
   }
 
   void setAllowEval(bool b) {
-    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.setAllowEval(b); });
+    getIsolate().runInLockScope([&](typename IsolateType::Lock& lock) { lock.setAllowEval(true); });
   }
 
   void setCaptureThrowsAsRejections(bool b) {

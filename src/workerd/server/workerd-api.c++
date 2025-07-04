@@ -431,7 +431,7 @@ struct WorkerdApi::Impl final {
       capnp::Data::Reader reader,
       const jsg::CompilationObserver& observer) {
     lock.setAllowEval(true);
-    KJ_DEFER(lock.setAllowEval(false));
+    // KJ_DEFER(lock.setAllowEval(false));
 
     // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
     // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
