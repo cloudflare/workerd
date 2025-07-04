@@ -411,11 +411,7 @@ PyodideMetadataReader::State::State(const State& other)
       snapshotToDisk(other.snapshotToDisk),
       createBaselineSnapshot(other.createBaselineSnapshot),
       memorySnapshot(other.memorySnapshot.map(
-          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })),
-      durableObjectClasses(other.durableObjectClasses.map(
-          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })),
-      entrypointClasses(other.entrypointClasses.map(
-          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })) {}
+          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
 
 kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
   return kj::heap<PyodideMetadataReader::State>(*this);

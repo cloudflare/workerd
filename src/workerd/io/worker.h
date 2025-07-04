@@ -13,6 +13,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker-source.h>
@@ -275,7 +276,8 @@ class Worker::Script: public kj::AtomicRefcounted {
       IsolateObserver::StartType startType,
       bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts);
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -339,6 +341,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Own<const Worker::Script> newScript(kj::StringPtr id,
       Script::Source source,
       IsolateObserver::StartType startType,
+      SpanParent parentSpan,
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
@@ -532,7 +535,8 @@ class Worker::Api {
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
       const Worker::Isolate& isolate,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const = 0;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan) const = 0;
 
   virtual kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Script::ScriptSource& source,

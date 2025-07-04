@@ -136,14 +136,6 @@ struct WorkerSource {
 
     bool isPython;
 
-    // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
-    // entrypoint classes based on the declared self-referential bindings and actor namespaces
-    // pointing at the service. This is needed becaues in workerd, the Python runtime is unable
-    // to fully execute at startup in order to discover what the Worker actually exports. This
-    // should be fixed eventually, but for now, we use this work-around.
-    kj::Array<kj::String> inferredEntrypointClassesForPython;
-    kj::Array<kj::String> inferredActorClassesForPython;
-
     // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
     // so we use AnyStruct here. This is deprecated anyway.
     kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
