@@ -421,7 +421,7 @@ export type ExportedHandlerTraceHandler<Env = unknown> = (
   ctx: ExecutionContext,
 ) => void | Promise<void>;
 export type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent,
+  event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -8208,38 +8208,40 @@ export declare namespace TailStream {
     readonly type: "attributes";
     readonly info: Attribute[];
   }
-  interface TailEvent {
-    readonly traceId: string;
+  type EventType =
+    | Onset
+    | Outcome
+    | Hibernate
+    | SpanOpen
+    | SpanClose
+    | DiagnosticChannelEvent
+    | Exception
+    | Log
+    | Return
+    | Link
+    | Attributes;
+  interface TailEvent<Event extends EventType> {
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event:
-      | Onset
-      | Outcome
-      | Hibernate
-      | SpanOpen
-      | SpanClose
-      | DiagnosticChannelEvent
-      | Exception
-      | Log
-      | Return
-      | Link
-      | Attributes;
+    readonly event: Event;
   }
-  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-  type TailEventHandlerName =
-    | "outcome"
-    | "hibernate"
-    | "spanOpen"
-    | "spanClose"
-    | "diagnosticChannel"
-    | "exception"
-    | "log"
-    | "return"
-    | "link"
-    | "attributes";
-  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
+  type TailEventHandler<Event extends EventType = EventType> = (
+    event: TailEvent<Event>,
+  ) => void | Promise<void>;
+  type TailEventHandlerObject = {
+    outcome?: TailEventHandler<Outcome>;
+    hibernate?: TailEventHandler<Hibernate>;
+    spanOpen?: TailEventHandler<SpanOpen>;
+    spanClose?: TailEventHandler<SpanClose>;
+    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+    exception?: TailEventHandler<Exception>;
+    log?: TailEventHandler<Log>;
+    return?: TailEventHandler<Return>;
+    link?: TailEventHandler<Link>;
+    attributes?: TailEventHandler<Attributes>;
+  };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.
