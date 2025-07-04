@@ -21,7 +21,7 @@ inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def)
 
 jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script, jsg::Optional<kj::String> name) {
   js.setAllowEval(true);
-  KJ_DEFER(js.setAllowEval(false));
+  // KJ_DEFER(js.setAllowEval(false));
   auto compiled = jsg::NonModuleScript::compile(js, script, getName(name, EVAL_STR));
   return compiled.runAndReturn(js);
 }
@@ -32,7 +32,7 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newFunction(jsg::Lock& js,
     jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
     const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
   js.setAllowEval(true);
-  KJ_DEFER(js.setAllowEval(false));
+  // KJ_DEFER(js.setAllowEval(false));
 
   auto nameStr = js.str(getName(name, ANON_STR));
   v8::ScriptOrigin origin(nameStr);
@@ -57,7 +57,7 @@ UnsafeEval::UnsafeEvalFunction UnsafeEval::newAsyncFunction(jsg::Lock& js,
     jsg::Arguments<jsg::JsRef<jsg::JsString>> args,
     const jsg::TypeHandler<UnsafeEvalFunction>& handler) {
   js.setAllowEval(true);
-  KJ_DEFER(js.setAllowEval(false));
+  // KJ_DEFER(js.setAllowEval(false));
 
   auto nameStr = js.str(getName(name, ANON_STR));
 

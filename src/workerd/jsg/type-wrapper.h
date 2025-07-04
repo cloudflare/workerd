@@ -421,7 +421,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         MaybeWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
-    fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
+    fastApiEnabled = true;
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
 
