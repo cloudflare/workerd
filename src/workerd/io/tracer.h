@@ -5,7 +5,8 @@
 #pragma once
 
 #include <workerd/io/trace.h>
-#include <workerd/util/weak-refs.h>
+
+#include <kj/refcount.h>
 
 namespace workerd {
 namespace tracing {
@@ -98,11 +99,6 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
-  BaseTracer(): self(kj::refcounted<WeakRef<BaseTracer>>(kj::Badge<BaseTracer>{}, *this)) {}
-  virtual ~BaseTracer() {
-    self->invalidate();
-  }
-
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -135,18 +131,7 @@ class BaseTracer: public kj::Refcounted {
   // final event, causing the stream to terminate.
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
 
-  kj::Own<WeakRef<BaseTracer>> addWeakRef() {
-    return self->addRef();
-  }
-
   virtual SpanParent getUserRequestSpan() = 0;
-
-  // A weak reference for the internal span submitter. We use this so that the span submitter can
-  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
-  // which would interfere with span submission (traces get submitted when the worker returns its
-  // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
-  // span submitter may exist for longer than the tracer).
-  kj::Own<WeakRef<BaseTracer>> self;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
