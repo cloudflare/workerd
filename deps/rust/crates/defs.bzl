@@ -297,9 +297,9 @@ _NORMAL_DEPENDENCIES = {
     "": {
         _COMMON_CONDITION: {
             "anyhow": Label("@crates_vendor//:anyhow-1.0.98"),
-            "capnp": Label("@crates_vendor//:capnp-0.21.1"),
-            "capnpc": Label("@crates_vendor//:capnpc-0.21.0"),
-            "cc": Label("@crates_vendor//:cc-1.2.27"),
+            "capnp": Label("@crates_vendor//:capnp-0.21.2"),
+            "capnpc": Label("@crates_vendor//:capnpc-0.21.1"),
+            "cc": Label("@crates_vendor//:cc-1.2.29"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.31"),
             "clap": Label("@crates_vendor//:clap-4.5.40"),
             "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
@@ -319,7 +319,7 @@ _NORMAL_DEPENDENCIES = {
             "static_assertions": Label("@crates_vendor//:static_assertions-1.1.0"),
             "syn": Label("@crates_vendor//:syn-2.0.104"),
             "thiserror": Label("@crates_vendor//:thiserror-2.0.12"),
-            "tokio": Label("@crates_vendor//:tokio-1.45.1"),
+            "tokio": Label("@crates_vendor//:tokio-1.46.1"),
             "tracing": Label("@crates_vendor//:tracing-0.1.41"),
         },
     },
@@ -394,6 +394,7 @@ _CONDITIONS = {
     "cfg(all(target_arch = \"x86\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86\", target_env = \"msvc\", not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86_64\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": ["@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
+    "cfg(all(tokio_uring, target_os = \"linux\"))": [],
     "cfg(any())": [],
     "cfg(any(windows, target_os = \"cygwin\"))": ["@rules_rust//rust/platform:x86_64-pc-windows-msvc"],
     "cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
@@ -519,22 +520,22 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__capnp-0.21.1",
-        sha256 = "64b3560604b407fe0ab6f89b81ac11887b4ae07f8d31486581dee5b353e48f06",
+        name = "crates_vendor__capnp-0.21.2",
+        sha256 = "168e28337bd0c923cea658afbc1f612bade6fedb616414db89bbd965869b66e7",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/capnp/0.21.1/download"],
-        strip_prefix = "capnp-0.21.1",
-        build_file = Label("//deps/rust/crates:BUILD.capnp-0.21.1.bazel"),
+        urls = ["https://static.crates.io/crates/capnp/0.21.2/download"],
+        strip_prefix = "capnp-0.21.2",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-0.21.2.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__capnpc-0.21.0",
-        sha256 = "5af589f7a7f3e6d920120b913345bd9a2fc65dfd76c5053a142852a5ea2e8609",
+        name = "crates_vendor__capnpc-0.21.1",
+        sha256 = "97b41fc9f41d940c160761b6030eb69c7252f0c1289317475ea4167fff308f8e",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/capnpc/0.21.0/download"],
-        strip_prefix = "capnpc-0.21.0",
-        build_file = Label("//deps/rust/crates:BUILD.capnpc-0.21.0.bazel"),
+        urls = ["https://static.crates.io/crates/capnpc/0.21.1/download"],
+        strip_prefix = "capnpc-0.21.1",
+        build_file = Label("//deps/rust/crates:BUILD.capnpc-0.21.1.bazel"),
     )
 
     maybe(
@@ -549,12 +550,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__cc-1.2.27",
-        sha256 = "d487aa071b5f64da6f19a3e848e3578944b726ee5a4854b82172f02aa876bfdc",
+        name = "crates_vendor__cc-1.2.29",
+        sha256 = "5c1599538de2394445747c8cf7935946e3cc27e9625f889d979bfb2aaf569362",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/cc/1.2.27/download"],
-        strip_prefix = "cc-1.2.27",
-        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.27.bazel"),
+        urls = ["https://static.crates.io/crates/cc/1.2.29/download"],
+        strip_prefix = "cc-1.2.29",
+        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.29.bazel"),
     )
 
     maybe(
@@ -915,6 +916,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/heck/0.5.0/download"],
         strip_prefix = "heck-0.5.0",
         build_file = Label("//deps/rust/crates:BUILD.heck-0.5.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__io-uring-0.7.8",
+        sha256 = "b86e202f00093dcba4275d4636b93ef9dd75d025ae560d2521b45ea28ab49013",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/io-uring/0.7.8/download"],
+        strip_prefix = "io-uring-0.7.8",
+        build_file = Label("//deps/rust/crates:BUILD.io-uring-0.7.8.bazel"),
     )
 
     maybe(
@@ -1508,12 +1519,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__tokio-1.45.1",
-        sha256 = "75ef51a33ef1da925cea3e4eb122833cb377c61439ca401b770f54902b806779",
+        name = "crates_vendor__tokio-1.46.1",
+        sha256 = "0cc3a2344dafbe23a245241fe8b09735b521110d30fcefbbd5feb1797ca35d17",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/tokio/1.45.1/download"],
-        strip_prefix = "tokio-1.45.1",
-        build_file = Label("//deps/rust/crates:BUILD.tokio-1.45.1.bazel"),
+        urls = ["https://static.crates.io/crates/tokio/1.46.1/download"],
+        strip_prefix = "tokio-1.46.1",
+        build_file = Label("//deps/rust/crates:BUILD.tokio-1.46.1.bazel"),
     )
 
     maybe(
@@ -1738,9 +1749,9 @@ def crate_repositories():
 
     return [
         struct(repo = "crates_vendor__anyhow-1.0.98", is_dev_dep = False),
-        struct(repo = "crates_vendor__capnp-0.21.1", is_dev_dep = False),
-        struct(repo = "crates_vendor__capnpc-0.21.0", is_dev_dep = False),
-        struct(repo = "crates_vendor__cc-1.2.27", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnp-0.21.2", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnpc-0.21.1", is_dev_dep = False),
+        struct(repo = "crates_vendor__cc-1.2.29", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.31", is_dev_dep = False),
         struct(repo = "crates_vendor__clap-4.5.40", is_dev_dep = False),
         struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
@@ -1761,6 +1772,6 @@ def crate_repositories():
         struct(repo = "crates_vendor__static_assertions-1.1.0", is_dev_dep = False),
         struct(repo = "crates_vendor__syn-2.0.104", is_dev_dep = False),
         struct(repo = "crates_vendor__thiserror-2.0.12", is_dev_dep = False),
-        struct(repo = "crates_vendor__tokio-1.45.1", is_dev_dep = False),
+        struct(repo = "crates_vendor__tokio-1.46.1", is_dev_dep = False),
         struct(repo = "crates_vendor__tracing-0.1.41", is_dev_dep = False),
     ]
