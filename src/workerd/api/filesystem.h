@@ -162,6 +162,16 @@ class FileSystemModule final: public jsg::Object {
     return FileFdHandle::constructor(js, fd);
   }
 
+  struct CpOptions {
+    bool deferenceSymlinks;
+    bool recursive;
+    bool force;
+    bool errorOnExist;
+    JSG_STRUCT(deferenceSymlinks, recursive, force, errorOnExist);
+  };
+
+  void cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions options);
+
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_METHOD(stat);
     JSG_METHOD(setLastModified);
@@ -180,6 +190,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(rm);
     JSG_METHOD(readdir);
     JSG_METHOD(getFdHandle);
+    JSG_METHOD(cp);
   }
 
  private:
@@ -620,6 +631,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
       workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
       workerd::api::FileSystemModule::DirEntHandle,                                                \
-      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle
+      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle,                  \
+      workerd::api::FileSystemModule::CpOptions
 
 }  // namespace workerd::api

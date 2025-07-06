@@ -214,6 +214,7 @@ export function cpSync(
     recursive = false,
     verbatimSymlinks = false,
   } = options;
+
   validateBoolean(dereference, 'options.dereference');
   validateBoolean(errorOnExist, 'options.errorOnExist');
   validateBoolean(force, 'options.force');
@@ -229,8 +230,18 @@ export function cpSync(
     );
   }
 
-  if (filter !== undefined && typeof filter !== 'function') {
-    throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  // We do not implement the filter option currently. There's a bug in the Node.js
+  // implementation of fs.cp and the option.filter in which non-UTF-8 encoded file
+  // names are not handled correctly and the option.filter fails when the src or
+  // dest is passed in as a Buffer. Fixing this bug in Node.js will require a breaking
+  // change to the API or a new API that appropriately handles Buffer inputs and non
+  // UTF-8 encoded names. We want to avoid implementing the filter option for now
+  // until Node.js settles on a better implementation and API.
+  if (filter !== undefined) {
+    if (typeof filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+    }
+    throw new ERR_UNSUPPORTED_OPERATION();
   }
 
   const exclusive = Boolean(mode & COPYFILE_EXCL);
@@ -238,9 +249,25 @@ export function cpSync(
   // it here just to use it so the compiler doesn't complain.
   validateBoolean(exclusive, '');
 
-  src = normalizePath(src);
-  dest = normalizePath(dest);
-  throw new Error('Not implemented');
+  // We're not currently implementing verbatimSymlinks in any meaningful way.
+  // Our symlinks are always fully qualfied. That is, they always point to
+  // an absolute path and never to a relative path, so there is no distinction
+  // between verbatimSymlinks and non-verbatimSymlinks. We validate the option
+  // value above but otherwise we ignore it.
+
+  // We're also not currently implementing the preserveTimestamps option.
+  // Timestamps in our virtual filesystem aren't super meaningful given
+  // that most files in the current implementation are either created
+  // at startup and use the EPOCH as their timestamp, or are temporary files
+  // that are deleted when the request completes.
+  // TODO(node-fs): Decide if we want to implement preserveTimestamps in the future.
+
+  cffs.cp(normalizePath(src), normalizePath(dest), {
+    deferenceSymlinks: dereference,
+    recursive,
+    force,
+    errorOnExist,
+  });
 }
 
 export function existsSync(path: FilePath): boolean {
