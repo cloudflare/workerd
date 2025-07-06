@@ -1001,8 +1001,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   kj::ForkedPromise<void> forked = donePromise.fork();
   ioContext.addWaitUntil(forked.addBranch().attach(ioContext.registerPendingEvent()));
 
+  KJ_DEFER({
+    // waitUntil() should allow extending execution on the server side even when the client
+    // disconnects.
+    waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
+  });
+
   co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
-  co_await incomingRequest->drain();
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
