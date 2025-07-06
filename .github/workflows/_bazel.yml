@@ -47,6 +47,10 @@ on:
         type: boolean
         required: false
         default: false
+      upload_coverage:
+        type: boolean
+        required: false
+        default: false
       fetch_depth:
         type: number
         required: false
@@ -60,6 +64,8 @@ on:
         required: true
       WORKERS_MIRROR_URL:
         required: true
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   # Read repo
@@ -114,11 +120,24 @@ jobs:
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
         run: |
-          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} //...
+          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.upload_coverage && '--config=clang-coverage' || '' }} ${{ inputs.extra_bazel_args }} //...
       - name: Bazel test
-        if: inputs.run_tests
+        if: inputs.run_tests && !inputs.upload_coverage
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Bazel coverage
+        if: inputs.upload_coverage
+        run: |
+          bazel coverage --combined_report=lcov --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=clang-coverage ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Upload coverage to Codecov
+        if: inputs.upload_coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./bazel-out/_coverage/_coverage_report.dat
+          fail_ci_if_error: true
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Upload test logs
         if: inputs.upload_test_logs
         uses: actions/upload-artifact@v4
