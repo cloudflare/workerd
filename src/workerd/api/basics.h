@@ -324,7 +324,8 @@ class EventTarget: public jsg::Object {
 
   struct HandlerObject {
     HandlerFunction handleEvent;
-    JSG_STRUCT(handleEvent);
+    jsg::SelfRef self;
+    JSG_STRUCT(handleEvent, self);
 
     // TODO(cleanup): Get rid of this override and parse the type directly in param-extractor.rs
     JSG_STRUCT_TS_OVERRIDE({
@@ -336,7 +337,8 @@ class EventTarget: public jsg::Object {
   void addEventListener(jsg::Lock& js,
       kj::String type,
       kj::Maybe<jsg::Identified<Handler>> maybeHandler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions);
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
   void removeEventListener(jsg::Lock& js,
       kj::String type,
       kj::Maybe<jsg::HashableV8Ref<v8::Object>> maybeHandler,
@@ -561,7 +563,8 @@ class AbortSignal final: public EventTarget {
 
   static jsg::Ref<AbortSignal> any(jsg::Lock& js,
       kj::Array<jsg::Ref<AbortSignal>> signals,
-      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
+      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   // While AbortSignal extends EventTarget, and our EventTarget implementation will
   // automatically support onabort being set as an own property, the spec defines
@@ -573,7 +576,8 @@ class AbortSignal final: public EventTarget {
   void addEventListener(jsg::Lock& js,
       kj::String type,
       jsg::Identified<Handler> handler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions);
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);

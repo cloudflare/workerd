@@ -855,4 +855,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # "getBuiltinModule", "platform" and "features" property implementations, to the full-featured
   # Node.js-compatibile process implementation with all process properties either stubbed or
   # implemented. Implies nodejs_compat + nodejs_compat_v2 (which sets the process global).
+
+  setEventTargetThis @98 :Bool
+      $compatEnableFlag("set_event_target_this")
+      $compatDisableFlag("no_set_event_target_this")
+      $compatEnableDate("2025-08-01");
+  # The original implementation of EventTarget was not correctly setting the `this` value
+  # for event handlers. This flag enables the correct behavior, which is compliant with the spec.
 }
