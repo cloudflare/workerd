@@ -173,7 +173,7 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
+      tracker.trackField(entry.key, entry.value);
     }
   }
 
@@ -212,7 +212,7 @@ private:
   };
 
   Guard guard;
-  std::map<kj::StringPtr, Header> headers;
+  kj::HashMap<kj::StringPtr, Header> headers;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
