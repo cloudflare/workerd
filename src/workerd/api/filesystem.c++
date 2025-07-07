@@ -1204,6 +1204,615 @@ kj::Array<FileSystemModule::DirEntHandle> FileSystemModule::readdir(
   }
 }
 
+namespace {
+
+using MaybeFsNode = kj::Maybe<
+    kj::OneOf<kj::Rc<workerd::Directory>, kj::Rc<workerd::File>, kj::Rc<workerd::SymbolicLink>>>;
+
+MaybeFsNode getNodeOrError(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    const jsg::Url& url,
+    const FileSystemModule::CpOptions& options) {
+  KJ_IF_SOME(node, vfs.resolve(js, url, {.followLinks = options.deferenceSymlinks})) {
+    KJ_SWITCH_ONEOF(node) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        return MaybeFsNode(kj::mv(file));
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        return MaybeFsNode(kj::mv(dir));
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        return MaybeFsNode(kj::mv(link));
+      }
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        throwFsError(js, err, "cp"_kj);
+      }
+    }
+  }
+  return kj::none;
+}
+
+// Copy the src symbolic link to the destination URL location.
+// We've already checked that the destination either does not exist
+// or we are want to overwrite it. We need to next determine if the
+// destination is writable. If it is not, this will throw an error.
+// If it is, we will either create a new symbolic link at the destination
+// or overwrite the existing file or link if it exists.
+void handleCpLink(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    kj::Rc<workerd::SymbolicLink> srcLink,
+    const jsg::Url& destUrl) {
+  // Here, we are going to essentially create a hard link (new refcount)
+  // of srcLink and destUrl, if we are allowed to do so.
+  // We need to check if the destination exists and is writable.
+  auto relative = destUrl.getRelative();
+  // relative.base is the parent directory path.
+  // relative.name is the name of the link we are creating in the parent.
+
+  auto basePath = kj::str(relative.base.getPathname().slice(1));
+  kj::Path root{};
+  auto base = root.eval(basePath);
+
+  // We need to grab the parent directory, creating it if it does not exist
+  // and we are permitted to do so.
+  KJ_IF_SOME(destDir,
+      vfs.getRoot(js)->tryOpen(js, base,
+          {
+            .createAs = workerd::FsType::DIRECTORY,
+            .followLinks = true,
+          })) {
+    // Awesome, either the destination directory existed already or we
+    // successfully created it, or an error was reported.
+    KJ_SWITCH_ONEOF(destDir) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        // We cannot copy into a file, so we throw an error.
+        return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        kj::Path path({relative.name});
+        // This is the case we're looking for!
+        // First, let's check to see if the target name already exists.
+        // If it does, we'll remove it.
+        KJ_SWITCH_ONEOF(dir->remove(js, path, {.recursive = false})) {
+          KJ_CASE_ONEOF(err, workerd::FsError) {
+            return throwFsError(js, err, "cp"_kj);
+          }
+          KJ_CASE_ONEOF(b, bool) {
+            // Ignore the return value, we don't actually care if the thing existed or not.
+          }
+        }
+        // Now, we can add the symbolic link to the directory.
+        KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(srcLink))) {
+          // If we got here, an error was reported
+          return throwFsError(js, err, "cp"_kj);
+        }
+        // If we got here, success!
+        return;
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // This shouldn't be possible since we told tryOpen to follow links.
+        // But, let's just throw an error.
+        return throwUVException(js, UV_EINVAL, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        return throwFsError(js, err, "cp"_kj);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // In this case, the destDir could not be opened, treat as an error.
+  // TODO(node-fs): What error code should this be?
+  throwUVException(js, UV_EINVAL, "cp"_kj);
+}
+
+void handleCpFile(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    kj::Rc<workerd::File> file,
+    const jsg::Url& destUrl) {
+  // Here, we are going to clone the file into a new file at the destination
+  // if we are allowed to do so.
+  // We need to check if the destination exists and is writable.
+  auto relative = destUrl.getRelative();
+  // relative.base is the parent directory path.
+  // relative.name is the name of the link we are creating in the parent.
+
+  auto basePath = kj::str(relative.base.getPathname().slice(1));
+  kj::Path root{};
+  auto base = root.eval(basePath);
+
+  // We need to grab the parent directory, creating it if it does not exist
+  // and we are permitted to do so.
+  KJ_IF_SOME(destDir,
+      vfs.getRoot(js)->tryOpen(js, base,
+          {
+            .createAs = workerd::FsType::DIRECTORY,
+            .followLinks = true,
+          })) {
+    // Awesome, either the destination directory existed already or we
+    // successfully created it, or an error was reported.
+    KJ_SWITCH_ONEOF(destDir) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        // We cannot copy into a file, so we throw an error.
+        return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        kj::Path path({relative.name});
+        // This is the case we're looking for!
+        // First, let's check to see if the target name already exists.
+        // If it does, we'll remove it.
+        KJ_SWITCH_ONEOF(dir->remove(js, path, {.recursive = false})) {
+          KJ_CASE_ONEOF(err, workerd::FsError) {
+            return throwFsError(js, err, "cp"_kj);
+          }
+          KJ_CASE_ONEOF(b, bool) {
+            // Ignore the return value, we don't actually care if the thing existed or not.
+          }
+        }
+        // Now, we can add the symbolic link to the directory.
+        KJ_IF_SOME(err, dir->add(js, relative.name, file->clone(js))) {
+          // If we got here, an error was reported
+          return throwFsError(js, err, "cp"_kj);
+        }
+        // If we got here, success!
+        return;
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // This shouldn't be possible since we told tryOpen to follow links.
+        // But, let's just throw an error.
+        return throwUVException(js, UV_EINVAL, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        return throwFsError(js, err, "cp"_kj);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // In this case, the destDir could not be opened, treat as an error.
+  // TODO(node-fs): What error code should this be?
+  throwUVException(js, UV_EINVAL, "cp"_kj);
+}
+
+void handleCpDir(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    kj::Rc<workerd::Directory> src,
+    kj::Rc<workerd::Directory> dest,
+    const FileSystemModule::CpOptions& options) {
+  auto stat = dest->stat(js);
+  if (!stat.writable) {
+    return throwUVException(js, UV_EPERM, "cp"_kj, "Destination directory is not writable"_kj);
+  }
+  if (src.get() == dest.get()) {
+    return throwUVException(
+        js, UV_EINVAL, "cp"_kj, "Source and destination directories are the same"_kj);
+  }
+
+  // Here, we iterate through each of the entries in the source directory,
+  // recursively copying them to the destination directory.
+  for (auto& entry: *src.get()) {
+    kj::StringPtr name = entry.key;
+    KJ_SWITCH_ONEOF(entry.value) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        // We have a file, we will copy it to the destination directory
+        // unless errorOnExist is true, force is false, and the destination already exists.
+
+        KJ_IF_SOME(existing,
+            dest->tryOpen(js, kj::Path({name}),
+                {
+                  .followLinks = options.deferenceSymlinks,
+                })) {
+          // The destination path already exists. Check to see if we can overwrite it.
+          KJ_SWITCH_ONEOF(existing) {
+            KJ_CASE_ONEOF(existingFile, kj::Rc<workerd::File>) {
+              if (existingFile.get() == file.get()) {
+                // Do nothing
+              } else if (options.force) {
+                KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(b, bool) {
+                    // Ignore the return value.
+                  }
+                }
+                KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
+                  // If we got here, an error was reported
+                  return throwFsError(js, err, "cp"_kj);
+                }
+              } else if (options.errorOnExist) {
+                return throwUVException(
+                    js, UV_EEXIST, "cp"_kj, kj::str("Destination already exists: ", name));
+              }
+              // If we got here, we are not overwriting the file, so we just ignore it.
+            }
+            KJ_CASE_ONEOF(existingDir, kj::Rc<workerd::Directory>) {
+              // We cannot overwrite a directory with a file, so we throw an error.
+              return throwUVException(
+                  js, UV_EISDIR, "cp"_kj, kj::str("Cannot copy file to directory: ", name));
+            }
+            KJ_CASE_ONEOF(_, kj::Rc<workerd::SymbolicLink>) {
+              // We're going to replace the existing link with the file.
+              if (options.force) {
+                KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(b, bool) {
+                    // Ignore the return value.
+                  }
+                }
+                KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
+                  // If we got here, an error was reported
+                  return throwFsError(js, err, "cp"_kj);
+                }
+              } else if (options.errorOnExist) {
+                return throwUVException(
+                    js, UV_EEXIST, "cp"_kj, kj::str("Destination already exists: ", name));
+              }
+              // If we got here, we are not overwriting the file, so we just ignore it.
+            }
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return throwFsError(js, err, "cp"_kj);
+            }
+          }
+        } else KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
+          // If we got here, an error was reported
+          return throwFsError(js, err, "cp"_kj);
+        }
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        // We have a directory, we will copy it to the destination directory
+        // recursively.
+
+        // First, we need to check if the destination directory already exists.
+        KJ_IF_SOME(existing,
+            dest->tryOpen(js, kj::Path({name}),
+                {
+                  .followLinks = options.deferenceSymlinks,
+                })) {
+          // The destination exists. Check to see if we can overwrite it.
+          KJ_SWITCH_ONEOF(existing) {
+            KJ_CASE_ONEOF(existingFile, kj::Rc<workerd::File>) {
+              // The destination is a file, we cannot overwrite it with a directory.
+              return throwUVException(
+                  js, UV_ENOTDIR, "cp"_kj, kj::str("Cannot copy directory to file: ", name));
+            }
+            KJ_CASE_ONEOF(existingDir, kj::Rc<workerd::Directory>) {
+              handleCpDir(js, vfs, kj::mv(dir), kj::mv(existingDir), options);
+            }
+            KJ_CASE_ONEOF(existingLink, kj::Rc<workerd::SymbolicLink>) {
+              // The destination is a symbolic link, we can overwrite it with a directory.
+              return throwUVException(js, UV_EISDIR, "cp"_kj,
+                  kj::str("Cannot copy directory to symbolic link: ", name));
+            }
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return throwFsError(js, err, "cp"_kj);
+            }
+          }
+        } else {
+          // The destination does not exist, we'll need to create a new directory.
+          // then recursively copy into it.
+          auto newDir = workerd::Directory::newWritable();
+          KJ_IF_SOME(err, dest->add(js, name, newDir.addRef())) {
+            // If we got here, an error was reported
+            return throwFsError(js, err, "cp"_kj);
+          }
+          // Now we can recursively copy the contents of the source directory into the new one.
+          handleCpDir(js, vfs, kj::mv(dir), kj::mv(newDir), options);
+        }
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        KJ_IF_SOME(existing,
+            dest->tryOpen(js, kj::Path({name}),
+                {
+                  .followLinks = options.deferenceSymlinks,
+                })) {
+          // The destination path already exists. Check to see if we can overwrite it.
+          KJ_SWITCH_ONEOF(existing) {
+            KJ_CASE_ONEOF(_, kj::Rc<workerd::File>) {
+              if (options.force) {
+                KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(b, bool) {
+                    // Ignore the return value.
+                  }
+                }
+                KJ_IF_SOME(err, dest->add(js, name, link.addRef())) {
+                  // If we got here, an error was reported
+                  return throwFsError(js, err, "cp"_kj);
+                }
+              } else if (options.errorOnExist) {
+                return throwUVException(
+                    js, UV_EEXIST, "cp"_kj, kj::str("Destination already exists: ", name));
+              }
+              // If we got here, we are not overwriting the file, so we just ignore it.
+            }
+            KJ_CASE_ONEOF(existingDir, kj::Rc<workerd::Directory>) {
+              // We cannot overwrite a directory with a file, so we throw an error.
+              return throwUVException(
+                  js, UV_EISDIR, "cp"_kj, kj::str("Cannot copy link to directory: ", name));
+            }
+            KJ_CASE_ONEOF(existingLink, kj::Rc<workerd::SymbolicLink>) {
+              if (existingLink.get() == link.get()) {
+                // Do nothing
+              } else if (options.force) {
+                KJ_SWITCH_ONEOF(dest->remove(js, kj::Path({name}), {.recursive = false})) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(b, bool) {
+                    // Ignore the return value.
+                  }
+                }
+                KJ_IF_SOME(err, dest->add(js, name, link.addRef())) {
+                  // If we got here, an error was reported
+                  return throwFsError(js, err, "cp"_kj);
+                }
+              } else if (options.errorOnExist) {
+                return throwUVException(
+                    js, UV_EEXIST, "cp"_kj, kj::str("Destination already exists: ", name));
+              }
+              // If we got here, we are not overwriting the file, so we just ignore it.
+            }
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return throwFsError(js, err, "cp"_kj);
+            }
+          }
+        } else KJ_IF_SOME(err, dest->add(js, name, link.addRef())) {
+          // If we got here, an error was reported
+          return throwFsError(js, err, "cp"_kj);
+        }
+      }
+    }
+  }
+}
+
+void handleCpDir(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    kj::Rc<workerd::Directory> src,
+    const jsg::Url& dest,
+    const FileSystemModule::CpOptions& options) {
+  // For this variation of handleCpDir, the dest needs to be created as a directory.
+  // The assumption here is that the destination does not yet exist. Let's create it.
+
+  auto basePath = kj::str(dest.getPathname().slice(1));
+  kj::Path root{};
+  auto path = root.eval(basePath);
+
+  KJ_IF_SOME(destDir,
+      vfs.getRoot(js)->tryOpen(js, path,
+          {
+            .createAs = workerd::FsType::DIRECTORY,
+            .followLinks = true,
+          })) {
+    KJ_SWITCH_ONEOF(destDir) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        // We cannot copy into a file, so we throw an error.
+        return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(destination, kj::Rc<workerd::Directory>) {
+        // Nice... we have our destination directory. Continue to copy the contents.
+        return handleCpDir(js, vfs, kj::mv(src), kj::mv(destination), options);
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // This shouldn't be possible since we told tryOpen to follow links.
+        // But, let's just throw an error.
+        return throwUVException(js, UV_EINVAL, "cp"_kj);
+      }
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        return throwFsError(js, err, "cp"_kj);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // If we got here, then for some reason we could not open/create the destination
+  // directory. Since we passed createAs, we shouldn't really be able to get here.
+  throwUVException(js, UV_EINVAL, "cp"_kj);
+}
+
+void cpImpl(jsg::Lock& js,
+    const workerd::VirtualFileSystem& vfs,
+    const jsg::Url& src,
+    const jsg::Url& dest,
+    const FileSystemModule::CpOptions& options) {
+
+  // Cannot copy a file to itself.
+  JSG_REQUIRE(!src.equal(dest,
+                  jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS |
+                      jsg::Url::EquivalenceOption::IGNORE_SEARCH |
+                      jsg::Url::EquivalenceOption::NORMALIZE_PATH),
+      Error, "Source and destination paths must not be the same"_kj);
+
+  // Step 1: If deferenceSymlinks is true, the we will be following symbolic links. If
+  // it is false, we won't be.
+
+  auto maybeSrcNode = getNodeOrError(js, vfs, src, options);
+  auto maybeDestNode = getNodeOrError(js, vfs, dest, options);
+
+  KJ_IF_SOME(sourceNode, maybeSrcNode) {
+    KJ_SWITCH_ONEOF(sourceNode) {
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        KJ_IF_SOME(node, maybeDestNode) {
+          KJ_SWITCH_ONEOF(node) {
+            KJ_CASE_ONEOF(_, kj::Rc<workerd::File>) {
+              // If options.force is true, we will overwrite the destination file.
+              if (options.force) {
+                return handleCpFile(js, vfs, kj::mv(file), dest);
+              }
+              // Otherwise, if options.errorOnExist is true, we will throw an error.
+              if (options.errorOnExist) {
+                // TODO(node-fs): Code should be ERR_FS_CP_EEXIST
+                return throwUVException(js, UV_EEXIST, "cp"_kj);
+              }
+              // Otherwise, we skip this file and do nothing.
+              return;
+            }
+            KJ_CASE_ONEOF(_, kj::Rc<workerd::Directory>) {
+              // Simple case: user is trying to copy a file over a directory
+              // which is not allowed.
+              // TODO(node-fs): Code should be THROW_ERR_FS_CP_NON_DIR_TO_DIR
+              return throwUVException(js, UV_EISDIR, "cp"_kj);
+            }
+            KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+              if (options.deferenceSymlinks) {
+                KJ_IF_SOME(target, link->resolve(js)) {
+                  KJ_SWITCH_ONEOF(target) {
+                    KJ_CASE_ONEOF(targetFile, kj::Rc<workerd::File>) {
+                      KJ_IF_SOME(err, targetFile->replace(js, file->clone(js))) {
+                        return throwFsError(js, err, "cp"_kj);
+                      }
+                      return;
+                    }
+                    KJ_CASE_ONEOF(_, kj::Rc<workerd::Directory>) {
+                      return throwUVException(js, UV_EISDIR, "cp"_kj);
+                    }
+                    KJ_CASE_ONEOF(err, workerd::FsError) {
+                      return throwFsError(js, err, "cp"_kj);
+                    }
+                  }
+                }
+                return throwUVException(js, UV_ENOENT, "cp"_kj);
+              }
+
+              // We would only get here if deferenceSymlinks is false.
+              // In this case, if errorOnExist is true and force is false,
+              // we will throw an error.
+              if (options.force) {
+                // Copy the file contents to the destination, replacing
+                // the symbolic link with a copy of the file.
+                // TODO(node-fs): Implement.
+                return handleCpFile(js, vfs, kj::mv(file), dest);
+              }
+              if (options.errorOnExist) {
+                // TODO(node-fs): Code should be ERR_FS_CP_EEXIST
+                return throwUVException(js, UV_EEXIST, "cp"_kj);
+              }
+
+              // Otherwise, we skip this file and do nothing.
+              return;
+            }
+          }
+          KJ_UNREACHABLE;
+        }
+
+        // Yay! we can just copy the file contents to the destination.
+        // If the path to the destination does not exist, we will create it
+        // if possible.
+        // TODO(node-fs): Implement.
+        return handleCpFile(js, vfs, kj::mv(file), dest);
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        // The source is a directory. The options.recursive option must be set
+        // to true or we will fail.
+        if (!options.recursive) {
+          // TODO(node-fs): Code should be ERR_FS_EISDIR
+          return throwUVException(js, UV_EISDIR, "cp"_kj);
+        }
+
+        KJ_IF_SOME(dest, maybeDestNode) {
+          KJ_SWITCH_ONEOF(dest) {
+            KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+              // Simple case: user is trying to copy a directory over a file
+              // which is not allowed.
+              // TODO(node-fs): Code should be ERR_FS_CP_DIR_TO_NON_DIR
+              return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+            }
+            KJ_CASE_ONEOF(destDir, kj::Rc<workerd::Directory>) {
+              // So Node.js has a bit of an inconsistency here when copying directories.
+              // When copying a file over a file, we will check the errorOnExist and force
+              // options, failing if the destination file exists and errorOnExist is true,
+              // unless the force option is set. If both are false, we skip the copy.
+              // However, the same logic is not applied to copying a directory. If the
+              // destination directory exists, we will still proceed to copy the source
+              // directory into the destination directory, only applying the force and
+              // errorOnExist options to individual files within the directories.
+              // See: https://github.com/nodejs/node/issues/58947
+              return handleCpDir(js, vfs, kj::mv(dir), kj::mv(destDir), options);
+            }
+            KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+              // Also a simple case, user is trying to copy a directory over
+              // an existing symbolic link, which we do not allow.
+              return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+            }
+          }
+          KJ_UNREACHABLE;
+        }
+
+        // Yay! we can just copy the file contents to the destination.
+        // If the path to the destination does not exist, we will create it
+        // if possible.
+        return handleCpDir(js, vfs, kj::mv(dir), dest, options);
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        // If we got here, then the source is itself a symbolic link.
+        // The destination, if we do copy it, will also be a symbolic link to
+        // the same target. The options.errorOnExist and options.force still
+        // apply here, but we will not follow the symbolic link at all.
+        KJ_IF_SOME(node, maybeDestNode) {
+          KJ_SWITCH_ONEOF(node) {
+            KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+              if (options.force) {
+                return handleCpLink(js, vfs, kj::mv(link), dest);
+              }
+
+              if (options.errorOnExist) {
+                // TODO(node-fs): Code should be ERR_FS_CP_EEXIST
+                return throwUVException(js, UV_EEXIST, "cp"_kj);
+              }
+
+              // Otherwise we skip this file and do nothing.
+              return;
+            }
+            KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+              // Simple case: user is trying to copy a symbolic link over a directory
+              // which is not allowed.
+              return throwUVException(js, UV_ENOTDIR, "cp"_kj);
+            }
+            KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+              if (options.force) {
+                return handleCpLink(js, vfs, kj::mv(link), dest);
+              }
+
+              if (options.errorOnExist) {
+                // TODO(node-fs): Code should be ERR_FS_CP_EEXIST
+                return throwUVException(js, UV_EEXIST, "cp"_kj);
+              }
+
+              // Otherwise we skip this file and do nothing.
+              return;
+            }
+          }
+          KJ_UNREACHABLE;
+        }
+
+        // Yay! we can just copy fhe symbolic link to the destination.
+        // If the path to the destination does not exist, we will create it
+        // if possible.
+        return handleCpLink(js, vfs, kj::mv(link), dest);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  // If we got here, the sourceNode does not exist.
+  throwUVException(js, UV_ENOENT, "cp"_kj);
+}
+}  // namespace
+
+void FileSystemModule::cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions options) {
+  auto& vfs = workerd::VirtualFileSystem::current(js);
+  NormalizedFilePath normalizedSrc(kj::mv(src));
+  NormalizedFilePath normalizedDest(kj::mv(dest));
+  // TODO(node-fs): Support the preserveTimestamps option.
+  cpImpl(js, vfs, normalizedSrc, normalizedDest, options);
+}
+
+// =======================================================================================
+
 jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
   return js.alloc<FileFdHandle>(js, vfs, fd);
