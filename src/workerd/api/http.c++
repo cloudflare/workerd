@@ -2,9 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "http.h"
-
 #include "data-url.h"
+#include "http.h"
 #include "queue.h"
 #include "sockets.h"
 #include "system-streams.h"
@@ -90,7 +89,7 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   if (slice.size() == value.size()) {
     return kj::mv(value);
   }
-  return js.accountedByteString(kj::str(slice));
+  return jsg::ByteString(kj::str(slice));
 }
 
 void requireValidHeaderName(const jsg::ByteString& name) {
@@ -151,9 +150,9 @@ Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict
 Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
   for (auto& header: other.headers) {
     Header copy{
-      js.accountedByteString(header.second.key),
-      js.accountedByteString(header.second.name),
-      KJ_MAP(value, header.second.values) { return js.accountedByteString(value); },
+      jsg::ByteString(kj::str(header.second.key)),
+      jsg::ByteString(kj::str(header.second.name)),
+      KJ_MAP(value, header.second.values) { return jsg::ByteString(kj::str(value)); },
     };
     kj::StringPtr keyRef = copy.key;
     KJ_ASSERT(headers.insert(std::make_pair(keyRef, kj::mv(copy))).second);
@@ -162,7 +161,7 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
   other.forEach([this, &js](auto name, auto value) {
-    append(js, js.accountedByteString(name), js.accountedByteString(value));
+    append(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value)));
   });
 
   this->guard = guard;
@@ -202,13 +201,13 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
         // combining them.
         for (auto& value: entry.second.values) {
           copy.add(Headers::DisplayedHeader{
-            .key = js.accountedByteString(entry.first),
-            .value = js.accountedByteString(value),
+            .key = jsg::ByteString(kj::str(entry.first)),
+            .value = jsg::ByteString(kj::str(value)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = js.accountedByteString(entry.first),
-          .value = js.accountedByteString(kj::strArray(entry.second.values, ", "))});
+        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.first)),
+          .value = jsg::ByteString(kj::strArray(entry.second.values, ", "))});
       }
     }
     return copy.releaseAsArray();
@@ -216,8 +215,8 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
     // The old behavior before the standard getSetCookie() API was introduced...
     auto headersCopy = KJ_MAP(mapEntry, headers) {
       const auto& header = mapEntry.second;
-      return DisplayedHeader{js.accountedByteString(header.key),
-        js.accountedByteString(kj::strArray(header.values, ", "))};
+      return DisplayedHeader{
+        jsg::ByteString(kj::str(header.key)), jsg::ByteString(kj::strArray(header.values, ", "))};
     };
     return headersCopy;
   }
@@ -278,7 +277,7 @@ kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr nam
   if (iter == headers.end()) {
     return kj::none;
   } else {
-    return js.accountedByteString(kj::strArray(iter->second.values, ", "));
+    return jsg::ByteString(kj::strArray(iter->second.values, ", "));
   }
 }
 
@@ -317,7 +316,7 @@ void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   requireValidHeaderName(name);
   // The variation of toLower we use here creates a copy.
-  auto key = js.accountedByteString(toLower(name));
+  auto key = jsg::ByteString(kj::str(toLower(name)));
   value = normalizeHeaderValue(js, kj::mv(value));
   requireValidHeaderValue(value);
   auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
@@ -332,7 +331,7 @@ void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value)
   checkGuard();
   requireValidHeaderName(name);
   // The variation of toLower we use here creates a copy.
-  auto key = js.accountedByteString(toLower(name));
+  auto key = jsg::ByteString(kj::str(toLower(name)));
   value = normalizeHeaderValue(js, kj::mv(value));
   requireValidHeaderValue(value);
   auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
@@ -384,16 +383,16 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
       // the keys iterator can end up having multiple set-cookie instances.
       if (entry.first == "set-cookie") {
         for (auto n = 0; n < entry.second.values.size(); n++) {
-          keysCopy.add(js.accountedByteString(entry.first));
+          keysCopy.add(jsg::ByteString(kj::str(entry.first)));
         }
       } else {
-        keysCopy.add(js.accountedByteString(entry.first));
+        keysCopy.add(jsg::ByteString(kj::str(entry.first)));
       }
     }
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
   } else {
     auto keysCopy =
-        KJ_MAP(mapEntry, headers) { return js.accountedByteString(mapEntry.second.key); };
+        KJ_MAP(mapEntry, headers) { return jsg::ByteString(kj::str(mapEntry.second.key)); };
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
@@ -405,16 +404,16 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
       // single value, so the values iterator must separate them.
       if (entry.first == "set-cookie") {
         for (auto& value: entry.second.values) {
-          values.add(js.accountedByteString(value));
+          values.add(jsg::ByteString(kj::str(value)));
         }
       } else {
-        values.add(js.accountedByteString(kj::strArray(entry.second.values, ", ")));
+        values.add(jsg::ByteString(kj::str(kj::strArray(entry.second.values, ", "))));
       }
     }
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
   } else {
     auto valuesCopy = KJ_MAP(mapEntry, headers) {
-      return js.accountedByteString(kj::strArray(mapEntry.second.values, ", "));
+      return jsg::ByteString(kj::str(kj::strArray(mapEntry.second.values, ", ")));
     };
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
   }
@@ -579,7 +578,7 @@ jsg::Ref<Headers> Headers::deserialize(
 
     auto value = deserializer.readLengthDelimitedString();
 
-    result->append(js, js.accountedByteString(kj::mv(name)), js.accountedByteString(kj::mv(value)));
+    result->append(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
   }
 
   // Don't actually set the guard until here because it may block the ability to call `append()`.
@@ -736,7 +735,7 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.set(
-                js, js.accountedByteString("Content-Type"_kj), js.accountedByteString(kj::mv(ct)));
+                js, jsg::ByteString(kj::str("Content-Type"_kj)), jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
@@ -1561,8 +1560,8 @@ jsg::Ref<Response> Response::json_(
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(MimeType::JSON.toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };
@@ -2285,8 +2284,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       }
 
       auto headers = js.alloc<Headers>();
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(dataUrl.getMimeType().toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(dataUrl.getMimeType().toString()));
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
