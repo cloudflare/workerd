@@ -47,6 +47,7 @@ wd_cc_binary(
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":json-logger",
         ":server",
         ":v8-platform-impl",
         ":workerd-meta_capnp",
@@ -136,6 +137,20 @@ wd_cc_library(
 )
 
 wd_capnp_library(src = "docker-api.capnp")
+
+wd_capnp_library(src = "log-schema.capnp")
+
+wd_cc_library(
+    name = "json-logger",
+    srcs = ["json-logger.c++"],
+    hdrs = ["json-logger.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":log-schema_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj",
+    ],
+)
 
 wd_cc_library(
     name = "container-client",
@@ -268,5 +283,13 @@ kj_test(
     deps = [
         ":facet-tree-index",
         "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "json-logger-test.c++",
+    deps = [
+        ":json-logger",
+        "@capnp-cpp//src/capnp/compat:json",
     ],
 )
