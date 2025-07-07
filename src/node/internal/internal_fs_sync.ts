@@ -57,7 +57,6 @@ import {
   validateBoolean,
   validateObject,
   validateOneOf,
-  validateEncoding,
   validateUint32,
 } from 'node-internal:validators';
 import {
@@ -454,7 +453,9 @@ export function mkdtempSync(
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   prefix = normalizePath(prefix, encoding);
   const ret = cffs.mkdir(normalizePath(prefix), {
     recursive: false,
@@ -508,7 +509,7 @@ export type ReadDirResult = string[] | Buffer[] | Dirent[];
 
 export function readdirSync(
   path: FilePath,
-  options: BufferEncoding | null | ReadDirOptions = {}
+  options: BufferEncoding | 'buffer' | null | ReadDirOptions = {}
 ): ReadDirResult {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -549,20 +550,26 @@ export function readdirSync(
 }
 
 export type ReadFileSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: BufferEncoding | 'buffer' | null | undefined;
   flag?: string | number | undefined;
 };
 
 export function readFileSync(
   pathOrFd: number | FilePath,
-  options: BufferEncoding | null | ReadFileSyncOptions = {}
+  options: BufferEncoding | 'buffer' | null | ReadFileSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
-  const { encoding = 'utf8', flag = 'r' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  const { encoding = null, flag = 'r' } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   stringToFlags(flag);
 
   // TODO(node:fs): We are currently ignoring flags on readFileSync.
@@ -582,19 +589,21 @@ export function readFileSync(
 }
 
 export type ReadLinkSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: BufferEncoding | 'buffer' | null | undefined;
 };
 
 export function readlinkSync(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: BufferEncoding | 'buffer' | null | ReadLinkSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   const dest = Buffer.from(
     cffs.readLink(normalizePath(path), { failIfNotSymlink: true })
   );
@@ -655,7 +664,9 @@ export function realpathSync(
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   const dest = Buffer.from(
     cffs.readLink(normalizePath(p), { failIfNotSymlink: false })
   );
@@ -893,6 +904,5 @@ export function globSync(
 // [x][x][2][x][x] fs.appendFileSync(path, data[, options])
 // [x][x][2][x][x] fs.copyFileSync(src, dest[, mode])
 // [x][x][2][x][x] fs.opendirSync(path[, options])
-//
-// [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
+// [x][x][2][x][x] fs.cpSync(src, dest[, options])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])

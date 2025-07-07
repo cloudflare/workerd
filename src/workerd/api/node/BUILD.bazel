@@ -527,3 +527,9 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/fs-cp-test.js"],
 )
+
+wd_test(
+    src = "tests/fs-readstream-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-readstream-test.js"],
+)

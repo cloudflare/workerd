@@ -50,6 +50,7 @@ strictEqual(typeof promises.readdir, 'function');
 strictEqual(typeof promises.opendir, 'function');
 
 const kInvalidArgTypeError = { code: 'ERR_INVALID_ARG_TYPE' };
+const kInvalidArgValueError = { code: 'ERR_INVALID_ARG_VALUE' };
 const kEPermError = { code: 'EPERM' };
 const kENoEntError = { code: 'ENOENT' };
 const kEExistError = { code: 'EEXIST' };
@@ -842,7 +843,7 @@ export const opendirSyncTest = {
   test() {
     throws(() => opendirSync(), kInvalidArgTypeError);
     throws(() => opendirSync(123), kInvalidArgTypeError);
-    throws(() => opendirSync('/tmp', { encoding: 123 }), kInvalidArgTypeError);
+    throws(() => opendirSync('/tmp', { encoding: 123 }), kInvalidArgValueError);
 
     const dir = opendirSync('/', { recursive: true });
     strictEqual(dir.path, '/');
@@ -868,7 +869,7 @@ export const opendirSyncAndAsyncTest = {
   async test() {
     throws(() => opendir(), kInvalidArgTypeError);
     throws(() => opendir(123), kInvalidArgTypeError);
-    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgTypeError);
+    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgValueError);
 
     const { promise, resolve, reject } = Promise.withResolvers();
     opendir('/', { recursive: true }, (err, dir) => {
@@ -894,7 +895,7 @@ export const opendirSyncAndAsyncTest2 = {
   async test() {
     throws(() => opendir(), kInvalidArgTypeError);
     throws(() => opendir(123), kInvalidArgTypeError);
-    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgTypeError);
+    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgValueError);
 
     const { promise, resolve, reject } = Promise.withResolvers();
     opendir('/', { recursive: true }, (err, dir) => {

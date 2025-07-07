@@ -87,6 +87,12 @@ import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 // A non-public symbol used to ensure that certain constructors cannot
 // be called from user-code
 export const kBadge = Symbol('kBadge');
+export const kFileHandle = Symbol('kFileHandle');
+
+export function isFileHandle(object: unknown): boolean {
+  if (typeof object !== 'object' || object === null) return false;
+  return Reflect.has(object, kFileHandle);
+}
 
 export type RawTime = string | number | bigint;
 export type SymlinkType = 'dir' | 'file' | 'junction' | null | undefined;
@@ -283,7 +289,7 @@ export function validateRmDirArgs(
 // We could use the @types/node definition here but it's a bit overly
 // complex for our needs here.
 export type ReadDirOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: BufferEncoding | 'buffer' | null | undefined;
   withFileTypes?: boolean | undefined;
   recursive?: boolean | undefined;
 };
@@ -293,7 +299,7 @@ export function validateReaddirArgs(
   options: ReadDirOptions
 ): {
   path: URL;
-  encoding: BufferEncoding;
+  encoding: BufferEncoding | 'buffer';
   withFileTypes: boolean;
   recursive: boolean;
 } {
@@ -303,7 +309,9 @@ export function validateReaddirArgs(
     withFileTypes = false,
     recursive = false,
   } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   validateBoolean(withFileTypes, 'options.withFileTypes');
   validateBoolean(recursive, 'options.recursive');
   return {
@@ -324,7 +332,9 @@ export function validateOpendirArgs(
 } {
   validateObject(options, 'options');
   const { encoding = 'utf8', bufferSize = 32, recursive = false } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
 
   // We don't implement the bufferSize option in any meaningful way but we
   // do at least validate it.
@@ -426,7 +436,9 @@ export function validateWriteFileArgs(
     flag = 'w',
     flush = false,
   } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   validateBoolean(flush, 'options.flush');
   parseFileMode(mode, 'options.mode', 0o666);
   const newFlag = stringToFlags(flag as string);
@@ -580,7 +592,11 @@ function validateMode(
 }
 
 function assertEncoding(encoding: unknown): asserts encoding is string {
-  if (encoding && !Buffer.isEncoding(encoding as string)) {
+  if (
+    encoding &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding as string)
+  ) {
     const reason = 'is invalid encoding';
     throw new ERR_INVALID_ARG_VALUE('encoding', encoding, reason);
   }
