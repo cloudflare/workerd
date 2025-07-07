@@ -105,3 +105,6 @@ create-external:
 
 bench-all:
   bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
+
+eslint:
+  just stream-test //src/node:node@eslint
