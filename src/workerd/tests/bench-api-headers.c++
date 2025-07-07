@@ -50,8 +50,13 @@ struct ApiHeaders: public benchmark::Fixture {
 // initialization performs a lot of copying, benchmark it
 BENCHMARK_F(ApiHeaders, constructor)(benchmark::State& state) {
   fixture->runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
     for (auto _: state) {
-      auto jsHeaders = env.js.alloc<api::Headers>(env.js, *kjHeaders, api::Headers::Guard::REQUEST);
+      for (size_t i = 0; i < 10000; ++i) {
+        benchmark::DoNotOptimize(
+            js.alloc<api::Headers>(js, *kjHeaders, api::Headers::Guard::REQUEST));
+        benchmark::DoNotOptimize(i);
+      }
     }
   });
 }

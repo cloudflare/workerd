@@ -33,8 +33,11 @@ struct GlobalScopeBenchmark: public benchmark::Fixture {
 
 BENCHMARK_F(GlobalScopeBenchmark, request)(benchmark::State& state) {
   for (auto _: state) {
-    auto result = fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj);
-    KJ_EXPECT(result.statusCode == 200);
+    for (size_t i = 0; i < 10000; ++i) {
+      benchmark::DoNotOptimize(
+          fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj));
+      benchmark::DoNotOptimize(i);
+    }
   }
 }
 

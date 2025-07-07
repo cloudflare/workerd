@@ -6,6 +6,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/bench-tools.h>
+#include <workerd/tests/test-fixture.h>
 
 namespace workerd {
 namespace {
@@ -25,55 +26,22 @@ static constexpr kj::StringPtr cfProperty = R"DATA({
   "webp": false
 })DATA"_kjc;
 
-class UtilContext: public jsg::Object, public jsg::ContextGlobal {
- public:
-  uint freezeThis(jsg::Lock& js, v8::Local<v8::Object> value) {
-    jsg::recursivelyFreeze(js.v8Context(), value);
-    auto names = jsg::check(value->GetPropertyNames(js.v8Context(), v8::KeyCollectionMode::kOwnOnly,
-        v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
-    return names->Length();
-  }
+static void Util_RecursivelyFreeze(benchmark::State& state) {
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto obj = jsg::check(v8::JSON::Parse(js.v8Context(), jsg::v8Str(js.v8Isolate, cfProperty)));
 
-  JSG_RESOURCE_TYPE(UtilContext) {
-    JSG_METHOD(freezeThis);
-  }
-};
-
-JSG_DECLARE_ISOLATE_TYPE(UtilIsolate, UtilContext);
-
-jsg::V8System system;
-
-struct UtilFixture: public benchmark::Fixture {
-  virtual ~UtilFixture() noexcept(true) {}
-
-  void SetUp(benchmark::State& state) noexcept(true) override {}
-
-  void TearDown(benchmark::State& state) noexcept(true) override {}
-};
-
-BENCHMARK_F(UtilFixture, recursivelyFreeze)(benchmark::State& state) {
-  UtilIsolate isolate(system, kj::heap<jsg::IsolateObserver>(), {});
-  auto code = kj::str("var cfObj = ", cfProperty, "; ",
-      "var result = 0; for (let i = 0; i < 10000; i++) { result += freezeThis(cfObj); } result"_kj);
-
-  isolate.runInLockScope([&](UtilIsolate::Lock& isolateLock) {
-    auto context = isolateLock.newContext<UtilContext>();
-
-    return JSG_WITHIN_CONTEXT_SCOPE(
-        isolateLock, context.getHandle(isolateLock), [&](jsg::Lock& js) {
-      v8::Local<v8::String> source = jsg::v8Str(js.v8Isolate, code);
-
-      // Compile the source code.
-      v8::Local<v8::Script> script;
-      KJ_ASSERT(v8::Script::Compile(js.v8Context(), source).ToLocal(&script));
-
-      // Run the script to get the result.
-      for (auto _: state) {
-        benchmark::DoNotOptimize(jsg::check(script->Run(js.v8Context())));
+    for (auto _: state) {
+      for (size_t i = 0; i < 100000; ++i) {
+        jsg::recursivelyFreeze(js.v8Context(), obj);
+        benchmark::DoNotOptimize(i);
       }
-    });
+    }
   });
 }
+
+WD_BENCHMARK(Util_RecursivelyFreeze);
 
 }  // namespace
 }  // namespace workerd
