@@ -441,14 +441,10 @@ KJ_TEST("Read/Write Onset works") {
   tracing::FetchEventInfo fetchInfo(
       kj::HttpMethod::GET, kj::str("https://example.com"), kj::str("{}"), nullptr);
 
-  FakeEntropySource entropy;
-  auto trigger = InvocationSpanContext::newForInvocation(kj::none, entropy);
-
-  tracing::Onset info(tracing::Onset::Info(kj::mv(fetchInfo)),
+  tracing::Onset info(tracing::staticSpanId, tracing::Onset::Info(kj::mv(fetchInfo)),
       {
         .scriptName = kj::str("foo"),
-      },
-      tracing::Onset::TriggerContext(trigger));
+      });
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -458,11 +454,6 @@ KJ_TEST("Read/Write Onset works") {
   KJ_ASSERT(fetchInfo2.method == kj::HttpMethod::GET);
   KJ_ASSERT(fetchInfo2.url == "https://example.com"_kj);
   KJ_ASSERT(info2.workerInfo.executionModel == ExecutionModel::STATELESS);
-
-  auto& triggerCtx = KJ_ASSERT_NONNULL(info2.trigger);
-  KJ_ASSERT(triggerCtx.traceId == trigger.getTraceId());
-  KJ_ASSERT(triggerCtx.invocationId == trigger.getInvocationId());
-  KJ_ASSERT(triggerCtx.spanId == trigger.getSpanId());
 
   tracing::Onset info3 = info.clone();
   tracing::FetchEventInfo& fetchInfo3 =
@@ -495,10 +486,11 @@ KJ_TEST("Read/Write TailEvent works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
 
-  FakeEntropySource entropy;
-  auto context = tracing::InvocationSpanContext::newForInvocation(kj::none, entropy);
+  auto context = tracing::SpanContext(TraceId(0, 0), {tracing::staticSpanId});
   tracing::Log log(kj::UNIX_EPOCH, LogLevel::INFO, kj::str("foo"));
-  tracing::TailEvent info(context, kj::UNIX_EPOCH, 0, kj::mv(log));
+  auto invocationId = TraceId(0, 0);
+  tracing::TailEvent info(
+      context.getTraceId(), invocationId, context.getSpanId(), kj::UNIX_EPOCH, 0, kj::mv(log));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();
@@ -506,9 +498,8 @@ KJ_TEST("Read/Write TailEvent works") {
   tracing::TailEvent info2(reader);
   KJ_ASSERT(info2.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info2.sequence == 0);
-  KJ_ASSERT(info2.invocationId == context.getInvocationId());
-  KJ_ASSERT(info2.traceId == context.getTraceId());
-  KJ_ASSERT(info2.spanId == context.getSpanId());
+  KJ_ASSERT(info2.invocationId == invocationId);
+  KJ_ASSERT(info2.spanContext == context);
 
   auto& log2 = KJ_ASSERT_NONNULL(info2.event.tryGet<tracing::Log>());
   KJ_ASSERT(log2.timestamp == kj::UNIX_EPOCH);
@@ -518,9 +509,8 @@ KJ_TEST("Read/Write TailEvent works") {
   tracing::TailEvent info3 = info.clone();
   KJ_ASSERT(info3.timestamp == kj::UNIX_EPOCH);
   KJ_ASSERT(info3.sequence == 0);
-  KJ_ASSERT(info3.invocationId == context.getInvocationId());
-  KJ_ASSERT(info3.traceId == context.getTraceId());
-  KJ_ASSERT(info3.spanId == context.getSpanId());
+  KJ_ASSERT(info3.invocationId == invocationId);
+  KJ_ASSERT(info3.spanContext == context);
 
   auto& log3 = KJ_ASSERT_NONNULL(info3.event.tryGet<tracing::Log>());
   KJ_ASSERT(log3.timestamp == kj::UNIX_EPOCH);
@@ -532,15 +522,15 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();
 
-  FakeEntropySource entropy;
-  auto context = tracing::InvocationSpanContext::newForInvocation(kj::none, entropy);
+  TraceId traceId(0, 0);
+  auto context = tracing::SpanContext(traceId, {tracing::staticSpanId});
 
   // An attribute event can have one or more Attributes specified.
   kj::Vector<tracing::Attribute> attrs(2);
   attrs.add(tracing::Attribute("foo"_kjc, true));
   attrs.add(tracing::Attribute("bar"_kjc, (int64_t)123));
 
-  tracing::TailEvent info(context, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
+  tracing::TailEvent info(kj::mv(context), traceId, kj::UNIX_EPOCH, 0, attrs.releaseAsArray());
   info.copyTo(infoBuilder);
 
   tracing::TailEvent info2(infoBuilder.asReader());

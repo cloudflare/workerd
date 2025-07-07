@@ -49,7 +49,8 @@ void TailStreamWriter::report(
     }
   }
 
-  tracing::TailEvent tailEvent(context, timestamp, s.sequence++, kj::mv(event));
+  tracing::TailEvent tailEvent(context.getTraceId(), context.getInvocationId(), context.getSpanId(),
+      timestamp, s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
   if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
@@ -240,18 +241,23 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     writer->report(
         context, tracing::SpanOpen(span.spanId, kj::str(span.operationName), span.startTime));
     // writer->report(context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)));
-    //auto spanOpenContext = tracing::InvocationSpanContext(
-    //    topLevelContext.getTraceId(), topLevelContext.getInvocationId() span.parentSpanId);
-    //auto spanComponentContext = tracing::InvocationSpanContext(
-    //    topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
+    // TODO: We ought to use these.
+    auto spanOpenContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.parentSpanId);
+    auto spanComponentContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
     //writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    writer->report(context, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    //writer->report(context, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
     if (span.tags.size()) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
+      //writer->report(spanComponentContext, kj::mv(attr), span.startTime);
       writer->report(context, kj::mv(attr), span.startTime);
     }
+    //writer->report(spanComponentContext, tracing::SpanClose(), span.endTime);
     writer->report(context, tracing::SpanClose(), span.endTime);
   }
 
@@ -377,7 +383,26 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
+    // TODO: inheriting span context is not implemented yet, so spanId of the tailEvent of Onset is always zero.
+
+    // For Onset:
+    // traceId is taken from global, shared ISC (as taken from first onset).
+    // invocationId is taken from global, shared ISC.
+    // spanId is always null.
+    // onset.spanId is taken from global, shared ISC.
+    // For SpanOpen:
+    // spanId is parent span ID.
+    // spanOpen.spanId is own spanId.
+    // For Span attributes, span close:
+    // spanId is own span ID.
+    // Otherwise:
+    // traceId is taken from global, shared ISC.
+    // invocationId is taken from global, shared ISC.
+    // spanId is taken from global ISC.
+
+    // TODO: needs to have event.spanId = null.
+    writer->report(
+        context, tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo)));
   }
 
   if (!truncated) {
