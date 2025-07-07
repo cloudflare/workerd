@@ -25,9 +25,13 @@ export default {
       switch (event.event.type) {
         case 'spanOpen':
           // The span ids will change between tests, but Map preserves insertion order
+          // console.log(event.spanId)
+          console.log('A' + event.event.spanId + ' ' + event.spanId);
+          //spans.set(event.event.spanId, { name: event.event.name });
           spans.set(event.spanId, { name: event.event.name });
           break;
         case 'attributes': {
+          console.log('B' + event.spanId);
           let span = spans.get(event.spanId);
           for (let { name, value } of event.event.info) {
             span[name] = value;
@@ -36,6 +40,7 @@ export default {
           break;
         }
         case 'spanClose': {
+          console.log('C' + event.spanId);
           let span = spans.get(event.spanId);
           span['closed'] = true;
           spans.set(event.spanId, span);

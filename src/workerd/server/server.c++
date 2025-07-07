@@ -1667,7 +1667,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SpanSubmitter final: public kj::Refcounted {
  public:
-  SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer);
+  SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource);
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span);
 
   tracing::SpanId makeSpanId();
@@ -1676,11 +1676,14 @@ class SpanSubmitter final: public kj::Refcounted {
  private:
   uint64_t predictableSpanId;
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
+  kj::EntropySource& entropySource;
 };
 
-SpanSubmitter::SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
+SpanSubmitter::SpanSubmitter(
+    kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource)
     : predictableSpanId(2),
-      workerTracer(kj::mv(workerTracer)) {}
+      workerTracer(kj::mv(workerTracer)),
+      entropySource(entropySource) {}
 
 void SpanSubmitter::submitSpan(
     tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
@@ -1714,14 +1717,16 @@ void SpanSubmitter::submitSpan(
 }
 
 tracing::SpanId SpanSubmitter::makeSpanId() {
+  //return tracing::SpanId::fromEntropy(entropySource);
   return tracing::SpanId(predictableSpanId++);
 }
 
 class WorkerTracerSpanObserver: public SpanObserver,
                                 public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
  public:
-  WorkerTracerSpanObserver(kj::Maybe<kj::Own<WorkerTracer>> workerTracer)
-      : spanSubmitter(kj::refcounted<SpanSubmitter>(kj::mv(workerTracer))),
+  WorkerTracerSpanObserver(
+      kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource)
+      : spanSubmitter(kj::refcounted<SpanSubmitter>(kj::mv(workerTracer), entropySource)),
         spanId(1),
         parentSpanId(tracing::SpanId::nullId) {}
 
@@ -1898,7 +1903,8 @@ class Server::WorkerService final: public Service,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Maybe<kj::String> dockerPathParam)
+      kj::Maybe<kj::String> dockerPathParam,
+      kj::EntropySource& entropySource)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1907,7 +1913,8 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        dockerPath(kj::mv(dockerPathParam)) {}
+        dockerPath(kj::mv(dockerPathParam)),
+        entropySource(entropySource) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -2143,7 +2150,8 @@ class Server::WorkerService final: public Service,
 
     KJ_IF_SOME(w, workerTracer) {
       if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
-        auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
+        auto tracerSpanObserver =
+            kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer), entropySource);
         SpanBuilder userSpanParent(kj::mv(tracerSpanObserver), "worker"_kjc);
         w->setUserRequestSpan(kj::mv(userSpanParent));
       }
@@ -2997,6 +3005,7 @@ class Server::WorkerService final: public Service,
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   kj::Maybe<kj::String> dockerPath;
+  kj::EntropySource& entropySource;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -4377,7 +4386,7 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
   auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), entropySource);
   result->initActorNamespaces(def.localActorConfigs, network);
   return result;
 }
