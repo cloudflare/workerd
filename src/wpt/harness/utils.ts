@@ -33,9 +33,7 @@ import {
 } from './common';
 
 declare global {
-  /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var GLOBAL: { isWindow(): boolean; isWorker(): boolean };
-  /* eslint-enable no-var */
 
   function done(): undefined;
   function subsetTestByKey(
