@@ -15,6 +15,7 @@ import {
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
   getRandomValues,
+  entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
 
 /**
@@ -109,6 +110,24 @@ function validatePyodideVersion(pyodide: Pyodide): void {
   }
 }
 
+const origSetTimeout = globalThis.setTimeout.bind(this);
+function setTimeoutTopLevelPatch(
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
+  handler: string | Function,
+  timeout: number | undefined
+): number {
+  // Redirect top level setTimeout(cb, 0) to queueMicrotask().
+  // If we don't know how to handle it, call normal setTimeout() to force failure.
+  if (typeof handler === 'string') {
+    return origSetTimeout(handler, timeout);
+  }
+  if (timeout) {
+    return origSetTimeout(handler, timeout);
+  }
+  queueMicrotask(handler as () => void);
+  return 0;
+}
+
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
@@ -125,7 +144,12 @@ export function loadPyodide(
     }
     Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
-    Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
+    Module.setSetTimeout(
+      setTimeoutTopLevelPatch,
+      clearTimeout,
+      setInterval,
+      clearInterval
+    );
 
     entropyMountFiles(Module);
     enterJaegerSpan('load_packages', () => {
@@ -170,4 +194,9 @@ export function loadPyodide(
     // but no traceback. This gives us a full traceback.
     reportError(e as Error);
   }
+}
+
+export function beforeRequest(Module: Module): void {
+  entropyBeforeRequest(Module);
+  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 }
