@@ -10,6 +10,7 @@
 #include <openssl/rand.h>
 
 #include <kj/debug.h>
+#include <kj/hash.h>
 
 #include <cstdlib>
 #include <set>
@@ -569,30 +570,42 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   }
 }
 
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
-  if (value->IsArray()) {
-    // Optimize array freezing (Array is a subclass of Object, but we can iterate it faster).
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
-    auto arr = value.As<v8::Array>();
+void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value) {
+  v8::HandleScope outerScope(js.v8Isolate);
+  v8::LocalVector<v8::Value> queue(js.v8Isolate);
+  queue.push_back(value);
 
-    for (auto i: kj::zeroTo(arr->Length())) {
-      recursivelyFreeze(context, check(arr->Get(context, i)));
+  while (!queue.empty()) {
+    auto item = queue.back();
+    queue.pop_back();
+
+    if (item->IsArray()) {
+      auto arr = item.As<v8::Array>();
+      uint32_t length = arr->Length();
+      for (uint32_t i = 0; i < length; i++) {
+        auto prop = check(arr->Get(js.v8Context(), i));
+        if (prop->IsArray() || prop->IsObject()) {
+          queue.push_back(prop);
+        }
+      }
+
+      check(arr->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen));
+    } else if (item->IsObject()) {
+      auto obj = item.As<v8::Object>();
+      auto names = check(obj->GetPropertyNames(js.v8Context(), v8::KeyCollectionMode::kOwnOnly,
+          v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
+      uint32_t length = names->Length();
+      for (uint32_t i = 0; i < length; i++) {
+        auto prop = check(obj->Get(js.v8Context(), check(names->Get(js.v8Context(), i))));
+        if (prop->IsArray() || prop->IsObject()) {
+          queue.push_back(prop);
+        }
+      }
+
+      check(obj->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen));
     }
 
-    check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
-  } else if (value->IsObject()) {
-    v8::HandleScope scope(v8::Isolate::GetCurrent());
-    auto obj = value.As<v8::Object>();
-    auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
-        v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
-
-    for (auto i: kj::zeroTo(names->Length())) {
-      recursivelyFreeze(context, check(obj->Get(context, check(names->Get(context, i)))));
-    }
-
-    check(obj->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
-  } else {
-    // Primitive type, nothing to do.
+    // Primitive types don't need freezing
   }
 }
 

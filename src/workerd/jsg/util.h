@@ -203,7 +203,7 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView);
 //   or may contain non-simple values it won't do the right thing. It is safe to call this on the
 //   output of JSON.parse().
 // TODO(cleanup): Maybe replace this with a function that parses and freezes JSON in one step.
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
+void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value);
 
 // Make a deep clone of the given object.
 v8::Local<v8::Value> deepClone(v8::Local<v8::Context> context, v8::Local<v8::Value> value);
