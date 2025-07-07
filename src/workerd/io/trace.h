@@ -113,8 +113,8 @@ class TraceId final {
     return high;
   }
 
-  static TraceId fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader);
-  void toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const;
+  static TraceId fromCapnp(rpc::TraceId::Reader reader);
+  void toCapnp(rpc::TraceId::Builder writer) const;
 
  private:
   uint64_t low = 0;
@@ -268,9 +268,38 @@ class InvocationSpanContext final {
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 };
 
+// SpanContext as used for streaming tail worker tail events.
+struct SpanContext {
+  SpanContext(TraceId traceId, kj::Maybe<SpanId> spanId): traceId(traceId), spanId(spanId) {};
+  KJ_DISALLOW_COPY(SpanContext);
+  SpanContext(SpanContext&& other) = default;
+  SpanContext& operator=(SpanContext&& other) = default;
+
+  inline bool operator==(const SpanContext& other) const {
+    return traceId == other.traceId && spanId == other.spanId;
+  }
+
+  inline const TraceId& getTraceId() const {
+    return traceId;
+  }
+
+  inline kj::Maybe<SpanId> getSpanId() const {
+    return spanId;
+  }
+
+  static SpanContext fromCapnp(rpc::SpanContext::Reader reader);
+  void toCapnp(rpc::SpanContext::Builder writer) const;
+  SpanContext clone() const;
+
+ private:
+  TraceId traceId;
+  kj::Maybe<SpanId> spanId;
+};
+
 kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
+kj::String KJ_STRINGIFY(const SpanContext& context);
 
 // The various structs defined below are used in both legacy tail workers
 // and streaming tail workers to report tail events.
@@ -684,7 +713,7 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(uint64_t spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
@@ -692,7 +721,7 @@ struct SpanOpen final {
 
   kj::String operationName;
   kj::Maybe<Info> info = kj::none;
-  uint64_t spanId;
+  SpanId spanId;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
@@ -750,17 +779,16 @@ struct Onset final {
         : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
   };
 
-  explicit Onset(
-      Info&& info, WorkerInfo&& workerInfo, kj::Maybe<TriggerContext> maybeTrigger = kj::none);
+  explicit Onset(tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
+  tracing::SpanId spanId;
   Info info;
   WorkerInfo workerInfo;
-  kj::Maybe<TriggerContext> trigger;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
@@ -805,11 +833,14 @@ struct TailEvent final {
       Link,
       CustomInfo>;
 
-  explicit TailEvent(
-      const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
+  explicit TailEvent(SpanContext context,
+      TraceId invocationId,
+      kj::Date timestamp,
+      kj::uint sequence,
+      Event&& event);
   TailEvent(TraceId traceId,
       TraceId invocationId,
-      SpanId spanId,
+      kj::Maybe<SpanId> spanId,
       kj::Date timestamp,
       kj::uint sequence,
       Event&& event);
@@ -818,10 +849,9 @@ struct TailEvent final {
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);
 
+  SpanContext spanContext;
   // The invocation span context this event is associated with.
-  TraceId traceId;
   TraceId invocationId;
-  SpanId spanId;
 
   kj::Date timestamp;  // Unix epoch, Spectre-mitigated resolution
   kj::uint sequence;
