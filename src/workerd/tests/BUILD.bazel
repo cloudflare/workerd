@@ -90,7 +90,10 @@ wd_cc_benchmark(
 wd_cc_benchmark(
     name = "bench-util",
     srcs = ["bench-util.c++"],
-    deps = ["//src/workerd/jsg"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/jsg",
+    ],
 )
 
 wd_test(
