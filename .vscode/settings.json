@@ -18,9 +18,9 @@
     "--query-driver=**",
     "--clang-tidy"
   ],
-  "clang-format.executable": "${workspaceRoot}/bazel-bin/build/deps/formatters/clang-format",
-  "bazel.buildifierExecutable": "${workspaceRoot}/bazel-bin/build/deps/formatters/buildifier",
-  "ruff.path": ["${workspaceRoot}/bazel-bin/build/deps/formatters/ruff"],
+  "clang-format.executable": "${workspaceRoot}/bazel-out/k8-fastbuild/bin/build/deps/formatters/clang-format",
+  "bazel.buildifierExecutable": "${workspaceRoot}/bazel-out/k8-fastbuild/bin/build/deps/formatters/buildifier",
+  "ruff.path": ["${workspaceRoot}/bazel-out/k8-fastbuild/bin/build/deps/formatters/ruff"],
   "rust-analyzer.workspace.discoverConfig": {
     "command": ["just", "_rust-analyzer"],
     "progressLabel": "generating rust analyzer config",
