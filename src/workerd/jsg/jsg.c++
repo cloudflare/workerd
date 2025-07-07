@@ -160,7 +160,7 @@ kj::String Lock::serializeJson(v8::Local<v8::Value> value) {
 }
 
 void Lock::recursivelyFreeze(Value& value) {
-  jsg::recursivelyFreeze(v8Context(), value.getHandle(*this));
+  jsg::recursivelyFreeze(*this, value.getHandle(*this));
 }
 
 v8::Local<v8::String> Lock::wrapString(kj::StringPtr text) {

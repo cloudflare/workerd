@@ -14,7 +14,7 @@ class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct FreezeContext: public ContextGlobalObject {
   void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value) {
-    jsg::recursivelyFreeze(js.v8Isolate->GetCurrentContext(), value);
+    jsg::recursivelyFreeze(js, value);
   }
   JSG_RESOURCE_TYPE(FreezeContext) {
     JSG_METHOD(recursivelyFreeze);

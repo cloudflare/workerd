@@ -34,7 +34,7 @@ static void Util_RecursivelyFreeze(benchmark::State& state) {
 
     for (auto _: state) {
       for (size_t i = 0; i < 100000; ++i) {
-        jsg::recursivelyFreeze(js.v8Context(), obj);
+        jsg::recursivelyFreeze(js, obj);
         benchmark::DoNotOptimize(i);
       }
     }

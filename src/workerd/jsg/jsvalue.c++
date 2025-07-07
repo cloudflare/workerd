@@ -157,7 +157,7 @@ JsArray JsObject::previewEntries(bool* isKeyValue) {
 }
 
 void JsObject::recursivelyFreeze(Lock& js) {
-  jsg::recursivelyFreeze(js.v8Context(), inner);
+  jsg::recursivelyFreeze(js, inner);
 }
 
 void JsObject::seal(Lock& js) {

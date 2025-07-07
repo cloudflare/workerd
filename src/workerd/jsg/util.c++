@@ -570,58 +570,39 @@ kj::Array<kj::byte> asBytes(v8::Local<v8::ArrayBufferView> arrayBufferView) {
   }
 }
 
-void recursivelyFreeze(v8::Local<v8::Context> context, v8::Local<v8::Value> value) {
-  auto isolate = v8::Isolate::GetCurrent();
-  v8::HandleScope outerScope(isolate);
-  kj::Vector<v8::Local<v8::Value>> queue;
-  queue.reserve(128);
-  queue.add(value);
+void recursivelyFreeze(jsg::Lock& js, v8::Local<v8::Value> value) {
+  v8::HandleScope outerScope(js.v8Isolate);
+  v8::LocalVector<v8::Value> queue(js.v8Isolate);
+  queue.push_back(value);
 
   while (!queue.empty()) {
     auto item = queue.back();
-    queue.removeLast();
+    queue.pop_back();
 
     if (item->IsArray()) {
       auto arr = item.As<v8::Array>();
       uint32_t length = arr->Length();
-
-      // Process array elements in batches to reduce V8 API call overhead
-      constexpr uint32_t BATCH_SIZE = 32;
-      for (uint32_t i = 0; i < length;) {
-        uint32_t batchEnd = kj::min(i + BATCH_SIZE, length);
-        queue.reserve(queue.size() + (batchEnd - i));
-
-        for (; i < batchEnd; ++i) {
-          auto element = check(arr->Get(context, i));
-          if (!element->IsNullOrUndefined()) {
-            queue.add(element);
-          }
+      for (uint32_t i = 0; i < length; i++) {
+        auto prop = check(arr->Get(js.v8Context(), i));
+        if (prop->IsArray() || prop->IsObject()) {
+          queue.push_back(prop);
         }
       }
 
-      check(arr->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
+      check(arr->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen));
     } else if (item->IsObject()) {
       auto obj = item.As<v8::Object>();
-      auto names = check(obj->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
+      auto names = check(obj->GetPropertyNames(js.v8Context(), v8::KeyCollectionMode::kOwnOnly,
           v8::ALL_PROPERTIES, v8::IndexFilter::kIncludeIndices));
-      if (!names.IsEmpty()) {
-        uint32_t length = names->Length();
-
-        constexpr uint32_t BATCH_SIZE = 16;
-        for (uint32_t i = 0; i < length;) {
-          uint32_t batchEnd = std::min(i + BATCH_SIZE, length);
-          queue.reserve(queue.size() + (batchEnd - i));
-
-          for (; i < batchEnd; ++i) {
-            auto propValue = check(obj->Get(context, check(names->Get(context, i))));
-            if (!propValue->IsNullOrUndefined()) {
-              queue.add(propValue);
-            }
-          }
+      uint32_t length = names->Length();
+      for (uint32_t i = 0; i < length; i++) {
+        auto prop = check(obj->Get(js.v8Context(), check(names->Get(js.v8Context(), i))));
+        if (prop->IsArray() || prop->IsObject()) {
+          queue.push_back(prop);
         }
       }
 
-      check(obj->SetIntegrityLevel(context, v8::IntegrityLevel::kFrozen));
+      check(obj->SetIntegrityLevel(js.v8Context(), v8::IntegrityLevel::kFrozen));
     }
 
     // Primitive types don't need freezing
