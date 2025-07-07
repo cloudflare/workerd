@@ -57,19 +57,6 @@ export function previewEntries(value: unknown): PreviewedEntries | undefined;
 
 export function getConstructorName(value: unknown): string;
 
-export type TypedArray =
-  | Uint8Array
-  | Uint8ClampedArray
-  | Uint16Array
-  | Uint32Array
-  | Int8Array
-  | Int16Array
-  | Int32Array
-  | BigUint64Array
-  | BigInt64Array
-  | Float32Array
-  | Float64Array;
-
 export function isArrayBufferView(value: unknown): value is ArrayBufferView;
 export function isArgumentsObject(value: unknown): value is IArguments;
 export function isArrayBuffer(value: unknown): value is ArrayBuffer;
@@ -107,7 +94,7 @@ export function isSetIterator(
 export function isSharedArrayBuffer(value: unknown): value is SharedArrayBuffer;
 export function isStringObject(value: unknown): value is string;
 export function isSymbolObject(value: unknown): value is symbol;
-export function isTypedArray(value: unknown): value is TypedArray;
+export function isTypedArray(value: unknown): value is NodeJS.TypedArray;
 export function isUint8Array(value: unknown): value is Uint8Array;
 export function isUint8ClampedArray(value: unknown): value is Uint8ClampedArray;
 export function isUint16Array(value: unknown): value is Uint16Array;

@@ -13,7 +13,8 @@ import type {
   ClientRequest,
   IncomingMessage,
 } from 'node:http';
-import type { Socket } from 'node:net';
+import type { Socket, NetConnectOpts } from 'node:net';
+import type { Duplex } from 'node:stream';
 
 // This is mostly a stub implementation.
 // We don't intend to support the Agent API right now beyond providing a very limited stub API.
@@ -61,7 +62,10 @@ export class Agent extends EventEmitter implements _Agent {
 
   static defaultMaxSockets: number = Infinity;
 
-  createConnection(): void {
+  createConnection(
+    _options: NetConnectOpts,
+    _callback?: (err: Error | null, stream: Duplex) => void
+  ): Duplex {
     // We can't create a connection like this because our implementation
     // relies on fetch() not on node:net sockets. In node.js, method
     // calls node:net's createConnection method.

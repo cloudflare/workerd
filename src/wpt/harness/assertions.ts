@@ -39,9 +39,7 @@ import { type Test } from './test';
 import { sanitize_unpaired_surrogates } from './common';
 
 declare global {
-  /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   var AssertionError: unknown;
-  /* eslint-enable no-var */
 
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;

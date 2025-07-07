@@ -200,12 +200,10 @@ class RunnerState {
 }
 
 declare global {
-  /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   // Current RunnerState
   var state: RunnerState;
   // All RunnerStates (to get results later)
   var results: { [file: string]: RunnerState };
-  /* eslint-enable no-var */
 }
 
 const COLORS = {

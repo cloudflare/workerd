@@ -82,9 +82,9 @@ function isError(e: unknown): e is Error {
 }
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array).prototype;
-const typedArrayPrototypeLength: (this: internal.TypedArray) => number =
+const typedArrayPrototypeLength: (this: NodeJS.TypedArray) => number =
   Object.getOwnPropertyDescriptor(typedArrayPrototype, 'length')!.get!;
-const typedArrayPrototypeToStringTag: (this: internal.TypedArray) => string =
+const typedArrayPrototypeToStringTag: (this: NodeJS.TypedArray) => string =
   Object.getOwnPropertyDescriptor(
     typedArrayPrototype,
     Symbol.toStringTag
@@ -2231,7 +2231,7 @@ function formatArray(
 }
 
 function formatTypedArray(
-  value: internal.TypedArray,
+  value: NodeJS.TypedArray,
   length: number,
   ctx: Context,
   _ignored: unknown,

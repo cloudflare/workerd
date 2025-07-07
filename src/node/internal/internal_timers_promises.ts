@@ -203,7 +203,6 @@ export async function* setInterval<T = void>(
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var scheduler: {
     wait: (delay: number, options?: { signal?: AbortSignal }) => Promise<void>;
   };
