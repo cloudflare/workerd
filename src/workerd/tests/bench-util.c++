@@ -33,7 +33,7 @@ static void Util_RecursivelyFreeze(benchmark::State& state) {
     auto obj = jsg::check(v8::JSON::Parse(js.v8Context(), jsg::v8Str(js.v8Isolate, cfProperty)));
 
     for (auto _: state) {
-      for (size_t i = 0; i < 100000; ++i) {
+      for (size_t i = 0; i < 1000; ++i) {
         jsg::recursivelyFreeze(js.v8Context(), obj);
         benchmark::DoNotOptimize(i);
       }
