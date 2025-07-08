@@ -43,7 +43,10 @@ import type {
 import {
   type ReadStream,
   type ReadStreamOptions,
+  type WriteStream,
+  type WriteStreamOptions,
   createReadStream,
+  createWriteStream,
 } from 'node-internal:internal_fs_streams';
 import {
   kBadge,
@@ -331,11 +334,8 @@ export class FileHandle extends EventEmitter {
     return createReadStream('', { ...options, fd: this });
   }
 
-  createWriteStream(_options: any = undefined): void {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-    throw new Error('not implemented');
+  createWriteStream(_options: WriteStreamOptions = {}): WriteStream {
+    return createWriteStream('', { ..._options, fd: this });
   }
 }
 
