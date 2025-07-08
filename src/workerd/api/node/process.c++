@@ -10,6 +10,8 @@
 
 #include <kj/vector.h>
 
+#include <cstdio>
+
 namespace workerd::api::node {
 
 jsg::JsValue ProcessModule::getBuiltinModule(jsg::Lock& js, kj::String specifier) {
@@ -135,6 +137,13 @@ void ProcessModule::exitImpl(jsg::Lock& js, int code) {
           .tryCast<jsg::JsObject>());
   err.set(js, "name"_kj, js.str());
   js.logWarning(kj::str(err.get(js, "stack"_kj)));
+}
+
+void ProcessModule::writeAndFlush(jsg::Lock& js, int fd, jsg::BufferSource data) {
+  FILE* file = (fd == 1) ? stdout : stderr;
+  auto ptr = data.asArrayPtr();
+  fwrite(ptr.begin(), 1, ptr.size(), file);
+  fflush(file);
 }
 
 }  // namespace workerd::api::node

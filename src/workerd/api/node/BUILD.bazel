@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
@@ -532,4 +533,23 @@ wd_test(
     src = "tests/fs-readstream-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fs-readstream-test.js"],
+)
+
+wd_test(
+    src = "tests/process-stdio-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/process-stdio-test.js"],
+)
+
+sh_test(
+    name = "process-stdio-golden-test",
+    srcs = ["tests/test_process_stdio.sh"],
+    args = ["$(location //src/workerd/server:workerd)"],
+    data = [
+        "tests/process-stdio-test.expected_stderr",
+        "tests/process-stdio-test.expected_stdout",
+        "tests/process-stdio-test.js",
+        "tests/process-stdio-test.wd-test",
+        "//src/workerd/server:workerd",
+    ],
 )

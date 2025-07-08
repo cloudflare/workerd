@@ -1,0 +1,5 @@
+Console log test message
+Multiple arguments test
+{ object: 'test', number: 42 }
+STDOUT: Message 1CONSOLE.LOG: Message 2
+STDOUT: Message 3Hello stdoutLine 1Line 2
