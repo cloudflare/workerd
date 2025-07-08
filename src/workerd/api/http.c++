@@ -161,14 +161,14 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  other.forEach([this](kj::StringPtr name, kj::StringPtr value) {
-    // The variation of toLower we use here creates a copy.
-    auto key = jsg::ByteString(toLower(name));
-    KJ_IF_SOME(header, headers.find(key)) {
-      header.values.add(jsg::ByteString(kj::str(value)));
+  other.forEachHeader([this](kj::HttpHeaders::Header header) {
+    auto key = jsg::ByteString(kj::str(header.lowcaseName));
+    KJ_IF_SOME(h, headers.find(key)) {
+      h.values.add(jsg::ByteString(kj::str(header.value)));
     } else {
       headers.insert(key,
-          Header(kj::mv(key), jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value))));
+          Header(kj::mv(key), jsg::ByteString(kj::str(header.name)),
+              jsg::ByteString(kj::str(header.value))));
     }
   });
 
