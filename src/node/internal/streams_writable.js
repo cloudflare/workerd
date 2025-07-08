@@ -31,7 +31,7 @@ import { EventEmitter } from 'node-internal:events';
 import { Stream } from 'node-internal:streams_legacy';
 
 import { Buffer } from 'node-internal:internal_buffer';
-import process from 'node:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import {
   nop,
@@ -310,7 +310,7 @@ function _write(stream, chunk, encoding, cb) {
     err = new ERR_STREAM_DESTROYED('write');
   }
   if (err) {
-    process.nextTick(cb, err);
+    nextTick(cb, err);
     errorOrDestroy(stream, err, true);
     return err;
   }
@@ -431,7 +431,7 @@ function onwrite(stream, er) {
       stream._readableState.errored = er;
     }
     if (sync) {
-      process.nextTick(onwriteError, stream, state, er, cb);
+      nextTick(onwriteError, stream, state, er, cb);
     } else {
       onwriteError(stream, state, er, cb);
     }
@@ -456,7 +456,7 @@ function onwrite(stream, er) {
           stream,
           state,
         };
-        process.nextTick(afterWriteTick, state.afterWriteTickInfo);
+        nextTick(afterWriteTick, state.afterWriteTickInfo);
       }
     } else {
       afterWrite(stream, state, 1, cb);
@@ -626,7 +626,7 @@ function end(chunk, encoding, cb) {
   }
   if (typeof cb === 'function') {
     if (err || state.finished) {
-      process.nextTick(cb, err);
+      nextTick(cb, err);
     } else {
       state[kOnFinished].push(cb);
     }
@@ -673,7 +673,7 @@ function callFinal(stream, state) {
       // Some streams assume 'finish' will be emitted
       // asynchronously relative to _final callback.
       state.pendingcb++;
-      process.nextTick(finish, stream, state);
+      nextTick(finish, stream, state);
     }
   }
   state.sync = true;
@@ -704,7 +704,7 @@ function finishMaybe(stream, state, sync = false) {
     if (state.pendingcb === 0) {
       if (sync) {
         state.pendingcb++;
-        process.nextTick(() => {
+        nextTick(() => {
           ((stream, state) => {
             if (needFinish(state)) {
               finish(stream, state);
@@ -853,7 +853,7 @@ Writable.prototype.destroy = function (err, cb) {
     !state.destroyed &&
     (state.bufferedIndex < state.buffered.length || state[kOnFinished].length)
   ) {
-    process.nextTick(errorBuffer, state);
+    nextTick(errorBuffer, state);
   }
   destroy.call(this, err, cb);
   return this;

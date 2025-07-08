@@ -368,7 +368,7 @@ export declare class ReadStream extends Readable {
   [kFs]: RealizedFsOperations;
   [kIsPerformingIO]: boolean;
   [kHandle]: FileHandle | undefined;
-  constructor(path: FilePath, options?: ReadStreamOptions);
+  constructor(path: FilePath | null, options?: ReadStreamOptions);
   push(chunk: NodeJS.ArrayBufferView | null): boolean;
   close(callback?: ErrorOnlyCallback): void;
 }
