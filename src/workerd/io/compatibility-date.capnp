@@ -862,4 +862,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-08-01");
   # The original implementation of EventTarget was not correctly setting the `this` value
   # for event handlers. This flag enables the correct behavior, which is compliant with the spec.
+
+  enableForwardableEmailFullHeaders @99 :Bool
+      $compatEnableFlag("set_forwardable_email_full_headers")
+      $compatDisableFlag("set_forwardable_email_single_headers")
+      $compatEnableDate("2025-08-01");
+  # The original version of the headers sent to edgeworker were truncated to a single
+  # value for specific header names, such as To and Cc. With this compat flag we will send
+  # the full header values to the worker script.
 }
