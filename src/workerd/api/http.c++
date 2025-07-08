@@ -281,11 +281,17 @@ kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
 }
 
 kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr name) {
-  KJ_UNIMPLEMENTED("getNoChecks");
+  KJ_IF_SOME(value, headers.find(toLower(name))) {
+    return jsg::ByteString(kj::strArray(value.values, ", "));
+  }
+  return kj::none;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
-  KJ_UNIMPLEMENTED("getSetCookie");
+  KJ_IF_SOME(value, headers.find("set-cookie"_kj)) {
+    return value.values.asPtr();
+  }
+  return nullptr;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
