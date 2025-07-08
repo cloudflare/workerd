@@ -16,12 +16,11 @@ import {
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
-import type { Buffer } from 'node:buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 import { parseEnv } from 'node-internal:internal_utils';
-import type * as NodeFS from 'node:fs';
-
-const { compatibilityFlags } = Cloudflare;
-
+import { Writable } from 'node-internal:streams_writable';
+import { writeSync } from 'node-internal:internal_fs_sync';
+import { ReadStream } from 'node-internal:internal_fs_streams';
 import {
   platform,
   nextTick,
@@ -32,12 +31,63 @@ import {
 } from 'node-internal:internal_process';
 import { validateString } from 'node-internal:validators';
 
+import type { Readable } from 'node-internal:streams_readable';
+import type * as NodeFS from 'node:fs';
+
+const { compatibilityFlags } = Cloudflare;
+
 export { platform, nextTick, emitWarning, env, features };
 
-// TODO(soon): Implement stdio along with TTY streams (and as a requirement for removing experimental).
-export const stdin = undefined;
-export const stdout = undefined;
-export const stderr = undefined;
+// For stdin, we emulate `node foo.js < /dev/null`
+export const stdin = new ReadStream(null, {
+  fd: 0,
+  autoClose: false,
+}) as Readable & {
+  fd: number;
+};
+stdin.fd = 0;
+
+function chunkToBuffer(
+  chunk: Buffer | ArrayBufferView | DataView | string,
+  encoding: BufferEncoding
+): Buffer {
+  if (Buffer.isBuffer(chunk)) {
+    return chunk;
+  }
+  if (typeof chunk === 'string') {
+    return Buffer.from(chunk, encoding);
+  }
+  return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+}
+
+// For stdout, we emulate `nohup node foo.js`
+class SyncWriteStream extends Writable {
+  fd: number;
+  readable: boolean;
+  _type = 'fs';
+  _isStdio = true;
+  constructor(fd: number) {
+    super({ autoDestroy: true });
+    this.fd = fd;
+    this.readable = false;
+  }
+  override _write(
+    chunk: string | Buffer | ArrayBufferView | DataView,
+    encoding: BufferEncoding,
+    cb: (error?: Error | null) => void
+  ): void {
+    try {
+      writeSync(this.fd, chunkToBuffer(chunk, encoding));
+    } catch (e: unknown) {
+      cb(e as Error);
+      return;
+    }
+    cb();
+  }
+}
+
+export const stdout = new SyncWriteStream(1);
+export const stderr = new SyncWriteStream(2);
 
 export function chdir(path: string | Buffer | URL): void {
   validateString(path, 'directory');
@@ -200,8 +250,6 @@ export function uptime(): number {
   return 0;
 }
 
-// TODO(soon): Support with proper process.cwd() resolution along with
-//             test in process-nodejs-test.
 export function loadEnvFile(path: string | URL | Buffer = '.env'): void {
   if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
     throw new ERR_UNSUPPORTED_OPERATION();

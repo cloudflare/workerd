@@ -42,8 +42,7 @@ import {
   finished,
   kOnConstructed,
 } from 'node-internal:streams_util';
-
-import process from 'node:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import { EventEmitter } from 'node-internal:events';
 
@@ -547,7 +546,7 @@ function emitReadable(stream) {
   state.needReadable = false;
   if (!state.emittedReadable) {
     state.emittedReadable = true;
-    process.nextTick(emitReadable_, stream);
+    nextTick(emitReadable_, stream);
   }
 }
 
@@ -578,7 +577,7 @@ function emitReadable_(stream) {
 function maybeReadMore(stream, state) {
   if (!state.readingMore && state.constructed) {
     state.readingMore = true;
-    process.nextTick(maybeReadMore_, stream, state);
+    nextTick(maybeReadMore_, stream, state);
   }
 }
 
@@ -643,7 +642,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   state.pipes.push(dest);
   const doEnd = !pipeOpts || pipeOpts.end !== false;
   const endFn = doEnd ? onend : unpipe;
-  if (state.endEmitted) process.nextTick(endFn);
+  if (state.endEmitted) nextTick(endFn);
   else src.once('end', endFn);
   dest.on('unpipe', onunpipe);
   function onunpipe(readable, unpipeInfo) {
@@ -835,7 +834,7 @@ Readable.prototype.on = function (ev, fn) {
       if (state.length) {
         emitReadable(this);
       } else if (!state.reading) {
-        process.nextTick(nReadingNextTick, this);
+        nextTick(nReadingNextTick, this);
       }
     }
   }
@@ -851,7 +850,7 @@ Readable.prototype.removeListener = function (ev, fn) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -865,7 +864,7 @@ Readable.prototype.removeAllListeners = function (ev) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -908,7 +907,7 @@ Readable.prototype.resume = function () {
 function resume(stream, state) {
   if (!state.resumeScheduled) {
     state.resumeScheduled = true;
-    process.nextTick(resume_, stream, state);
+    nextTick(resume_, stream, state);
   }
 }
 
@@ -1225,7 +1224,7 @@ function endReadable(stream) {
   const state = stream._readableState;
   if (!state.endEmitted) {
     state.ended = true;
-    process.nextTick(endReadableNT, state, stream);
+    nextTick(endReadableNT, state, stream);
   }
 }
 
@@ -1240,7 +1239,7 @@ function endReadableNT(state, stream) {
     state.endEmitted = true;
     stream.emit('end');
     if (stream.writable && stream.allowHalfOpen === false) {
-      process.nextTick(endWritableNT, stream);
+      nextTick(endWritableNT, stream);
     } else if (state.autoDestroy) {
       // In case of duplex streams we need a way to detect
       // if the writable side is ready for autoDestroy as well.
@@ -1344,8 +1343,8 @@ export function from(Readable, iterable, opts) {
   };
   readable._destroy = function (error, cb) {
     close(error).then(
-      () => process.nextTick(cb, error),
-      (err) => process.nextTick(cb, err || error)
+      () => nextTick(cb, error),
+      (err) => nextTick(cb, err || error)
     );
   };
   async function close(error) {

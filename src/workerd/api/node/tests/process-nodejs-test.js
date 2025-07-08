@@ -330,11 +330,6 @@ export const processProperties = {
 // Some of these might be implemented at future dates.
 export const processUndefined = {
   test() {
-    // TODO(soon): Implement these!
-    assert.strictEqual(process.stdin, undefined);
-    assert.strictEqual(process.stdout, undefined);
-    assert.strictEqual(process.stderr, undefined);
-
     // These may be implemented in future
     assert.strictEqual(process.kill, undefined);
     assert.strictEqual(process.ref, undefined);
@@ -910,5 +905,54 @@ export const processUmask = {
       () => process.umask('40000000000'), // > 32-bit max octal
       { code: 'ERR_INVALID_ARG_VALUE' }
     );
+  },
+};
+
+export const processStdio = {
+  test() {
+    assert.ok(process.stdout, 'process.stdout should exist');
+    assert.ok(process.stderr, 'process.stderr should exist');
+
+    assert.ok(process.stdout.writable, 'process.stdout should be writable');
+    assert.ok(process.stderr.writable, 'process.stderr should be writable');
+
+    assert.strictEqual(
+      typeof process.stdout.write,
+      'function',
+      'process.stdout.write should be a function'
+    );
+    assert.strictEqual(
+      typeof process.stderr.write,
+      'function',
+      'process.stderr.write should be a function'
+    );
+
+    assert.notStrictEqual(
+      process.stdout,
+      process.stderr,
+      'stdout and stderr should be different objects'
+    );
+
+    assert.doesNotThrow(() => {
+      process.stdout.write('test stdout');
+      process.stderr.write('test stderr');
+    }, 'Writing to stdio streams should not throw');
+
+    assert.ok(process.stdin, 'process.stdin should exist');
+    assert.ok(process.stdin.readable, 'process.stdin should be readable');
+    assert.strictEqual(process.stdin.read(), null);
+
+    assert.strictEqual(
+      process.stdout.isTTY,
+      undefined,
+      'process.stdout.isTTY should be undefined'
+    );
+    assert(!('isTTY' in process.stdin));
+    assert(!('isTTY' in process.stdout));
+    assert(!('isTTY' in process.stderr));
+
+    assert.strictEqual(process.stdin.fd, 0, 'process.stdin.fd should be 0');
+    assert.strictEqual(process.stdout.fd, 1, 'process.stdout.fd should be 1');
+    assert.strictEqual(process.stderr.fd, 2, 'process.stderr.fd should be 2');
   },
 };

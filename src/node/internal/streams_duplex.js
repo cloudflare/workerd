@@ -34,8 +34,7 @@ import {
   newStreamDuplexFromReadableWritablePair,
   newReadableWritablePairFromDuplex,
 } from 'node-internal:streams_adapters';
-
-import process from 'node:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import {
   addAbortSignal,
@@ -322,9 +321,9 @@ function duplexify(body, name) {
           final(async () => {
             try {
               await promise;
-              process.nextTick(cb, null);
+              nextTick(cb, null);
             } catch (err) {
-              process.nextTick(cb, err);
+              nextTick(cb, err);
             }
           });
         },
@@ -434,7 +433,7 @@ function fromAsyncGen(fn) {
         const _promise = promise;
         promise = null;
         const { chunk, done, cb } = await _promise;
-        process.nextTick(cb);
+        nextTick(cb);
         if (done) return;
         if (signal.aborted)
           throw new AbortError(undefined, {
@@ -633,7 +632,7 @@ class DuplexSide extends Duplex {
     assert(this.#otherSide !== null);
     assert(this.#otherSide[kCallback] === null);
     if (chunk.length === 0) {
-      process.nextTick(callback);
+      nextTick(callback);
     } else {
       this.#otherSide.push(chunk);
       this.#otherSide[kCallback] = callback;
