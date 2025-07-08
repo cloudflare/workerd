@@ -70,6 +70,30 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::HttpHeaders& headers,
     kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
     kj::StringPtr urlStr,
+    TraceContext& traceContext) {
+
+  KJ_SWITCH_ONEOF(opTypeOrUnknown) {
+    KJ_CASE_ONEOF(name, kj::LiteralStringConst) {}
+    KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
+      // Check if we've hit KV usage limits. (This will throw if we have.)
+      context.getLimitEnforcer().newKvRequest(opType);
+    }
+  }
+
+  auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
+
+  headers.add(FLPROD_405_HEADER, urlStr);
+  for (const auto& header: additionalHeaders) {
+    headers.add(header.name.asPtr(), header.value.asPtr());
+  }
+
+  return client;
+}
+
+kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
+    kj::HttpHeaders& headers,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
+    kj::StringPtr urlStr,
     kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options) {
   const auto operationName = [&] {
     KJ_SWITCH_ONEOF(opTypeOrUnknown) {
@@ -343,7 +367,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
   return context.awaitIo(js, kj::mv(request.response),
       [type = kj::mv(type), &context, client = kj::mv(client)](
           jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-      -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
+          -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
         response.headers->get(context.getHeaderIds().cfCacheStatus).map([&](kj::StringPtr cs) {
       return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
@@ -424,23 +448,30 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
+    auto traceSpan = context.makeTraceSpan("kv_list"_kjc);
+    auto userSpan = context.makeUserTraceSpan("kv_list"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
 
     kj::Url url;
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
+        traceContext.userSpan.setTag(
+            "cloudflare.kv.query.parameter.limit"_kjc, static_cast<int64_t>(limit));
         if (limit > 0) {
           url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
+          traceContext.userSpan.setTag("cloudflare.kv.query.parameter.prefix"_kjc, kj::str(prefix));
           url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
+          traceContext.userSpan.setTag("cloudflare.kv.query.parameter.cursor"_kjc, kj::str(cursor));
           url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
         }
       }
@@ -450,7 +481,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
 
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     auto client =
-        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, kj::mv(options));
+        getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, traceContext);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js, kj::mv(request.response),

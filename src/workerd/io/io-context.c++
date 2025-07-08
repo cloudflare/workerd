@@ -855,7 +855,12 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));
-  auto ret = func(tracing, getIoChannelFactory());
+  kj::Own<WorkerInterface> ret;
+  KJ_IF_SOME(existing, options.existingTraceContext) {
+    ret = func(existing, getIoChannelFactory());
+  } else {
+    ret = func(tracing, getIoChannelFactory());
+  }
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
@@ -892,6 +897,20 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
+      });
+}
+
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
       });
 }
 
@@ -960,6 +979,11 @@ kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
     kj::Vector<Span::Tag> tags) {
   return asHttpClient(getSubrequestChannelWithSpans(
       channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
+}
+
+kj::Own<kj::HttpClient> IoContext::getHttpClient(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
@@ -1358,8 +1382,8 @@ jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
 void IoContext::writeLogfwdr(
     uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) {
   addWaitUntil(getIoChannelFactory()
-                   .writeLogfwdr(channel, kj::mv(buildMessage))
-                   .attach(registerPendingEvent()));
+          .writeLogfwdr(channel, kj::mv(buildMessage))
+          .attach(registerPendingEvent()));
 }
 
 void IoContext::requireCurrentOrThrowJs() {
