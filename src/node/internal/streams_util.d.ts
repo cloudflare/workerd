@@ -228,7 +228,7 @@ export function destroy(
 export function undestroy(this: NodeStreamLike): void;
 export function errorOrDestroy(
   stream: NodeStreamLike,
-  err: Error,
+  err: unknown,
   sync?: boolean
 ): void;
 export function construct(

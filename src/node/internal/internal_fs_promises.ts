@@ -31,6 +31,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import * as fssync from 'node-internal:internal_fs_sync';
+import { EventEmitter } from 'node-internal:events';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import type {
   MkdirTempSyncOptions,
@@ -40,7 +41,13 @@ import type {
   StatOptions,
 } from 'node-internal:internal_fs_sync';
 import {
+  type ReadStream,
+  type ReadStreamOptions,
+  createReadStream,
+} from 'node-internal:internal_fs_streams';
+import {
   kBadge,
+  kFileHandle,
   Stats,
   validatePosition,
   type Position,
@@ -75,7 +82,8 @@ import type {
 } from 'node:fs';
 import { isArrayBufferView } from 'node-internal:internal_types';
 
-class FileHandle {
+// @ts-expect-error TS2507 EventEmitter is not a constructor function type.
+export class FileHandle extends EventEmitter {
   // The FileHandle class is a wrapper around a file descriptor.
   // When the #handle is cleared, the reference to the underlying
   // file descriptor is dropped. The user is expected to call
@@ -84,11 +92,13 @@ class FileHandle {
   // collected.
   #fd: number | undefined;
   #handle: cffs.FdHandle | undefined;
+  [kFileHandle] = true;
 
   constructor(badge: symbol, fd: number) {
     if (badge !== kBadge) {
       throw new TypeError('Illegal constructor');
     }
+    super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
     this.#fd = fd;
     this.#handle = cffs.getFdHandle(fd);
   }
@@ -303,6 +313,7 @@ class FileHandle {
     if (this.#handle !== undefined) this.#handle.close();
     this.#fd = undefined;
     this.#handle = undefined;
+    (this as unknown as EventEmitter).emit('close');
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -316,11 +327,8 @@ class FileHandle {
     throw new Error('not implemented');
   }
 
-  createReadStream(_options: any = undefined): void {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-    throw new Error('not implemented');
+  createReadStream(options: ReadStreamOptions = {}): ReadStream {
+    return createReadStream('', { ...options, fd: this });
   }
 
   createWriteStream(_options: any = undefined): void {

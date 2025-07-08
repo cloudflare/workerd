@@ -5,12 +5,16 @@
 import * as promises from 'node-internal:internal_fs_promises';
 import * as constants from 'node-internal:internal_fs_constants';
 import * as callbackMethods from 'node-internal:internal_fs_callback';
-import { WriteStream, ReadStream } from 'node-internal:internal_fs_streams';
 import { Dirent, Dir } from 'node-internal:internal_fs';
 import { Stats } from 'node-internal:internal_fs_utils';
 
 export * from 'node-internal:internal_fs_callback';
-
+import {
+  ReadStream,
+  WriteStream,
+  createReadStream,
+  createWriteStream,
+} from 'node-internal:internal_fs_streams';
 import {
   accessSync,
   existsSync,
@@ -62,8 +66,6 @@ export {
   promises,
   Dirent,
   Dir,
-  WriteStream,
-  ReadStream,
   accessSync,
   existsSync,
   appendFileSync,
@@ -108,6 +110,10 @@ export {
   writeSync,
   writevSync,
   Stats,
+  ReadStream,
+  WriteStream,
+  createReadStream,
+  createWriteStream,
 };
 
 export default {
@@ -115,8 +121,6 @@ export default {
   promises,
   Dirent,
   Dir,
-  WriteStream,
-  ReadStream,
   Stats,
   ...callbackMethods,
   accessSync,
@@ -162,4 +166,8 @@ export default {
   writeFileSync,
   writeSync,
   writevSync,
+  WriteStream,
+  ReadStream,
+  createReadStream,
+  createWriteStream,
 };
