@@ -50,7 +50,7 @@ function validateHost(host: unknown, name: string): string {
   return host as string;
 }
 
-export class ClientRequest extends OutgoingMessage {
+export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #abortController = new AbortController();
   #body: Buffer[] = [];
   #incomingMessage?: IncomingMessage;
