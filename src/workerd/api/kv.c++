@@ -327,7 +327,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
   return context.awaitIo(js, kj::mv(request.response),
       [type = kj::mv(type), &context, client = kj::mv(client)](
           jsg::Lock& js, kj::HttpClient::Response&& response) mutable
-          -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
+      -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
         response.headers->get(context.getHeaderIds().cfCacheStatus).map([&](kj::StringPtr cs) {
       return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
