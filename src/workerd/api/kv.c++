@@ -68,12 +68,11 @@ constexpr auto FLPROD_405_HEADER = "CF-KV-FLPROD-405"_kj;
 
 kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     kj::HttpHeaders& headers,
-    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrUnknown,
+    kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
     kj::StringPtr urlStr,
     TraceContext& traceContext) {
 
-  KJ_SWITCH_ONEOF(opTypeOrUnknown) {
-    KJ_CASE_ONEOF(name, kj::LiteralStringConst) {}
+  KJ_SWITCH_ONEOF(opTypeOrName) {
     KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
       // Check if we've hit KV usage limits. (This will throw if we have.)
       context.getLimitEnforcer().newKvRequest(opType);
