@@ -91,9 +91,11 @@ jobs:
       extra_bazel_args: '--config=ci-test --config=ci-linux'
       upload_test_logs: true
       upload_binary: true
+      upload_coverage: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     uses: ./.github/workflows/_bazel.yml
