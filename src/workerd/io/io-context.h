@@ -1548,7 +1548,8 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
   using T = jsg::RemovePromise<jsg::PromiseForResult<Func, void, true>>;
   auto [result, resolver] = js.newPromiseAndResolver<T>();
 
-  addTask(cs->wait()
+  addTask(
+      cs->wait()
           .then([this, callback = kj::mv(callback),
                     maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
                     InputGate::Lock inputLock) mutable {

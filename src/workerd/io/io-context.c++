@@ -1382,8 +1382,8 @@ jsg::Promise<IoOwn<kj::AsyncInputStream>> IoContext::makeCachePutStream(
 void IoContext::writeLogfwdr(
     uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) {
   addWaitUntil(getIoChannelFactory()
-          .writeLogfwdr(channel, kj::mv(buildMessage))
-          .attach(registerPendingEvent()));
+                   .writeLogfwdr(channel, kj::mv(buildMessage))
+                   .attach(registerPendingEvent()));
 }
 
 void IoContext::requireCurrentOrThrowJs() {
