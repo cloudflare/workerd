@@ -345,6 +345,7 @@ _NORMAL_DEV_ALIASES = {
 _PROC_MACRO_DEPENDENCIES = {
     "": {
         _COMMON_CONDITION: {
+            "async-trait": Label("@crates_vendor//:async-trait-0.1.88"),
             "rustversion": Label("@crates_vendor//:rustversion-1.0.21"),
         },
     },
@@ -476,6 +477,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/anyhow/1.0.98/download"],
         strip_prefix = "anyhow-1.0.98",
         build_file = Label("//deps/rust/crates:BUILD.anyhow-1.0.98.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__async-trait-0.1.88",
+        sha256 = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/async-trait/0.1.88/download"],
+        strip_prefix = "async-trait-0.1.88",
+        build_file = Label("//deps/rust/crates:BUILD.async-trait-0.1.88.bazel"),
     )
 
     maybe(
@@ -1749,6 +1760,7 @@ def crate_repositories():
 
     return [
         struct(repo = "crates_vendor__anyhow-1.0.98", is_dev_dep = False),
+        struct(repo = "crates_vendor__async-trait-0.1.88", is_dev_dep = False),
         struct(repo = "crates_vendor__capnp-0.21.2", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.21.1", is_dev_dep = False),
         struct(repo = "crates_vendor__cc-1.2.29", is_dev_dep = False),
