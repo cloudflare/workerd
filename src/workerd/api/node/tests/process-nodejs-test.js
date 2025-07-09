@@ -334,9 +334,6 @@ export const processUndefined = {
     assert.strictEqual(process.cwd, undefined);
     assert.strictEqual(process.chdir, undefined);
     assert.strictEqual(process.umask, undefined);
-    assert.strictEqual(process.stdin, undefined);
-    assert.strictEqual(process.stdout, undefined);
-    assert.strictEqual(process.stderr, undefined);
 
     // These may be implemented in future
     assert.strictEqual(process.kill, undefined);
@@ -784,5 +781,125 @@ export const processRejectionListeners = {
       const { promise: promise2 } = await handledPromise;
       assert.strictEqual(promise, promise2);
     }
+  },
+};
+
+export const processStdio = {
+  test() {
+    // Test that stdio streams exist and have correct properties
+    assert.ok(process.stdout, 'process.stdout should exist');
+    assert.ok(process.stderr, 'process.stderr should exist');
+
+    // Test that they are writable streams
+    assert.ok(process.stdout.writable, 'process.stdout should be writable');
+    assert.ok(process.stderr.writable, 'process.stderr should be writable');
+
+    // Test that they have write methods
+    assert.strictEqual(
+      typeof process.stdout.write,
+      'function',
+      'process.stdout.write should be a function'
+    );
+    assert.strictEqual(
+      typeof process.stderr.write,
+      'function',
+      'process.stderr.write should be a function'
+    );
+
+    // Test that they are different objects
+    assert.notStrictEqual(
+      process.stdout,
+      process.stderr,
+      'stdout and stderr should be different objects'
+    );
+
+    // Test writing to streams (should not throw)
+    assert.doesNotThrow(() => {
+      process.stdout.write('test stdout');
+      process.stderr.write('test stderr');
+    }, 'Writing to stdio streams should not throw');
+
+    // Test that stdin exists and is readable
+    assert.ok(process.stdin, 'process.stdin should exist');
+    assert.ok(process.stdin.readable, 'process.stdin should be readable');
+    assert.strictEqual(process.stdin.read(), null);
+
+    // Test TTY properties
+    assert.strictEqual(
+      typeof process.stdout.isTTY,
+      'boolean',
+      'process.stdout.isTTY should be a boolean'
+    );
+    assert.strictEqual(
+      typeof process.stderr.isTTY,
+      'boolean',
+      'process.stderr.isTTY should be a boolean'
+    );
+    assert.strictEqual(
+      typeof process.stdin.isTTY,
+      'boolean',
+      'process.stdin.isTTY should be a boolean'
+    );
+
+    // In workerd environment, these should typically be false (not connected to a terminal)
+    assert.strictEqual(
+      process.stdout.isTTY,
+      false,
+      'process.stdout.isTTY should be false in workerd'
+    );
+    assert.strictEqual(
+      process.stderr.isTTY,
+      false,
+      'process.stderr.isTTY should be false in workerd'
+    );
+    assert.strictEqual(
+      process.stdin.isTTY,
+      false,
+      'process.stdin.isTTY should be false in workerd'
+    );
+
+    // Test TTY functions (should exist even if isTTY is false)
+    assert.strictEqual(
+      typeof process.stdout.getColorDepth,
+      'function',
+      'process.stdout.getColorDepth should be a function'
+    );
+    assert.strictEqual(
+      typeof process.stdout.getColorDepth(),
+      'number',
+      'getColorDepth should return a number'
+    );
+
+    assert.strictEqual(
+      typeof process.stdout.hasColors,
+      'function',
+      'process.stdout.hasColors should be a function'
+    );
+    assert.strictEqual(
+      typeof process.stdout.hasColors(),
+      'boolean',
+      'hasColors should return a boolean'
+    );
+
+    assert.strictEqual(
+      typeof process.stdout.getWindowSize,
+      'function',
+      'process.stdout.getWindowSize should be a function'
+    );
+    const windowSize = process.stdout.getWindowSize();
+    assert.ok(
+      Array.isArray(windowSize),
+      'getWindowSize should return an array'
+    );
+    assert.strictEqual(
+      windowSize.length,
+      2,
+      'getWindowSize should return array of length 2'
+    );
+
+    // Test file descriptor properties (Node.js semantics)
+    assert.strictEqual(process.stdin.fd, 0, 'process.stdin.fd should be 0');
+    assert.strictEqual(process.stdout.fd, 1, 'process.stdout.fd should be 1');
+    assert.strictEqual(process.stderr.fd, 2, 'process.stderr.fd should be 2');
   },
 };

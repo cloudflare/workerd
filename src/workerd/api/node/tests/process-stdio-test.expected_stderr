@@ -1,0 +1,5 @@
+Console error test message
+Error with multiple arguments
+{ error: 'test', code: 500 }
+STDERR: Error 1CONSOLE.ERROR: Error 2
+STDERR: Error 3Hello stderrError: Test error messageWarning: Test warning message

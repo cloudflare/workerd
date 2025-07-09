@@ -46,10 +46,13 @@ class ProcessModule final: public jsg::Object {
 
   jsg::JsObject getVersions(jsg::Lock& js) const;
 
+  void writeAndFlush(jsg::Lock& js, int fd, jsg::BufferSource data);
+
   JSG_RESOURCE_TYPE(ProcessModule) {
     JSG_METHOD(getEnvObject);
     JSG_METHOD(getBuiltinModule);
     JSG_METHOD(exitImpl);
+    JSG_METHOD(writeAndFlush);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(versions, getVersions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
   }

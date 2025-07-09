@@ -15,9 +15,11 @@ import {
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
-import type { Buffer } from 'node:buffer';
+import { Buffer } from 'node-internal:internal_buffer';
 import { parseEnv } from 'node-internal:internal_utils';
 import type * as NodeFS from 'node:fs';
+import { Readable } from 'node-internal:streams_readable';
+import { Writable } from 'node-internal:streams_writable';
 
 const { compatibilityFlags } = Cloudflare;
 
@@ -32,10 +34,103 @@ import {
 
 export { platform, nextTick, emitWarning, env, features };
 
-// TODO(soon): Implement stdio along with TTY streams (and as a requirement for removing experimental).
-export const stdin = undefined;
-export const stdout = undefined;
-export const stderr = undefined;
+/**
+ * Mock non-TTY TTY ReadStream
+ */
+class ReadStream extends Readable {
+  fd: number = 0;
+  isTTY: boolean = false;
+  isRaw: boolean = false;
+  setRawMode(_mode: boolean): this {
+    return this;
+  }
+}
+
+export const stdin = new ReadStream({
+  read(): void {
+    this.push(null);
+  },
+});
+
+function chunkToBuffer(
+  chunk: Buffer | ArrayBufferView | DataView | string,
+  encoding: BufferEncoding
+): Uint8Array {
+  if (typeof chunk === 'string') {
+    return new Uint8Array(Buffer.from(chunk, encoding));
+  }
+  return new Uint8Array(
+    Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+  );
+}
+
+/**
+ * Mock non-TTY TTY WriteStream
+ */
+class WriteStream extends Writable {
+  fd: number;
+  isTTY: boolean = false;
+  columns: number = 120;
+  rows: number = 40;
+
+  constructor(opts: any, fd: number) {
+    super(opts);
+    this.fd = fd;
+  }
+  getColorDepth(_env?: object): number {
+    return 1;
+  }
+  hasColors(_count?: number, _env?: object): boolean {
+    return false;
+  }
+  clearLine(_dir: -1 | 0 | 1, callback?: () => void): boolean {
+    if (callback) nextTick(callback);
+    return true;
+  }
+  clearScreenDown(callback?: () => void): boolean {
+    if (callback) nextTick(callback);
+    return true;
+  }
+  cursorTo(_x: number, _y?: number, callback?: () => void): boolean {
+    if (callback) nextTick(callback);
+    return true;
+  }
+  moveCursor(_dx: number, _dy: number, callback?: () => void): boolean {
+    if (callback) nextTick(callback);
+    return true;
+  }
+  getWindowSize(): [number, number] {
+    return [this.columns, this.rows];
+  }
+}
+
+export const stdout = new WriteStream(
+  {
+    write(
+      chunk: string | Buffer | ArrayBufferView | DataView,
+      encoding: BufferEncoding,
+      callback: (error?: Error | null) => void
+    ): void {
+      processImpl.writeAndFlush(1, chunkToBuffer(chunk, encoding));
+      callback();
+    },
+  },
+  1
+);
+
+export const stderr = new WriteStream(
+  {
+    write(
+      chunk: string | Buffer | ArrayBufferView | DataView,
+      encoding: BufferEncoding,
+      callback: (error?: Error | null) => void
+    ): void {
+      processImpl.writeAndFlush(0, chunkToBuffer(chunk, encoding));
+      callback();
+    },
+  },
+  2
+);
 
 // TODO(soon): Implement along with FS work (and as a requirement for removing experimental).
 export const chdir = undefined;
