@@ -342,8 +342,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     //
     // 1. Content decoding is handled automatically by fetch,
     //    but expectation is that it's not handled in http.
-    // 2. Redirects are always followed.
-    // 3. Nothing is directly waiting for fetch promise here.
+    // 2. Nothing is directly waiting for fetch promise here.
     //    It's up to the user of the HTTP API to arrange for
     //    the request to be held open until the fetch completes,
     //    typically by passing some promise to ctx.waitUntil()
@@ -355,6 +354,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       headers,
       body: body ?? null,
       signal: this.#abortController.signal,
+      redirect: 'manual',
     })
       .then(this.#handleFetchResponse.bind(this))
       .catch(this.#handleFetchError.bind(this));

@@ -439,6 +439,7 @@ wd_test(
         "HELLO_WORLD_SERVER_PORT",
         "HEADER_VALIDATION_SERVER_PORT",
     ],
+    tags = ["requires-network"],
 )
 
 js_binary(
