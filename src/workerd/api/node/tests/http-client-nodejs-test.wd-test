@@ -18,6 +18,6 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-    ( name = "internet", network = ( allow = ["private"] ) ),
+    ( name = "internet", network = ( allow = ["private", "public"] ) ),
   ],
 );
