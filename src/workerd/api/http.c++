@@ -311,15 +311,15 @@ bool Headers::has(jsg::ByteString name) {
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
+  requireValidHeaderName(name);
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
   setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  requireValidHeaderName(name);
   // The variation of toLower we use here creates a copy.
   auto key = js.accountedByteString(toLower(name));
-  value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
   auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
   if (!emplaced) {
     // Overwrite existing value(s).
