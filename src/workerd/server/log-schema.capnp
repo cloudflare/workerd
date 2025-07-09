@@ -28,7 +28,8 @@ struct LogEntry {
   # Context depth for nested operations (optional, only included if > 0)
 
   enum LogLevel {
-    debug @0 $Json.name("debug");
+    debug @0 $Cxx.name("debug_") $Json.name("debug");
+    # in C++, the constant will be DEBUG_ to avoid clashing with the DEBUG macro
     info @1 $Json.name("info");
     warning @2 $Json.name("warning");
     error @3 $Json.name("error");

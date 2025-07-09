@@ -26,7 +26,7 @@ log_schema::LogEntry::LogLevel severityToLogLevel(kj::LogSeverity severity) {
     case kj::LogSeverity::FATAL:
       return log_schema::LogEntry::LogLevel::FATAL;
     case kj::LogSeverity::DBG:
-      return log_schema::LogEntry::LogLevel::DEBUG;
+      return log_schema::LogEntry::LogLevel::DEBUG_;
   }
 }
 
