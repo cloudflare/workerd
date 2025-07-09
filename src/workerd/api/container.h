@@ -68,7 +68,6 @@ class Container: public jsg::Object {
   kj::Maybe<jsg::Value> destroyReason;
   void monitorOnBackgroundIfNeeded();
 
-  // Store the shared monitor promise and its KJ counterpart
   kj::Maybe<kj::ForkedPromise<uint8_t>> monitorKjPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> monitorJsPromise;
 
