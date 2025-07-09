@@ -1013,6 +1013,13 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   });
 
   co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
+  // If we get to this point, we are done processing tail stream events. However, the
+  // TailStreamTarget may still have pending promises, which should be cleaned up before we return
+  // so that the capability will be cleaned up properly. The drain() call can't be placed here
+  // directly for this cleanup since it should still run if there is an exception, hence the
+  // KJ_DEFER() block. We can't drain twice either, so await scheduled promises using
+  // finishScheduled() instead.
+  co_await incomingRequest->finishScheduled();
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
