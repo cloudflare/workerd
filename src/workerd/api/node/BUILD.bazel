@@ -315,6 +315,7 @@ wd_test(
     src = "tests/dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/dns-nodejs-test.js"],
+    tags = ["requires-network"],
 )
 
 js_binary(
