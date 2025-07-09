@@ -925,3 +925,9 @@ export class ERR_UNESCAPED_CHARACTERS extends NodeTypeError {
     super('ERR_UNESCAPED_CHARACTERS', `${field} contains unescaped characters`);
   }
 }
+
+export class ERR_SYSTEM_ERROR extends NodeError {
+  constructor(message: string) {
+    super('ERR_SYSTEM_ERROR', message);
+  }
+}
