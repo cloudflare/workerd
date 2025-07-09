@@ -44,6 +44,18 @@ alias(
 )
 
 alias(
+    name = "async-trait-0.1.88",
+    actual = "@crates_vendor__async-trait-0.1.88//:async_trait",
+    tags = ["manual"],
+)
+
+alias(
+    name = "async-trait",
+    actual = "@crates_vendor__async-trait-0.1.88//:async_trait",
+    tags = ["manual"],
+)
+
+alias(
     name = "capnp-0.21.4",
     actual = "@crates_vendor__capnp-0.21.4//:capnp",
     tags = ["manual"],
