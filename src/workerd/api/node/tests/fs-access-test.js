@@ -15,6 +15,11 @@ import {
   exists,
   promises,
   constants,
+  fstatSync,
+  closeSync,
+  openSync,
+  writeSync,
+  readSync,
 } from 'node:fs';
 
 const { F_OK, R_OK, W_OK, X_OK } = constants;
@@ -291,4 +296,45 @@ export const existsCallbackTest = {
   },
 };
 
+export const stdioFds = {
+  test() {
+    let stat1 = fstatSync(0);
+    let stat2 = fstatSync(1);
+    let stat3 = fstatSync(2);
+    ok(stat1.isCharacterDevice());
+    ok(stat2.isCharacterDevice());
+    ok(stat3.isCharacterDevice());
+    closeSync(0);
+    closeSync(1);
+    closeSync(2);
+    // After closing the stdio file descriptors, they can still be used.
+    // That is, we don't actually close them.
+    stat1 = fstatSync(0);
+    stat2 = fstatSync(1);
+    stat3 = fstatSync(2);
+    ok(stat1.isCharacterDevice());
+    ok(stat2.isCharacterDevice());
+    ok(stat3.isCharacterDevice());
+
+    // Writing to the stdio file descriptors is permitted, always in append mode.
+    // Position is ignored.
+    writeSync(0, 'Hello, stdin!\n', 1000);
+    writeSync(0, 'test', 500);
+
+    stat1 = fstatSync(0);
+    strictEqual(stat1.size, 18);
+
+    const buf = Buffer.alloc(20);
+    // Position is ignored.
+    const bytesRead = readSync(0, buf, { position: 1000 });
+    strictEqual(bytesRead, 18);
+    strictEqual(buf.toString('utf8', 0, bytesRead), 'Hello, stdin!\ntest');
+
+    stat1 = fstatSync(0);
+    strictEqual(stat1.size, 0);
+
+    const fd = openSync('/tmp/test.txt', 'w');
+    strictEqual(fd, 3);
+  },
+};
 // There is no promise version of exists in Node.js, so no test for it here.
