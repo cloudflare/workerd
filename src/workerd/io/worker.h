@@ -177,8 +177,10 @@ class Worker: public kj::AtomicRefcounted {
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
-  static void setupContext(
-      jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode);
+  static void setupContext(jsg::Lock& lock,
+      v8::Local<v8::Context> context,
+      Worker::ConsoleMode consoleMode,
+      bool structuredLogging);
 
  private:
   kj::Own<const Script> script;
@@ -206,6 +208,7 @@ class Worker: public kj::AtomicRefcounted {
   static void handleLog(jsg::Lock& js,
       ConsoleMode mode,
       LogLevel level,
+      bool structuredLogging,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
 
@@ -314,7 +317,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::StringPtr id,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
-      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
+      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY,
+      bool structuredLogging = false);
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -456,6 +460,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<Api> api;
   ConsoleMode consoleMode;
+  bool structuredLogging;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.

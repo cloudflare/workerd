@@ -313,7 +313,9 @@ class TestStream {
 
 class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
  public:
-  TestServer(kj::StringPtr configText, kj::SourceLocation loc = {})
+  TestServer(kj::StringPtr configText,
+      Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
+      kj::SourceLocation loc = {})
       : ws(loop),
         config(parseConfig(configText, loc)),
         root(kj::newInMemoryDirectory(*this)),
@@ -324,7 +326,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
             timer,
             mockNetwork,
             *this,
-            Worker::ConsoleMode::INSPECTOR_ONLY,
+            consoleMode,
             [this](kj::String error) {
               if (expectedErrors.startsWith(error) && expectedErrors[error.size()] == '\n') {
                 expectedErrors = expectedErrors.slice(error.size() + 1);
@@ -4914,5 +4916,145 @@ KJ_TEST("Server: Durable Object facets") {
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
 }
 
+#if __linux__
+// This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
+#include <unistd.h>
+
+struct FdPair {
+  kj::AutoCloseFd output;
+  kj::AutoCloseFd input;
+};
+
+auto makePipeFds() {
+  int pipeFds[2];
+  KJ_SYSCALL(pipe2(pipeFds, 0));
+
+  return FdPair{
+    .output = kj::AutoCloseFd(pipeFds[0]),
+    .input = kj::AutoCloseFd(pipeFds[1]),
+  };
+}
+
+template <typename Func>
+auto expectLogLine(int fd, Func&& f) {
+  char buffer[4096];
+  int pos = 0;
+  char c;
+  while (read(fd, &c, 1) == 1) {
+    if (c == '\n') {
+      break;
+    }
+    if (pos < sizeof(buffer) - 1) {
+      buffer[pos++] = c;
+    }
+  }
+  buffer[pos] = '\0';  // null-terminate
+
+  kj::StringPtr logline(buffer);
+  f(logline);
+}
+
+KJ_TEST("Server: structured logging with console methods") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    console.log("This is a log message", { key: "value" });
+                `    console.info("This is an info message");
+                `    console.warn("This is a warning message");
+                `    console.error("This is an error message");
+                `    console.debug("This is a debug message");
+                `    console.debug({a: 1});
+                `
+                `    try {
+                `      throw new Error("Test exception for structured logging");
+                `    } catch (e) {
+                `      console.error(e);
+                `    }
+                `
+                `    return new Response("Structured logging test completed");
+                `  }
+                `}
+            )
+          ]
+        )
+      )
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ],
+    # Enable structured logging for this test
+    structuredLogging = true
+  ))"_kj,
+      Worker::ConsoleMode::STDOUT);
+  auto interceptorPipe = makePipeFds();
+  int originalStdout = dup(STDOUT_FILENO);
+  int originalStderr = dup(STDERR_FILENO);
+  KJ_SYSCALL(dup2(interceptorPipe.input.get(), STDOUT_FILENO));
+  KJ_SYSCALL(dup2(interceptorPipe.input.get(), STDERR_FILENO));
+  interceptorPipe.input = nullptr;
+  KJ_DEFER({
+    // Restore stdout/stderr
+    KJ_SYSCALL(dup2(originalStdout, STDOUT_FILENO));
+    close(originalStdout);
+    KJ_SYSCALL(dup2(originalStderr, STDERR_FILENO));
+    close(originalStderr);
+  });
+
+  test.start();
+  auto conn = test.connect("test-addr");
+
+  conn.sendHttpGet("/");
+  conn.recvHttp200("Structured logging test completed");
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"({"timestamp")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a log message { key: 'value' }")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"info")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is an info message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"warn")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a warning message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is an error message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"This is a debug message")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"{ a: 1 }")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(
+        logline.contains(
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:11:13)")_"),
+        logline);
+  });
+}
+#endif  // __linux__
 }  // namespace
 }  // namespace workerd::server

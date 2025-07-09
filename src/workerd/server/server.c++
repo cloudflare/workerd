@@ -4033,7 +4033,8 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       def.source.variant.is<WorkerSource::ScriptSource>() &&
               !def.featureFlags.getNewModuleRegistry()
           ? Worker::ConsoleMode::INSPECTOR_ONLY
-          : consoleMode);
+          : consoleMode,
+      structuredLogging);
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -4826,6 +4827,10 @@ kj::Promise<void> Server::handleDrain(kj::Promise<void> drainWhen) {
 kj::Promise<void> Server::run(
     jsg::V8System& v8System, config::Config::Reader config, kj::Promise<void> drainWhen) {
   TRACE_EVENT("workerd", "Server.run");
+
+  // Update structured logging setting from config
+  structuredLogging = config.getStructuredLogging();
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();

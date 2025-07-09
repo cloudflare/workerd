@@ -10,6 +10,7 @@
 #include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
+#include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
 #include <workerd/server/workerd-meta.capnp.h>
 #include <workerd/server/workerd.capnp.h>
@@ -1344,6 +1345,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
       TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
+
+      // Initialize JSON logger if structured logging is enabled (similar to SyslogFriendlyLogger)
+      kj::Maybe<JsonLogger> jsonLogger;
+      if (config.getStructuredLogging()) {
+        jsonLogger.emplace();  // Stack-allocated instance for the entire serve scope
+      }
+
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
       jsg::V8System v8System(v8Platform,

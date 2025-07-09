@@ -61,6 +61,23 @@ namespace workerd {
 
 namespace {
 
+constexpr kj::StringPtr logLevelToString(LogLevel level) {
+  switch (level) {
+    case LogLevel::DEBUG_:
+      return "debug";
+    case LogLevel::INFO:
+      return "info";
+    case LogLevel::LOG:
+      return "log";
+    case LogLevel::WARN:
+      return "warn";
+    case LogLevel::ERROR:
+      return "error";
+    default:
+      return "log";
+  }
+}
+
 void headersToCDP(const kj::HttpHeaders& in, capnp::JsonValue::Builder out) {
   std::map<kj::StringPtr, kj::Vector<kj::StringPtr>> inMap;
   in.forEach([&](kj::StringPtr name, kj::StringPtr value) {
@@ -559,6 +576,7 @@ struct Worker::Isolate::Impl {
           oldCurrentApi(currentApi),
           limitEnforcer(isolate.getLimitEnforcer()),
           consoleMode(isolate.consoleMode),
+          structuredLogging(isolate.structuredLogging),
           lock(isolate.api->lock(stackScope)) {
       WarnAboutIsolateLockScope::maybeWarn();
 
@@ -606,7 +624,7 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      Worker::setupContext(*lock, context, consoleMode);
+      Worker::setupContext(*lock, context, consoleMode, structuredLogging);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -642,6 +660,10 @@ struct Worker::Isolate::Impl {
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
 
     ConsoleMode consoleMode;
+
+    // When structuredLogging is true AND consoleMode is STDOUT js logs will be emitted to STDOUT
+    // as newline separated json objects.
+    bool structuredLogging;
 
    public:
     kj::Own<jsg::Lock> lock;
@@ -984,12 +1006,14 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::StringPtr id,
     kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
-    ConsoleMode consoleMode)
+    ConsoleMode consoleMode,
+    bool structuredLogging)
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       api(kj::mv(apiParam)),
       consoleMode(consoleMode),
+      structuredLogging(structuredLogging),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
@@ -1458,8 +1482,10 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
-void Worker::setupContext(
-    jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode) {
+void Worker::setupContext(jsg::Lock& lock,
+    v8::Local<v8::Context> context,
+    Worker::ConsoleMode consoleMode,
+    bool structuredLogging) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
@@ -1475,9 +1501,9 @@ void Worker::setupContext(
         lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
 
     auto f = lock.wrapSimpleFunction(context,
-        [consoleMode, level, original = kj::mv(original)](
+        [consoleMode, level, structuredLogging, original = kj::mv(original)](
             jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      handleLog(js, consoleMode, level, original, info);
+      handleLog(js, consoleMode, level, structuredLogging, original, info);
     });
     jsg::check(console->Set(context, methodStr, f));
   };
@@ -1809,12 +1835,16 @@ void Worker::processEntrypointClass(jsg::Lock& js,
 void Worker::handleLog(jsg::Lock& js,
     ConsoleMode consoleMode,
     LogLevel level,
+    bool structuredLogging,
     const v8::Global<v8::Function>& original,
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
   auto context = js.v8Context();
   int length = info.Length();
-  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 1);
+  // to pass additional arguments from this function to js' `formatLog` we add arguments to the end
+  // of the arguments vector, then in formatLog we `pop` these from the vector.
+  // 3 is just the number of args we currently pass.
+  v8::LocalVector<v8::Value> args(js.v8Isolate, length + 3);
   for (auto i: kj::zeroTo(length)) args[i] = info[i];
   jsg::check(original.Get(js.v8Isolate)->Call(context, info.This(), length, args.data()));
 
@@ -1920,7 +1950,8 @@ void Worker::handleLog(jsg::Lock& js,
 #endif
 
     // Log warnings and errors to stderr
-    auto useStderr = level >= LogLevel::WARN;
+    // Always log to stdout when structuredLogging is enabled.
+    auto useStderr = level >= LogLevel::WARN && !structuredLogging;
     auto fd = useStderr ? stderr : stdout;
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
     auto colors =
@@ -1932,9 +1963,12 @@ void Worker::handleLog(jsg::Lock& js,
     KJ_ASSERT(formatLogVal->IsFunction());
     auto formatLog = formatLogVal.As<v8::Function>();
 
+    auto levelStr = logLevelToString(level);
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
+    args[length + 1] = v8::Boolean::New(js.v8Isolate, structuredLogging);
+    args[length + 2] = jsg::v8StrIntern(js.v8Isolate, levelStr);
     auto formatted = js.toString(
-        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 1, args.data())));
+        jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
     fprintf(fd, "%s\n", formatted.cStr());
     fflush(fd);
   }

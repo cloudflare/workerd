@@ -131,6 +131,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   bool experimental = false;
 
   Worker::ConsoleMode consoleMode;
+  bool structuredLogging;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
