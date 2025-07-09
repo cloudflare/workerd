@@ -39,7 +39,7 @@ class Container: public jsg::Object {
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
   void start(jsg::Lock& js, jsg::Optional<StartupOptions> options);
-  jsg::Promise<void> monitor(jsg::Lock& js);
+  jsg::MemoizedIdentity<jsg::Promise<void>>& monitor(jsg::Lock& js);
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
@@ -68,8 +68,13 @@ class Container: public jsg::Object {
   kj::Maybe<jsg::Value> destroyReason;
   void monitorOnBackgroundIfNeeded();
 
+  // Store the shared monitor promise and its KJ counterpart
+  kj::Maybe<kj::ForkedPromise<uint8_t>> monitorKjPromise;
+  kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> monitorJsPromise;
+
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);
+    visitor.visit(monitorJsPromise);
   }
 
   class TcpPortWorkerInterface;
