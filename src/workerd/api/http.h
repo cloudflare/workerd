@@ -46,7 +46,7 @@ public:
   };
 
   Headers(): guard(Guard::NONE) {}
-  explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
+  // explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
 
@@ -172,15 +172,16 @@ public:
   JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& entry : headers) {
-      tracker.trackField(entry.key, entry.value);
-    }
+    // for (const auto& entry : headers) {
+      // tracker.trackField(entry.key, entry.value);
+    // }
   }
 
-private:
+  using Str = kj::OneOf<kj::StringPtr, kj::String>;
+  using Values = kj::Vector<Str>;
+
   struct Header {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString name;
+    Str name;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
     // able to re-serialize them separately. This is particularly important for the Set-Cookie
@@ -192,27 +193,63 @@ private:
     //
     // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
-    kj::Vector<jsg::ByteString> values;
+    // kj::OneOf<kj::StringPtr, kj::Vector<kj::OneOf<kj::String, kj::Vector<kj::String>>>> values;
+    // kj::Vector<jsg::ByteString> values;
+    Values values;
 
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
+    explicit Header(Str name, Values values)
+        : name(kj::mv(name)), values(kj::mv(values)) {}
+    explicit Header(Str name, Str value)
+        :name(kj::mv(name)), values(1) {
       values.add(kj::mv(value));
     }
 
-    JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
-      tracker.trackField("name", name);
-      for (const auto& value : values) {
-        tracker.trackField(nullptr, value);
-      }
-    }
+    // JSG_MEMORY_INFO(Header) {
+    //   tracker.trackField("name", name);
+    //   KJ_SWITCH_ONEOF(values) {
+    //     KJ_CASE_ONEOF(value, Str) {
+    //       tracker.trackField("value", value);
+    //     }
+    //     KJ_CASE_ONEOF(vec, kj::Vector<Str>) {
+    //       for (const auto& value : vec) {
+    //         tracker.trackField(nullptr, value);
+    //       }
+    //     }
+    //   }
+    // }
   };
 
+  struct HeaderKey {
+    kj::StringPtr name;
+
+    HeaderKey(const Str& input) {
+      KJ_SWITCH_ONEOF(input) {
+        KJ_CASE_ONEOF(value, kj::StringPtr) {
+          name = value;
+        }
+        KJ_CASE_ONEOF(value, kj::String) {
+          name = value;
+        }
+      }
+    }
+
+    bool operator==(const HeaderKey& other) const {
+      return name == other.name;
+    }
+
+    bool operator==(kj::StringPtr other) const {
+      return name == other;
+    }
+
+    bool operator==(const char* other) const {
+      KJ_UNIMPLEMENTED("operator==");
+    }
+  };
+  private:
+
   Guard guard;
-  kj::HashMap<kj::StringPtr, Header> headers;
+  kj::HashMap<HeaderKey, Header> headers;
+  kj::Maybe<kj::Array<kj::byte>> buffer;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
@@ -1323,6 +1360,10 @@ bool isRedirectStatusCode(uint statusCode);
 kj::String makeRandomBoundaryCharacters();
 // Make a boundary string for FormData serialization.
 // TODO(cleanup): Move to form-data.{h,c++}?
+
+inline auto KJ_HASHCODE(const Headers::HeaderKey& key) {
+  return kj::hashCode(key.name);
+}
 
 #define EW_HTTP_ISOLATE_TYPES         \
   api::FetchEvent,                    \
