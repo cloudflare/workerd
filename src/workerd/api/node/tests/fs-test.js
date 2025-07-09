@@ -253,7 +253,9 @@ export const writeSyncTest = {
       kErrInvalidArgType
     );
     throws(() => writeSync(123, 'Hello World'), kErrEBadf);
-    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), kErrOutOfRange);
+    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => writeSync(fd, Buffer.alloc(2), { length: 5 }),
       kErrInvalidArgValue
@@ -313,10 +315,9 @@ export const writeAsyncCallbackTest = {
       () => write(fd, 'Hello World', { position: 'hello' }, mustNotCall),
       kErrInvalidArgType
     );
-    throws(
-      () => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall),
-      kErrOutOfRange
-    );
+    throws(() => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => write(fd, Buffer.alloc(2), { length: 5 }, mustNotCall),
       kErrInvalidArgValue
@@ -429,7 +430,7 @@ export const writeSyncTest4 = {
 
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 100, 3), {
-      message: /out of bounds/,
+      message: /outside of buffer bounds/,
     });
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 0, 100), {
