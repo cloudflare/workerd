@@ -146,7 +146,11 @@ void HibernationManagerImpl::acceptWebSocket(
 
   // Finally, we initiate the readloop for this HibernatableWebSocket and
   // give the task to the HibernationManager so it lives long.
-  readLoopTasks.add(handleReadLoop(refToHibernatable));
+  readLoopTasks.add(handleReadLoop(refToHibernatable).catch_([](kj::Exception&& e) {
+    if (isInterestingException(e)) {
+      LOG_EXCEPTION("HibernationManagerImpl::handleReadLoop", e);
+    }
+  }));
 }
 
 kj::Promise<void> HibernationManagerImpl::handleReadLoop(HibernatableWebSocket& refToHibernatable) {
