@@ -9,6 +9,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     # When adding packages here, please only enable features as needed to keep compile times and
     # binary sizes bounded.
     "anyhow": crate.spec(version = "1"),
+    "async-trait": crate.spec(version = "0"),
     "capnp": crate.spec(version = "0"),
     "capnpc": crate.spec(version = "0"),
     "clang-ast": crate.spec(version = "0"),

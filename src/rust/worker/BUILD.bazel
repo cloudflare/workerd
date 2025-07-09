@@ -1,0 +1,43 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "worker",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/kj",
+        "//src/workerd/io:worker-interface",
+        "@workerd-cxx//kj-rs",
+    ],
+    cxx_bridge_src = "lib.rs",
+    proc_macro_deps = [
+        "@crates_vendor//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":rust-worker-interface",
+        "@workerd-cxx//kj-rs",
+    ],
+)
+
+cc_library(
+    name = "rust-worker-interface",
+    srcs = ["rust-worker-interface.cc"],
+    hdrs = ["rust-worker-interface.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":worker@cxx",
+        "//src/workerd/io:worker-interface",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+cc_test(
+    name = "rust-worker-interface-test",
+    srcs = ["rust-worker-interface-test.cc"],
+    deps = [
+        ":rust-worker-interface",
+        ":worker",  # This provides the Rust implementations
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj:kj-test",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)

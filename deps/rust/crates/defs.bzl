@@ -345,6 +345,7 @@ _NORMAL_DEV_ALIASES = {
 _PROC_MACRO_DEPENDENCIES = {
     "": {
         _COMMON_CONDITION: {
+            "async-trait": Label("@crates_vendor//:async-trait-0.1.88"),
             "rustversion": Label("@crates_vendor//:rustversion-1.0.21"),
         },
     },
@@ -476,6 +477,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/anyhow/1.0.98/download"],
         strip_prefix = "anyhow-1.0.98",
         build_file = Label("//deps/rust/crates:BUILD.anyhow-1.0.98.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__async-trait-0.1.88",
+        sha256 = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/async-trait/0.1.88/download"],
+        strip_prefix = "async-trait-0.1.88",
+        build_file = Label("//deps/rust/crates:BUILD.async-trait-0.1.88.bazel"),
     )
 
     maybe(
@@ -1289,12 +1300,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__rustc-demangle-0.1.25",
-        sha256 = "989e6739f80c4ad5b13e0fd7fe89531180375b18520cc8c82080e4dc4035b84f",
+        name = "crates_vendor__rustc-demangle-0.1.26",
+        sha256 = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rustc-demangle/0.1.25/download"],
-        strip_prefix = "rustc-demangle-0.1.25",
-        build_file = Label("//deps/rust/crates:BUILD.rustc-demangle-0.1.25.bazel"),
+        urls = ["https://static.crates.io/crates/rustc-demangle/0.1.26/download"],
+        strip_prefix = "rustc-demangle-0.1.26",
+        build_file = Label("//deps/rust/crates:BUILD.rustc-demangle-0.1.26.bazel"),
     )
 
     maybe(
@@ -1739,6 +1750,7 @@ def crate_repositories():
 
     return [
         struct(repo = "crates_vendor__anyhow-1.0.98", is_dev_dep = False),
+        struct(repo = "crates_vendor__async-trait-0.1.88", is_dev_dep = False),
         struct(repo = "crates_vendor__capnp-0.21.4", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.21.2", is_dev_dep = False),
         struct(repo = "crates_vendor__cc-1.2.30", is_dev_dep = False),

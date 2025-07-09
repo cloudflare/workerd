@@ -55,6 +55,7 @@
 -isystembazel-bin/src/rust/dns/_virtual_includes/dns@cxx
 -isystembazel-bin/src/rust/python-parser/_virtual_includes/python-parser@cxx
 -isystembazel-bin/src/rust/net/_virtual_includes/net@cxx
+-isystembazel-bin/src/rust/worker/_virtual_includes/worker@cxx
 -D_FORTIFY_SOURCE=1
 -D_LIBCPP_REMOVE_TRANSITIVE_INCLUDES
 -D_LIBCPP_NO_ABI_TAG
