@@ -199,29 +199,17 @@ private:
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
     kj::Vector<jsg::ByteString> values;
     kj::uint hash;
+    jsg::ExternalMemoryAdjustment memoryAdjustment;
 
-    Header clone() const {
-      return Header(name, KJ_MAP(val, values) {
-        return jsg::ByteString(kj::str(val));
-      }, hash);
-    }
+    Header clone(jsg::Lock& js) const;
 
-    Header(kj::String name, kj::String value)
-        : name(kj::mv(name)), hash(hashCode(this->name)) {
-      values.add(jsg::ByteString(kj::mv(value)));
-    }
+    Header(jsg::Lock& js, kj::String name, kj::String value);
 
-    Header(kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash)
-        : name(kj::str(name)), values(kj::mv(values)), hash(hash) {}
+    Header(jsg::Lock& js, kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash);
 
-    void add(jsg::ByteString value) {
-      values.add(kj::mv(value));
-    }
+    void add(jsg::ByteString value);
 
-    void set(jsg::ByteString value) {
-      values.clear();
-      values.add(kj::mv(value));
-    }
+    void set(jsg::ByteString value);
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);

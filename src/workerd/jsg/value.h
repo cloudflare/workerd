@@ -529,7 +529,8 @@ class StringWrapper {
     if constexpr (kj::isSameType<kj::String, T>()) {
       return js.accountedKjString(kj::mv(buf));
     } else if constexpr (kj::isSameType<ByteString, T>()) {
-      return js.accountedByteString(kj::mv(buf));
+      //return js.accountedByteString(kj::mv(buf));
+      return jsg::ByteString(kj::mv(buf));
     } else if constexpr (kj::isSameType<USVString, T>()) {
       return js.accountedUSVString(kj::mv(buf));
     } else if constexpr (kj::isSameType<DOMString, T>()) {

@@ -63,7 +63,7 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   if (slice.size() == value.size()) {
     return kj::mv(value);
   }
-  return js.accountedByteString(kj::str(slice));
+  return jsg::ByteString(kj::str(slice));
 }
 
 void requireValidHeaderName(const jsg::ByteString& name) {
@@ -105,7 +105,7 @@ Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict
 Headers::Headers(jsg::Lock& js, const Headers& other, Guard guard): guard(guard) {
   headers.reserve(other.headers.size());
   for (const auto& header: other.headers) {
-    headers.insert(header.clone());
+    headers.insert(header.clone(js));
   }
 }
 
@@ -113,9 +113,9 @@ Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guar
   headers.reserve(other.size());
   other.forEach([this, &js](auto name, auto value) {
     KJ_IF_SOME(existing, headers.find(name)) {
-      existing.add(js.accountedByteString(value));
+      existing.add(jsg::ByteString(kj::str(value)));
     } else {
-      headers.insert(Header(js.accountedByteString(name), js.accountedByteString(value)));
+      headers.insert(Header(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value))));
     }
   });
 }
@@ -269,7 +269,7 @@ void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString 
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.set(kj::mv(value));
   } else {
-    headers.insert(Header(kj::mv(name), kj::mv(value)));
+    headers.insert(Header(js, kj::mv(name), kj::mv(value)));
   }
 }
 
@@ -282,7 +282,7 @@ void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value)
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.add(kj::mv(value));
   } else {
-    headers.insert(Header(kj::mv(name), kj::mv(value)));
+    headers.insert(Header(js, kj::mv(name), kj::mv(value)));
   }
 }
 
@@ -497,10 +497,10 @@ jsg::Ref<Headers> Headers::deserialize(
     auto value = deserializer.readLengthDelimitedString();
 
     KJ_IF_SOME(existing, result->headers.find(name)) {
-      existing.add(js.accountedByteString(kj::mv(value)));
+      existing.add(jsg::ByteString(kj::mv(value)));
     } else {
       result->headers.insert(
-          Header(js.accountedByteString(kj::mv(name)), js.accountedByteString(kj::mv(value))));
+          Header(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value))));
     }
   }
 
@@ -508,6 +508,45 @@ jsg::Ref<Headers> Headers::deserialize(
   result->guard = static_cast<Guard>(guard);
 
   return result;
+}
+
+Headers::Header::Header(jsg::Lock& js, kj::String name, kj::String value)
+    : name(kj::mv(name)),
+      hash(hashCode(this->name)),
+      memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
+  memoryAdjustment.adjust(this->name.size() + value.size());
+  values.add(jsg::ByteString(kj::mv(value)));
+}
+
+Headers::Header::Header(
+    jsg::Lock& js, kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash)
+    : name(kj::str(name)),
+      values(kj::mv(values)),
+      hash(hash),
+      memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
+  memoryAdjustment.adjust(this->name.size());
+  for (auto& value: this->values) {
+    memoryAdjustment.adjust(value.size());
+  }
+}
+
+void Headers::Header::add(jsg::ByteString value) {
+  memoryAdjustment.adjust(value.size());
+  values.add(kj::mv(value));
+}
+
+void Headers::Header::set(jsg::ByteString value) {
+  ssize_t adjustment = 0;
+  for (auto& v: values) {
+    adjustment += v.size();
+  }
+  memoryAdjustment.adjust(-adjustment);
+  values.clear();
+  add(kj::mv(value));
+}
+
+Headers::Header Headers::Header::clone(jsg::Lock& js) const {
+  return Header(js, name, KJ_MAP(val, values) { return jsg::ByteString(kj::str(val)); }, hash);
 }
 
 }  // namespace workerd::api

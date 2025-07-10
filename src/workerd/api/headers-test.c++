@@ -40,10 +40,6 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
     KJ_ASSERT(statsBefore == 0);
 
     {
-      auto str = js.accountedByteString("hello"_kj);
-      auto after = js.v8Isolate->GetExternalMemory();
-      KJ_ASSERT(after - before == 6);
-
       // The GetHeapStatistics API is not expected to reflect
       // the correct external memory value.
       v8::HeapStatistics stats;
@@ -58,13 +54,13 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
     // Now make sure the Headers object accounts for the memory.
     {
       auto headers = js.alloc<workerd::api::Headers>();
-      headers->append(js, js.accountedByteString("KEY"), js.accountedByteString("value"));
+      headers->append(js, jsg::ByteString(kj::str("KEY")), jsg::ByteString(kj::str("value")));
       auto after = js.v8Isolate->GetExternalMemory();
       // Why 14? That's surprising! I'm happy you asked. Each header
       // entry ends up storing the key twice as an artifact of an
       // old implementation decision. This is something we can probably
       // refactor at some point.
-      KJ_ASSERT(after - before == 10);
+      KJ_ASSERT(after - before == 8);
     }
     after = js.v8Isolate->GetExternalMemory();
     KJ_ASSERT(after == before);
@@ -79,7 +75,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
       auto headers =
           js.alloc<workerd::api::Headers>(js, kjHeaders, workerd::api::Headers::Guard::NONE);
       auto after = js.v8Isolate->GetExternalMemory();
-      KJ_ASSERT(after - before == 9);
+      KJ_ASSERT(after - before == 7);
     }
     after = js.v8Isolate->GetExternalMemory();
     KJ_ASSERT(after == before);

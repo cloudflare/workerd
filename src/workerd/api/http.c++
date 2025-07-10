@@ -194,8 +194,7 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
           if (!headers.hasLowerCase("content-type")) {
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
-            headers.set(
-                js, js.accountedByteString("Content-Type"_kj), js.accountedByteString(kj::mv(ct)));
+            headers.set(js, jsg::ByteString(kj::str("Content-Type")), jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
@@ -1020,8 +1019,8 @@ jsg::Ref<Response> Response::json_(
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(MimeType::JSON.toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+          jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };
@@ -1744,8 +1743,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       }
 
       auto headers = js.alloc<Headers>();
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(dataUrl.getMimeType().toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+          jsg::ByteString(dataUrl.getMimeType().toString()));
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,

@@ -319,7 +319,7 @@ jsg::USVString JsString::toUSVString(Lock& js) const {
 }
 
 jsg::ByteString JsString::toByteString(Lock& js) const {
-  auto result = js.accountedByteString(toString(js));
+  auto result = jsg::ByteString(toString(js));
 
   if (!simdutf::validate_ascii(result.begin(), result.size())) {
     // If storage is one-byte or the string contains only one-byte
@@ -416,7 +416,7 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
-  return js.accountedByteString(str.toString(js));
+  return jsg::ByteString(str.toString(js));
 }
 
 JsDate::operator kj::Date() const {
