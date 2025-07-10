@@ -214,9 +214,9 @@ private:
 
     Header(jsg::Lock& js, kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash);
 
-    void add(jsg::ByteString value);
+    void add(jsg::Lock& js, jsg::ByteString value);
 
-    void set(jsg::ByteString value);
+    void set(jsg::Lock& js, jsg::ByteString value);
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);

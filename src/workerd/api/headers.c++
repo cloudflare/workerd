@@ -266,7 +266,7 @@ void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
 
 void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   KJ_IF_SOME(existing, headers.find(name)) {
-    existing.set(kj::mv(value));
+    existing.set(js, kj::mv(value));
   } else {
     headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
   }
@@ -286,7 +286,7 @@ void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteStr
 
 void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   KJ_IF_SOME(existing, headers.find(name)) {
-    existing.add(kj::mv(value));
+    existing.add(js, kj::mv(value));
   } else {
     headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
   }
@@ -497,7 +497,7 @@ jsg::Ref<Headers> Headers::deserialize(
     auto value = deserializer.readLengthDelimitedString();
 
     KJ_IF_SOME(existing, result->headers.find(name)) {
-      existing.add(jsg::ByteString(kj::mv(value)));
+      existing.add(js, jsg::ByteString(kj::mv(value)));
     } else {
       result->headers.insert(
           Header(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value))));
@@ -514,7 +514,7 @@ Headers::Header::Header(jsg::Lock& js, kj::String name, kj::String value)
     : name(kj::mv(name)),
       hash(hashCode(this->name)),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
-  memoryAdjustment.adjust(this->name.size() + value.size());
+  memoryAdjustment.adjustNow(js, this->name.size() + value.size());
   values.add(jsg::ByteString(kj::mv(value)));
 }
 
@@ -524,25 +524,25 @@ Headers::Header::Header(
       values(kj::mv(values)),
       hash(hash),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
-  memoryAdjustment.adjust(this->name.size());
+  memoryAdjustment.adjustNow(js, this->name.size());
   for (auto& value: this->values) {
-    memoryAdjustment.adjust(value.size());
+    memoryAdjustment.adjustNow(js, value.size());
   }
 }
 
-void Headers::Header::add(jsg::ByteString value) {
-  memoryAdjustment.adjust(value.size());
+void Headers::Header::add(jsg::Lock& js, jsg::ByteString value) {
+  memoryAdjustment.adjustNow(js, value.size());
   values.add(kj::mv(value));
 }
 
-void Headers::Header::set(jsg::ByteString value) {
+void Headers::Header::set(jsg::Lock& js, jsg::ByteString value) {
   ssize_t adjustment = 0;
   for (auto& v: values) {
     adjustment += v.size();
   }
-  memoryAdjustment.adjust(-adjustment);
+  memoryAdjustment.adjustNow(js, -adjustment);
   values.clear();
-  add(kj::mv(value));
+  add(js, kj::mv(value));
 }
 
 Headers::Header Headers::Header::clone(jsg::Lock& js) const {
