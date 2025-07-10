@@ -159,15 +159,30 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  other.forEach([this](kj::StringPtr name, kj::StringPtr value) {
-    HeaderKey key(name);
-    KJ_IF_SOME(h, headers.find(key)) {
-      h.values.add(kj::str(value));
+  size_t bufferSize = 0;
+  other.forEach([&bufferSize](kj::StringPtr name, kj::StringPtr value) {
+    bufferSize += name.size() + value.size() + 2;
+  });
+  kj::Array<char> buffer = kj::heapArray<char>(bufferSize);
+  kj::ArrayPtr<char> ptr = buffer.asPtr();
+
+  auto appendToBuffer = [&ptr](kj::StringPtr value) -> kj::StringPtr {
+    ptr.first(value.size()).copyFrom(value.asArray());
+    ptr[value.size()] = '\0';
+    kj::StringPtr valuePtr(ptr.begin(), value.size());
+    ptr = ptr.slice(value.size() + 1);
+    return valuePtr;
+  };
+  other.forEach([this, &appendToBuffer](kj::StringPtr name, kj::StringPtr value) {
+    KJ_IF_SOME(h, headers.find(HeaderKey(name))) {
+      h.values.add(appendToBuffer(value));
     } else {
-      headers.insert(key, Header(kj::str(name), kj::str(value)));
+      auto nameBuffer = appendToBuffer(name);
+      headers.insert(HeaderKey(nameBuffer), Header(nameBuffer, appendToBuffer(value)));
     }
   });
 
+  this->buffer = kj::mv(buffer);
   this->guard = guard;
 }
 

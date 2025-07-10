@@ -256,7 +256,7 @@ public:
 
   Guard guard;
   kj::HashMap<HeaderKey, Header> headers;
-  kj::Maybe<kj::Array<kj::byte>> buffer;
+  kj::Maybe<kj::Array<char>> buffer;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
