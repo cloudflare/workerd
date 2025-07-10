@@ -10,10 +10,10 @@ def test():
 
 def test_path_ordering():
     """Verify that the Python path is set in the correct order.
-    '/session/metadata/vendor' should be positioned after the system paths
+    '/session/metadata/python_modules' should be positioned after the system paths
     but before any site-packages paths.
     """
-    vendor_path = "/session/metadata/vendor"
+    vendor_path = "/session/metadata/python_modules"
     vendor_index = sys.path.index(vendor_path)
 
     # Check that vendor_path is in sys.path

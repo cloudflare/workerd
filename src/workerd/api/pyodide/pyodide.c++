@@ -98,7 +98,7 @@ kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
 
 kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   auto result = kj::HashSet<kj::String>();
-  const auto vendor = "vendor/"_kj;
+  const auto vendor = "python_modules/"_kj;
   const auto dotPy = ".py"_kj;
   const auto dotSo = ".so"_kj;
   for (auto& item: names) {
@@ -418,7 +418,7 @@ kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
 }
 
 void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
-  // Verify that we don't have module named after the main module in the `vendor` subdir.
+  // Verify that we don't have module named after the main module in the `python_modules` subdir.
   // mainModule includes the .py extension, so we need to extract the base name
   kj::ArrayPtr<const char> mainModuleBase = mainModule;
   if (mainModule.endsWith(".py")) {
@@ -426,18 +426,18 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
   }
 
   for (auto& name: moduleInfo.names) {
-    if (name.startsWith(kj::str("vendor/", mainModule))) {
+    if (name.startsWith(kj::str("python_modules/", mainModule))) {
       JSG_FAIL_REQUIRE(
-          Error, kj::str("Python module vendor/", mainModule, " clashes with main module"));
+          Error, kj::str("Python module python_modules/", mainModule, " clashes with main module"));
     }
-    if (name == kj::str("vendor/", mainModuleBase, "/__init__.py")) {
+    if (name == kj::str("python_modules/", mainModuleBase, "/__init__.py")) {
       JSG_FAIL_REQUIRE(Error,
-          kj::str(
-              "Python module vendor/", mainModuleBase, "/__init__.py clashes with main module"));
+          kj::str("Python module python_modules/", mainModuleBase,
+              "/__init__.py clashes with main module"));
     }
-    if (name == kj::str("vendor/", mainModuleBase, ".so")) {
-      JSG_FAIL_REQUIRE(
-          Error, kj::str("Python module vendor/", mainModuleBase, ".so clashes with main module"));
+    if (name == kj::str("python_modules/", mainModuleBase, ".so")) {
+      JSG_FAIL_REQUIRE(Error,
+          kj::str("Python module python_modules/", mainModuleBase, ".so clashes with main module"));
     }
   }
 }
