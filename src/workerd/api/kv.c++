@@ -73,6 +73,7 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
     TraceContext& traceContext) {
 
   KJ_SWITCH_ONEOF(opTypeOrName) {
+    KJ_CASE_ONEOF(name, kj::LiteralStringConst) {}
     KJ_CASE_ONEOF(opType, LimitEnforcer::KvOpType) {
       // Check if we've hit KV usage limits. (This will throw if we have.)
       context.getLimitEnforcer().newKvRequest(opType);
