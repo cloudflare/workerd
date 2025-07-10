@@ -6,6 +6,7 @@ import functools
 import http.client
 import inspect
 import json
+from asyncio import create_task, gather
 from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
@@ -198,6 +199,30 @@ def _to_python_exception(exc: JsException) -> Exception:
         return TypeError(exc.message)
     else:
         return exc
+
+
+class NonRetryableError(Exception):
+    # This is a marker exception used to signal that a workflow step should not be retried.
+    # This is a special exception used by workflows
+    pass
+
+
+def _from_js_error(exc: JsException) -> Exception:
+    # convert into Python exception after a full round trip
+    # Python - JS - Python
+    if not exc.message or not exc.message.startswith("PythonError"):
+        return _to_python_exception(exc)
+
+    # extract the Python exception type from the traceback
+    error_message_last_line = exc.message.split("\n")[-2]
+    if error_message_last_line.startswith("TypeError"):
+        return TypeError(error_message_last_line)
+    elif error_message_last_line.startswith("ValueError"):
+        return ValueError(error_message_last_line)
+    elif error_message_last_line.startswith("_workers.NonRetryableError"):
+        return NonRetryableError(error_message_last_line)
+    else:
+        return _to_python_exception(exc)
 
 
 @contextmanager
@@ -937,20 +962,24 @@ def handler(func):
 class _WorkflowStepWrapper:
     def __init__(self, js_step):
         self._js_step = js_step
+        self._memoized_dependencies = {}
+        self._in_flight = {}
 
-    def do(self, name, callback=None, config=None):
-        if callback:
-
-            async def wrapper():
-                return _do_call(self, name, config, callback)
-
-            return wrapper()
-
-        # Return a decorator that will execute the function when called
+    def do(self, name, depends=None, concurrent=False, config=None):
         def decorator(func):
             async def wrapper():
-                return _do_call(self, name, config, func)
+                if concurrent:
+                    results = await gather(
+                        *[self._resolve_dependency(dep) for dep in depends or []]
+                    )
+                else:
+                    results = [
+                        await self._resolve_dependency(dep) for dep in depends or []
+                    ]
+                python_results = [python_from_rpc(result) for result in results]
+                return await _do_call(self, name, config, func, *python_results)
 
+            wrapper._step_name = name
             return wrapper
 
         return decorator
@@ -961,20 +990,44 @@ class _WorkflowStepWrapper:
     def sleep_until(self, *args, **kwargs):
         return self._js_step.sleepUntil(*args, **kwargs)
 
+    async def _resolve_dependency(self, dep):
+        if dep._step_name in self._memoized_dependencies:
+            return self._memoized_dependencies[dep._step_name]
+        elif dep._step_name in self._in_flight:
+            return await self._in_flight[dep._step_name]
 
-def _do_call(entrypoint, name, config, callback):
+        return await dep()
+
+
+async def _do_call(entrypoint, name, config, callback, *results):
     async def _callback():
-        result = callback()
+        result = callback(*results)
+
         if inspect.iscoroutine(result):
             result = await result
-        return result
+        return to_js(result, dict_converter=Object.fromEntries)
 
-    if config is None:
-        result = entrypoint._js_step.do(name, _callback)
-    else:
-        result = entrypoint._js_step.do(name, to_js(config), _callback)
+    async def _closure():
+        try:
+            if config is None:
+                coroutine = await entrypoint._js_step.do(name, _callback)
+            else:
+                coroutine = await entrypoint._js_step.do(name, to_js(config), _callback)
 
-    return python_from_rpc(result)
+            return python_from_rpc(coroutine)
+        except Exception as exc:
+            raise _from_js_error(exc) from exc
+
+    task = create_task(_closure())
+    entrypoint._in_flight[name] = task
+
+    try:
+        result = await task
+        entrypoint._memoized_dependencies[name] = result
+    finally:
+        del entrypoint._in_flight[name]
+
+    return result
 
 
 def _wrap_subclass(cls):
@@ -1055,7 +1108,3 @@ class WorkflowEntrypoint:
     def __init_subclass__(cls, **_kwargs):
         _wrap_subclass(cls)
         _wrap_workflow_step(cls)
-
-
-class NonRetryableError(Exception):
-    pass
