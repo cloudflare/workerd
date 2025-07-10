@@ -229,22 +229,19 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
           });
         }
       } else {
-        KJ_UNIMPLEMENTED();
-        // copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.key.name)),
-        //   .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
+        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.key.name)),
+          .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
       }
     }
     return copy.releaseAsArray();
   } else {
-    KJ_UNIMPLEMENTED("oops");
-
-    // // The old behavior before the standard getSetCookie() API was introduced...
-    // auto headersCopy = KJ_MAP(mapEntry, headers) {
-    //   const auto& header = mapEntry.value;
-    //   return DisplayedHeader{
-    //     jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::strArray(header.values, ", "))};
-    // };
-    // return headersCopy;
+    // The old behavior before the standard getSetCookie() API was introduced...
+    auto headersCopy = KJ_MAP(mapEntry, headers) {
+      const auto& header = mapEntry.value;
+      return DisplayedHeader{jsg::ByteString(kj::str(header.name.str)),
+        jsg::ByteString(kj::strArray(header.values, ", "))};
+    };
+    return headersCopy;
   }
 }
 
@@ -299,11 +296,10 @@ kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
 }
 
 kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr name) {
-  KJ_UNIMPLEMENTED();
-  // KJ_IF_SOME(value, headers.find(HeaderKey(name))) {
-  //   return jsg::ByteString(kj::strArray(value.values, ", "));
-  // }
-  // return kj::none;
+  KJ_IF_SOME(value, headers.find(HeaderKey(name))) {
+    return jsg::ByteString(kj::strArray(value.values, ", "));
+  }
+  return kj::none;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
@@ -345,18 +341,15 @@ void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString 
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  KJ_UNIMPLEMENTED();
-  // checkGuard();
-  // requireValidHeaderName(name);
-  // // The variation of toLower we use here creates a copy.
-  // auto key = kj::String(kj::str(toLower(name)));
-  // value = normalizeHeaderValue(js, kj::mv(value));
-  // requireValidHeaderValue(value);
-  // KJ_IF_SOME(header, headers.find(key)) {
-  //   header.values.add(kj::mv(value));
-  // } else {
-  //   headers.insert(key, Header(kj::mv(key), kj::mv(name), kj::mv(value)));
-  // }
+  checkGuard();
+  requireValidHeaderName(name);
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
+  KJ_IF_SOME(header, headers.find(HeaderKey(name))) {
+    header.values.add(kj::mv(value));
+  } else {
+    headers.insert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
+  }
 }
 
 void Headers::delete_(jsg::ByteString name) {
@@ -423,20 +416,18 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
       // single value, so the values iterator must separate them.
       if (entry.key == "set-cookie") {
         for (auto& value: entry.value.values) {
-          values.add(kj::String(kj::str(value.str)));
+          values.add(jsg::ByteString(kj::str(value.str)));
         }
       } else {
-        KJ_UNIMPLEMENTED();
-        // values.add(kj::String(kj::str(kj::strArray(entry.value.values, ", "))));
+        values.add(jsg::ByteString(kj::strArray(entry.value.values, ", ")));
       }
     }
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
   } else {
-    KJ_UNIMPLEMENTED();
-    // auto valuesCopy = KJ_MAP(mapEntry, headers) {
-    //   return kj::String(kj::str(kj::strArray(mapEntry.value.values, ", ")));
-    // };
-    // return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
+    auto valuesCopy = KJ_MAP(mapEntry, headers) {
+      return jsg::ByteString(kj::strArray(mapEntry.value.values, ", "));
+    };
+    return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
   }
 }
 
@@ -580,33 +571,32 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 jsg::Ref<Headers> Headers::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  KJ_UNIMPLEMENTED();
-  // auto result = js.alloc<Headers>();
-  // uint guard = deserializer.readRawUint32();
-  // KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
+  auto result = js.alloc<Headers>();
+  uint guard = deserializer.readRawUint32();
+  KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
 
-  // uint count = deserializer.readRawUint32();
+  uint count = deserializer.readRawUint32();
 
-  // auto commonHeaders = getCommonHeaderList();
-  // for (auto i KJ_UNUSED: kj::zeroTo(count)) {
-  //   uint commonId = deserializer.readRawUint32();
-  //   kj::String name;
-  //   if (commonId == 0) {
-  //     name = deserializer.readLengthDelimitedString();
-  //   } else {
-  //     KJ_ASSERT(commonId < commonHeaders.size());
-  //     name = kj::str(commonHeaders[commonId]);
-  //   }
+  auto commonHeaders = getCommonHeaderList();
+  for (auto i KJ_UNUSED: kj::zeroTo(count)) {
+    uint commonId = deserializer.readRawUint32();
+    kj::String name;
+    if (commonId == 0) {
+      name = deserializer.readLengthDelimitedString();
+    } else {
+      KJ_ASSERT(commonId < commonHeaders.size());
+      name = kj::str(commonHeaders[commonId]);
+    }
 
-  //   auto value = deserializer.readLengthDelimitedString();
+    auto value = deserializer.readLengthDelimitedString();
 
-  //   result->append(js, kj::String(kj::mv(name)), kj::String(kj::mv(value)));
-  // }
+    result->append(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
+  }
 
   // Don't actually set the guard until here because it may block the ability to call `append()`.
-  // result->guard = static_cast<Guard>(guard);
+  result->guard = static_cast<Guard>(guard);
 
-  // return result;
+  return result;
 }
 
 // =======================================================================================

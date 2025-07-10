@@ -186,6 +186,8 @@ public:
         str = KJ_REQUIRE_NONNULL(storage).asPtr();
       }
       Str(kj::StringPtr data) : str(data) {}
+
+      operator kj::StringPtr() const { return str; }
   };
 
   using Values = kj::Vector<Str>;
@@ -241,15 +243,15 @@ public:
     }
 
     bool operator==(const HeaderKey& other) const {
-      return name == other.name;
+      return strcasecmp(name.begin(), other.name.begin()) == 0;
     }
 
     bool operator==(kj::StringPtr other) const {
-      return name == other;
+      return strcasecmp(name.begin(), other.begin()) == 0;
     }
 
     bool operator==(const char* other) const {
-      KJ_UNIMPLEMENTED("operator==");
+      return strcasecmp(name.begin(), other) == 0;
     }
   };
   private:
