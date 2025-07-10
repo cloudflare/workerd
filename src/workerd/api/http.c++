@@ -76,11 +76,13 @@ namespace {
 // }
 
 // Left- and right-trim HTTP whitespace from `value`.
-kj::String normalizeHeaderValue(jsg::Lock& js, kj::StringPtr value) {
+jsg::ByteString normalizeHeaderValue(jsg::Lock& js, kj::StringPtr value) {
   // warnIfBadHeaderString(value);
 
   auto slice = value.asArray();
-  auto isHttpWhitespace = [](char c) { return c == '\t' || c == '\r' || c == '\n' || c == ' '; };
+  constexpr auto isHttpWhitespace = [](char c) {
+    return c == '\t' || c == '\r' || c == '\n' || c == ' ';
+  };
   while (slice.size() > 0 && isHttpWhitespace(slice.front())) {
     slice = slice.slice(1, slice.size());
   }
@@ -88,9 +90,9 @@ kj::String normalizeHeaderValue(jsg::Lock& js, kj::StringPtr value) {
     slice = slice.first(slice.size() - 1);
   }
   if (slice.size() == value.size()) {
-    return kj::str(value);
+    return jsg::ByteString(kj::str(value));
   }
-  return kj::String(kj::str(slice));
+  return jsg::ByteString(kj::str(slice));
 }
 
 void requireValidHeaderName(kj::StringPtr name) {
@@ -277,14 +279,13 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
         // the test fails.
       }
       KJ_CASE_ONEOF(pairs, ByteStringPairs) {
-        KJ_UNIMPLEMENTED();
-        // auto dict = KJ_MAP(entry, pairs) {
-        //   JSG_REQUIRE(entry.size() == 2, TypeError,
-        //       "To initialize a Headers object from a sequence, each inner sequence "
-        //       "must have exactly two elements.");
-        //   return StringDict::Field{kj::mv(entry[0]), kj::mv(entry[1])};
-        // };
-        // return js.alloc<Headers>(js, StringDict{kj::mv(dict)});
+        auto dict = KJ_MAP(entry, pairs) {
+          JSG_REQUIRE(entry.size() == 2, TypeError,
+              "To initialize a Headers object from a sequence, each inner sequence "
+              "must have exactly two elements.");
+          return StringDict::Field{kj::mv(entry[0]), kj::mv(entry[1])};
+        };
+        return js.alloc<Headers>(js, StringDict{kj::mv(dict)});
       }
     }
   }
@@ -293,15 +294,14 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
 }
 
 kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
-  KJ_UNIMPLEMENTED();
-  // requireValidHeaderName(name);
-  // return getNoChecks(js, name.asPtr());
+  requireValidHeaderName(name);
+  return getNoChecks(js, name.asPtr());
 }
 
 kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr name) {
   KJ_UNIMPLEMENTED();
-  // KJ_IF_SOME(value, headers.find(toLower(name))) {
-  //   return kj::String(kj::strArray(value.values, ", "));
+  // KJ_IF_SOME(value, headers.find(HeaderKey(name))) {
+  //   return jsg::ByteString(kj::strArray(value.values, ", "));
   // }
   // return kj::none;
 }
@@ -315,7 +315,7 @@ kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
-  // requireValidHeaderName(name);
+  requireValidHeaderName(name);
 
   if (strcasecmp(name.cStr(), "set-cookie") != 0) {
     JSG_FAIL_REQUIRE(TypeError, "getAll() can only be used with the header name \"Set-Cookie\".");
@@ -328,18 +328,16 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 }
 
 bool Headers::has(jsg::ByteString name) {
-  KJ_UNIMPLEMENTED();
-  // requireValidHeaderName(name);
-  // return headers.find(toLower(kj::mv(name))) != kj::none;
+  requireValidHeaderName(name);
+  return headers.find(HeaderKey(kj::mv(name))) != kj::none;
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  KJ_UNIMPLEMENTED();
-  // checkGuard();
-  // requireValidHeaderName(name);
-  // value = normalizeHeaderValue(js, kj::mv(value));
-  // requireValidHeaderValue(value);
-  // setUnguarded(js, kj::mv(name), kj::mv(value));
+  checkGuard();
+  requireValidHeaderName(name);
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
+  setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -362,10 +360,9 @@ void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value)
 }
 
 void Headers::delete_(jsg::ByteString name) {
-  KJ_UNIMPLEMENTED();
-  // checkGuard();
-  // requireValidHeaderName(name);
-  // headers.erase(toLower(kj::mv(name)));
+  checkGuard();
+  requireValidHeaderName(name);
+  headers.erase(HeaderKey(name));
 }
 
 // There are a couple implementation details of the Headers iterators worth calling out.
@@ -413,9 +410,9 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
     }
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
   } else {
-    KJ_UNIMPLEMENTED();
-    // auto keysCopy = KJ_MAP(mapEntry, headers) { return kj::String(kj::str(mapEntry.value.key)); };
-    // return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
+    auto keysCopy =
+        KJ_MAP(mapEntry, headers) { return jsg::ByteString(kj::str(mapEntry.value.name.str)); };
+    return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
 jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
@@ -551,35 +548,34 @@ static const kj::HashMap<kj::String, uint>& getCommonHeaderMap() {
 }
 
 void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  KJ_UNIMPLEMENTED();
-  // // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
-  // // is a common header ID, or the value zero to indicate an uncommon header, which is then
-  // // followed by a length-delimited name.
+  // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
+  // is a common header ID, or the value zero to indicate an uncommon header, which is then
+  // followed by a length-delimited name.
 
-  // serializer.writeRawUint32(static_cast<uint>(guard));
+  serializer.writeRawUint32(static_cast<uint>(guard));
 
-  // // Write the count of headers.
-  // uint count = 0;
-  // for (auto& entry: headers) {
-  //   count += entry.value.values.size();
-  // }
-  // serializer.writeRawUint32(count);
+  // Write the count of headers.
+  uint count = 0;
+  for (auto& entry: headers) {
+    count += entry.value.values.size();
+  }
+  serializer.writeRawUint32(count);
 
-  // // Now write key/values.
-  // auto& commonHeaders = getCommonHeaderMap();
-  // for (auto& entry: headers) {
-  //   auto& header = entry.value;
-  //   auto commonId = commonHeaders.find(header.key);
-  //   for (auto& value: header.values) {
-  //     KJ_IF_SOME(c, commonId) {
-  //       serializer.writeRawUint32(c);
-  //     } else {
-  //       serializer.writeRawUint32(0);
-  //       serializer.writeLengthDelimited(header.name);
-  //     }
-  //     serializer.writeLengthDelimited(value);
-  //   }
-  // }
+  // Now write key/values.
+  auto& commonHeaders = getCommonHeaderMap();
+  for (auto& entry: headers) {
+    auto& header = entry.value;
+    auto commonId = commonHeaders.find(header.name.str);
+    for (auto& value: header.values) {
+      KJ_IF_SOME(c, commonId) {
+        serializer.writeRawUint32(c);
+      } else {
+        serializer.writeRawUint32(0);
+        serializer.writeLengthDelimited(header.name.str);
+      }
+      serializer.writeLengthDelimited(value.str);
+    }
+  }
 }
 
 jsg::Ref<Headers> Headers::deserialize(
@@ -1582,57 +1578,56 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
 
 jsg::Ref<Response> Response::json_(
     jsg::Lock& js, jsg::JsValue any, jsg::Optional<Initializer> maybeInit) {
-  KJ_UNIMPLEMENTED();
-  // const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
-  //   if (!headers->hasLowerCase("content-type"_kj)) {
-  //     headers->set(js, kj::String(kj::str("content-type"_kj)),
-  //       kj::String(MimeType::JSON.toString()));
-  //   }
-  //   return kj::mv(headers);
-  // };
+  const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
+    if (!headers->hasLowerCase("content-type"_kj)) {
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(MimeType::JSON.toString()));
+    }
+    return kj::mv(headers);
+  };
 
-  // // While this all looks a bit complicated, all the following is doing is checking
-  // // to see if maybeInit contains a content-type header. If it does, the existing
-  // // value is left alone. If it does not, then we set the value of content-type
-  // // to the default content type for JSON payloads. The reason this all looks a bit
-  // // complicated is that maybeInit is an optional kj::OneOf that might be either
-  // // a dict or a jsg::Ref<Response>. If it is a dict, then the optional headers
-  // // field is also an optional kj::OneOf that can be either a dict or a jsg::Ref<Headers>.
-  // // We have to deal with all of the various possibilities here to set the content-type
-  // // appropriately.
-  // KJ_IF_SOME(init, maybeInit) {
-  //   KJ_SWITCH_ONEOF(init) {
-  //     KJ_CASE_ONEOF(dict, InitializerDict) {
-  //       KJ_IF_SOME(headers, dict.headers) {
-  //         dict.headers = maybeSetContentType(js, Headers::constructor(js, kj::mv(headers)));
-  //       } else {
-  //         dict.headers = maybeSetContentType(js, js.alloc<Headers>());
-  //       }
-  //     }
-  //     KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
-  //       auto newInit = InitializerDict{
-  //         .status = res->statusCode,
-  //         .statusText = kj::str(res->statusText),
-  //         .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
-  //         .cf = res->cf.getRef(js),
-  //         .encodeBody =
-  //             kj::str(res->bodyEncoding == Response::BodyEncoding::MANUAL ? "manual" : "automatic"),
-  //       };
+  // While this all looks a bit complicated, all the following is doing is checking
+  // to see if maybeInit contains a content-type header. If it does, the existing
+  // value is left alone. If it does not, then we set the value of content-type
+  // to the default content type for JSON payloads. The reason this all looks a bit
+  // complicated is that maybeInit is an optional kj::OneOf that might be either
+  // a dict or a jsg::Ref<Response>. If it is a dict, then the optional headers
+  // field is also an optional kj::OneOf that can be either a dict or a jsg::Ref<Headers>.
+  // We have to deal with all of the various possibilities here to set the content-type
+  // appropriately.
+  KJ_IF_SOME(init, maybeInit) {
+    KJ_SWITCH_ONEOF(init) {
+      KJ_CASE_ONEOF(dict, InitializerDict) {
+        KJ_IF_SOME(headers, dict.headers) {
+          dict.headers = maybeSetContentType(js, Headers::constructor(js, kj::mv(headers)));
+        } else {
+          dict.headers = maybeSetContentType(js, js.alloc<Headers>());
+        }
+      }
+      KJ_CASE_ONEOF(res, jsg::Ref<Response>) {
+        auto newInit = InitializerDict{
+          .status = res->statusCode,
+          .statusText = kj::str(res->statusText),
+          .headers = maybeSetContentType(js, Headers::constructor(js, res->headers.addRef())),
+          .cf = res->cf.getRef(js),
+          .encodeBody =
+              kj::str(res->bodyEncoding == Response::BodyEncoding::MANUAL ? "manual" : "automatic"),
+        };
 
-  //       KJ_IF_SOME(otherWs, res->webSocket) {
-  //         newInit.webSocket = otherWs.addRef();
-  //       }
+        KJ_IF_SOME(otherWs, res->webSocket) {
+          newInit.webSocket = otherWs.addRef();
+        }
 
-  //       maybeInit = kj::mv(newInit);
-  //     }
-  //   }
-  // } else {
-  //   maybeInit = InitializerDict{
-  //     .headers = maybeSetContentType(js, js.alloc<Headers>()),
-  //   };
-  // }
+        maybeInit = kj::mv(newInit);
+      }
+    }
+  } else {
+    maybeInit = InitializerDict{
+      .headers = maybeSetContentType(js, js.alloc<Headers>()),
+    };
+  }
 
-  // return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
@@ -2308,16 +2303,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         maybeResponseBody.emplace(dataUrl.releaseData());
       }
 
-      KJ_UNIMPLEMENTED();
-      // auto headers = js.alloc<Headers>();
-      // headers->set(js, kj::String(kj::str("content-type"_kj)),
-      //   kj::String(dataUrl.getMimeType().toString()));
-      // return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
-      //     Response::InitializerDict{
-      //       .status = 200,
-      //       .statusText = kj::str("OK"),
-      //       .headers = kj::mv(headers),
-      //     }));
+      auto headers = js.alloc<Headers>();
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(dataUrl.getMimeType().toString()));
+      return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
+          Response::InitializerDict{
+            .status = 200,
+            .statusText = kj::str("OK"),
+            .headers = kj::mv(headers),
+          }));
     }
 
     urlList.add(actualFetcher->parseUrl(js, jsRequest->getUrl()));
