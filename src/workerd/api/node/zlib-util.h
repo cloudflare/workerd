@@ -318,11 +318,11 @@ class ZlibUtil final: public jsg::Object {
     void write(jsg::Lock& js,
         int flush,
         jsg::Optional<kj::Array<kj::byte>> input,
-        int inputOffset,
-        int inputLength,
+        uint32_t inputOffset,
+        uint32_t inputLength,
         kj::Array<kj::byte> output,
-        int outputOffset,
-        int outputLength);
+        uint32_t outputOffset,
+        uint32_t outputLength);
     void reset(jsg::Lock& js);
 
     JSG_RESOURCE_TYPE(CompressionStream) {

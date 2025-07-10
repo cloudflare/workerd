@@ -483,8 +483,8 @@ void ZlibUtil::CompressionStream<CompressionContext>::writeStream(
   if constexpr (!async) {
     context()->work();
     if (checkError(js)) {
-      updateWriteResult();
       writing = false;
+      updateWriteResult();
     }
     return;
   }
@@ -540,6 +540,7 @@ template <typename CompressionContext>
 void ZlibUtil::CompressionStream<CompressionContext>::updateWriteResult() {
   KJ_IF_SOME(wr, writeResult) {
     auto ptr = wr.template asArrayPtr<uint32_t>();
+    JSG_REQUIRE(ptr.size() >= 2, Error, "Invalid write result buffer"_kj);
     context()->getAfterWriteResult(&ptr[1], &ptr[0]);
   }
 }
@@ -549,11 +550,11 @@ template <bool async>
 void ZlibUtil::CompressionStream<CompressionContext>::write(jsg::Lock& js,
     int flush,
     jsg::Optional<kj::Array<kj::byte>> input,
-    int inputOffset,
-    int inputLength,
+    uint32_t inputOffset,
+    uint32_t inputLength,
     kj::Array<kj::byte> output,
-    int outputOffset,
-    int outputLength) {
+    uint32_t outputOffset,
+    uint32_t outputLength) {
   if (flush != Z_NO_FLUSH && flush != Z_PARTIAL_FLUSH && flush != Z_SYNC_FLUSH &&
       flush != Z_FULL_FLUSH && flush != Z_FINISH && flush != Z_BLOCK) {
     JSG_FAIL_REQUIRE(Error, "Invalid flush value");
@@ -567,10 +568,14 @@ void ZlibUtil::CompressionStream<CompressionContext>::write(jsg::Lock& js,
 
   auto input_ensured = input.map([](auto& val) { return val.asPtr(); }).orDefault({});
 
+  // Check for integer overflow...
+  JSG_REQUIRE(inputOffset + inputLength >= inputOffset, Error, "Input access it not within bounds");
+  JSG_REQUIRE(
+      outputOffset + outputLength >= outputOffset, Error, "Input access it not within bounds");
   JSG_REQUIRE(IsWithinBounds(inputOffset, inputLength, input_ensured.size()), Error,
       "Input access is not within bounds"_kj);
   JSG_REQUIRE(IsWithinBounds(outputOffset, outputLength, output.size()), Error,
-      "Input access is not within bounds"_kj);
+      "Output access is not within bounds"_kj);
 
   writeStream<async>(js, flush, input_ensured.slice(inputOffset, inputOffset + inputLength),
       output.slice(outputOffset, outputOffset + outputLength));
@@ -929,11 +934,11 @@ void ZlibUtil::brotliWithCallback(
 #define CREATE_TEMPLATE(T)                                                                         \
   template class ZlibUtil::CompressionStream<T>;                                                   \
   template void ZlibUtil::CompressionStream<T>::write<false>(jsg::Lock & js, int flush,            \
-      jsg::Optional<kj::Array<kj::byte>> input, int inputOffset, int inputLength,                  \
-      kj::Array<kj::byte> output, int outputOffset, int outputLength);                             \
+      jsg::Optional<kj::Array<kj::byte>> input, uint32_t inputOffset, uint32_t inputLength,        \
+      kj::Array<kj::byte> output, uint32_t outputOffset, uint32_t outputLength);                   \
   template void ZlibUtil::CompressionStream<T>::write<true>(jsg::Lock & js, int flush,             \
-      jsg::Optional<kj::Array<kj::byte>> input, int inputOffset, int inputLength,                  \
-      kj::Array<kj::byte> output, int outputOffset, int outputLength);
+      jsg::Optional<kj::Array<kj::byte>> input, uint32_t inputOffset, uint32_t inputLength,        \
+      kj::Array<kj::byte> output, uint32_t outputOffset, uint32_t outputLength);
 
 CREATE_TEMPLATE(ZlibContext)
 CREATE_TEMPLATE(BrotliEncoderContext)
