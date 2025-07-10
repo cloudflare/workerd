@@ -265,7 +265,6 @@ void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
 }
 
 void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
-  // The variation of toLower we use here creates a copy.
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.set(kj::mv(value));
   } else {
@@ -436,13 +435,7 @@ static kj::HashMap<uint, uint> makeCommonHeaderMap() {
   auto list = getCommonHeaderList();
   KJ_ASSERT(MAX_COMMON_HEADER_ID < list.size());
   for (auto i: kj::range(1, MAX_COMMON_HEADER_ID + 1)) {
-    auto key = kj::str(list[i]);
-    for (auto& c: key) {
-      if ('A' <= c && c <= 'Z') {
-        c = c - 'A' + 'a';
-      }
-    }
-    result.insert(Headers::hashCode(key), i);
+    result.insert(Headers::hashCode(list[i]), i);
   }
   return result;
 }
