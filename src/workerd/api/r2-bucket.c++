@@ -1098,23 +1098,22 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
   const auto& m = KJ_REQUIRE_NONNULL(httpMetadata);
 
   KJ_IF_SOME(ct, m.contentType) {
-    headers.set(js, jsg::ByteString(kj::str("content-type"_kj)), jsg::ByteString(kj::str(ct)));
+    headers.setValueChecked(js, "content-type"_kj, jsg::ByteString(kj::str(ct)));
   }
   KJ_IF_SOME(cl, m.contentLanguage) {
-    headers.set(js, jsg::ByteString(kj::str("content-language"_kj)), jsg::ByteString(kj::str(cl)));
+    headers.setValueChecked(js, "content-language"_kj, jsg::ByteString(kj::str(cl)));
   }
   KJ_IF_SOME(cd, m.contentDisposition) {
-    headers.set(
-        js, jsg::ByteString(kj::str("content-disposition"_kj)), jsg::ByteString(kj::str(cd)));
+    headers.setValueChecked(js, "content-disposition"_kj, jsg::ByteString(kj::str(cd)));
   }
   KJ_IF_SOME(ce, m.contentEncoding) {
-    headers.set(js, jsg::ByteString(kj::str("content-encoding"_kj)), jsg::ByteString(kj::str(ce)));
+    headers.setValueChecked(js, "content-encoding"_kj, jsg::ByteString(kj::str(ce)));
   }
   KJ_IF_SOME(cc, m.cacheControl) {
-    headers.set(js, jsg::ByteString(kj::str("cache-control"_kj)), jsg::ByteString(kj::str(cc)));
+    headers.setValueChecked(js, "cache-control"_kj, jsg::ByteString(kj::str(cc)));
   }
   KJ_IF_SOME(ce, m.cacheExpiry) {
-    headers.set(js, jsg::ByteString(kj::str("expires"_kj)), toUTCString(js, ce));
+    headers.setValueChecked(js, "expires"_kj, toUTCString(js, ce));
   }
 }
 

@@ -264,12 +264,18 @@ void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
-void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
+void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
+  setUnguarded(js, kj::mv(name), kj::mv(value));
+}
+
+void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   // The variation of toLower we use here creates a copy.
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.set(kj::mv(value));
   } else {
-    headers.insert(Header(js, kj::mv(name), kj::mv(value)));
+    headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
   }
 }
 
@@ -278,11 +284,20 @@ void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value)
   requireValidHeaderName(name);
   value = normalizeHeaderValue(js, kj::mv(value));
   requireValidHeaderValue(value);
+  appendUnguarded(js, name, kj::mv(value));
+}
 
+void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
+  appendUnguarded(js, name, kj::mv(value));
+}
+
+void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.add(kj::mv(value));
   } else {
-    headers.insert(Header(js, kj::mv(name), kj::mv(value)));
+    headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
   }
 }
 

@@ -97,11 +97,18 @@ public:
 
   void set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
+  // Let set(), but ignores the header guard if set and performs validation on
+  // the value. This can only be called from C++, and may be used to mutate
+  // headers before dispatching a request.
+  void setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value);
+
   // Like set(), but ignores the header guard if set. This can only be called from C++, and may be
   // used to mutate headers before dispatching a request.
-  void setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
+  void setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value);
 
   void append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
+  void appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value);
+  void appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value);
 
   void delete_(jsg::ByteString name);
 

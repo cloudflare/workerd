@@ -54,7 +54,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
     // Now make sure the Headers object accounts for the memory.
     {
       auto headers = js.alloc<workerd::api::Headers>();
-      headers->append(js, jsg::ByteString(kj::str("KEY")), jsg::ByteString(kj::str("value")));
+      headers->appendUnguarded(js, "KEY"_kj, jsg::ByteString(kj::str("value")));
       auto after = js.v8Isolate->GetExternalMemory();
       // Why 14? That's surprising! I'm happy you asked. Each header
       // entry ends up storing the key twice as an artifact of an
