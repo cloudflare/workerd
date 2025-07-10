@@ -79,7 +79,6 @@ import {
   parseFileMode,
   validateBoolean,
   validateObject,
-  validateEncoding,
   validateOneOf,
   validateUint32,
 } from 'node-internal:validators';
@@ -98,9 +97,13 @@ import type {
   WriteFileOptions,
 } from 'node:fs';
 
-type ErrorOnlyCallback = (err: unknown) => void;
-type SingleArgCallback<T> = (err: unknown, result?: T) => void;
-type DoubleArgCallback<T, U> = (err: unknown, result1?: T, result2?: U) => void;
+export type ErrorOnlyCallback = (err: unknown) => void;
+export type SingleArgCallback<T> = (err: unknown, result?: T) => void;
+export type DoubleArgCallback<T, U> = (
+  err: unknown,
+  result1?: T,
+  result2?: U
+) => void;
 
 function callWithErrorOnlyCallback(
   fn: () => void,
@@ -938,7 +941,7 @@ export function readlink(
     | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadLinkSyncOptions;
+  let options: BufferEncoding | 'buffer' | null | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
@@ -948,7 +951,9 @@ export function readlink(
   path = normalizePath(path);
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   callWithSingleArgCallback(
     () => fssync.readlinkSync(path, { encoding }),
     callback
@@ -1002,7 +1007,9 @@ export function realpath(
 
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
 
   callWithSingleArgCallback(
     () => fssync.realpathSync(path, { encoding }),
@@ -1318,13 +1325,6 @@ export function watchFile(): void {
   throw new Error('Not implemented');
 }
 
-export function createReadStream(): void {
-  throw new Error('Not implemented');
-}
-export function createWriteStream(): void {
-  throw new Error('Not implemented');
-}
-
 export function glob(
   _pattern: string | readonly string[],
   _options:
@@ -1402,9 +1402,10 @@ export function glob(
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
+// [x][x][x][x] fs.cp(src, dest[, options], callback)
 //
-// [x][x][ ][ ] fs.cp(src, dest[, options], callback)
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
+//
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])

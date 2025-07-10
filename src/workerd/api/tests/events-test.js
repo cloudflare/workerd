@@ -1,4 +1,5 @@
 import { deepStrictEqual, strictEqual, throws, ok } from 'node:assert';
+import { mock } from 'node:test';
 
 // Test for the Event and EventTarget standard Web API implementations.
 // The implementation for these are in api/basics.{h|c++}
@@ -420,5 +421,26 @@ export const closeEvent = {
     // had it as required. Let's make sure we can create it without the second arg.
     new CloseEvent('foo');
     new CloseEvent('foo', { code: 1000, reason: 'bye' });
+  },
+};
+
+export const handlerThis = {
+  test() {
+    const et = new EventTarget();
+    const handler = mock.fn(function () {
+      strictEqual(this, et);
+    });
+    et.addEventListener('foo', handler);
+
+    const handlerObject = {
+      handleEvent: mock.fn(function () {
+        strictEqual(this, handlerObject);
+      }),
+    };
+    et.addEventListener('foo', handlerObject);
+
+    et.dispatchEvent(new Event('foo'));
+    strictEqual(handler.mock.callCount(), 1);
+    strictEqual(handlerObject.handleEvent.mock.callCount(), 1);
   },
 };

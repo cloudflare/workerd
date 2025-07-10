@@ -318,22 +318,14 @@ bool Headers::has(jsg::ByteString name) {
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
+  requireValidHeaderName(name);
+  value = normalizeHeaderValue(js, kj::mv(value));
+  requireValidHeaderValue(value);
   setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   KJ_UNIMPLEMENTED();
-  // requireValidHeaderName(name);
-  // // The variation of toLower we use here creates a copy.
-  // auto key = kj::String(kj::str(toLower(name)));
-  // value = normalizeHeaderValue(js, kj::mv(value));
-  // requireValidHeaderValue(value);
-  // KJ_IF_SOME(header, headers.find(key)) {
-  //   header.values.clear();
-  //   header.values.add(kj::mv(value));
-  // } else {
-  //   headers.insert(key, Header(kj::mv(key), kj::mv(name), kj::mv(value)));
-  // }
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {

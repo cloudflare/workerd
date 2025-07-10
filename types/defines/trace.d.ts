@@ -175,19 +175,43 @@ interface Attributes {
   readonly info: Attribute[];
 }
 
-interface TailEvent {
-  readonly traceId: string;
+type EventType =
+  | Onset
+  | Outcome
+  | Hibernate
+  | SpanOpen
+  | SpanClose
+  | DiagnosticChannelEvent
+  | Exception
+  | Log
+  | Return
+  | Link
+  | Attributes;
+
+interface TailEvent<Event extends EventType> {
   readonly invocationId: string;
   readonly spanId: string;
   readonly timestamp: Date;
   readonly sequence: number;
-  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | DiagnosticChannelEvent | Exception | Log | Return | Link | Attributes;
+  readonly event: Event;
 }
 
-type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-type TailEventHandlerName = "outcome" | "hibernate" | "spanOpen" | "spanClose" |
-                            "diagnosticChannel" | "exception" | "log" | "return" | "link" | "attributes";
-type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
-type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
+type TailEventHandler<Event extends EventType = EventType> = (
+  event: TailEvent<Event>
+) => void | Promise<void>;
 
+type TailEventHandlerObject = {
+  outcome?: TailEventHandler<Outcome>;
+  hibernate?: TailEventHandler<Hibernate>;
+  spanOpen?: TailEventHandler<SpanOpen>;
+  spanClose?: TailEventHandler<SpanClose>;
+  diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+  exception?: TailEventHandler<Exception>;
+  log?: TailEventHandler<Log>;
+  return?: TailEventHandler<Return>;
+  link?: TailEventHandler<Link>;
+  attributes?: TailEventHandler<Attributes>;
+};
+
+type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }

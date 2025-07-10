@@ -84,6 +84,12 @@ struct Config {
   # A list of gates which are enabled.
   # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
   # config definition in our internal repo for more details.
+
+  structuredLogging @5 :Bool = false;
+  # If true, logs will be emitted as JSON for structured logging.
+  # When false, logs use the traditional human-readable format.
+  # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
+  # This won't work for logs coming from service worker syntax workers with the old module registry.
 }
 
 # ========================================================================================

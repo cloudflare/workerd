@@ -1044,6 +1044,9 @@ class LenientOptional: public kj::Maybe<T> {
 class SelfRef: public V8Ref<v8::Object> {
  public:
   using V8Ref::V8Ref;
+
+  // Convert the V8Ref<v8::Object> to a V8Ref<v8::Value>
+  inline Value asValue(Lock& js) const;
 };
 
 // TODO(cleanup): This class was meant to be a ByteString (characters in the range [0,255]), but
@@ -3033,6 +3036,10 @@ inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) const {
 template <typename T>
 inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
   return handle.Get(js.v8Isolate);
+}
+
+inline Value SelfRef::asValue(Lock& js) const {
+  return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
 
 }  // namespace workerd::jsg

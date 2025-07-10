@@ -315,6 +315,7 @@ wd_test(
     src = "tests/dns-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["tests/dns-nodejs-test.js"],
+    tags = ["requires-network"],
 )
 
 js_binary(
@@ -439,6 +440,7 @@ wd_test(
         "HELLO_WORLD_SERVER_PORT",
         "HEADER_VALIDATION_SERVER_PORT",
     ],
+    tags = ["requires-network"],
 )
 
 js_binary(
@@ -526,4 +528,16 @@ wd_test(
     src = "tests/fs-cp-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fs-cp-test.js"],
+)
+
+wd_test(
+    src = "tests/fs-readstream-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-readstream-test.js"],
+)
+
+wd_test(
+    src = "tests/fs-writestream-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fs-writestream-test.js"],
 )

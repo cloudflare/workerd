@@ -185,6 +185,7 @@ python_register_toolchains(
     ignore_root_user_error = True,
     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
     python_version = "3.13",
+    register_coverage_tool = True,
 )
 
 load("@rules_python//python:pip.bzl", "pip_parse")

@@ -307,3 +307,24 @@ export const testHttpSetTimeout = {
     await promise;
   },
 };
+
+export const httpRedirectsAreNotFollowed = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const req = http.request(
+      {
+        port: 80,
+        method: 'GET',
+        protocol: 'http:',
+        hostname: 'cloudflare.com',
+        path: '/',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 301);
+        resolve();
+      }
+    );
+    req.end();
+    await promise;
+  },
+};

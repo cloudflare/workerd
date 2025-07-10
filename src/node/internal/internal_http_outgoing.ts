@@ -16,6 +16,7 @@ import {
 } from 'node-internal:internal_http';
 import { Writable } from 'node-internal:streams_writable';
 import { EventEmitter } from 'node-internal:events';
+import type { OutgoingMessage as _OutgoingMessage } from 'node:http';
 
 export const kUniqueHeaders = Symbol('kUniqueHeaders');
 export const kHighWaterMark = Symbol('kHighWaterMark');
@@ -37,7 +38,7 @@ export function parseUniqueHeadersOption(
   return unique;
 }
 
-export class OutgoingMessage extends Writable {
+export class OutgoingMessage extends Writable implements _OutgoingMessage {
   [kHeadersSent]: boolean = false;
   [kOutHeaders]: Record<string, Record<string, string | string[]>> = {};
 
@@ -57,14 +58,15 @@ export class OutgoingMessage extends Writable {
     return this;
   }
 
-  setHeaders(headers: HeadersInit | null | undefined): this {
+  setHeaders(
+    headers: Headers | Map<string, string | number | readonly string[]>
+  ): this {
     if (this[kHeadersSent]) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
 
     if (
       Array.isArray(headers) ||
-      headers == null ||
       typeof headers !== 'object' ||
       !('keys' in headers) ||
       !('get' in headers) ||
@@ -82,7 +84,6 @@ export class OutgoingMessage extends Writable {
     // set-cookie values in array and set them all at once.
     const cookies: string[] = [];
 
-    // @ts-expect-error TS2488 headers is missing iterator type.
     for (const { 0: key, 1: value } of headers) {
       if (key === 'set-cookie') {
         if (Array.isArray(value)) {
@@ -92,7 +93,7 @@ export class OutgoingMessage extends Writable {
         }
         continue;
       }
-      this.setHeader(key as string, value as string | string[]);
+      this.setHeader(key, value as string | string[]);
     }
     if (cookies.length) {
       this.setHeader('set-cookie', cookies);

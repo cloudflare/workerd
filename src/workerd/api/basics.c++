@@ -221,7 +221,8 @@ kj::Array<kj::StringPtr> EventTarget::getHandlerNames() const {
 void EventTarget::addEventListener(jsg::Lock& js,
     kj::String type,
     kj::Maybe<jsg::Identified<Handler>> maybeHandler,
-    jsg::Optional<AddEventListenerOpts> maybeOptions) {
+    jsg::Optional<AddEventListenerOpts> maybeOptions,
+    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
   if (warnOnSpecialEvents && isSpecialEventType(type)) {
     js.logWarning(kj::str("When using module syntax, the '", type,
         "' event handler should be "
@@ -236,9 +237,15 @@ void EventTarget::addEventListener(jsg::Lock& js,
       HandlerFunction handlerFn = ([&]() {
         KJ_SWITCH_ONEOF(handler.unwrapped) {
           KJ_CASE_ONEOF(fn, HandlerFunction) {
+            if (FeatureFlags::get(js).getSetEventTargetThis()) {
+              fn.setReceiver(js.v8Ref(eventTargetHandler.wrap(js, JSG_THIS)));
+            }
             return kj::mv(fn);
           }
           KJ_CASE_ONEOF(obj, HandlerObject) {
+            if (FeatureFlags::get(js).getSetEventTargetThis()) {
+              obj.handleEvent.setReceiver(obj.self.asValue(js));
+            }
             return kj::mv(obj.handleEvent);
           }
         }
@@ -635,8 +642,10 @@ void AbortSignal::setOnAbort(jsg::Lock& js, jsg::Optional<jsg::JsValue> handler)
 void AbortSignal::addEventListener(jsg::Lock& js,
     kj::String type,
     jsg::Identified<Handler> handler,
-    jsg::Optional<AddEventListenerOpts> maybeOptions) {
-  EventTarget::addEventListener(js, kj::mv(type), kj::mv(handler), kj::mv(maybeOptions));
+    jsg::Optional<AddEventListenerOpts> maybeOptions,
+    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
+  EventTarget::addEventListener(
+      js, kj::mv(type), kj::mv(handler), kj::mv(maybeOptions), eventTargetHandler);
   subscribeToRpcAbort(js);
 }
 
@@ -717,7 +726,8 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
 
 jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
     kj::Array<jsg::Ref<AbortSignal>> signals,
-    const jsg::TypeHandler<EventTarget::HandlerFunction>& handler) {
+    const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
+    const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler) {
   // If nothing was passed in, we can just return a signal that never aborts.
   if (signals.size() == 0) {
     return js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
@@ -758,7 +768,8 @@ jsg::Ref<AbortSignal> AbortSignal::any(jsg::Lock& js,
           .once = true,
           // Each of the followed signals will maintain a strong reference to this new
           // one that's been created.
-          .followingSignal = signal.addRef()});
+          .followingSignal = signal.addRef()},
+        eventTargetHandler);
   }
   return signal;
 }
