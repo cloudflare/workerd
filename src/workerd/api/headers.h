@@ -2,7 +2,12 @@
 #include <kj/compat/http.h>
 #include <workerd/io/features.h>
 #include <workerd/io/worker-interface.capnp.h>
-#include <map>
+
+#if !_MSC_VER
+#include <strings.h>
+#else
+#define strcasecmp _stricmp
+#endif
 
 namespace workerd::api {
 
@@ -25,13 +30,13 @@ public:
   };
 
   struct DisplayedHeader {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString value; // comma-concatenation of all values seen
+    jsg::JsRef<jsg::JsString> key;   // lower-cased name
+    jsg::JsRef<jsg::JsString> value;  // comma-concatenation of all values seen
   };
 
   Headers(): guard(Guard::NONE) {}
   explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
-  explicit Headers(jsg::Lock& js, const Headers& other);
+  explicit Headers(jsg::Lock& js, const Headers& other, Guard guard = Guard::NONE);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
 
   Headers(Headers&&) = delete;
@@ -50,7 +55,12 @@ public:
   bool hasLowerCase(kj::StringPtr name);
 
   // Returns headers with lower-case name and comma-concatenated duplicates.
-  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
+  enum class DisplayedHeaderOption {
+    DEFAULT,
+    KEYONLY,
+  };
+  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js,
+      DisplayedHeaderOption option = DisplayedHeaderOption::DEFAULT);
 
   using ByteStringPair = jsg::Sequence<jsg::ByteString>;
   using ByteStringPairs = jsg::Sequence<ByteStringPair>;
@@ -96,22 +106,22 @@ public:
   void delete_(jsg::ByteString name);
 
   void forEach(jsg::Lock& js,
-               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)>,
+               jsg::Function<void(jsg::JsString, jsg::JsString, jsg::Ref<Headers>)>,
                jsg::Optional<jsg::Value>);
 
   bool inspectImmutable();
 
   JSG_ITERATOR(EntryIterator, entries,
-                kj::Array<jsg::ByteString>,
+                kj::Array<jsg::JsRef<jsg::JsString>>,
                 IteratorState<DisplayedHeader>,
                 entryIteratorNext)
   JSG_ITERATOR(KeyIterator, keys,
-                jsg::ByteString,
-                IteratorState<jsg::ByteString>,
+                jsg::JsRef<jsg::JsString>,
+                IteratorState<jsg::JsRef<jsg::JsString>>,
                 keyOrValueIteratorNext)
   JSG_ITERATOR(ValueIterator, values,
-                jsg::ByteString,
-                IteratorState<jsg::ByteString>,
+                jsg::JsRef<jsg::JsString>,
+                IteratorState<jsg::JsRef<jsg::JsString>>,
                 keyOrValueIteratorNext)
 
   // JavaScript API.
@@ -157,13 +167,24 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
+      tracker.trackField("header", entry);
     }
+  }
+
+  static kj::uint hashCode(kj::StringPtr name) {
+    KJ_STACK_ARRAY(char, buf, name.size(), 1024, 1024);
+    for (int n = 0; n < name.size(); n++) {
+      if ('A' <= name[n] && name[n] <= 'Z') {
+        buf[n] = name[n] | 0x20;  // Convert to lower-case.
+      } else {
+        buf[n] = name[n];
+      }
+    }
+    return kj::hashCode(buf);
   }
 
 private:
   struct Header {
-    jsg::ByteString key;   // lower-cased name
     jsg::ByteString name;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
@@ -177,17 +198,32 @@ private:
     // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
     kj::Vector<jsg::ByteString> values;
+    kj::uint hash;
 
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
+    Header clone() const {
+      return Header(name, KJ_MAP(val, values) {
+        return jsg::ByteString(kj::str(val));
+      }, hash);
+    }
+
+    Header(kj::String name, kj::String value)
+        : name(kj::mv(name)), hash(hashCode(this->name)) {
+      values.add(jsg::ByteString(kj::mv(value)));
+    }
+
+    Header(kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash)
+        : name(kj::str(name)), values(kj::mv(values)), hash(hash) {}
+
+    void add(jsg::ByteString value) {
+      values.add(kj::mv(value));
+    }
+
+    void set(jsg::ByteString value) {
+      values.clear();
       values.add(kj::mv(value));
     }
 
     JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
       tracker.trackField("name", name);
       for (const auto& value : values) {
         tracker.trackField(nullptr, value);
@@ -195,14 +231,45 @@ private:
     }
   };
 
+  struct HeaderCallbacks {
+    kj::uint keyForRow(const Header& header) const {
+      return header.hash;
+    }
+    bool matches(const Header& header, kj::uint key) const {
+      return header.hash == key;
+    }
+    bool matches(const Header& header, kj::StringPtr name) const {
+      return Headers::hashCode(name) == keyForRow(header);
+    }
+    uint hashCode(kj::uint hash) const { return hash; }
+    uint hashCode(kj::StringPtr name) const {
+      return Headers::hashCode(name);
+    }
+  };
+
+  struct HeaderTreeCallbacks {
+    kj::StringPtr keyForRow(const Header& header) const {
+      return header.name;
+    }
+    bool isBefore(const Header& header, kj::StringPtr name) const {
+      return strcasecmp(header.name.cStr(), name.cStr()) < 0;
+    }
+    bool matches(const Header& header, kj::StringPtr name) const {
+      return Headers::hashCode(name) == header.hash;
+    }
+  };
+
+  kj::Table<Header, kj::HashIndex<HeaderCallbacks>,
+                    kj::TreeIndex<HeaderTreeCallbacks>> headers;
+
   Guard guard;
-  std::map<kj::StringPtr, Header> headers;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
   }
 
-  static kj::Maybe<kj::Array<jsg::ByteString>> entryIteratorNext(jsg::Lock& js, auto& state) {
+  static kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> entryIteratorNext(
+      jsg::Lock& js, auto& state) {
     if (state.cursor == state.copy.end()) {
       return kj::none;
     }
@@ -210,7 +277,7 @@ private:
     return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
   }
 
-  static kj::Maybe<jsg::ByteString> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
+  static kj::Maybe<jsg::JsRef<jsg::JsString>> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
     if (state.cursor == state.copy.end()) {
       return kj::none;
     }

@@ -8,6 +8,8 @@
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 
+#include <kj/hash.h>
+
 namespace workerd::api {
 namespace {
 
@@ -62,7 +64,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
       // entry ends up storing the key twice as an artifact of an
       // old implementation decision. This is something we can probably
       // refactor at some point.
-      KJ_ASSERT(after - before == 14);
+      KJ_ASSERT(after - before == 10);
     }
     after = js.v8Isolate->GetExternalMemory();
     KJ_ASSERT(after == before);
@@ -77,7 +79,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
       auto headers =
           js.alloc<workerd::api::Headers>(js, kjHeaders, workerd::api::Headers::Guard::NONE);
       auto after = js.v8Isolate->GetExternalMemory();
-      KJ_ASSERT(after - before == 13);
+      KJ_ASSERT(after - before == 9);
     }
     after = js.v8Isolate->GetExternalMemory();
     KJ_ASSERT(after == before);
