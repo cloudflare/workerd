@@ -476,7 +476,9 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // be found.
     using Key = typename Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
-    if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
+    if (entries.find(Key(referrer, Type::BUNDLE)) != kj::none) {
+      // The referrer is found in the module bundle, so we use the default.
+    } else if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
