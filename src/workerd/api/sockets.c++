@@ -525,8 +525,8 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 // Definition of the StreamWorkerInterface class
 class StreamWorkerInterface final: public WorkerInterface {
  public:
-  StreamWorkerInterface(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
-      : stream(kj::mv(stream)),
+  StreamWorkerInterface(kj::AsyncIoStream& stream, const kj::HttpHeaderTable& headerTable)
+      : stream(stream),
         headerTable(headerTable) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -544,7 +544,7 @@ class StreamWorkerInterface final: public WorkerInterface {
     newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
     // Create a new HTTP client using our stream
-    auto httpClient = kj::newHttpClient(headerTable, *stream);
+    auto httpClient = kj::newHttpClient(headerTable, stream);
 
     // Create a new HTTP service from the client
     auto service = kj::newHttpService(*httpClient);
@@ -579,7 +579,7 @@ class StreamWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  kj::Own<kj::AsyncIoStream> stream;
+  kj::AsyncIoStream& stream;
   const kj::HttpHeaderTable& headerTable;
 };
 
@@ -591,10 +591,12 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+    /*
     JSG_ASSERT(stream.get() != nullptr, Error,
         "Fetcher created from convertSocketToFetcher can only be used once");
+    */
     // Create a WorkerInterface that wraps the stream
-    return kj::heap<StreamWorkerInterface>(kj::mv(stream), headerTable);
+    return kj::heap<StreamWorkerInterface>(*stream, headerTable);
   }
 
  private:

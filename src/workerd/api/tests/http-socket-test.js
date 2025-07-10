@@ -102,6 +102,7 @@ export default {
         assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
       } catch (error) {
         assert(error instanceof Error, 'Expected an Error to be thrown');
+        console.log(error);
         assert(
           error.message.includes(
             'Fetcher created from convertSocketToFetcher can only be used once'
