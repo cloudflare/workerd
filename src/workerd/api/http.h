@@ -46,7 +46,7 @@ public:
   };
 
   Headers(): guard(Guard::NONE) {}
-  // explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
+  explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
 
@@ -177,7 +177,17 @@ public:
     // }
   }
 
-  using Str = kj::OneOf<kj::StringPtr, kj::String>;
+  struct Str {
+      kj::StringPtr str;
+      kj::Maybe<kj::String> storage = kj::none;
+
+      Str(kj::String data) {
+        storage = kj::mv(data);
+        str = KJ_REQUIRE_NONNULL(storage).asPtr();
+      }
+      Str(kj::StringPtr data) : str(data) {}
+  };
+
   using Values = kj::Vector<Str>;
 
   struct Header {
@@ -223,14 +233,11 @@ public:
     kj::StringPtr name;
 
     HeaderKey(const Str& input) {
-      KJ_SWITCH_ONEOF(input) {
-        KJ_CASE_ONEOF(value, kj::StringPtr) {
-          name = value;
-        }
-        KJ_CASE_ONEOF(value, kj::String) {
-          name = value;
-        }
-      }
+      name = input.str;
+    }
+
+    HeaderKey(const jsg::ByteString& input) {
+      name = input.asPtr();
     }
 
     bool operator==(const HeaderKey& other) const {

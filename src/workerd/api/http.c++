@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "data-url.h"
 #include "http.h"
+
+#include "data-url.h"
 #include "queue.h"
 #include "sockets.h"
 #include "system-streams.h"
@@ -140,18 +141,18 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 
 }  // namespace
 
-// Headers::Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict)
-//     : guard(Guard::NONE) {
-//   for (auto& field: dict.fields) {
-//     append(js, kj::mv(field.name), kj::mv(field.value));
-//   }
-// }
+Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
+    : guard(Guard::NONE) {
+  for (auto& field: dict.fields) {
+    append(js, kj::mv(field.name), kj::mv(field.value));
+  }
+}
 
 Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
   for (auto& header: other.headers) {
     Header copy{
-      kj::str(header.value.name),
-      KJ_MAP(value, header.value.values) { return Str(kj::str(value)); },
+      kj::str(header.value.name.str),
+      KJ_MAP(value, header.value.values) { return Str(kj::str(value.str)); },
     };
     headers.insert(HeaderKey(copy.name), kj::mv(copy));
   }
@@ -179,12 +180,11 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
-  KJ_UNIMPLEMENTED("shallowCopyTo");
-  // for (auto& entry: headers) {
-  //   for (auto& value: entry.value.values) {
-  //     out.add(entry.value.name, value);
-  //   }
-  // }
+  for (auto& entry: headers) {
+    for (auto& value: entry.value.values) {
+      out.add(entry.value.name.str, value.str);
+    }
+  }
 }
 
 bool Headers::hasLowerCase(kj::StringPtr name) {
@@ -206,12 +206,13 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
         for (auto& value: entry.value.values) {
           copy.add(Headers::DisplayedHeader{
             .key = jsg::ByteString(kj::str(entry.key.name)),
-            .value = jsg::ByteString(kj::str(value)),
+            .value = jsg::ByteString(kj::str(value.str)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.key.name)),
-          .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
+        KJ_UNIMPLEMENTED();
+        // copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.key.name)),
+        //   .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
       }
     }
     return copy.releaseAsArray();
@@ -234,8 +235,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
   KJ_IF_SOME(i, init) {
     KJ_SWITCH_ONEOF(kj::mv(i)) {
       KJ_CASE_ONEOF(dict, StringDict) {
-        KJ_UNIMPLEMENTED();
-        // return js.alloc<Headers>(js, kj::mv(dict));
+        return js.alloc<Headers>(js, kj::mv(dict));
       }
       KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
         return js.alloc<Headers>(js, *headers);
@@ -317,15 +317,16 @@ bool Headers::has(jsg::ByteString name) {
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  checkGuard();
-  requireValidHeaderName(name);
-  value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
-  setUnguarded(js, kj::mv(name), kj::mv(value));
+  KJ_UNIMPLEMENTED();
+  // checkGuard();
+  // requireValidHeaderName(name);
+  // value = normalizeHeaderValue(js, kj::mv(value));
+  // requireValidHeaderValue(value);
+  // setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  KJ_UNIMPLEMENTED();
+  headers.insert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -408,10 +409,11 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
       // single value, so the values iterator must separate them.
       if (entry.key == "set-cookie") {
         for (auto& value: entry.value.values) {
-          values.add(kj::String(kj::str(value)));
+          values.add(kj::String(kj::str(value.str)));
         }
       } else {
-        values.add(kj::String(kj::str(kj::strArray(entry.value.values, ", "))));
+        KJ_UNIMPLEMENTED();
+        // values.add(kj::String(kj::str(kj::strArray(entry.value.values, ", "))));
       }
     }
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
@@ -565,7 +567,7 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
 jsg::Ref<Headers> Headers::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-      KJ_UNIMPLEMENTED();
+  KJ_UNIMPLEMENTED();
   // auto result = js.alloc<Headers>();
   // uint guard = deserializer.readRawUint32();
   // KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
@@ -1428,8 +1430,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       KJ_IF_SOME(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(initHeaders));
       } else {
-        KJ_UNIMPLEMENTED();
-        // headers = js.alloc<Headers>(js, jsg::Dict<jsg::ByteString, jsg::ByteString>());
+        headers = js.alloc<Headers>(js, jsg::Dict<jsg::ByteString, jsg::ByteString>());
       }
 
       KJ_IF_SOME(newCf, initDict.cf) {
