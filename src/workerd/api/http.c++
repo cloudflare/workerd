@@ -159,6 +159,8 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
+  headers.reserve(other.size());
+
   size_t bufferSize = 0;
   other.forEach([&bufferSize](kj::StringPtr name, kj::StringPtr value) {
     bufferSize += name.size() + value.size() + 2;
