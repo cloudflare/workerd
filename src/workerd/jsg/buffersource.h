@@ -130,8 +130,8 @@ class BackingStore {
   inline kj::ArrayPtr<T> asArrayPtr() KJ_LIFETIMEBOUND {
     KJ_ASSERT(backingStore != nullptr, "Invalid access after move.");
     KJ_ASSERT(byteLength % sizeof(T) == 0);
-    return kj::ArrayPtr<T>(
-        static_cast<T*>(backingStore->Data()) + byteOffset, byteLength / sizeof(T));
+    kj::byte* data = static_cast<kj::byte*>(backingStore->Data());
+    return kj::ArrayPtr<T>(reinterpret_cast<T*>(data + byteOffset), byteLength / sizeof(T));
   }
 
   template <typename T = kj::byte>
