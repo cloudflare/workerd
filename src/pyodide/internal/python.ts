@@ -65,7 +65,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      VENDOR_PATH = "/session/metadata/vendor"
+      VENDOR_PATH = "/session/metadata/python_modules"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
