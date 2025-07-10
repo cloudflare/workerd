@@ -112,11 +112,7 @@ Headers::Headers(jsg::Lock& js, const Headers& other, Guard guard): guard(guard)
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(guard) {
   headers.reserve(other.size());
   other.forEach([this, &js](auto name, auto value) {
-    KJ_IF_SOME(existing, headers.find(name)) {
-      existing.add(jsg::ByteString(kj::str(value)));
-    } else {
-      headers.insert(Header(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value))));
-    }
+    appendUnguarded(js, name, jsg::ByteString(kj::str(value)));
   });
 }
 
@@ -259,9 +255,7 @@ bool Headers::has(jsg::ByteString name) {
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
   requireValidHeaderName(name);
-  value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
-  setUnguarded(js, kj::mv(name), kj::mv(value));
+  setValueChecked(js, name, kj::mv(value));
 }
 
 void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
@@ -282,9 +276,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString va
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
   requireValidHeaderName(name);
-  value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
-  appendUnguarded(js, name, kj::mv(value));
+  appendValueChecked(js, name, kj::mv(value));
 }
 
 void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
