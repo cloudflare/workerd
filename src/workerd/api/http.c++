@@ -211,9 +211,12 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
-  for (auto& entry: headers) {
-    for (auto& value: entry.value.values) {
-      out.add(entry.value.name, value);
+  // while technically we don't care about header order on the network
+  // there are _so many_ tests depending on the order of headers, we have
+  // to sort them.
+  for (auto& entry: sortedHeaders()) {
+    for (auto& value: entry->value.values) {
+      out.add(entry->value.name, value);
     }
   }
 }
