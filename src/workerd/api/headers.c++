@@ -62,13 +62,13 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   while (slice.size() > 0 && isHttpWhitespace(slice.back())) {
     slice = slice.first(slice.size() - 1);
   }
-  if (slice.size() == value.size()) {
+  if (slice.size() == value.size()) [[likely]] {
     return kj::mv(value);
   }
   return jsg::ByteString(kj::str(slice));
 }
 
-void requireValidHeaderName(const jsg::ByteString& name) {
+constexpr bool requireValidHeaderName(const jsg::ByteString& name) {
   // TODO(cleanup): Code duplication with kj/compat/http.c++
 
   warnIfBadHeaderString(name);
@@ -84,16 +84,17 @@ void requireValidHeaderName(const jsg::ByteString& name) {
   // RFC2616 section 4.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
 
   for (char c: name) {
-    JSG_REQUIRE(HTTP_TOKEN_CHARS.contains(c), TypeError, "Invalid header name.");
+    if (!HTTP_TOKEN_CHARS.contains(c)) return false;
   }
+
+  return true;
 }
 
-void requireValidHeaderValue(kj::StringPtr value) {
-  // TODO(cleanup): Code duplication with kj/compat/http.c++
-
+constexpr bool requireValidHeaderValue(kj::StringPtr value) {
   for (char c: value) {
-    JSG_REQUIRE(c != '\0' && c != '\r' && c != '\n', TypeError, "Invalid header value.");
+    if (c == '\0' || c == '\r' || c == '\n') return false;
   }
+  return true;
 }
 }  // namespace
 
@@ -125,8 +126,8 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
-  for (auto& entry: headers.ordered<1>()) {
-    for (auto& value: entry.values) {
+  for (const auto& entry: headers.ordered<1>()) {
+    for (const auto& value: entry.values) {
       out.add(entry.getName(), value);
     }
   }
@@ -154,13 +155,14 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
   auto getSetCookie = FeatureFlags::get(js).getHttpHeadersGetSetCookie();
 
   for (const auto& entry: headers.ordered<1>()) {
+    auto nameStr = js.str(toLower(entry.getName()));
     if (getSetCookie && strcasecmp(entry.getName().cStr(), "set-cookie") == 0) {
       copy.reserve(entry.values.size() - 1);
       // For set-cookie entries, we iterate each individually without
       // combining them.
-      for (auto& value: entry.values) {
+      for (const auto& value: entry.values) {
         copy.add(Headers::DisplayedHeader{
-          .key = jsg::JsRef(js, js.str(toLower(entry.getName()))),
+          .key = jsg::JsRef(js, nameStr),
           .value = includeValues ? jsg::JsRef(js, js.str(value)) : jsg::JsRef(js, js.str()),
         });
       }
@@ -168,7 +170,7 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
     }
 
     copy.add(Headers::DisplayedHeader{
-      .key = jsg::JsRef(js, js.str(toLower(entry.getName()))),
+      .key = jsg::JsRef(js, nameStr),
       .value = includeValues ? jsg::JsRef(js, js.str(kj::strArray(entry.values, ", ")))
                              : jsg::JsRef(js, js.str()),
     });
@@ -222,7 +224,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
 }
 
 kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
-  requireValidHeaderName(name);
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
   return getNoChecks(js, name.asPtr());
 }
 
@@ -238,7 +240,7 @@ kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
-  requireValidHeaderName(name);
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
 
   if (strcasecmp(name.cStr(), "set-cookie") != 0) {
     JSG_FAIL_REQUIRE(TypeError, "getAll() can only be used with the header name \"Set-Cookie\".");
@@ -251,19 +253,19 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 }
 
 bool Headers::has(jsg::ByteString name) {
-  requireValidHeaderName(name);
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
   return headers.find(name) != kj::none;
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  checkGuard();
-  requireValidHeaderName(name);
+  JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
   setValueChecked(js, name, kj::mv(value));
 }
 
 void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
+  JSG_REQUIRE(requireValidHeaderValue(value), TypeError, "Invalid header value.");
   setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
@@ -276,14 +278,14 @@ void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString va
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  checkGuard();
-  requireValidHeaderName(name);
+  JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
   appendValueChecked(js, name, kj::mv(value));
 }
 
 void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   value = normalizeHeaderValue(js, kj::mv(value));
-  requireValidHeaderValue(value);
+  JSG_REQUIRE(requireValidHeaderValue(value), TypeError, "Invalid header value.");
   appendUnguarded(js, name, kj::mv(value));
 }
 
@@ -296,8 +298,8 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
 }
 
 void Headers::delete_(jsg::ByteString name) {
-  checkGuard();
-  requireValidHeaderName(name);
+  JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
+  JSG_REQUIRE(requireValidHeaderName(name), TypeError, "Invalid header name.");
   headers.eraseMatch(name);
 }
 
@@ -359,7 +361,7 @@ void Headers::forEach(jsg::Lock& js,
   }
   callback.setReceiver(js.v8Ref(receiver));
 
-  for (auto& entry: getDisplayedHeaders(js)) {
+  for (const auto& entry: getDisplayedHeaders(js)) {
     callback(js, entry.value.getHandle(js), entry.key.getHandle(js), JSG_THIS);
   }
 }
@@ -466,7 +468,7 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   auto& commonHeaders = getCommonHeaderMap();
   for (const auto& header: headers.ordered<1>()) {
     auto commonId = commonHeaders.find(header.hash);
-    for (auto& value: header.values) {
+    for (const auto& value: header.values) {
       KJ_IF_SOME(c, commonId) {
         serializer.writeRawUint32(c);
       } else {
@@ -536,10 +538,11 @@ Headers::Header::Header(jsg::Lock& js, kj::StringPtr name, kj::String value)
     : hash(hashCode(name)),
       nameOrIndex(getNameOrIdx(this->hash, name)),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
+  size_t totalSize = 0;
   KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
-    memoryAdjustment.adjustNow(js, str.size());
+    totalSize = str.size();
   }
-  memoryAdjustment.adjustNow(js, value.size());
+  memoryAdjustment.adjustNow(js, totalSize + value.size());
   values.add(jsg::ByteString(kj::mv(value)));
 }
 
@@ -555,7 +558,7 @@ Headers::Header::Header(jsg::Lock& js,
   KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
     totalSize = str.size();
   }
-  for (auto& value: this->values) {
+  for (const auto& value: this->values) {
     totalSize += value.size();
   }
   memoryAdjustment.adjustNow(js, totalSize);
@@ -582,7 +585,7 @@ void Headers::Header::add(jsg::Lock& js, jsg::ByteString value) {
 
 void Headers::Header::set(jsg::Lock& js, jsg::ByteString value) {
   ssize_t adjustment = 0;
-  for (auto& v: values) {
+  for (const auto& v: values) {
     adjustment += v.size();
   }
   memoryAdjustment.adjustNow(js, -adjustment);
