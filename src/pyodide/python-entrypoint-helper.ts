@@ -54,7 +54,11 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
+      const pyodide = await loadPyodide(
+        IS_WORKERD,
+        LOCKFILE,
+        WORKERD_INDEX_URL
+      );
       await setupPatches(pyodide);
       return pyodide;
     })();

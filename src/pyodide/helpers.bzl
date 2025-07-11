@@ -258,6 +258,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             "function _PyEM_CountFuncParams(func){",
             "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
         ],
+        [
+            "var tableBase=metadata.tableSize?wasmTable.length:0;",
+            "var tableBase=metadata.tableSize?wasmTable.length:0;" +
+            "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
+        ],
     ]
 
     expand_template(
@@ -318,6 +323,8 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         internal_data_modules = [
             _out_path("python_stdlib.zip", version),
             _out_path("pyodide.asm.wasm", version),
+        ],
+        internal_modules = [
             _out_path("emscriptenSetup.js", version),
         ],
         deps = [
@@ -334,7 +341,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         srcs = [
             ":pyodide@%s.capnp" % version,
             "//src/workerd/jsg:modules.capnp",
-            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup.js", version),
+            _ts_bundle_out(import_name + "-internal_", "emscriptenSetup", version),
             _ts_bundle_out(import_name + "-internal_", "pyodide.asm.wasm", version),
             _ts_bundle_out(import_name + "-internal_", "python_stdlib.zip", version),
         ],

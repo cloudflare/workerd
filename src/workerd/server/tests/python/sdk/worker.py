@@ -7,6 +7,11 @@ from workers import Blob, File, FormData, Request, Response, fetch, handler
 import pyodide.http
 from pyodide.ffi import to_js
 
+try:
+    from pyodide.ffi import jsnull
+except ImportError:
+    jsnull = None
+
 
 @asynccontextmanager
 async def _mock_fetch(check):
@@ -419,7 +424,7 @@ async def response_unit_tests(env):
 
     response_none = Response(None, status=204)
     assert response_none.status == 204
-    assert response_none.body is None
+    assert response_none.body is jsnull
 
     class Test:
         def __init__(self, x):

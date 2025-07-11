@@ -206,11 +206,16 @@ function prepareStackTrace(
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
-    if (fileName !== 'pyodide-internal:generated/emscriptenSetup') {
+    if (fileName !== 'pyodideRuntime-internal:emscriptenSetup') {
       return [false, funcName];
     }
     return [
-      ['loadModule', 'convertJsFunctionToWasm', 'generate'].includes(funcName),
+      [
+        'loadModule',
+        'convertJsFunctionToWasm',
+        'generate',
+        'getPyEMCountArgsPtr',
+      ].includes(funcName),
       funcName,
     ];
   } catch (e) {

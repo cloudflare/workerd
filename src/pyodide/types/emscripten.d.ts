@@ -9,6 +9,7 @@ interface PyodideConfig {
   resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
   _makeSnapshot?: boolean;
+  lockFileURL: '';
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
@@ -36,6 +37,7 @@ interface API {
     pyimport_impl: PyCallable;
   };
   serializeHiwireState(): SnapshotConfig;
+  pyVersionTuple: [number, number, number];
 }
 
 interface LDSO {
@@ -76,14 +78,17 @@ interface EmscriptenSettings {
 
 interface Module {
   HEAP8: Uint8Array;
+  HEAPU32: Uint32Array;
   _dump_traceback: () => void;
   FS: FS;
   API: API;
   ENV: ENV;
   LDSO: LDSO;
   newDSO: (path: string, opt: object | undefined, handle: string) => DSO;
-  _py_version_major: () => number;
+  _Py_Version: number;
+  _py_version_major?: () => number;
   _py_version_minor: () => number;
+  _py_version_micro: () => number;
   loadWebAssemblyModule: (
     mod: WebAssembly.Module,
     opt: object,
@@ -94,7 +99,6 @@ interface Module {
   addRunDependency(x: string): void;
   removeRunDependency(x: string): void;
   noInitialRun: boolean;
-  setUnsafeEval(mod: typeof import('internal:unsafe-eval').default): void;
   setGetRandomValues(
     func: typeof import('pyodide-internal:topLevelEntropy/lib').getRandomValues
   ): void;
@@ -112,6 +116,9 @@ interface Module {
     size: number
   ): number;
   promise: Promise<void>;
-  reportUndefinedSymbols: () => void;
+  reportUndefinedSymbols(): void;
   wasmTable: WebAssembly.Table;
+  getEmptyTableSlot(): number;
+  freeTableIndexes: number[];
+  snapshotDebug?: boolean;
 }

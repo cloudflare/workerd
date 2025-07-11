@@ -22,7 +22,9 @@ import {
  * emscripten seperately from this code in another context.
  * The underlying code for it can be found in pool/emscriptenSetup.ts.
  */
-import { default as SetupEmscripten } from 'internal:setup-emscripten';
+import { instantiateEmscriptenModule } from 'pyodideRuntime-internal:emscriptenSetup';
+import pythonStdlib from 'pyodideRuntime-internal:python_stdlib.zip';
+import wasmSource from 'pyodideRuntime-internal:pyodide.asm.wasm';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { reportError } from 'pyodide-internal:util';
@@ -114,21 +116,24 @@ function validatePyodideVersion(pyodide: Pyodide): void {
   }
 }
 
-export function loadPyodide(
+export async function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string
-): Pyodide {
+): Promise<Pyodide> {
   try {
-    const Module = enterJaegerSpan('instantiate_emscripten', () =>
-      SetupEmscripten.getModule()
+    const wasmModule = UnsafeEval.newWasmModule(wasmSource);
+    const Module = await instantiateEmscriptenModule(
+      true,
+      pythonStdlib,
+      wasmModule,
+      UnsafeEval
     );
     Module.API.config.jsglobals = globalThis;
     if (isWorkerd) {
       Module.API.config.indexURL = indexURL;
       Module.API.config.resolveLockFilePromise!(lockfile);
     }
-    Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
     Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 

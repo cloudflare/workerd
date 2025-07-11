@@ -18,6 +18,10 @@ import {
   finishSetup,
 } from 'pyodide-internal:pool/builtin_wrappers';
 
+import { getSentinelImport } from 'pyodide-internal:pool/sentinel';
+
+let UnsafeEval: any;
+
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
  */
@@ -34,6 +38,20 @@ function getWaitForDynlibs(resolveReadyPromise: PreRunHook): PreRunHook {
     Module.addRunDependency('dynlibs');
     resolveReadyPromise(Module);
   };
+}
+
+function computeVersionTuple(Module: Module): [number, number, number] {
+  if (Module._py_version_major) {
+    const pymajor = Module._py_version_major();
+    const pyminor = Module._py_version_minor();
+    const micro = Module._py_version_micro();
+    return [pymajor, pyminor, micro];
+  }
+  const versionInt = Module.HEAPU32[Module._Py_Version >>> 2];
+  const major = (versionInt >>> 24) & 0xff;
+  const minor = (versionInt >>> 16) & 0xff;
+  const micro = (versionInt >>> 8) & 0xff;
+  return [major, minor, micro];
 }
 
 /**
@@ -58,9 +76,12 @@ function getWaitForDynlibs(resolveReadyPromise: PreRunHook): PreRunHook {
  */
 function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
   return function prepareFileSystem(Module: Module): void {
-    const pymajor = Module._py_version_major();
-    const pyminor = Module._py_version_minor();
+    Module.API.pyVersionTuple = computeVersionTuple(Module);
+    const [pymajor, pyminor] = Module.API.pyVersionTuple;
     Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
+    // finalizeBootstrap() will set LD_LIBRARY_PATH to this same value in a bit, but it's too late
+    // for us when we preload dynamic libraries.
+    Module.ENV.LD_LIBRARY_PATH = ['/usr/lib', Module.FS.sitePackages].join(':');
     Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
     Module.FS.mkdirTree(Module.FS.sitePackages);
     Module.FS.writeFile(
@@ -89,6 +110,7 @@ function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
 function getInstantiateWasm(
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings['instantiateWasm'] {
+  const sentinelImportPromise = getSentinelImport(UnsafeEval);
   return function instantiateWasm(
     wasmImports: WebAssembly.Imports,
     successCallback: (
@@ -97,6 +119,7 @@ function getInstantiateWasm(
     ) => void
   ): WebAssembly.Exports {
     (async function (): Promise<void> {
+      wasmImports.sentinel = await sentinelImportPromise;
       // Instantiate pyodideWasmModule with wasmImports
       const instance = await WebAssembly.instantiate(
         pyodideWasmModule,
@@ -136,6 +159,7 @@ function getEmscriptenSettings(
       // discussion in topLevelEntropy/entropy_patches.py
       PYTHONHASHSEED: '111',
     },
+    lockFileURL: '',
   };
   let lockFilePromise;
   if (isWorkerd) {
@@ -181,6 +205,7 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
   global.sessionStorage = {};
   // Make Emscripten think we're not in a worker
   global.importScripts = 1;
+  global.WorkerGlobalScope = undefined;
   try {
     yield;
   } finally {
@@ -203,8 +228,11 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
 export async function instantiateEmscriptenModule(
   isWorkerd: boolean,
   pythonStdlib: ArrayBuffer,
-  wasmModule: WebAssembly.Module
+  wasmModule: WebAssembly.Module,
+  unsafeEval: any
 ): Promise<Module> {
+  UnsafeEval = unsafeEval;
+  setUnsafeEval(UnsafeEval);
   const emscriptenSettings = getEmscriptenSettings(
     isWorkerd,
     pythonStdlib,
@@ -220,7 +248,6 @@ export async function instantiateEmscriptenModule(
 
   // Wait until we've executed all the preRun hooks before proceeding
   const emscriptenModule = await emscriptenSettings.readyPromise;
-  emscriptenModule.setUnsafeEval = setUnsafeEval;
   emscriptenModule.setGetRandomValues = setGetRandomValues;
   emscriptenModule.setSetTimeout = setSetTimeout;
   finishSetup();
