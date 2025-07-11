@@ -536,18 +536,18 @@ static kj::ArrayPtr<const kj::StringPtr> getCommonHeaderList() {
   return LIST;
 }
 
-static kj::HashMap<Headers::HeaderKey, uint> makeCommonHeaderMap() {
-  kj::HashMap<Headers::HeaderKey, uint> result;
+kj::HashMap<Headers::HeaderKey, uint> Headers::makeCommonHeaderMap() {
+  kj::HashMap<HeaderKey, uint> result;
   auto list = getCommonHeaderList();
   KJ_ASSERT(MAX_COMMON_HEADER_ID < list.size());
   for (auto i: kj::range(1, MAX_COMMON_HEADER_ID + 1)) {
-    result.insert(Headers::HeaderKey(list[i]), i);
+    result.insert(HeaderKey(list[i]), i);
   }
   return result;
 }
 
-static const kj::HashMap<Headers::HeaderKey, uint>& getCommonHeaderMap() {
-  static const kj::HashMap<Headers::HeaderKey, uint> MAP = makeCommonHeaderMap();
+const kj::HashMap<Headers::HeaderKey, uint>& Headers::getCommonHeaderMap() {
+  static const kj::HashMap<HeaderKey, uint> MAP = makeCommonHeaderMap();
   return MAP;
 }
 

@@ -247,6 +247,9 @@ private:
     auto& ret = *state.cursor++;
     return kj::mv(ret);
   }
+
+  static kj::HashMap<HeaderKey, uint> makeCommonHeaderMap();
+  static const kj::HashMap<HeaderKey, uint>& getCommonHeaderMap();
 };
 
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
