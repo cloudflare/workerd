@@ -3,6 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <kj/string.h>
+
 #include <compare>
 #include <cstdint>
 
