@@ -192,7 +192,9 @@ public:
 
 private:
   struct Header {
-    jsg::ByteString name;
+    kj::uint hash;
+    kj::OneOf<uint, kj::String> nameOrIndex;
+    kj::StringPtr getName() const;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
     // able to re-serialize them separately. This is particularly important for the Set-Cookie
@@ -205,25 +207,31 @@ private:
     // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
     kj::Vector<jsg::ByteString> values;
-    kj::uint hash;
     jsg::ExternalMemoryAdjustment memoryAdjustment;
 
     Header clone(jsg::Lock& js) const;
 
-    Header(jsg::Lock& js, kj::String name, kj::String value);
-
-    Header(jsg::Lock& js, kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash);
+    Header(jsg::Lock& js, kj::StringPtr name, kj::String value);
 
     void add(jsg::Lock& js, jsg::ByteString value);
 
     void set(jsg::Lock& js, jsg::ByteString value);
 
     JSG_MEMORY_INFO(Header) {
-      tracker.trackField("name", name);
+      KJ_SWITCH_ONEOF(nameOrIndex) {
+        KJ_CASE_ONEOF(idx, uint) {}
+        KJ_CASE_ONEOF(str, kj::String) {
+          tracker.trackField("name", str);
+        }
+      }
       for (const auto& value : values) {
         tracker.trackField(nullptr, value);
       }
     }
+
+   private:
+    Header(jsg::Lock& js, kj::OneOf<uint, kj::String> nameOrIndex,
+          kj::Array<jsg::ByteString> values, kj::uint hash);
   };
 
   struct HeaderCallbacks {
@@ -244,10 +252,10 @@ private:
 
   struct HeaderTreeCallbacks {
     kj::StringPtr keyForRow(const Header& header) const {
-      return header.name;
+      return header.getName();
     }
     bool isBefore(const Header& header, kj::StringPtr name) const {
-      return strcasecmp(header.name.cStr(), name.cStr()) < 0;
+      return strcasecmp(header.getName().cStr(), name.cStr()) < 0;
     }
     bool matches(const Header& header, kj::StringPtr name) const {
       return Headers::hashCode(name) == header.hash;

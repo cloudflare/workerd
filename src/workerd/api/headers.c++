@@ -127,7 +127,7 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
   for (auto& entry: headers.ordered<1>()) {
     for (auto& value: entry.values) {
-      out.add(entry.name, value);
+      out.add(entry.getName(), value);
     }
   }
 }
@@ -154,13 +154,13 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
   auto getSetCookie = FeatureFlags::get(js).getHttpHeadersGetSetCookie();
 
   for (const auto& entry: headers.ordered<1>()) {
-    if (getSetCookie && strcasecmp(entry.name.cStr(), "set-cookie") == 0) {
+    if (getSetCookie && strcasecmp(entry.getName().cStr(), "set-cookie") == 0) {
       copy.reserve(entry.values.size() - 1);
       // For set-cookie entries, we iterate each individually without
       // combining them.
       for (auto& value: entry.values) {
         copy.add(Headers::DisplayedHeader{
-          .key = jsg::JsRef(js, js.str(toLower(entry.name))),
+          .key = jsg::JsRef(js, js.str(toLower(entry.getName()))),
           .value = includeValues ? jsg::JsRef(js, js.str(value)) : jsg::JsRef(js, js.str()),
         });
       }
@@ -168,7 +168,7 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
     }
 
     copy.add(Headers::DisplayedHeader{
-      .key = jsg::JsRef(js, js.str(toLower(entry.name))),
+      .key = jsg::JsRef(js, js.str(toLower(entry.getName()))),
       .value = includeValues ? jsg::JsRef(js, js.str(kj::strArray(entry.values, ", ")))
                              : jsg::JsRef(js, js.str()),
     });
@@ -271,7 +271,7 @@ void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString va
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.set(js, kj::mv(value));
   } else {
-    headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
+    headers.insert(Header(js, name, kj::mv(value)));
   }
 }
 
@@ -291,7 +291,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
   KJ_IF_SOME(existing, headers.find(name)) {
     existing.add(js, kj::mv(value));
   } else {
-    headers.insert(Header(js, jsg::ByteString(kj::str(name)), kj::mv(value)));
+    headers.insert(Header(js, name, kj::mv(value)));
   }
 }
 
@@ -471,7 +471,7 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         serializer.writeRawUint32(c);
       } else {
         serializer.writeRawUint32(0);
-        serializer.writeLengthDelimited(header.name);
+        serializer.writeLengthDelimited(header.getName());
       }
       serializer.writeLengthDelimited(value);
     }
@@ -502,8 +502,7 @@ jsg::Ref<Headers> Headers::deserialize(
     KJ_IF_SOME(existing, result->headers.find(name)) {
       existing.add(js, jsg::ByteString(kj::mv(value)));
     } else {
-      result->headers.insert(
-          Header(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value))));
+      result->headers.insert(Header(js, name, jsg::ByteString(kj::mv(value))));
     }
   }
 
@@ -513,24 +512,56 @@ jsg::Ref<Headers> Headers::deserialize(
   return result;
 }
 
-Headers::Header::Header(jsg::Lock& js, kj::String name, kj::String value)
-    : name(kj::mv(name)),
-      hash(hashCode(this->name)),
+namespace {
+kj::OneOf<uint, kj::String> getNameOrIdx(uint hash, kj::StringPtr name) {
+  KJ_IF_SOME(idx, getCommonHeaderMap().find(hash)) {
+    return idx;
+  }
+  return kj::str(name);
+}
+}  // namespace
+
+Headers::Header::Header(jsg::Lock& js, kj::StringPtr name, kj::String value)
+    : hash(hashCode(name)),
+      nameOrIndex(getNameOrIdx(this->hash, name)),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
-  memoryAdjustment.adjustNow(js, this->name.size() + value.size());
+  KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
+    memoryAdjustment.adjustNow(js, str.size());
+  }
+  memoryAdjustment.adjustNow(js, value.size());
   values.add(jsg::ByteString(kj::mv(value)));
 }
 
-Headers::Header::Header(
-    jsg::Lock& js, kj::StringPtr name, kj::Array<jsg::ByteString> values, kj::uint hash)
-    : name(kj::str(name)),
+Headers::Header::Header(jsg::Lock& js,
+    kj::OneOf<uint, kj::String> nameOrIndex,
+    kj::Array<jsg::ByteString> values,
+    kj::uint hash)
+    : hash(hash),
+      nameOrIndex(kj::mv(nameOrIndex)),
       values(kj::mv(values)),
-      hash(hash),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
-  memoryAdjustment.adjustNow(js, this->name.size());
-  for (auto& value: this->values) {
-    memoryAdjustment.adjustNow(js, value.size());
+  size_t totalSize = 0;
+  KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
+    totalSize = str.size();
   }
+  for (auto& value: this->values) {
+    totalSize += value.size();
+  }
+  memoryAdjustment.adjustNow(js, totalSize);
+}
+
+kj::StringPtr Headers::Header::getName() const {
+  KJ_SWITCH_ONEOF(nameOrIndex) {
+    KJ_CASE_ONEOF(idx, uint) {
+      auto list = getCommonHeaderList();
+      KJ_ASSERT(idx < list.size());
+      return list[idx];
+    }
+    KJ_CASE_ONEOF(name, kj::String) {
+      return name;
+    }
+  }
+  KJ_UNREACHABLE;
 }
 
 void Headers::Header::add(jsg::Lock& js, jsg::ByteString value) {
@@ -549,7 +580,19 @@ void Headers::Header::set(jsg::Lock& js, jsg::ByteString value) {
 }
 
 Headers::Header Headers::Header::clone(jsg::Lock& js) const {
-  return Header(js, name, KJ_MAP(val, values) { return jsg::ByteString(kj::str(val)); }, hash);
+  auto clonedNameOrIdx = ([&]() -> kj::OneOf<uint, kj::String> {
+    KJ_SWITCH_ONEOF(nameOrIndex) {
+      KJ_CASE_ONEOF(idx, uint) {
+        return idx;
+      }
+      KJ_CASE_ONEOF(str, kj::String) {
+        return kj::str(str);
+      }
+    }
+    KJ_UNREACHABLE;
+  })();
+  return Header(js, kj::mv(clonedNameOrIdx),
+      KJ_MAP(val, values) { return jsg::ByteString(kj::str(val)); }, hash);
 }
 
 }  // namespace workerd::api
