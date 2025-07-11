@@ -258,6 +258,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
             "function _PyEM_CountFuncParams(func){",
             "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
         ],
+        [
+            "var tableBase=metadata.tableSize?wasmTable.length:0;",
+            "var tableBase=metadata.tableSize?wasmTable.length:0;" +
+            "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
+        ],
     ]
 
     expand_template(
