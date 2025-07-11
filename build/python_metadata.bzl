@@ -18,8 +18,8 @@ PYODIDE_VERSIONS = [
         "sha256": "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
     },
     {
-        "version": "0.27.7",
-        "sha256": "9bc8f127db6c590b191b9aee754022cb41b1a36c7bac233776c11c5ecb541be8",
+        "version": "0.28.0",
+        "sha256": "da184d1266414630ed6c8312d2faf23ca959a0bbc31be334890fa44d0ad72b3d",
     },
 ]
 
@@ -102,15 +102,15 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "fastapi_snapshot_hash": "d204956a074cd74f7fe72e029e9a82686fcb8a138b509f765e664a03bfdd50fb",
     },
     {
-        "name": "0.27.7",
-        "pyodide_version": "0.27.7",
+        "name": "0.28.0",
+        "pyodide_version": "0.28.0",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250616,
-        "backport": "2",
+        "backport": "0",
         "integrity": "sha256-04qtaf3jr6q7mixWrpeASgYzTW1WHb9NEILBGl8M9hk=",
         "flag": "pythonWorkers20250116",
-        "emscripten_version": "3.1.58",
-        "python_version": "3.12.7",
+        "emscripten_version": "4.0.9",
+        "python_version": "3.13.2",
         "baseline_snapshot": "baseline-59fa311f4.bin",
         "baseline_snapshot_hash": "59fa311f4af0bb28477e2fa17f54dc254ec7fa6f02617b832b141854e44bd621",
         "numpy_snapshot": "package_snapshot_numpy-429b1174f.bin",
