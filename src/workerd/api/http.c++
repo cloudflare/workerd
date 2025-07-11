@@ -423,7 +423,6 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
   } else {
     auto keysCopy = KJ_MAP(mapEntry, sortedHeaders()) { return mapEntry->key.toDisplay(js); };
-    std::sort(keysCopy.begin(), keysCopy.end());
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
