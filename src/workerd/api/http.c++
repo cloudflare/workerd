@@ -30,54 +30,52 @@
 #include <kj/memory.h>
 #include <kj/parse/char.h>
 
-#include <set>
-
 namespace workerd::api {
 
 namespace {
 
-// void warnIfBadHeaderString(kj::StringPtr byteString) {
-//   if (IoContext::hasCurrent()) {
-//     auto& context = IoContext::current();
-//     if (context.isInspectorEnabled()) {
-//       if (byteString.warning == jsg::ByteString::Warning::CONTAINS_EXTENDED_ASCII) {
-//         // We're in a bit of a pickle: the script author is using our API correctly, but we're doing
-//         // the wrong thing by UTF-8-encoding their bytes. To help the author understand the issue,
-//         // we can show the string that they would be putting in the header if we implemented the
-//         // spec correctly, and the string that is actually going get serialized onto the wire.
-//         auto rawHex = kj::strArray(KJ_MAP(b, fastEncodeUtf16(byteString.asArray())) {
-//           KJ_ASSERT(b < 256);  // Guaranteed by StringWrapper having set CONTAINS_EXTENDED_ASCII.
-//           return kj::str("\\x", kj::hex(kj::byte(b)));
-//         }, "");
-//         auto utf8Hex =
-//             kj::strArray(
-//                 KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(kj::byte(b))); }, "");
+void warnIfBadHeaderString(const jsg::ByteString& byteString) {
+  if (IoContext::hasCurrent()) {
+    auto& context = IoContext::current();
+    if (context.isInspectorEnabled()) {
+      if (byteString.warning == jsg::ByteString::Warning::CONTAINS_EXTENDED_ASCII) {
+        // We're in a bit of a pickle: the script author is using our API correctly, but we're doing
+        // the wrong thing by UTF-8-encoding their bytes. To help the author understand the issue,
+        // we can show the string that they would be putting in the header if we implemented the
+        // spec correctly, and the string that is actually going get serialized onto the wire.
+        auto rawHex = kj::strArray(KJ_MAP(b, fastEncodeUtf16(byteString.asArray())) {
+          KJ_ASSERT(b < 256);  // Guaranteed by StringWrapper having set CONTAINS_EXTENDED_ASCII.
+          return kj::str("\\x", kj::hex(kj::byte(b)));
+        }, "");
+        auto utf8Hex =
+            kj::strArray(
+                KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(kj::byte(b))); }, "");
 
-//         context.logWarning(kj::str("Problematic header name or value: \"", byteString,
-//             "\" (raw bytes: \"", rawHex,
-//             "\"). "
-//             "This string contains 8-bit characters in the range 0x80 - 0xFF. As a quirk to support "
-//             "Unicode, we encode header strings in UTF-8, meaning the actual header name/value on "
-//             "the wire will be \"",
-//             utf8Hex,
-//             "\". Consider encoding this string in ASCII for "
-//             "compatibility with browser implementations of the Fetch specifications."));
-//       } else if (byteString.warning == jsg::ByteString::Warning::CONTAINS_UNICODE) {
-//         context.logWarning(kj::str("Invalid header name or value: \"", byteString,
-//             "\". Per the Fetch specification, the "
-//             "Headers class may only accept header names and values which contain 8-bit characters. "
-//             "That is, they must not contain any Unicode code points greater than 0xFF. As a quirk, "
-//             "we are encoding this string in UTF-8 in the header, but in a browser this would "
-//             "result in a TypeError exception. Consider encoding this string in ASCII for "
-//             "compatibility with browser implementations of the Fetch specification."));
-//       }
-//     }
-//   }
-// }
+        context.logWarning(kj::str("Problematic header name or value: \"", byteString,
+            "\" (raw bytes: \"", rawHex,
+            "\"). "
+            "This string contains 8-bit characters in the range 0x80 - 0xFF. As a quirk to support "
+            "Unicode, we encode header strings in UTF-8, meaning the actual header name/value on "
+            "the wire will be \"",
+            utf8Hex,
+            "\". Consider encoding this string in ASCII for "
+            "compatibility with browser implementations of the Fetch specifications."));
+      } else if (byteString.warning == jsg::ByteString::Warning::CONTAINS_UNICODE) {
+        context.logWarning(kj::str("Invalid header name or value: \"", byteString,
+            "\". Per the Fetch specification, the "
+            "Headers class may only accept header names and values which contain 8-bit characters. "
+            "That is, they must not contain any Unicode code points greater than 0xFF. As a quirk, "
+            "we are encoding this string in UTF-8 in the header, but in a browser this would "
+            "result in a TypeError exception. Consider encoding this string in ASCII for "
+            "compatibility with browser implementations of the Fetch specification."));
+      }
+    }
+  }
+}
 
 // Left- and right-trim HTTP whitespace from `value`.
-jsg::ByteString normalizeHeaderValue(jsg::Lock& js, kj::StringPtr value) {
-  // warnIfBadHeaderString(value);
+jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
+  warnIfBadHeaderString(value);
 
   auto slice = value.asArray();
   constexpr auto isHttpWhitespace = [](char c) {
@@ -90,15 +88,15 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, kj::StringPtr value) {
     slice = slice.first(slice.size() - 1);
   }
   if (slice.size() == value.size()) {
-    return jsg::ByteString(kj::str(value));
+    return kj::mv(value);
   }
   return jsg::ByteString(kj::str(slice));
 }
 
-void requireValidHeaderName(kj::StringPtr name) {
+void requireValidHeaderName(const jsg::ByteString& name) {
   // TODO(cleanup): Code duplication with kj/compat/http.c++
 
-  // warnIfBadHeaderString(name);
+  warnIfBadHeaderString(name);
 
   constexpr auto HTTP_SEPARATOR_CHARS = kj::parse::anyOfChars("()<>@,;:\\\"/[]?={} \t");
   // RFC2616 section 2.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec2.html#sec2.2
@@ -212,7 +210,7 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
     KJ_DREQUIRE(!('A' <= c && c <= 'Z'));
   }
 #endif
-  return headers.find(name) != kj::none;
+  return headers.find(HeaderKey(name)) != kj::none;
 }
 
 kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
@@ -224,12 +222,12 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
         // combining them.
         for (auto& value: entry.value.values) {
           copy.add(Headers::DisplayedHeader{
-            .key = jsg::ByteString(kj::str(entry.key.name)),
+            .key = jsg::ByteString(toLower(entry.key.name)),
             .value = jsg::ByteString(kj::str(value.str)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.key.name)),
+        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(toLower(entry.key.name)),
           .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
       }
     }
@@ -238,7 +236,7 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
     // The old behavior before the standard getSetCookie() API was introduced...
     auto headersCopy = KJ_MAP(mapEntry, headers) {
       const auto& header = mapEntry.value;
-      return DisplayedHeader{jsg::ByteString(kj::str(header.name.str)),
+      return DisplayedHeader{jsg::ByteString(toLower(header.name.str)),
         jsg::ByteString(kj::strArray(header.values, ", "))};
     };
     return headersCopy;
@@ -337,7 +335,7 @@ void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  headers.insert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
+  headers.upsert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -395,16 +393,16 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
       // the keys iterator can end up having multiple set-cookie instances.
       if (entry.key == "set-cookie") {
         for (auto n = 0; n < entry.value.values.size(); n++) {
-          keysCopy.add(kj::String(kj::str(entry.key.name)));
+          keysCopy.add(jsg::ByteString(toLower(entry.key.name)));
         }
       } else {
-        keysCopy.add(kj::String(kj::str(entry.key.name)));
+        keysCopy.add(jsg::ByteString(toLower(entry.key.name)));
       }
     }
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
   } else {
     auto keysCopy =
-        KJ_MAP(mapEntry, headers) { return jsg::ByteString(kj::str(mapEntry.value.name.str)); };
+        KJ_MAP(mapEntry, headers) { return jsg::ByteString(toLower(mapEntry.value.name.str)); };
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
@@ -741,12 +739,13 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
-    : impl(kj::mv(init).map([&headers](auto i) -> Impl {
+    : impl(kj::mv(init).map([&headers, &js](auto i) -> Impl {
         KJ_IF_SOME(ct, i.contentType) {
           if (!headers.hasLowerCase("content-type")) {
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
-            // headers.set(js, kj::String(kj::str("Content-Type"_kj)), kj::String(kj::mv(ct)));
+            headers.set(
+                js, jsg::ByteString(kj::str("Content-Type"_kj)), jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.

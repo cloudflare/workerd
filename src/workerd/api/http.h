@@ -172,9 +172,9 @@ public:
   JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    // for (const auto& entry : headers) {
-      // tracker.trackField(entry.key, entry.value);
-    // }
+    for (const auto& entry : headers) {
+      tracker.trackField(entry.key.name, entry.value);
+    }
   }
 
   struct Str {
@@ -188,6 +188,10 @@ public:
       Str(kj::StringPtr data) : str(data) {}
 
       operator kj::StringPtr() const { return str; }
+
+      bool operator<(const Str& other) const {
+        return strcasecmp(str.cStr(), other.str.cStr()) < 0;
+      }
   };
 
   using Values = kj::Vector<Str>;
@@ -216,19 +220,16 @@ public:
       values.add(kj::mv(value));
     }
 
-    // JSG_MEMORY_INFO(Header) {
-    //   tracker.trackField("name", name);
-    //   KJ_SWITCH_ONEOF(values) {
-    //     KJ_CASE_ONEOF(value, Str) {
-    //       tracker.trackField("value", value);
-    //     }
-    //     KJ_CASE_ONEOF(vec, kj::Vector<Str>) {
-    //       for (const auto& value : vec) {
-    //         tracker.trackField(nullptr, value);
-    //       }
-    //     }
-    //   }
-    // }
+    JSG_MEMORY_INFO(Header) {
+      KJ_IF_SOME(storage, name.storage) {
+        tracker.trackField("name", storage);
+      }
+      for (const auto& value : values) {
+        KJ_IF_SOME(storage, value.storage) {
+          tracker.trackField(nullptr, storage);
+        }
+      }
+    }
   };
 
   struct HeaderKey {
@@ -1371,7 +1372,15 @@ kj::String makeRandomBoundaryCharacters();
 // TODO(cleanup): Move to form-data.{h,c++}?
 
 inline auto KJ_HASHCODE(const Headers::HeaderKey& key) {
-  return kj::hashCode(key.name);
+  uint hash = 0;
+  for (unsigned char c : key.name) {
+    // Branchless ASCII uppercase to lowercase conversion
+    // Create a mask that's 0x20 for uppercase letters, 0 otherwise
+    unsigned char is_upper = ((c - 'A') <= ('Z' - 'A'));
+    c |= (is_upper << 5);  // Set bit 5 if uppercase (converts to lowercase)
+    hash = hash * 31 + c;
+  }
+  return hash;
 }
 
 #define EW_HTTP_ISOLATE_TYPES         \
