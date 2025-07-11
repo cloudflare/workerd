@@ -178,17 +178,7 @@ public:
     }
   }
 
-  static kj::uint hashCode(kj::StringPtr name) {
-    KJ_STACK_ARRAY(char, buf, name.size(), 1024, 1024);
-    for (int n = 0; n < name.size(); n++) {
-      if ('A' <= name[n] && name[n] <= 'Z') {
-        buf[n] = name[n] | 0x20;  // Convert to lower-case.
-      } else {
-        buf[n] = name[n];
-      }
-    }
-    return kj::hashCode(buf);
-  }
+  static kj::uint hashCode(kj::StringPtr name);
 
 private:
   struct Header {

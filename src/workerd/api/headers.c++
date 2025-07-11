@@ -512,6 +512,17 @@ jsg::Ref<Headers> Headers::deserialize(
   return result;
 }
 
+kj::uint Headers::hashCode(kj::StringPtr name) {
+  KJ_STACK_ARRAY(char, buf, name.size(), 64, 64);
+  buf.copyFrom(name);
+  for (auto& c: buf) {
+    if ('A' <= c && c <= 'Z') {
+      c |= 0x20;  // Convert to lower-case.
+    }
+  }
+  return kj::hashCode(buf);
+}
+
 namespace {
 kj::OneOf<uint, kj::String> getNameOrIdx(uint hash, kj::StringPtr name) {
   KJ_IF_SOME(idx, getCommonHeaderMap().find(hash)) {
