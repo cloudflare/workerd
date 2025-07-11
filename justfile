@@ -86,6 +86,7 @@ clippy package="...":
 
 prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov genhtml fd-find
+  cargo install watchexec-cli
 
 generate-types:
   bazel build //types:types
@@ -124,3 +125,6 @@ profile path:
   else \
     echo "No valid perf.data file found for {{path}}"; \
   fi
+
+watch *args="build":
+  watchexec -rc -w src -w build just {{args}}
