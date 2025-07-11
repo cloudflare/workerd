@@ -642,9 +642,12 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
 
 class TailStreamTarget final: public rpc::TailStreamTarget::Server {
  public:
-  TailStreamTarget(
-      IoContext& ioContext, Frankenvalue props, kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+  TailStreamTarget(IoContext& ioContext,
+      kj::Maybe<kj::StringPtr> entrypointNamePtr,
+      Frankenvalue props,
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : weakIoContext(ioContext.getWeakRef()),
+        entrypointNamePtr(kj::mv(entrypointNamePtr)),
         props(kj::mv(props)),
         doneFulfiller(kj::mv(doneFulfiller)) {}
 
@@ -741,10 +744,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         "Expected only a single onset event");
     auto& event = events[0];
 
-    // TODO(later): This assumes the tail worker is on the default export.
-    // Should we allow other named exports to provide the tailStream handler?
     auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler("default"_kj, kj::mv(props), ioContext.getActor()),
+        lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
         "Failed to get handler to worker.");
     StringCache stringCache;
 
@@ -954,6 +955,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
   kj::Own<IoContext::WeakRef> weakIoContext;
+  kj::Maybe<kj::StringPtr> entrypointNamePtr;
   Frankenvalue props;
   // The done fulfiller is resolved when we receive the outcome event
   // or rejected if the capability is dropped before receiving the outcome
@@ -980,8 +982,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   }
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(
-      kj::heap<TailStreamTarget>(ioContext, kj::mv(props), kj::mv(doneFulfiller)));
+  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
+      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
 
   // What is happening here? I'm glad you asked! When this method is called we are
   // starting a tail stream session. Our TailStreamTarget created above is an RPC
