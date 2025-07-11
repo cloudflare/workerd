@@ -627,8 +627,8 @@ class FileImpl final: public File {
   // Writes data to the file at the given offset.
   kj::OneOf<FsError, uint32_t> write(
       jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
-    static constexpr uint32_t kMax = kj::maxValue;
-    if (buffer.size() > kMax) {
+    auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
+    if (buffer.size() > maxSize) {
       return FsError::FILE_SIZE_LIMIT_EXCEEDED;
     }
     if (!isWritable()) {
@@ -652,6 +652,11 @@ class FileImpl final: public File {
     auto& owned = writableView();
     if (size == owned.size()) return kj::none;  // Nothing to do.
 
+    auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
+    if (size > maxSize) {
+      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    }
+
     auto newData = kj::heapArray<kj::byte>(size);
 
     if (size > owned.size()) {
@@ -670,7 +675,10 @@ class FileImpl final: public File {
     if (!isWritable()) {
       return FsError::READ_ONLY;
     }
-    writableView().slice(offset.orDefault(0)).fill(value);
+    auto& view = writableView();
+    int actualOffset = offset.orDefault(0);
+    if (actualOffset >= view.size() || view.size() == 0) return kj::none;
+    view.slice(actualOffset).fill(value);
     return kj::none;
   }
 
@@ -695,13 +703,22 @@ class FileImpl final: public File {
     }
   }
 
-  kj::Rc<File> clone(jsg::Lock&) override {
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock& js) override {
+    auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
     KJ_SWITCH_ONEOF(ownedOrView) {
       KJ_CASE_ONEOF(owned, kj::Array<kj::byte>) {
-        return kj::rc<FileImpl>(kj::heapArray<kj::byte>(owned));
+        if (owned.size() > maxSize) [[unlikely]] {
+          return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+        }
+        kj::Rc<File> file = kj::rc<FileImpl>(kj::heapArray<kj::byte>(owned));
+        return kj::mv(file);
       }
       KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
-        return kj::rc<FileImpl>(kj::heapArray<kj::byte>(view));
+        if (view.size() > maxSize) [[unlikely]] {
+          return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+        }
+        kj::Rc<File> file = kj::rc<FileImpl>(kj::heapArray<kj::byte>(view));
+        return kj::mv(file);
       }
     }
     KJ_UNREACHABLE;
@@ -1036,7 +1053,9 @@ kj::Rc<Directory> Directory::newWritable() {
 }
 
 kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
-  auto actualSize = size.orDefault(0);
+  // We will cap the maximum size of the file.
+  auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
+  auto actualSize = kj::min(size.orDefault(0), maxSize);
   auto data = kj::heapArray<kj::byte>(actualSize);
   if (actualSize > 0) data.asPtr().fill(0);
   auto owned = data.attach(js.getExternalMemoryAdjustment(actualSize));
@@ -1228,8 +1247,9 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
     };
   }
 
-  kj::Rc<File> clone(jsg::Lock&) override {
-    return addRefToThis();
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock&) override {
+    kj::Rc<File> ref = addRefToThis();
+    return kj::mv(ref);
   }
 
   kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
@@ -1286,8 +1306,9 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
     };
   }
 
-  kj::Rc<File> clone(jsg::Lock&) override {
-    return addRefToThis();
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock&) override {
+    kj::Rc<File> ref = addRefToThis();
+    return kj::mv(ref);
   }
 
   kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
@@ -1345,8 +1366,9 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
     };
   }
 
-  kj::Rc<File> clone(jsg::Lock&) override {
-    return addRefToThis();
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock&) override {
+    kj::Rc<File> ref = addRefToThis();
+    return kj::mv(ref);
   }
 
   kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
@@ -1402,8 +1424,9 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
     };
   }
 
-  kj::Rc<File> clone(jsg::Lock&) override {
-    return addRefToThis();
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock&) override {
+    kj::Rc<File> ref = addRefToThis();
+    return kj::mv(ref);
   }
 
   kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {

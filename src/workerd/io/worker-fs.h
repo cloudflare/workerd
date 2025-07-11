@@ -282,7 +282,7 @@ class File: public kj::Refcounted {
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
 
   // Creates a copy of this file.
-  virtual kj::Rc<File> clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
+  virtual kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   // Replaces the contents of this file with the given file if possible.
   // If this file is read-only, an exception will be thrown.
