@@ -100,20 +100,21 @@ constexpr bool requireValidHeaderValue(kj::StringPtr value) {
 
 Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
     : guard(Guard::NONE) {
+  headers.reserve(dict.fields.size() + 16);
   for (auto& field: dict.fields) {
     append(js, kj::mv(field.name), kj::mv(field.value));
   }
 }
 
 Headers::Headers(jsg::Lock& js, const Headers& other, Guard guard): guard(guard) {
-  headers.reserve(other.headers.size());
+  headers.reserve(other.headers.size() + 16);
   for (const auto& header: other.headers) {
     headers.insert(header.clone(js));
   }
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(guard) {
-  headers.reserve(other.size());
+  headers.reserve(other.size() + 16);
   other.forEach([this, &js](auto name, auto value) {
     appendUnguarded(js, name, jsg::ByteString(kj::str(value)));
   });
@@ -270,10 +271,11 @@ void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
 }
 
 void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
-  KJ_IF_SOME(existing, headers.find(name)) {
+  kj::uint hash = hashCode(name);
+  KJ_IF_SOME(existing, headers.find(hash)) {
     existing.set(js, kj::mv(value));
   } else {
-    headers.insert(Header(js, name, kj::mv(value)));
+    headers.insert(Header(js, hash, name, kj::mv(value)));
   }
 }
 
@@ -290,10 +292,11 @@ void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteStr
 }
 
 void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
-  KJ_IF_SOME(existing, headers.find(name)) {
+  auto hash = hashCode(name);
+  KJ_IF_SOME(existing, headers.find(hash)) {
     existing.add(js, kj::mv(value));
   } else {
-    headers.insert(Header(js, name, kj::mv(value)));
+    headers.insert(Header(js, hash, name, kj::mv(value)));
   }
 }
 
@@ -370,6 +373,7 @@ bool Headers::inspectImmutable() {
   return guard != Guard::NONE;
 }
 
+namespace {
 // -----------------------------------------------------------------------------
 // serialization of headers
 //
@@ -450,6 +454,14 @@ static const kj::HashMap<uint, uint>& getCommonHeaderMap() {
   return MAP;
 }
 
+kj::OneOf<uint, kj::String> getNameOrIdx(uint hash, kj::StringPtr name) {
+  KJ_IF_SOME(idx, getCommonHeaderMap().find(hash)) {
+    return idx;
+  }
+  return kj::str(name);
+}
+}  // namespace
+
 void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // We serialize as a series of key-value pairs. Each value is a length-delimited string. Each key
   // is a common header ID, or the value zero to indicate an uncommon header, which is then
@@ -501,10 +513,11 @@ jsg::Ref<Headers> Headers::deserialize(
 
     auto value = deserializer.readLengthDelimitedString();
 
-    KJ_IF_SOME(existing, result->headers.find(name)) {
+    kj::uint hash = hashCode(name);
+    KJ_IF_SOME(existing, result->headers.find(hash)) {
       existing.add(js, jsg::ByteString(kj::mv(value)));
     } else {
-      result->headers.insert(Header(js, name, jsg::ByteString(kj::mv(value))));
+      result->headers.insert(Header(js, hash, name, jsg::ByteString(kj::mv(value))));
     }
   }
 
@@ -525,18 +538,10 @@ kj::uint Headers::hashCode(kj::StringPtr name) {
   return kj::hashCode(buf);
 }
 
-namespace {
-kj::OneOf<uint, kj::String> getNameOrIdx(uint hash, kj::StringPtr name) {
-  KJ_IF_SOME(idx, getCommonHeaderMap().find(hash)) {
-    return idx;
-  }
-  return kj::str(name);
-}
-}  // namespace
-
-Headers::Header::Header(jsg::Lock& js, kj::StringPtr name, kj::String value)
-    : hash(hashCode(name)),
+Headers::Header::Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name, kj::String value)
+    : hash(hash),
       nameOrIndex(getNameOrIdx(this->hash, name)),
+      values(1),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
   size_t totalSize = 0;
   KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {

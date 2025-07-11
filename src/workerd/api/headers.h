@@ -34,7 +34,9 @@ public:
     jsg::JsRef<jsg::JsString> value;  // comma-concatenation of all values seen
   };
 
-  Headers(): guard(Guard::NONE) {}
+  Headers(): guard(Guard::NONE) {
+    headers.reserve(16);
+  }
   explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
   explicit Headers(jsg::Lock& js, const Headers& other, Guard guard = Guard::NONE);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
@@ -201,7 +203,7 @@ private:
 
     Header clone(jsg::Lock& js) const;
 
-    Header(jsg::Lock& js, kj::StringPtr name, kj::String value);
+    Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name, kj::String value);
 
     void add(jsg::Lock& js, jsg::ByteString value);
 
@@ -248,7 +250,7 @@ private:
       return strcasecmp(header.getName().cStr(), name.cStr()) < 0;
     }
     bool matches(const Header& header, kj::StringPtr name) const {
-      return Headers::hashCode(name) == header.hash;
+      return strcasecmp(header.getName().cStr(), name.cStr()) == 0;
     }
   };
 
