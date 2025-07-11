@@ -1915,7 +1915,6 @@ export const deepDirectoryStructureTestsCallback = {
       `${sourceRoot}/level1/duplicate_file.txt`,
       'source level1 duplicate content'
     );
-    console.log('.......');
     // Perform recursive copy (should ignore duplicates and not follow symlinks)
     await new Promise((resolve, reject) => {
       cp(sourceRoot, destRoot, { recursive: true, force: false }, (err) => {
