@@ -101,6 +101,15 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "strong-bool",
+    hdrs = ["strong-bool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "uuid",
     srcs = ["uuid.c++"],
     hdrs = ["uuid.h"],
@@ -259,6 +268,13 @@ kj_test(
     src = "string-buffer-test.c++",
     deps = [
         ":string-buffer",
+    ],
+)
+
+kj_test(
+    src = "strong-bool-test.c++",
+    deps = [
+        ":strong-bool",
     ],
 )
 
