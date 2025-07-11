@@ -661,9 +661,9 @@ struct Worker::Isolate::Impl {
 
     ConsoleMode consoleMode;
 
-    // When structuredLogging is true AND consoleMode is STDOUT js logs will be emitted to STDOUT
+    // When structuredLogging is YES AND consoleMode is STDOUT js logs will be emitted to STDOUT
     // as newline separated json objects.
-    bool structuredLogging;
+    StructuredLogging structuredLogging;
 
    public:
     kj::Own<jsg::Lock> lock;
@@ -1007,7 +1007,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
     ConsoleMode consoleMode,
-    bool structuredLogging)
+    StructuredLogging structuredLogging)
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
@@ -1485,7 +1485,7 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 void Worker::setupContext(jsg::Lock& lock,
     v8::Local<v8::Context> context,
     Worker::ConsoleMode consoleMode,
-    bool structuredLogging) {
+    StructuredLogging structuredLogging) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
@@ -1835,7 +1835,7 @@ void Worker::processEntrypointClass(jsg::Lock& js,
 void Worker::handleLog(jsg::Lock& js,
     ConsoleMode consoleMode,
     LogLevel level,
-    bool structuredLogging,
+    StructuredLogging structuredLogging,
     const v8::Global<v8::Function>& original,
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
@@ -1965,7 +1965,7 @@ void Worker::handleLog(jsg::Lock& js,
 
     auto levelStr = logLevelToString(level);
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    args[length + 1] = v8::Boolean::New(js.v8Isolate, structuredLogging);
+    args[length + 1] = v8::Boolean::New(js.v8Isolate, bool(structuredLogging));
     args[length + 2] = jsg::v8StrIntern(js.v8Isolate, levelStr);
     auto formatted = js.toString(
         jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
