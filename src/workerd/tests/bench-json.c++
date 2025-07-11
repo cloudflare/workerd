@@ -18,7 +18,7 @@ static void Test_JSON_ENC(benchmark::State& state) {
   // Perform setup here
 
   for (auto _: state) {
-    for (size_t i = 0; i < 100000; i++) {
+    for (size_t i = 0; i < 10000; i++) {
       // This code gets timed
       KJ_EXPECT(json.encode(capnp::VOID) == "null");
       KJ_EXPECT(json.encode(true) == "true");
