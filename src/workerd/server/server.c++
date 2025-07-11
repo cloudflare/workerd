@@ -4829,7 +4829,7 @@ kj::Promise<void> Server::run(
   TRACE_EVENT("workerd", "Server.run");
 
   // Update structured logging setting from config
-  structuredLogging = config.getStructuredLogging();
+  structuredLogging = StructuredLogging(config.getStructuredLogging());
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);

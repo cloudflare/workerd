@@ -19,6 +19,7 @@
 #include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
 
@@ -30,6 +31,8 @@ class Isolate;
 }
 
 namespace workerd {
+
+WD_STRONG_BOOL(StructuredLogging);
 
 namespace api {
 class DurableObjectState;
@@ -180,7 +183,7 @@ class Worker: public kj::AtomicRefcounted {
   static void setupContext(jsg::Lock& lock,
       v8::Local<v8::Context> context,
       Worker::ConsoleMode consoleMode,
-      bool structuredLogging);
+      StructuredLogging structuredLogging);
 
  private:
   kj::Own<const Script> script;
@@ -208,7 +211,7 @@ class Worker: public kj::AtomicRefcounted {
   static void handleLog(jsg::Lock& js,
       ConsoleMode mode,
       LogLevel level,
-      bool structuredLogging,
+      StructuredLogging structuredLogging,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
 
@@ -318,7 +321,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
       ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY,
-      bool structuredLogging = false);
+      StructuredLogging structuredLogging = StructuredLogging::NO);
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -460,7 +463,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<Api> api;
   ConsoleMode consoleMode;
-  bool structuredLogging;
+  StructuredLogging structuredLogging;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
