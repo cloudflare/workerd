@@ -909,7 +909,7 @@ KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
   commit2MsFulfiller->fulfill();
 }
 
-KJ_TEST("rejected alarm scheduling request breaks gate") {
+KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
   auto promise = test.gate.onBroken();
@@ -919,6 +919,31 @@ KJ_TEST("rejected alarm scheduling request breaks gate") {
       KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
 
   KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
+}
+
+KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Update alarm to be later.  We expect the db to be persisted before the alarm scheduling.
+  // We simulate a failure during the alarm rescheduling, but expect it to not break the output
+  // gate.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
+      KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
+
+  // Subsequent kv put succeeds.  In an earlier version of the code, this failed, due to capturing
+  // the scheduling failure as if it had broke the output gate, without actually breaking the
+  // output gate.
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("an exception thrown during merged commits does not hang") {
