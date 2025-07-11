@@ -139,9 +139,9 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
   KJ_UNREACHABLE;
 }
 
-constexpr char toLowerAscii(unsigned char c) {
+constexpr char toLowerAscii(char c) {
   // Create a mask that's 0x20 for uppercase letters, 0 otherwise
-  unsigned char is_upper = ((c - 'A') <= ('Z' - 'A'));
+  char is_upper = ((c - 'A') <= ('Z' - 'A'));
   c |= (is_upper << 5);  // Set bit 5 if uppercase (converts to lowercase)
   return c;
 }
@@ -171,7 +171,7 @@ constexpr bool Headers::HeaderKey::operator<(const HeaderKey& other) const {
 
 constexpr uint Headers::HeaderKey::hashCode() const {
   uint hash = 0;
-  for (unsigned char c: name) {
+  for (char c: name) {
     hash = hash * 31 + toLowerAscii(c);
   }
   return hash;
