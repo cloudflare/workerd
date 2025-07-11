@@ -25,6 +25,17 @@ from pyodide import __version__ as pyodide_version
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
 
+try:
+    from pyodide.ffi import jsnull
+except ImportError:
+    jsnull = None
+
+
+def _jsnull_to_none(x):
+    if x is jsnull:
+        return None
+    return x
+
 
 def import_from_javascript(module_name: str) -> Any:
     """
@@ -122,7 +133,7 @@ class FetchResponse(pyodide.http.FetchResponse):
         """
         Returns the body as a JavaScript ReadableStream from the JavaScript Response instance.
         """
-        return self.js_response.body
+        return _jsnull_to_none(self.js_response.body)
 
     @property
     def js_object(self) -> "js.Response":
@@ -163,10 +174,10 @@ class FetchResponse(pyodide.http.FetchResponse):
         return Blob(await self.js_object.blob())
 
 
-async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
-    # TODO: This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
+if pyodide_version == "0.26.0a2":
 
-    if pyodide_version == "0.26.0a2":
+    async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
+        # This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
         custom_fetch = kwargs["fetcher"] if "fetcher" in kwargs else js.fetch
         kwargs["fetcher"] = None
         try:
@@ -178,9 +189,8 @@ async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
             )
         except JsException as e:
             raise OSError(e.message) from None
-    else:
-        kwargs["fetcher"] = None
-        return await pyfetch(url, **kwargs)
+else:
+    _pyfetch_patched = pyfetch
 
 
 async def fetch(

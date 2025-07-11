@@ -137,7 +137,7 @@ def make_fastapi_snapshot(
 
 
 def main() -> int:
-    compat_flags = ["python_workers_20250116"]
+    compat_flags = ["python_workers_20250808"]
     with TemporaryDirectory() as package_cache:
         cache = Path(package_cache)
         cwd = Path.cwd()

@@ -1,7 +1,7 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
 load("//src/workerd/server/tests/python:py_wd_test.bzl", "FEATURE_FLAGS", "py_wd_test")
 
-def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix):
+def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
     http_archive target containing the vendored sources should be specified in `vendored_srcs_target_prefix`.
 
@@ -65,9 +65,10 @@ with open('$@', 'w') as f:
             main_py_file,
             vendored_srcs_target,
         ],
+        **kwds
     )
 
-def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendored_srcs_target_prefix = None):
+def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendored_srcs_target_prefix = None, **kwds):
     bzl_name = "%s_vendor_test" % name
     if test_template == None:
         test_template = "%s_vendor.wd-test" % name
@@ -79,4 +80,4 @@ def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendore
     for info in BUNDLE_VERSION_INFO.values():
         if name not in info["vendored_packages_for_tests"]:
             continue
-        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix)
+        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)

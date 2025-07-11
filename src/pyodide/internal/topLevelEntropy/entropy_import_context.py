@@ -29,6 +29,9 @@ MODULES_TO_PATCH = [
     "aiohttp.connector",
     "urllib3.util.ssl_",
     "requests.adapters",
+    "multiprocessing.process",
+    "langsmith._internal._constants",
+    "langchain_openai.chat_models.base",
     *RUST_PACKAGES,
 ]
 
@@ -115,7 +118,7 @@ def numpy_random_context(module):
     yield
     # Calling default_rng() with a given seed is fine, calling it without a seed
     # will call getentropy() and fail.
-    block_calls(module, allowlist=("default_rng",))
+    block_calls(module, allowlist=("default_rng", "RandomState"))
 
 
 @contextmanager
@@ -125,7 +128,7 @@ def numpy_random_mtrand_context(module):
     with allow_bad_entropy_calls(1):
         yield
     # Block calls until we get a chance to replace the bad random seed.
-    block_calls(module)
+    block_calls(module, allowlist=("RandomState",))
 
 
 @contextmanager
@@ -242,3 +245,26 @@ def tempfile_restore_random_name_sequence():
 
     tempfile._RandomNameSequence = tempfile._orig_RandomNameSequence
     del tempfile._orig_RandomNameSequence
+
+
+@contextmanager
+def multiprocessing_process_context(module):
+    # multiprocessing.process calls os.urandom() on import. It's harmless b/c multiprocessing is
+    # useless.
+    with allow_bad_entropy_calls(1):
+        yield
+
+
+@contextmanager
+def langsmith__internal__constants_context(module):
+    # Langsmith uses a UUID to communicate with a background thread. This obviously won't work so we
+    # might as well allow it to make a UUID.
+    with allow_bad_entropy_calls(1):
+        yield
+
+
+@contextmanager
+def langchain_openai_chat_models_base_context(module):
+    # Creates an ssl context
+    with allow_bad_entropy_calls(1):
+        yield

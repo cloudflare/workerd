@@ -210,7 +210,12 @@ function prepareStackTrace(
       return [false, funcName];
     }
     return [
-      ['loadModule', 'convertJsFunctionToWasm', 'generate'].includes(funcName),
+      [
+        'loadModule',
+        'convertJsFunctionToWasm',
+        'generate',
+        'getPyEMCountArgsPtr',
+      ].includes(funcName),
       funcName,
     ];
   } catch (e) {
