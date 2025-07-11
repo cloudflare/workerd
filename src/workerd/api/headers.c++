@@ -272,11 +272,7 @@ void Headers::setValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteString
 
 void Headers::setUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   kj::uint hash = hashCode(name);
-  KJ_IF_SOME(existing, headers.find(hash)) {
-    existing.set(js, kj::mv(value));
-  } else {
-    headers.insert(Header(js, hash, name, kj::mv(value)));
-  }
+  headers.findOrCreate(hash, [&]() { return Header(js, hash, name); }).set(js, kj::mv(value));
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -293,11 +289,7 @@ void Headers::appendValueChecked(jsg::Lock& js, kj::StringPtr name, jsg::ByteStr
 
 void Headers::appendUnguarded(jsg::Lock& js, kj::StringPtr name, jsg::ByteString value) {
   auto hash = hashCode(name);
-  KJ_IF_SOME(existing, headers.find(hash)) {
-    existing.add(js, kj::mv(value));
-  } else {
-    headers.insert(Header(js, hash, name, kj::mv(value)));
-  }
+  headers.findOrCreate(hash, [&]() { return Header(js, hash, name); }).add(js, kj::mv(value));
 }
 
 void Headers::delete_(jsg::ByteString name) {
@@ -499,6 +491,7 @@ jsg::Ref<Headers> Headers::deserialize(
   KJ_REQUIRE(guard <= static_cast<uint>(Guard::NONE), "unknown guard value");
 
   uint count = deserializer.readRawUint32();
+  result->headers.reserve(count);
 
   auto commonHeaders = getCommonHeaderList();
   for (auto i KJ_UNUSED: kj::zeroTo(count)) {
@@ -513,12 +506,7 @@ jsg::Ref<Headers> Headers::deserialize(
 
     auto value = deserializer.readLengthDelimitedString();
 
-    kj::uint hash = hashCode(name);
-    KJ_IF_SOME(existing, result->headers.find(hash)) {
-      existing.add(js, jsg::ByteString(kj::mv(value)));
-    } else {
-      result->headers.insert(Header(js, hash, name, jsg::ByteString(kj::mv(value))));
-    }
+    result->appendUnguarded(js, name, jsg::ByteString(kj::mv(value)));
   }
 
   // Don't actually set the guard until here because it may block the ability to call `append()`.
@@ -527,28 +515,30 @@ jsg::Ref<Headers> Headers::deserialize(
   return result;
 }
 
+namespace {
+constexpr void toLowerImpl(kj::ArrayPtr<char> buf) {
+  // Converts buf to lowercase in place, then hashes it.
+  for (auto& c: buf) {
+    c += ((static_cast<unsigned char>(c - 'A') < 26) << 5);
+  }
+}
+}  // namespace
+
 kj::uint Headers::hashCode(kj::StringPtr name) {
   KJ_STACK_ARRAY(char, buf, name.size(), 64, 64);
   buf.copyFrom(name);
-  for (auto& c: buf) {
-    if ('A' <= c && c <= 'Z') {
-      c |= 0x20;  // Convert to lower-case.
-    }
-  }
+  toLowerImpl(buf);
   return kj::hashCode(buf);
 }
 
-Headers::Header::Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name, kj::String value)
+Headers::Header::Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name)
     : hash(hash),
       nameOrIndex(getNameOrIdx(this->hash, name)),
       values(1),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
-  size_t totalSize = 0;
   KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
-    totalSize = str.size();
+    memoryAdjustment.adjustNow(js, str.size());
   }
-  memoryAdjustment.adjustNow(js, totalSize + value.size());
-  values.add(jsg::ByteString(kj::mv(value)));
 }
 
 Headers::Header::Header(jsg::Lock& js,

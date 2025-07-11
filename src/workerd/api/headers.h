@@ -10,7 +10,6 @@
 #endif
 
 namespace workerd::api {
-
 class Headers final: public jsg::Object {
 private:
   template <typename T>
@@ -203,7 +202,7 @@ private:
 
     Header clone(jsg::Lock& js) const;
 
-    Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name, kj::String value);
+    Header(jsg::Lock& js, kj::uint hash, kj::StringPtr name);
 
     void add(jsg::Lock& js, jsg::ByteString value);
 
@@ -227,29 +226,29 @@ private:
   };
 
   struct HeaderCallbacks {
-    kj::uint keyForRow(const Header& header) const {
+    constexpr kj::uint keyForRow(const Header& header) const {
       return header.hash;
     }
-    bool matches(const Header& header, kj::uint key) const {
+    constexpr bool matches(const Header& header, kj::uint key) const {
       return header.hash == key;
     }
-    bool matches(const Header& header, kj::StringPtr name) const {
+    constexpr bool matches(const Header& header, kj::StringPtr name) const {
       return Headers::hashCode(name) == keyForRow(header);
     }
-    uint hashCode(kj::uint hash) const { return hash; }
-    uint hashCode(kj::StringPtr name) const {
+    constexpr uint hashCode(kj::uint hash) const { return hash; }
+    constexpr uint hashCode(kj::StringPtr name) const {
       return Headers::hashCode(name);
     }
   };
 
   struct HeaderTreeCallbacks {
-    kj::StringPtr keyForRow(const Header& header) const {
+    constexpr kj::StringPtr keyForRow(const Header& header) const {
       return header.getName();
     }
-    bool isBefore(const Header& header, kj::StringPtr name) const {
+    constexpr bool isBefore(const Header& header, kj::StringPtr name) const {
       return strcasecmp(header.getName().cStr(), name.cStr()) < 0;
     }
-    bool matches(const Header& header, kj::StringPtr name) const {
+    constexpr bool matches(const Header& header, kj::StringPtr name) const {
       return strcasecmp(header.getName().cStr(), name.cStr()) == 0;
     }
   };
@@ -258,10 +257,6 @@ private:
                     kj::TreeIndex<HeaderTreeCallbacks>> headers;
 
   Guard guard;
-
-  inline void checkGuard() {
-    JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
-  }
 
   static kj::Maybe<kj::Array<jsg::JsRef<jsg::JsString>>> entryIteratorNext(
       jsg::Lock& js, auto& state) {

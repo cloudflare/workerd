@@ -426,7 +426,7 @@ USVString Lock::accountedUSVString(kj::Array<char>&& str) {
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
-
+  if (amount == 0) return;
   this->amount += amount;
   externalMemory->maybeDeferAdjustment(amount);
 }
@@ -434,6 +434,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(
     kj::Arc<const ExternalMemoryTarget> externalMemory, size_t amount)
     : externalMemory(kj::mv(externalMemory)) {
+  if (amount == 0) return;
   maybeDeferAdjustment(amount);
 }
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
@@ -461,6 +462,7 @@ ExternalMemoryAdjustment::~ExternalMemoryAdjustment() noexcept(false) {
 }
 
 void ExternalMemoryAdjustment::adjust(ssize_t amount) {
+  if (amount == 0) return;
   maybeDeferAdjustment(amount);
 }
 
