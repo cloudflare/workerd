@@ -53,7 +53,9 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   warnIfBadHeaderString(value);
 
   kj::ArrayPtr<char> slice = value;
-  auto isHttpWhitespace = [](char c) { return c == '\t' || c == '\r' || c == '\n' || c == ' '; };
+  constexpr auto isHttpWhitespace = [](char c) {
+    return c == '\t' || c == '\r' || c == '\n' || c == ' ';
+  };
   while (slice.size() > 0 && isHttpWhitespace(slice.front())) {
     slice = slice.slice(1, slice.size());
   }
@@ -149,9 +151,10 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(
 
   kj::Vector<Headers::DisplayedHeader> copy(headers.size());
 
+  auto getSetCookie = FeatureFlags::get(js).getHttpHeadersGetSetCookie();
+
   for (const auto& entry: headers.ordered<1>()) {
-    if (FeatureFlags::get(js).getHttpHeadersGetSetCookie() &&
-        strcasecmp(entry.name.cStr(), "set-cookie") == 0) {
+    if (getSetCookie && strcasecmp(entry.name.cStr(), "set-cookie") == 0) {
       copy.reserve(entry.values.size() - 1);
       // For set-cookie entries, we iterate each individually without
       // combining them.

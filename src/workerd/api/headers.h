@@ -259,7 +259,7 @@ private:
 
   Guard guard;
 
-  void checkGuard() {
+  inline void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
   }
 
