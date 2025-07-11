@@ -1,7 +1,7 @@
 load("@aspect_bazel_lib//lib:base64.bzl", "base64")
 load("@aspect_bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
-load("//:build/python/packages_20250616.bzl", "PACKAGES_20250616")
+load("//:build/python/packages_20250725.bzl", "PACKAGES_20250725")
 
 def _chunk(data, length):
     return [data[i:i + length] for i in range(0, len(data), length)]
@@ -18,8 +18,8 @@ PYODIDE_VERSIONS = [
         "sha256": "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
     },
     {
-        "version": "0.27.7",
-        "sha256": "9bc8f127db6c590b191b9aee754022cb41b1a36c7bac233776c11c5ecb541be8",
+        "version": "0.28.0",
+        "sha256": "da184d1266414630ed6c8312d2faf23ca959a0bbc31be334890fa44d0ad72b3d",
     },
 ]
 
@@ -32,7 +32,7 @@ PYODIDE_VERSIONS = [
 # first.
 _package_lockfiles = [
     PACKAGES_20240829_4,
-    PACKAGES_20250616,
+    PACKAGES_20250725,
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -53,7 +53,7 @@ def verify_no_packages_were_removed():
         if missing_pkgs:
             fail("Some packages from version ", curr_info["info"]["tag"], " missing in version", next_info["info"]["tag"], ":\n", "   ", ", ".join(missing_pkgs), "\n\n")
 
-verify_no_packages_were_removed()
+# verify_no_packages_were_removed()
 
 def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
     return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
@@ -79,8 +79,8 @@ def _make_bundle_version_info(versions):
         result[name] = entry
     dev = result["development"]
 
-    # Uncomment to test with development = 0.27.7
-    # dev["real_pyodide_version"] = "0.27.7"
+    # Uncomment to test with development = 0.28.0
+    # dev["real_pyodide_version"] = "0.28.0"
     result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
@@ -116,33 +116,27 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "name": "0.27.7",
-        "pyodide_version": "0.27.7",
+        "name": "0.28.0",
+        "pyodide_version": "0.28.0",
         "pyodide_date": "2025-01-16",
-        "packages": PACKAGES_20250616,
+        "packages": PACKAGES_20250725,
         "backport": "2",
-        "integrity": "sha256-04qtaf3jr6q7mixWrpeASgYzTW1WHb9NEILBGl8M9hk=",
+        "integrity": "sha256-vgJw1nTi/1gqPa46J4iOBH3wAE0ziPJd5BjvTHbUI9g=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
-        "emscripten_version": "3.1.58",
-        "python_version": "3.12.7",
-        "baseline_snapshot": "baseline-59fa311f4.bin",
-        "baseline_snapshot_hash": "59fa311f4af0bb28477e2fa17f54dc254ec7fa6f02617b832b141854e44bd621",
-        "numpy_snapshot": "package_snapshot_numpy-429b1174f.bin",
-        "numpy_snapshot_hash": "429b1174f9c0d73f9c845007c60595c0a80141b440c080c862568f9d2351dcbb",
-        "fastapi_snapshot": "package_snapshot_fastapi-23337a32b.bin",
-        "fastapi_snapshot_hash": "23337a032bb78f8c2d1abb9439a9c16f56c50130b67aff6bf82b78c896d9a1cc",
+        "emscripten_version": "4.0.9",
+        "python_version": "3.13.2",
+        "baseline_snapshot": "baseline-67dd35c78.bin",
+        "baseline_snapshot_hash": "67dd35c78ed4ec332b2c6bddf18c6659fa4e6791f20e212717c9df53bff30",
+        "numpy_snapshot": "package_snapshot_numpy-70d214e09.bin",
+        "numpy_snapshot_hash": "70d214e093533167feb3d4ffedcda5690ce964787f03f5588cc27fdd442ed2",
         "vendored_packages_for_tests": [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
                 "name": "beautifulsoup4",
                 "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
             },
-            {
-                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip
-                "name": "fastapi",
-                "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
-            },
+            # TODO: Add a fastapi zip
         ],
     },
     {

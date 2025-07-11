@@ -31,7 +31,7 @@ class DurableObjectExample(DurableObject, MixinTest):
         assert isinstance(request, Request)
 
         curr = await self.storage.getAlarm()
-        if curr is None:
+        if not curr:
             self.storage.setAlarm(Date.now() + 100)
 
         url = urlparse(request.url)
@@ -105,7 +105,8 @@ async def test(ctrl, env, ctx):
     assert third_resp_data == "hello from python 3"
 
     # Wait for alarm to get triggered.
-    while True:
+    for n in range(20):
+        print("alarm try", n)
         await sleep(0.2)
         resp = await obj.fetch("http://foo.com/alarm")
 
