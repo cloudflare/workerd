@@ -4,10 +4,10 @@
 
 #pragma once
 
+#include <workerd/util/strings.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/async-context.h>
 #include <kj/compat/http.h>
-#include <map>
 #include "basics.h"
 #include "cf-property.h"
 #include <workerd/api/streams/readable.h>
@@ -61,9 +61,9 @@ public:
   // reference, so the output must be consumed immediately.
   void shallowCopyTo(kj::HttpHeaders& out);
 
-  // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
+  // Like has(), but doesn't guard at all. Useful to avoid an
   // unnecessary string allocation. Not part of the JS interface.
-  bool hasLowerCase(kj::StringPtr name);
+  bool hasUnguarded(kj::StringPtr name);
 
   // Returns headers with lower-case name and comma-concatenated duplicates.
   kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
@@ -173,13 +173,25 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
+      tracker.trackField(entry.key.name, entry.value);
     }
   }
 
 private:
+  // Performs case insensitive comparison for header names.
+  struct HeaderKey {
+    kj::StringPtr name;
+
+    explicit HeaderKey(kj::StringPtr input) : name(input) {}
+    explicit HeaderKey(const jsg::ByteString& input) : name(input.asPtr()) {}
+    constexpr bool operator==(const HeaderKey& other) const;
+    constexpr bool operator<(const HeaderKey& other) const;
+    constexpr uint hashCode() const;
+    // Returns lowercase header name for display purposes.
+    jsg::ByteString toDisplay(jsg::Lock& js) const;
+  };
+
   struct Header {
-    jsg::ByteString key;   // lower-cased name
     jsg::ByteString name;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
@@ -194,16 +206,15 @@ private:
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
     kj::Vector<jsg::ByteString> values;
 
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
+    explicit Header(jsg::ByteString name,
                     kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
+        : name(kj::mv(name)), values(kj::mv(values)) {}
+    explicit Header(jsg::ByteString name, jsg::ByteString value)
+        : name(kj::mv(name)), values(1) {
       values.add(kj::mv(value));
     }
 
     JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
       tracker.trackField("name", name);
       for (const auto& value : values) {
         tracker.trackField(nullptr, value);
@@ -212,7 +223,10 @@ private:
   };
 
   Guard guard;
-  std::map<kj::StringPtr, Header> headers;
+  kj::HashMap<HeaderKey, Header> headers;
+
+  using HeaderEntry = kj::HashMap<Headers::HeaderKey, Headers::Header>::Entry;
+  kj::Array<const HeaderEntry*> sortedHeaders() const;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
