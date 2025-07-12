@@ -2315,6 +2315,7 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted,
 
  private:
   void maybeDeferAdjustment(ssize_t amount) const;
+  void adjustNow(Lock& js, ssize_t amount) const;
 
   // Mutable so that it can be set null when the isolate is destroyed.
   mutable std::atomic<v8::Isolate*> isolate;
@@ -2342,9 +2343,15 @@ class ExternalMemoryAdjustment final {
   // Adjust the amount of external memory report up or down.
   void adjust(ssize_t amount);
 
+  // Like adjust, except that the adjustment is applied immediately with no deferral.
+  void adjustNow(Lock& js, ssize_t amount);
+
   // Set a specific amount of external memory to be attributed, overriding
   // the previous amount.
   void set(size_t amount);
+
+  // Like set(), except that the adjustment is applied immediately with no deferral.
+  void setNow(Lock& js, size_t amount);
 
   inline size_t getAmount() const {
     return amount;

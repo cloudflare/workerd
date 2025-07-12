@@ -336,6 +336,7 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
   // Carefully check whether `isolate` is locked by the current thread. Note that there's a
   // possibility that the isolate is being torn down in a different thread, which means we cannot
   // safely call `v8::Locekr::IsLocked()` on it.
+  if (amount == 0) return;
   v8::Isolate* current = v8::Isolate::TryGetCurrent();
   v8::Isolate* target = isolate.load(std::memory_order_relaxed);  // could be null!
 
@@ -358,6 +359,17 @@ void ExternalMemoryTarget::maybeDeferAdjustment(ssize_t amount) const {
     // the isolate lock is acquired.
     pendingExternalMemoryUpdate.fetch_add(amount, std::memory_order_relaxed);
   }
+}
+
+void ExternalMemoryTarget::adjustNow(Lock& js, ssize_t amount) const {
+#ifdef KJ_DEBUG
+  v8::Isolate* target = isolate.load(std::memory_order_relaxed);
+  if (target != nullptr) {
+    KJ_ASSERT(target == js.v8Isolate);
+  }
+#endif
+  if (amount == 0) return;
+  js.v8Isolate->AdjustAmountOfExternalAllocatedMemory(amount);
 }
 
 void ExternalMemoryTarget::detach() const {
@@ -414,7 +426,7 @@ USVString Lock::accountedUSVString(kj::Array<char>&& str) {
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
-
+  if (amount == 0) return;
   this->amount += amount;
   externalMemory->maybeDeferAdjustment(amount);
 }
@@ -422,6 +434,7 @@ void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(
     kj::Arc<const ExternalMemoryTarget> externalMemory, size_t amount)
     : externalMemory(kj::mv(externalMemory)) {
+  if (amount == 0) return;
   maybeDeferAdjustment(amount);
 }
 ExternalMemoryAdjustment::ExternalMemoryAdjustment(ExternalMemoryAdjustment&& other)
@@ -449,11 +462,24 @@ ExternalMemoryAdjustment::~ExternalMemoryAdjustment() noexcept(false) {
 }
 
 void ExternalMemoryAdjustment::adjust(ssize_t amount) {
+  if (amount == 0) return;
   maybeDeferAdjustment(amount);
+}
+
+void ExternalMemoryAdjustment::adjustNow(Lock& js, ssize_t amount) {
+  KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
+      "Memory usage may not be decreased below zero");
+
+  this->amount += amount;
+  externalMemory->adjustNow(js, amount);
 }
 
 void ExternalMemoryAdjustment::set(size_t amount) {
   adjust(amount - this->amount);
+}
+
+void ExternalMemoryAdjustment::setNow(Lock& js, size_t amount) {
+  adjustNow(js, amount - this->amount);
 }
 
 Name::Name(kj::String string): hash(kj::hashCode(string)), inner(kj::mv(string)) {}

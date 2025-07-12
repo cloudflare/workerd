@@ -4,242 +4,31 @@
 
 #pragma once
 
-#include <workerd/jsg/jsg.h>
-#include <workerd/jsg/async-context.h>
-#include <kj/compat/http.h>
-#include <map>
 #include "basics.h"
-#include "cf-property.h"
-#include <workerd/api/streams/readable.h>
-#include "form-data.h"
-#include "web-socket.h"
-#include <workerd/api/url.h>
-#include <workerd/api/url-standard.h>
 #include "blob.h"
-#include <workerd/io/compatibility-date.capnp.h>
-#include "worker-rpc.h"
+#include "cf-property.h"
+#include "form-data.h"
+#include "headers.h"
 #include "queue.h"
+#include "web-socket.h"
+#include "worker-rpc.h"
+
+#include <workerd/api/streams/readable.h>
+#include <workerd/api/url-standard.h>
+#include <workerd/api/url.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/jsg/async-context.h>
+#include <workerd/jsg/jsg.h>
+
+#include <kj/compat/http.h>
 
 namespace workerd::api {
-
-class Headers final: public jsg::Object {
-private:
-  template <typename T>
-  struct IteratorState {
-    kj::Array<T> copy;
-    decltype(copy.begin()) cursor = copy.begin();
-  };
-
-public:
-  enum class Guard {
-    // WARNING: This type is serialized, do not change the numeric values.
-    IMMUTABLE = 0,
-    REQUEST = 1,
-    // REQUEST_NO_CORS,  // CORS not relevant on server side
-    RESPONSE = 2,
-    NONE = 3
-  };
-
-  struct DisplayedHeader {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString value; // comma-concatenation of all values seen
-  };
-
-  Headers(): guard(Guard::NONE) {}
-  explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
-  explicit Headers(jsg::Lock& js, const Headers& other);
-  explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
-
-  Headers(Headers&&) = delete;
-  Headers& operator=(Headers&&) = delete;
-
-  // Make a copy of this Headers object, and preserve the guard. The normal copy constructor sets
-  // the copy's guard to NONE.
-  jsg::Ref<Headers> clone(jsg::Lock& js) const;
-
-  // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
-  // reference, so the output must be consumed immediately.
-  void shallowCopyTo(kj::HttpHeaders& out);
-
-  // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
-  // unnecessary string allocation. Not part of the JS interface.
-  bool hasLowerCase(kj::StringPtr name);
-
-  // Returns headers with lower-case name and comma-concatenated duplicates.
-  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
-
-  using ByteStringPair = jsg::Sequence<jsg::ByteString>;
-  using ByteStringPairs = jsg::Sequence<ByteStringPair>;
-
-  // Per the fetch specification, it is possible to initialize a Headers object
-  // from any other object that has a Symbol.iterator implementation. Those are
-  // handled in this Initializer definition using the ByteStringPairs definition
-  // that aliases jsg::Sequence<jsg::Sequence<jsg::ByteString>>. Technically,
-  // the Headers object itself falls under that definition as well. However, treating
-  // a Headers object as a jsg::Sequence<jsg::Sequence<T>> is nowhere near as
-  // performant and has the side effect of forcing all header names to be lower-cased
-  // rather than case-preserved. Instead of following the spec exactly here, we
-  // choose to special case creating a Header object from another Header object.
-  // This is an intentional departure from the spec.
-  using Initializer = kj::OneOf<jsg::Ref<Headers>,
-                                ByteStringPairs,
-                                jsg::Dict<jsg::ByteString, jsg::ByteString>>;
-
-  static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
-  kj::Maybe<jsg::ByteString> get(jsg::Lock& js, jsg::ByteString name);
-
-  kj::Maybe<jsg::ByteString> getNoChecks(jsg::Lock& js, kj::StringPtr name);
-
-  // getAll is a legacy non-standard extension API that we introduced before
-  // getSetCookie() was defined. We continue to support it for backwards
-  // compatibility but users really ought to be using getSetCookie() now.
-  kj::ArrayPtr<jsg::ByteString> getAll(jsg::ByteString name);
-
-  // The Set-Cookie header is special in that it is the only HTTP header that
-  // is not permitted to be combined into a single instance.
-  kj::ArrayPtr<jsg::ByteString> getSetCookie();
-
-  bool has(jsg::ByteString name);
-
-  void set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
-
-  // Like set(), but ignores the header guard if set. This can only be called from C++, and may be
-  // used to mutate headers before dispatching a request.
-  void setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
-
-  void append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
-
-  void delete_(jsg::ByteString name);
-
-  void forEach(jsg::Lock& js,
-               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)>,
-               jsg::Optional<jsg::Value>);
-
-  bool inspectImmutable();
-
-  JSG_ITERATOR(EntryIterator, entries,
-                kj::Array<jsg::ByteString>,
-                IteratorState<DisplayedHeader>,
-                entryIteratorNext)
-  JSG_ITERATOR(KeyIterator, keys,
-                jsg::ByteString,
-                IteratorState<jsg::ByteString>,
-                keyOrValueIteratorNext)
-  JSG_ITERATOR(ValueIterator, values,
-                jsg::ByteString,
-                IteratorState<jsg::ByteString>,
-                keyOrValueIteratorNext)
-
-  // JavaScript API.
-
-  JSG_RESOURCE_TYPE(Headers, CompatibilityFlags::Reader flags) {
-    JSG_METHOD(get);
-    JSG_METHOD(getAll);
-    if (flags.getHttpHeadersGetSetCookie()) {
-      JSG_METHOD(getSetCookie);
-    }
-    JSG_METHOD(has);
-    JSG_METHOD(set);
-    JSG_METHOD(append);
-    JSG_METHOD_NAMED(delete, delete_);
-    JSG_METHOD(forEach);
-    JSG_METHOD(entries);
-    JSG_METHOD(keys);
-    JSG_METHOD(values);
-
-    JSG_INSPECT_PROPERTY(immutable, inspectImmutable);
-
-    JSG_ITERABLE(entries);
-
-    JSG_TS_DEFINE(type HeadersInit = Headers | Iterable<Iterable<string>> | Record<string, string>);
-    // All type aliases get inlined when exporting RTTI, but this type alias is included by
-    // the official TypeScript types, so users might be depending on it.
-
-    JSG_TS_OVERRIDE({
-      constructor(init?: HeadersInit);
-
-      entries(): IterableIterator<[key: string, value: string]>;
-      [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
-
-      forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
-    });
-  }
-
-  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-  static jsg::Ref<Headers> deserialize(
-      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
-
-  JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
-    }
-  }
-
-private:
-  struct Header {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString name;
-
-    // We intentionally do not comma-concatenate header values of the same name, as we need to be
-    // able to re-serialize them separately. This is particularly important for the Set-Cookie
-    // header, which uses a date format that requires a comma. This would normally suggest using a
-    // std::multimap, but we also need to be able to display the values in comma-concatenated form
-    // via Headers.entries()[1] in order to be Fetch-conformant. Storing a vector of strings in a
-    // std::map makes this easier, and also makes it easy to honor the "first header name casing is
-    // used for all duplicate header names" rule[2] that the Fetch spec mandates.
-    //
-    // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
-    //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
-    kj::Vector<jsg::ByteString> values;
-
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
-      values.add(kj::mv(value));
-    }
-
-    JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
-      tracker.trackField("name", name);
-      for (const auto& value : values) {
-        tracker.trackField(nullptr, value);
-      }
-    }
-  };
-
-  Guard guard;
-  std::map<kj::StringPtr, Header> headers;
-
-  void checkGuard() {
-    JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
-  }
-
-  static kj::Maybe<kj::Array<jsg::ByteString>> entryIteratorNext(jsg::Lock& js, auto& state) {
-    if (state.cursor == state.copy.end()) {
-      return kj::none;
-    }
-    auto& ret = *state.cursor++;
-    return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
-  }
-
-  static kj::Maybe<jsg::ByteString> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
-    if (state.cursor == state.copy.end()) {
-      return kj::none;
-    }
-    auto& ret = *state.cursor++;
-    return kj::mv(ret);
-  }
-};
 
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
 // be instantiating objects of this type -- it exists solely to house body-related functionality
 // common to both Requests and Responses.
 class Body: public jsg::Object {
-public:
+ public:
   // The types of objects from which a Body can be created.
   //
   // If the object is a ReadableStream, Body will adopt it directly; otherwise the object is some
@@ -254,9 +43,13 @@ public:
   // will fail, because there is no body source left. On the other hand, if the body was constructed
   // from any of the other source types, Body can create a new ReadableStream from the source, and
   // the POST will successfully retransmit.
-  using Initializer = kj::OneOf<jsg::Ref<ReadableStream>, kj::String, kj::Array<byte>,
-                                jsg::Ref<Blob>, jsg::Ref<FormData>,
-                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>>;
+  using Initializer = kj::OneOf<jsg::Ref<ReadableStream>,
+      kj::String,
+      kj::Array<byte>,
+      jsg::Ref<Blob>,
+      jsg::Ref<FormData>,
+      jsg::Ref<URLSearchParams>,
+      jsg::Ref<url::URLSearchParams>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -328,8 +121,8 @@ public:
 
   struct ExtractedBody {
     ExtractedBody(jsg::Ref<ReadableStream> stream,
-                  kj::Maybe<Buffer> source = kj::none,
-                  kj::Maybe<kj::String> contentType = kj::none);
+        kj::Maybe<Buffer> source = kj::none,
+        kj::Maybe<kj::String> contentType = kj::none);
 
     Impl impl;
     kj::Maybe<kj::String> contentType;
@@ -397,11 +190,11 @@ public:
     tracker.trackField("impl", impl);
   }
 
-protected:
+ protected:
   // Helper to implement Request/Response::clone().
   kj::Maybe<ExtractedBody> clone(jsg::Lock& js);
 
-private:
+ private:
   kj::Maybe<Impl> impl;
 
   // HACK: This `headersRef` variable refers to a Headers object in the Request/Response subclass.
@@ -418,8 +211,8 @@ private:
 
 // Controls how response bodies are encoded/decoded according to Content-Encoding headers
 enum class Response_BodyEncoding {
-  AUTO,    // Automatically encode/decode based on Content-Encoding headers
-  MANUAL   // Treat Content-Encoding headers as opaque (no automatic encoding/decoding)
+  AUTO,   // Automatically encode/decode based on Content-Encoding headers
+  MANUAL  // Treat Content-Encoding headers as opaque (no automatic encoding/decoding)
 };
 
 class Request;
@@ -441,12 +234,9 @@ using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
 // TODO(cleanup): This probably doesn't belong in `http.h` anymore. And perhaps it should be
 //   renamed, though I haven't heard any great suggestions for what the name should be.
 class Fetcher: public JsRpcClientProvider {
-public:
+ public:
   // Should we use a fake https base url if we lack a scheme+authority?
-  enum class RequiresHostAndProtocol {
-    YES,
-    NO
-  };
+  enum class RequiresHostAndProtocol { YES, NO };
 
   // `channel` is what to pass to IoContext::getSubrequestChannel() to get a WorkerInterface
   // representing this Fetcher. Note that different requests potentially have different client
@@ -459,12 +249,14 @@ public:
   //
   // See pipeline.capnp or request-context.h for an explanation of `isInHouse`.
   explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
-      : channelOrClientFactory(channel), requiresHost(requiresHost), isInHouse(isInHouse) {}
+      : channelOrClientFactory(channel),
+        requiresHost(requiresHost),
+        isInHouse(isInHouse) {}
 
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
   class OutgoingFactory {
-  public:
+   public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
@@ -479,8 +271,9 @@ public:
   // to a specific I/O context. The factory object moves with the isolate across threads and
   // contexts, and must work from any context.
   class CrossContextOutgoingFactory {
-  public:
-    virtual kj::Own<WorkerInterface> newSingleUseClient(IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
+   public:
+    virtual kj::Own<WorkerInterface> newSingleUseClient(
+        IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
 
     virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
       // TODO(soon): Update all implementations and remove this default implementation.
@@ -491,8 +284,8 @@ public:
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, such as ones
   // created for Actors.
   Fetcher(IoOwn<OutgoingFactory> outgoingFactory,
-          RequiresHostAndProtocol requiresHost,
-          bool isInHouse = false)
+      RequiresHostAndProtocol requiresHost,
+      bool isInHouse = false)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
@@ -500,8 +293,8 @@ public:
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, but doesn't
   // require an IoContext
   Fetcher(kj::Own<CrossContextOutgoingFactory> outgoingFactory,
-          RequiresHostAndProtocol requiresHost,
-          bool isInHouse = false)
+      RequiresHostAndProtocol requiresHost,
+      bool isInHouse = false)
       : channelOrClientFactory(kj::mv(outgoingFactory)),
         requiresHost(requiresHost),
         isInHouse(isInHouse) {}
@@ -509,9 +302,7 @@ public:
   // Returns an `WorkerInterface` that is only valid for the lifetime of the current
   // `IoContext`.
   kj::Own<WorkerInterface> getClient(
-      IoContext& ioContext,
-      kj::Maybe<kj::String> cfStr,
-      kj::ConstString operationName);
+      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
@@ -523,8 +314,8 @@ public:
   jsg::Ref<Socket> connect(
       jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
-  jsg::Promise<jsg::Ref<Response>> fetch(
-      jsg::Lock& js, kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
+  jsg::Promise<jsg::Ref<Response>> fetch(jsg::Lock& js,
+      kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
   using GetResult = kj::OneOf<jsg::Ref<ReadableStream>, jsg::BufferSource, kj::String, jsg::Value>;
@@ -574,8 +365,8 @@ public:
     JSG_STRUCT(outcome, ackAll, retryBatch, explicitAcks, retryMessages);
   };
 
-  jsg::Promise<QueueResult> queue(jsg::Lock& js, kj::String queueName,
-                                  kj::Array<ServiceBindingQueueMessage> messages);
+  jsg::Promise<QueueResult> queue(
+      jsg::Lock& js, kj::String queueName, kj::Array<ServiceBindingQueueMessage> messages);
 
   struct ScheduledOptions {
     jsg::Optional<kj::Date> scheduledTime;
@@ -667,8 +458,9 @@ public:
     }
   }
 
-private:
-  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>> channelOrClientFactory;
+ private:
+  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>>
+      channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
 };
@@ -754,10 +546,11 @@ struct RequestInitializerDict {
   // jsg::Optional<kj::String> priority;
   // TODO(conform): Might support later?
 
-  JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
+  JSG_STRUCT(
+      method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
-    if(flags.getCacheOptionEnabled()) {
-      if(flags.getCacheNoCache()) {
+    if (flags.getCacheOptionEnabled()) {
+      if (flags.getCacheNoCache()) {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
@@ -791,7 +584,7 @@ struct RequestInitializerDict {
 };
 
 class Request final: public Body {
-public:
+ public:
   enum class Redirect {
     FOLLOW,
     MANUAL
@@ -807,15 +600,27 @@ public:
     NOCACHE,
   };
 
-  Request(jsg::Lock& js, kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
-          jsg::Ref<Headers> headers, kj::Maybe<jsg::Ref<Fetcher>> fetcher,
-          kj::Maybe<jsg::Ref<AbortSignal>> signal, CfProperty&& cf,
-          kj::Maybe<Body::ExtractedBody> body, kj::Maybe<jsg::Ref<AbortSignal>> thisSignal,
-          CacheMode cacheMode = CacheMode::NONE,
-          Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
-    : Body(js, kj::mv(body), *headers), method(method), url(kj::str(url)),
-      redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
-      cacheMode(cacheMode), cf(kj::mv(cf)), responseBodyEncoding(responseBodyEncoding) {
+  Request(jsg::Lock& js,
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      Redirect redirect,
+      jsg::Ref<Headers> headers,
+      kj::Maybe<jsg::Ref<Fetcher>> fetcher,
+      kj::Maybe<jsg::Ref<AbortSignal>> signal,
+      CfProperty&& cf,
+      kj::Maybe<Body::ExtractedBody> body,
+      kj::Maybe<jsg::Ref<AbortSignal>> thisSignal,
+      CacheMode cacheMode = CacheMode::NONE,
+      Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
+      : Body(js, kj::mv(body), *headers),
+        method(method),
+        url(kj::str(url)),
+        redirect(redirect),
+        headers(kj::mv(headers)),
+        fetcher(kj::mv(fetcher)),
+        cacheMode(cacheMode),
+        cf(kj::mv(cf)),
+        responseBodyEncoding(responseBodyEncoding) {
     KJ_IF_SOME(s, signal) {
       // If the AbortSignal will never abort, assigning it to thisSignal instead ensures
       // that the cancel machinery is not used but the request.signal accessor will still
@@ -835,9 +640,15 @@ public:
   //   constructs like `new Request("")` should actually throw TypeError, but constructing Requests
   //   with empty URLs is useful in testing.
 
-  kj::HttpMethod getMethodEnum() { return method; }
-  void setMethodEnum(kj::HttpMethod newMethod) { method = newMethod; }
-  Redirect getRedirectEnum() { return redirect; }
+  kj::HttpMethod getMethodEnum() {
+    return method;
+  }
+  void setMethodEnum(kj::HttpMethod newMethod) {
+    method = newMethod;
+  }
+  Redirect getRedirectEnum() {
+    return redirect;
+  }
   void shallowCopyHeadersTo(kj::HttpHeaders& out);
   kj::Maybe<kj::String> serializeCfBlobJson(jsg::Lock& js);
 
@@ -854,14 +665,10 @@ public:
   //
   // C++ API, but declared down here because we need the InitializerDict type.
   static jsg::Ref<Request> coerce(
-      jsg::Lock& js,
-      Request::Info input,
-      jsg::Optional<Request::Initializer> init);
+      jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init);
 
   static jsg::Ref<Request> constructor(
-      jsg::Lock& js,
-      Request::Info input,
-      jsg::Optional<Request::Initializer> init);
+      jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init);
 
   jsg::Ref<Request> clone(jsg::Lock& js);
 
@@ -912,7 +719,9 @@ public:
   // the standard property, hard-coded to always be false. WinterTC actually recommends that
   // this one just be left undefined but we already had this returning false always and it
   // would require a compat flag to remove. Just keep it as it's harmless.
-  bool getKeepalive() { return false; }
+  bool getKeepalive() {
+    return false;
+  }
 
   // The cache mode determines how HTTP cache is used with the request.
   jsg::Optional<kj::StringPtr> getCache(jsg::Lock& js);
@@ -921,10 +730,14 @@ public:
   // We do not implement integrity checking at all. However, the spec says that
   // the default value should be an empty string. When the Request object is
   // created we verify that the given value is undefined or empty.
-  kj::String getIntegrity() { return kj::String(); }
+  kj::String getIntegrity() {
+    return kj::String();
+  }
 
   // Get the response body encoding setting for this request
-  Response_BodyEncoding getResponseBodyEncoding() { return responseBodyEncoding; }
+  Response_BodyEncoding getResponseBodyEncoding() {
+    return responseBodyEncoding;
+  }
 
   JSG_RESOURCE_TYPE(Request, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(Body);
@@ -949,9 +762,9 @@ public:
       // JSG_READONLY_PROTOTYPE_PROPERTY(duplex, getDuplex);
       JSG_READONLY_PROTOTYPE_PROPERTY(integrity, getIntegrity);
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
-      if(flags.getCacheOptionEnabled()) {
+      if (flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
-        if(flags.getCacheNoCache()) {
+        if (flags.getCacheNoCache()) {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;
@@ -1000,11 +813,12 @@ public:
     }
   }
 
-  void serialize(
-      jsg::Lock& js, jsg::Serializer& serializer,
+  void serialize(jsg::Lock& js,
+      jsg::Serializer& serializer,
       const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
-  static jsg::Ref<Request> deserialize(
-      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+  static jsg::Ref<Request> deserialize(jsg::Lock& js,
+      rpc::SerializationTag tag,
+      jsg::Deserializer& deserializer,
       const jsg::TypeHandler<RequestInitializerDict>& initDictHandler);
 
   JSG_SERIALIZABLE(rpc::SerializationTag::REQUEST);
@@ -1018,7 +832,7 @@ public:
     tracker.trackField("cf", cf);
   }
 
-private:
+ private:
   kj::HttpMethod method;
   kj::String url;
   Redirect redirect;
@@ -1045,15 +859,19 @@ private:
 };
 
 class Response final: public Body {
-public:
+ public:
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
-  Response(jsg::Lock& js, int statusCode, kj::String statusText, jsg::Ref<Headers> headers,
-           CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
-           kj::Array<kj::String> urlList = {},
-           kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
-           BodyEncoding bodyEncoding = BodyEncoding::AUTO);
+  Response(jsg::Lock& js,
+      int statusCode,
+      kj::String statusText,
+      jsg::Ref<Headers> headers,
+      CfProperty&& cf,
+      kj::Maybe<Body::ExtractedBody> body,
+      kj::Array<kj::String> urlList = {},
+      kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
+      BodyEncoding bodyEncoding = BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -1087,8 +905,7 @@ public:
   //   - We need to be able to call `new Response()`, meaning the body initializer MUST be Optional.
   //   - We need to be able to call `new Response(null)`, but `null` cannot implicitly convert to
   //     an Optional, so we need an inner Maybe to inhibit string coercion to Body::Initializer.
-  static jsg::Ref<Response> constructor(
-      jsg::Lock& js,
+  static jsg::Ref<Response> constructor(jsg::Lock& js,
       jsg::Optional<kj::Maybe<Body::Initializer>> bodyInit,
       jsg::Optional<Initializer> maybeInit);
 
@@ -1114,17 +931,16 @@ public:
   jsg::Ref<Response> clone(jsg::Lock& js);
 
   static jsg::Ref<Response> json_(
-      jsg::Lock& js,
-      jsg::JsValue any,
-      jsg::Optional<Initializer> maybeInit);
+      jsg::Lock& js, jsg::JsValue any, jsg::Optional<Initializer> maybeInit);
 
   struct SendOptions {
     bool allowWebSocket = false;
   };
 
   // Helper not exposed to JavaScript.
-  kj::Promise<DeferredProxy<void>> send(
-      jsg::Lock& js, kj::HttpService::Response& outer, SendOptions options,
+  kj::Promise<DeferredProxy<void>> send(jsg::Lock& js,
+      kj::HttpService::Response& outer,
+      SendOptions options,
       kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
 
   int getStatus();
@@ -1193,12 +1009,13 @@ public:
     // Use `BodyInit` and `ResponseInit` type aliases in constructor instead of inlining
   }
 
-  void serialize(
-      jsg::Lock& js, jsg::Serializer& serializer,
+  void serialize(jsg::Lock& js,
+      jsg::Serializer& serializer,
       const jsg::TypeHandler<InitializerDict>& initDictHandler,
       const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
-  static jsg::Ref<Response> deserialize(
-      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer,
+  static jsg::Ref<Response> deserialize(jsg::Lock& js,
+      rpc::SerializationTag tag,
+      jsg::Deserializer& deserializer,
       const jsg::TypeHandler<InitializerDict>& initDictHandler,
       const jsg::TypeHandler<kj::Maybe<jsg::Ref<ReadableStream>>>& streamHandler);
 
@@ -1209,13 +1026,13 @@ public:
     tracker.trackField("headers", headers);
     tracker.trackField("webSocket", webSocket);
     tracker.trackField("cf", cf);
-    for (const auto& url : urlList) {
+    for (const auto& url: urlList) {
       tracker.trackField("urlList", url);
     }
     tracker.trackField("asyncContext", asyncContext);
   }
 
-private:
+ private:
   int statusCode;
   kj::String statusText;
   jsg::Ref<Headers> headers;
@@ -1253,9 +1070,10 @@ private:
 };
 
 class FetchEvent final: public ExtendableEvent {
-public:
+ public:
   FetchEvent(jsg::Ref<Request> request)
-      : ExtendableEvent("fetch"), request(kj::mv(request)),
+      : ExtendableEvent("fetch"),
+        request(kj::mv(request)),
         state(AwaitingRespondWith()) {}
 
   kj::Maybe<jsg::Promise<jsg::Ref<Response>>> getResponsePromise(jsg::Lock& js);
@@ -1285,7 +1103,7 @@ public:
     }
   }
 
-private:
+ private:
   jsg::Ref<Request> request;
 
   struct AwaitingRespondWith {};
@@ -1304,16 +1122,19 @@ private:
   }
 };
 
-jsg::Promise<jsg::Ref<Response>> fetchImpl(
-    jsg::Lock& js,
+jsg::Promise<jsg::Ref<Response>> fetchImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,  // if null, use fetcher from request object
     Request::Info requestOrUrl,
     jsg::Optional<Request::Initializer> requestInit);
 
-jsg::Ref<Response> makeHttpResponse(
-    jsg::Lock& js, kj::HttpMethod method, kj::Vector<kj::Url> urlList,
-    uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers,
-    kj::Own<kj::AsyncInputStream> body, kj::Maybe<jsg::Ref<WebSocket>> webSocket,
+jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
+    kj::HttpMethod method,
+    kj::Vector<kj::Url> urlList,
+    uint statusCode,
+    kj::StringPtr statusText,
+    const kj::HttpHeaders& headers,
+    kj::Own<kj::AsyncInputStream> body,
+    kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
 
@@ -1324,26 +1145,13 @@ kj::String makeRandomBoundaryCharacters();
 // Make a boundary string for FormData serialization.
 // TODO(cleanup): Move to form-data.{h,c++}?
 
-#define EW_HTTP_ISOLATE_TYPES         \
-  api::FetchEvent,                    \
-  api::Headers,                       \
-  api::Headers::EntryIterator,        \
-  api::Headers::EntryIterator::Next,  \
-  api::Headers::KeyIterator,          \
-  api::Headers::KeyIterator::Next,    \
-  api::Headers::ValueIterator,        \
-  api::Headers::ValueIterator::Next,  \
-  api::Body,                          \
-  api::Response,                      \
-  api::Response::InitializerDict,     \
-  api::Request,                       \
-  api::Request::InitializerDict,      \
-  api::Fetcher,                       \
-  api::Fetcher::PutOptions,           \
-  api::Fetcher::ScheduledOptions,     \
-  api::Fetcher::ScheduledResult,      \
-  api::Fetcher::QueueResult,          \
-  api::Fetcher::ServiceBindingQueueMessage
+#define EW_HTTP_ISOLATE_TYPES                                                                      \
+  api::FetchEvent, api::Headers, api::Headers::EntryIterator, api::Headers::EntryIterator::Next,   \
+      api::Headers::KeyIterator, api::Headers::KeyIterator::Next, api::Headers::ValueIterator,     \
+      api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
+      api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
+      api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
+      api::Fetcher::ServiceBindingQueueMessage
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
