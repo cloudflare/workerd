@@ -215,6 +215,13 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   kj::TaskSet commitTasks;
 
+  class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
+   public:
+    void taskFailed(kj::Exception&& exception) override;
+  };
+  AlarmLaterErrorHandler alarmLaterErrorHandler;
+  kj::TaskSet alarmLaterTasks;
+
   void onWrite();
 
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);

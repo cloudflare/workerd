@@ -36,7 +36,8 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       hooks(hooks),
       kv(*db),
       metadata(*db),
-      commitTasks(*this) {
+      commitTasks(*this),
+      alarmLaterTasks(alarmLaterErrorHandler) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
@@ -202,6 +203,8 @@ void ActorSqlite::onCriticalError(
     kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
+    // TODO(someday): If we are setting the broken exception, do we also need to explicitly break
+    // the output gate?
     KJ_IF_SOME(e, maybeException) {
       e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
       broken.emplace(kj::mv(e));
@@ -337,16 +340,29 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // it to match the db state.  We don't need to hold open the output gate, so we add the
   // scheduling request to commitTasks.
   if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
-    commitTasks.add(requestScheduledAlarm(alarmStateForCommit));
+    alarmLaterTasks.add(requestScheduledAlarm(alarmStateForCommit));
   }
 }
 
+void ActorSqlite::AlarmLaterErrorHandler::taskFailed(kj::Exception&& exception) {
+  // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
+  // eventually fire at the earlier time, and the rescheduling will be retried.
+  //
+  // TODO(cleanup): Logging is here for short-term debugging, but could be removed; occasional
+  // alarm scheduling failures are expected during shutdowns or extreme load.
+  LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", exception);
+}
+
 void ActorSqlite::taskFailed(kj::Exception&& exception) {
-  // The output gate should already have been broken since it wraps all commits tasks. So, we
-  // don't have to report anything here, the exception will already propagate elsewhere. We
-  // should block further operations, though.
+  // The output gate should already have been broken since it wraps all commit tasks that can
+  // throw. So, we don't have to report anything here, the exception will already propagate
+  // elsewhere. We should block further operations, though.
   if (broken == kj::none) {
     broken = kj::mv(exception);
+    if (!outputGate.isBroken()) {
+      LOG_PERIODICALLY(
+          ERROR, "SQLite actor recorded broken exception without breaking output gate");
+    }
   }
 }
 
