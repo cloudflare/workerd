@@ -654,7 +654,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
   ~TailStreamTarget() {
     if (doneFulfiller->isWaiting()) {
-      doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Tail stream session canceled."));
+      doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled."));
     }
   }
 
@@ -943,11 +943,14 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
+      // When doFulfill applies the last promise refers to the outcome event. In that case the chain
+      // of promises provides all remaining events to the user tail handler, so we should fulfill
+      // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
+      // the stream and has done all its work, that the stream self-evidently did not get canceled
+      // prematurely. This applies even if promises were rejected.
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) {
-          doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled"));
-        });
+            [&](jsg::Lock& js, jsg::Value&& value) { doneFulfiller->fulfill(); });
       }
       return ioContext.awaitJs(js, kj::mv(p));
     }
