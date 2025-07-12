@@ -3156,6 +3156,7 @@ declare abstract class FileSystemFileHandle extends FileSystemHandle {
   ): Promise<FileSystemWritableFileStream>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createSyncAccessHandle) */
   createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>;
+  getUniqueId(): Promise<string>;
 }
 /**
  * Available only in secure contexts.
@@ -3191,6 +3192,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
     ) => void,
     thisArg?: any,
   ): void;
+  getUniqueId(): Promise<string>;
   [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
 }
 /**

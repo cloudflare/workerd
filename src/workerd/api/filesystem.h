@@ -318,11 +318,16 @@ class FileSystemFileHandle: public FileSystemHandle {
 
   jsg::Promise<jsg::Ref<FileSystemSyncAccessHandle>> createSyncAccessHandle(jsg::Lock& js);
 
+  jsg::Promise<kj::StringPtr> getUniqueId(jsg::Lock& js) {
+    return js.resolvedPromise<kj::StringPtr>(inner->getUniqueId(js));
+  }
+
   JSG_RESOURCE_TYPE(FileSystemFileHandle) {
     JSG_INHERIT(FileSystemHandle);
     JSG_METHOD(getFile);
     JSG_METHOD(createWritable);
     JSG_METHOD(createSyncAccessHandle);
+    JSG_METHOD(getUniqueId);
   }
 
  private:
@@ -447,6 +452,10 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
           callback,
       jsg::Optional<jsg::Value> thisArg);
 
+  jsg::Promise<kj::StringPtr> getUniqueId(jsg::Lock& js) {
+    return js.resolvedPromise<kj::StringPtr>(inner->getUniqueId(js));
+  }
+
   JSG_RESOURCE_TYPE(FileSystemDirectoryHandle) {
     JSG_INHERIT(FileSystemHandle);
     JSG_METHOD(getFileHandle);
@@ -458,6 +467,7 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
     JSG_METHOD(values);
     JSG_ASYNC_ITERABLE(entries);
     JSG_METHOD(forEach);
+    JSG_METHOD(getUniqueId);
   }
 
  private:
