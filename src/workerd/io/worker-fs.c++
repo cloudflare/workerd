@@ -832,6 +832,16 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
         weakThis(
             kj::rc<WeakRef<VirtualFileSystemImpl>>(kj::Badge<VirtualFileSystemImpl>(), *this)) {}
 
+  kj::Rc<OpenedFile> getStdio(jsg::Lock& js, Stdio stdio) const override {
+    int n = static_cast<int>(stdio);
+    KJ_IF_SOME(existing, openedFiles.find(n)) {
+      return existing.addRef();
+    }
+    auto opened = kj::rc<OpenedFile>(n, true, true, true, getDevFifo());
+    openedFiles.insert(n, opened.addRef());
+    return kj::mv(opened);
+  }
+
   ~VirtualFileSystemImpl() noexcept(false) override {
     weakThis->invalidate();
   }
@@ -947,10 +957,17 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   }
 
   void closeFd(jsg::Lock& js, int fd) const override {
+    // We do not allow closing the stdio file descriptors.
+    static constexpr int kMaxFd = static_cast<int>(Stdio::ERR);
+    if (fd <= kMaxFd) return;
     closeFdWithoutExplicitLock(fd);
   }
 
   kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(jsg::Lock& js, int fd) const override {
+    static constexpr int kMaxFd = static_cast<int>(Stdio::ERR);
+    if (fd <= kMaxFd) {
+      return getStdio(js, static_cast<Stdio>(fd));
+    }
     KJ_IF_SOME(opened, openedFiles.find(fd)) {
       return opened.addRef();
     }
@@ -973,7 +990,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   friend class FdHandle;
 
   // The next file descriptor to be used for the next file opened.
-  mutable int nextFd = 0;
+  mutable int nextFd = static_cast<int>(Stdio::ERR) + 1;
 
   mutable kj::HashMap<int, kj::Rc<OpenedFile>> openedFiles;
 
@@ -1578,6 +1595,108 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
+// A variation on a file that acts like a FIFO. Every call to read should return
+// the data that was written to it, consuming the data in the process. This is not
+// a real FIFO, but rather a file that behaves like one.
+class FifoFile final: public File, public kj::EnableAddRefToThis<FifoFile> {
+ public:
+  FifoFile() = default;
+
+  ~FifoFile() noexcept(false) override {
+    // Ensure that we do not leak the external memory adjustment.
+    KJ_IF_SOME(ema, maybeExternalMemoryAdjustment) {
+      ema.adjust(-fifoBuffer.size());
+    }
+  }
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = static_cast<uint32_t>(fifoBuffer.size()),
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = true,
+      .device = true,
+    };
+  }
+
+  kj::Rc<File> clone(jsg::Lock&) override {
+    return addRefToThis();
+  }
+
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "fifo"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(FifoFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
+    tracker.trackFieldWithSize("buffer", fifoBuffer.size());
+  }
+
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
+    // Append data to the end of the FIFO buffer, ignoring offset
+    if ((fifoBuffer.size() + buffer.size()) > 0xFFFFFFFF) {
+      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    }
+    fifoBuffer.reserve(buffer.size());
+    fifoBuffer.addAll(buffer);
+    KJ_IF_SOME(ema, maybeExternalMemoryAdjustment) {
+      ema.adjust(buffer.size());
+    } else {
+      maybeExternalMemoryAdjustment = js.getExternalMemoryAdjustment(buffer.size());
+    }
+    return static_cast<uint32_t>(buffer.size());
+  }
+
+  uint32_t read(jsg::Lock& js, uint32_t offset, kj::ArrayPtr<kj::byte> buffer) const override {
+    // Read from the beginning of the FIFO buffer, consuming data and ignoring offset
+    uint32_t bytesToRead = kj::min(buffer.size(), fifoBuffer.size());
+    KJ_ASSERT(bytesToRead <= fifoBuffer.size());
+
+    if (bytesToRead == 0) {
+      return 0;
+    }
+
+    // Copy the data from the front of the FIFO buffer
+    buffer.slice(0, bytesToRead).copyFrom(fifoBuffer.slice(0, bytesToRead));
+
+    // Remove the data that was read from the FIFO buffer
+    kj::Vector<kj::byte> newBuffer(fifoBuffer.size() - bytesToRead);
+    newBuffer.asPtr().copyFrom(fifoBuffer.slice(bytesToRead, fifoBuffer.size()));
+    fifoBuffer = kj::mv(newBuffer);
+
+    KJ_IF_SOME(ema, maybeExternalMemoryAdjustment) {
+      int32_t amount = static_cast<int32_t>(bytesToRead);
+      ema.adjust(-amount);
+    }
+
+    return bytesToRead;
+  }
+
+ private:
+  mutable kj::Vector<kj::byte> fifoBuffer;
+  mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeExternalMemoryAdjustment;
+};
+
 }  // namespace
 
 kj::Rc<File> getDevNull() {
@@ -1594,6 +1713,10 @@ kj::Rc<File> getDevFull() {
 
 kj::Rc<File> getDevRandom() {
   return kj::rc<DevRandomFile>();
+}
+
+kj::Rc<File> getDevFifo() {
+  return kj::rc<FifoFile>();
 }
 
 kj::Rc<Directory> getDevDirectory() {
