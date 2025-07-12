@@ -140,10 +140,7 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
 }
 
 constexpr char toLowerAscii(char c) {
-  // Create a mask that's 0x20 for uppercase letters, 0 otherwise
-  char is_upper = ((c - 'A') <= ('Z' - 'A'));
-  c |= (is_upper << 5);  // Set bit 5 if uppercase (converts to lowercase)
-  return c;
+  return c + ((static_cast<unsigned char>(c - 'A') < 26) << 5);
 }
 
 constexpr int compareLowerAscii(kj::StringPtr lhs, kj::StringPtr rhs) {
