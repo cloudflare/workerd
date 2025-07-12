@@ -7,6 +7,7 @@
 #include "system-streams.h"
 
 #include <workerd/io/worker-interface.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {
@@ -551,7 +552,13 @@ class StreamWorkerInterface final: public WorkerInterface {
 
     // Forward the request to the service
     return service->request(method, noHostUrl, newHeaders, requestBody, response)
-        .attach(kj::mv(service), kj::mv(httpClient));
+        .catch_([](kj::Exception&& exception) {
+      if (exception.getDescription().contains(
+              "can't read() again until previous read() completes")) {
+        JSG_FAIL_REQUIRE(TypeError, exception.getDescription());
+      }
+      throw exception;
+    }).attach(kj::mv(service), kj::mv(httpClient));
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
