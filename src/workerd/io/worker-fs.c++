@@ -1,6 +1,7 @@
 #include "worker-fs.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/uuid.h>
 #include <workerd/util/weak-refs.h>
 
 #include <algorithm>
@@ -122,7 +123,20 @@ class TmpDirectory final: public Directory {
     // will be called when either of these are current.
   }
 
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
  private:
+  mutable kj::Maybe<kj::String> maybeUniqueId;
+
   kj::Maybe<kj::Rc<Directory>> tryGetDirectory() const {
     if (IoContext::hasCurrent()) {
       return IoContext::current().getTmpDirStoreScope().getDirectory();
@@ -203,6 +217,10 @@ class LazyDirectory final: public Directory {
         return;
       }
     }
+  }
+
+  kj::StringPtr getUniqueId(jsg::Lock& js) const override {
+    return getDirectory()->getUniqueId(js);
   }
 
  private:
@@ -525,8 +543,20 @@ class DirectoryBase final: public Directory {
     }
   }
 
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
  private:
   kj::HashMap<kj::String, Item> entries;
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 
   // Called by tryOpen to create a new file or directory at the given path.
   kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> tryCreate(
@@ -721,9 +751,21 @@ class FileImpl final: public File {
     return kj::none;
   }
 
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
  private:
   kj::OneOf<kj::Array<kj::byte>, kj::ArrayPtr<const kj::byte>> ownedOrView;
   kj::Date lastModified;
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 
   bool isWritable() const {
     // Our file is only writable if it owns the actual data buffer.
@@ -808,13 +850,6 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     if (nextFd == kMax) {
       observer->onMaxFds(openedFiles.size());
       return FsError::TOO_MANY_OPEN_FILES;
-    }
-
-    // TODO(node-fs): Currently tryOpen will always attempt to follow the
-    // symlinks, which means we cannot correctly handle followLinks = false
-    // just yet.
-    if (!opts.followLinks) {
-      return FsError::NOT_SUPPORTED;
     }
 
     auto rootDir = getRoot(js);
@@ -1139,6 +1174,17 @@ kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> SymbolicLink::res
   return kj::none;
 }
 
+kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock&) const {
+  KJ_IF_SOME(id, maybeUniqueId) {
+    return id;
+  }
+  // Generating a UUID requires randomness, which requires an IoContext.
+  JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+  auto& ioContext = IoContext::current();
+  maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+  return KJ_ASSERT_NONNULL(maybeUniqueId);
+}
+
 kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
@@ -1268,6 +1314,20 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
       jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     return static_cast<uint32_t>(buffer.size());
   }
+
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
+ private:
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
 // /dev/zero is a special file that returns zeroes when read from and
@@ -1327,6 +1387,20 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
       jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     return static_cast<uint32_t>(buffer.size());
   }
+
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
+ private:
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
 // /dev/full is a special file that returns zeroes when read from and
@@ -1386,6 +1460,20 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
       jsg::Lock& js, uint32_t offset, kj::ArrayPtr<const kj::byte> buffer) override {
     return FsError::NOT_PERMITTED;
   }
+
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
+ private:
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
 class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomFile> {
@@ -1451,6 +1539,20 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
     }
     return buffer.size();
   }
+
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
+ private:
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
 }  // namespace

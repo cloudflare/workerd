@@ -1684,7 +1684,6 @@ void cpImpl(jsg::Lock& js,
               if (options.force) {
                 // Copy the file contents to the destination, replacing
                 // the symbolic link with a copy of the file.
-                // TODO(node-fs): Implement.
                 return handleCpFile(js, vfs, kj::mv(file), dest);
               }
               if (options.errorOnExist) {
@@ -1702,7 +1701,6 @@ void cpImpl(jsg::Lock& js,
         // Yay! we can just copy the file contents to the destination.
         // If the path to the destination does not exist, we will create it
         // if possible.
-        // TODO(node-fs): Implement.
         return handleCpFile(js, vfs, kj::mv(file), dest);
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
@@ -2048,7 +2046,7 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
   }
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
-    if (opts.create) createAs = FsType::FILE;
+    if (opts.create) createAs = FsType::DIRECTORY;
   }
   KJ_IF_SOME(node,
       inner->tryOpen(js, kj::Path({name}),

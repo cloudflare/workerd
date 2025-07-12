@@ -287,6 +287,13 @@ class File: public kj::Refcounted {
   // Replaces the contents of this file with the given file if possible.
   // If this file is read-only, an exception will be thrown.
   virtual kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) KJ_WARN_UNUSED_RESULT = 0;
+
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -421,6 +428,13 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
    private:
     Map entries;
   };
+
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
 };
 
 // The equivalent to a symbolic link. A symlink holds a reference to the
@@ -448,9 +462,17 @@ class SymbolicLink final: public kj::Refcounted {
 
   jsg::Url getTargetUrl() const KJ_WARN_UNUSED_RESULT;
 
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  kj::StringPtr getUniqueId(jsg::Lock&) const;
+
  private:
   kj::Rc<Directory> root;
   kj::Path targetPath;
+  mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
 using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;

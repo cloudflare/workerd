@@ -114,3 +114,11 @@ wpt_test(
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )
+
+wpt_test(
+    name = "fs",
+    size = "large",
+    compat_flags = ["enable_web_file_system"],
+    config = "fs-test.ts",
+    wpt_directory = "@wpt//:fs@module",
+)
