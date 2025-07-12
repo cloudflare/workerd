@@ -9,17 +9,42 @@ env = workers_module.env
 assert env.FOO == "BAR", "env.FOO should be 'BAR'"
 sockets_module = import_from_javascript("cloudflare:sockets")
 
-# TODO: in 0.27.7 this ends up attempting to perform async IO in the global scope, this appears
-# to be a bug in Pyodide which ends up calling setTimeout(cb, 0).
-if __version__ != "0.27.7":
-    try:
-        import_from_javascript("cloudflare:vectorize")
-        assert __version__ != "0.26.0a2", (
-            'import_from_javascript("cloudflare:vectorize") should not work in the global scope in 0.26.0a2'
-        )
-    except ImportError:
-        # This should throw "ImportError: Failed to import 'cloudflare:vectorize': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
-        assert __version__ == "0.26.0a2"
+vectorize = None
+try:
+    vectorize = import_from_javascript("cloudflare:vectorize")
+except ImportError:
+    pass
+
+if __version__ == "0.26.0a2":
+    # Should have thrown throw "ImportError: Failed to import 'cloudflare:vectorize': Only 'cloudflare:workers' and 'cloudflare:sockets' are available until the next python runtime version."
+    assert vectorize is None, (
+        'import_from_javascript("cloudflare:vectorize") not expected to work in the global scope in 0.26.0a2'
+    )
+else:
+    assert {"DistanceMetric", "KnownModel", "MetadataRetrievalLevel"}.issubset(
+        dir(vectorize)
+    )
+
+from js import setTimeout
+
+from pyodide.ffi import create_once_callable
+
+
+def f():
+    pass
+
+
+err = None
+try:
+    setTimeout(create_once_callable(f), 1)
+except Exception as e:
+    err = e
+finally:
+    assert err
+    assert str(err).startswith("Error: Disallowed operation called within global scope")
+    del err
+
+setTimeout(create_once_callable(f), 0)
 
 
 async def test():
@@ -27,6 +52,7 @@ async def test():
     assert hasattr(sockets_module, "connect"), (
         "sockets_module should have 'connect' attribute"
     )
+    setTimeout(create_once_callable(f), 1)
 
     # Test that cache exists and is accessible
     assert env.CACHE, "env.CACHE should exist"
