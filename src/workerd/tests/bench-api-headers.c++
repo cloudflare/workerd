@@ -24,7 +24,7 @@ struct ApiHeaders: public benchmark::Fixture {
     builder.add("Last-Modified");
     table = builder.build();
     kjHeaders = kj::heap<kj::HttpHeaders>(*table);
-    auto in = kj::heapString(
+    in = kj::heapString(
         "GET /favicon.ico HTTP/1.1\r\n"
         "Host: 0.0.0.0=5000\r\n"
         "User-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9) Gecko/2008061015 Firefox/3.0\r\n"
@@ -45,6 +45,7 @@ struct ApiHeaders: public benchmark::Fixture {
   kj::Own<TestFixture> fixture;
   kj::Own<kj::HttpHeaderTable> table;
   kj::Own<kj::HttpHeaders> kjHeaders;
+  kj::String in;
 };
 
 // initialization performs a lot of copying, benchmark it

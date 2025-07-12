@@ -30,8 +30,6 @@
 #include <kj/memory.h>
 #include <kj/parse/char.h>
 
-#include <set>
-
 namespace workerd::api {
 
 namespace {
@@ -79,8 +77,10 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
 jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   warnIfBadHeaderString(value);
 
-  kj::ArrayPtr<char> slice = value;
-  auto isHttpWhitespace = [](char c) { return c == '\t' || c == '\r' || c == '\n' || c == ' '; };
+  auto slice = value.asArray();
+  constexpr auto isHttpWhitespace = [](char c) {
+    return c == '\t' || c == '\r' || c == '\n' || c == ' ';
+  };
   while (slice.size() > 0 && isHttpWhitespace(slice.front())) {
     slice = slice.slice(1, slice.size());
   }
@@ -90,7 +90,7 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   if (slice.size() == value.size()) {
     return kj::mv(value);
   }
-  return js.accountedByteString(kj::str(slice));
+  return jsg::ByteString(kj::str(slice));
 }
 
 void requireValidHeaderName(const jsg::ByteString& name) {
@@ -151,20 +151,40 @@ Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict
 Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
   for (auto& header: other.headers) {
     Header copy{
-      js.accountedByteString(header.second.key),
-      js.accountedByteString(header.second.name),
-      KJ_MAP(value, header.second.values) { return js.accountedByteString(value); },
+      kj::str(header.value.name.str),
+      KJ_MAP(value, header.value.values) { return Str(kj::str(value.str)); },
     };
-    kj::StringPtr keyRef = copy.key;
-    KJ_ASSERT(headers.insert(std::make_pair(keyRef, kj::mv(copy))).second);
+    headers.insert(HeaderKey(copy.name), kj::mv(copy));
   }
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  other.forEach([this, &js](auto name, auto value) {
-    append(js, js.accountedByteString(name), js.accountedByteString(value));
+  headers.reserve(other.size());
+
+  size_t bufferSize = 0;
+  other.forEach([&bufferSize](kj::StringPtr name, kj::StringPtr value) {
+    bufferSize += name.size() + value.size() + 2;
+  });
+  kj::Array<char> buffer = kj::heapArray<char>(bufferSize);
+  kj::ArrayPtr<char> ptr = buffer.asPtr();
+
+  auto appendToBuffer = [&ptr](kj::StringPtr value) -> kj::StringPtr {
+    ptr.first(value.size()).copyFrom(value.asArray());
+    ptr[value.size()] = '\0';
+    kj::StringPtr valuePtr(ptr.begin(), value.size());
+    ptr = ptr.slice(value.size() + 1);
+    return valuePtr;
+  };
+  other.forEach([this, &appendToBuffer](kj::StringPtr name, kj::StringPtr value) {
+    KJ_IF_SOME(h, headers.find(HeaderKey(name))) {
+      h.values.add(appendToBuffer(value));
+    } else {
+      auto nameBuffer = appendToBuffer(name);
+      headers.insert(HeaderKey(nameBuffer), Header(nameBuffer, appendToBuffer(value)));
+    }
   });
 
+  this->buffer = kj::mv(buffer);
   this->guard = guard;
 }
 
@@ -178,8 +198,8 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
   for (auto& entry: headers) {
-    for (auto& value: entry.second.values) {
-      out.add(entry.second.name, value);
+    for (auto& value: entry.value.values) {
+      out.add(entry.value.name.str, value.str);
     }
   }
 }
@@ -190,34 +210,34 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
     KJ_DREQUIRE(!('A' <= c && c <= 'Z'));
   }
 #endif
-  return headers.contains(name);
+  return headers.find(HeaderKey(name)) != kj::none;
 }
 
 kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
   if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<Headers::DisplayedHeader> copy;
     for (auto& entry: headers) {
-      if (entry.first == "set-cookie") {
+      if (entry.key == "set-cookie") {
         // For set-cookie entries, we iterate each individually without
         // combining them.
-        for (auto& value: entry.second.values) {
+        for (auto& value: entry.value.values) {
           copy.add(Headers::DisplayedHeader{
-            .key = js.accountedByteString(entry.first),
-            .value = js.accountedByteString(value),
+            .key = jsg::ByteString(toLower(entry.key.name)),
+            .value = jsg::ByteString(kj::str(value.str)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = js.accountedByteString(entry.first),
-          .value = js.accountedByteString(kj::strArray(entry.second.values, ", "))});
+        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(toLower(entry.key.name)),
+          .value = jsg::ByteString(kj::strArray(entry.value.values, ", "))});
       }
     }
     return copy.releaseAsArray();
   } else {
     // The old behavior before the standard getSetCookie() API was introduced...
     auto headersCopy = KJ_MAP(mapEntry, headers) {
-      const auto& header = mapEntry.second;
-      return DisplayedHeader{js.accountedByteString(header.key),
-        js.accountedByteString(kj::strArray(header.values, ", "))};
+      const auto& header = mapEntry.value;
+      return DisplayedHeader{jsg::ByteString(toLower(header.name.str)),
+        jsg::ByteString(kj::strArray(header.values, ", "))};
     };
     return headersCopy;
   }
@@ -274,21 +294,18 @@ kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
 }
 
 kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr name) {
-  auto iter = headers.find(toLower(name));
-  if (iter == headers.end()) {
-    return kj::none;
-  } else {
-    return js.accountedByteString(kj::strArray(iter->second.values, ", "));
+  KJ_IF_SOME(value, headers.find(HeaderKey(name))) {
+    return jsg::ByteString(kj::strArray(value.values, ", "));
   }
+  return kj::none;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
-  auto iter = headers.find("set-cookie");
-  if (iter == headers.end()) {
-    return nullptr;
-  } else {
-    return iter->second.values.asPtr();
-  }
+  KJ_UNIMPLEMENTED();
+  // KJ_IF_SOME(value, headers.find("set-cookie"_kj)) {
+  //   return value.values.asPtr();
+  // }
+  // return nullptr;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
@@ -306,7 +323,7 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 
 bool Headers::has(jsg::ByteString name) {
   requireValidHeaderName(name);
-  return headers.contains(toLower(kj::mv(name)));
+  return headers.find(HeaderKey(kj::mv(name))) != kj::none;
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -318,33 +335,25 @@ void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
 }
 
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  // The variation of toLower we use here creates a copy.
-  auto key = js.accountedByteString(toLower(name));
-  auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
-  if (!emplaced) {
-    // Overwrite existing value(s).
-    iter->second.values.clear();
-    iter->second.values.add(kj::mv(value));
-  }
+  headers.upsert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
   requireValidHeaderName(name);
-  // The variation of toLower we use here creates a copy.
-  auto key = js.accountedByteString(toLower(name));
   value = normalizeHeaderValue(js, kj::mv(value));
   requireValidHeaderValue(value);
-  auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
-  if (!emplaced) {
-    iter->second.values.add(kj::mv(value));
+  KJ_IF_SOME(header, headers.find(HeaderKey(name))) {
+    header.values.add(kj::mv(value));
+  } else {
+    headers.insert(HeaderKey(name), Header(kj::mv(name), kj::mv(value)));
   }
 }
 
 void Headers::delete_(jsg::ByteString name) {
   checkGuard();
   requireValidHeaderName(name);
-  headers.erase(toLower(kj::mv(name)));
+  headers.erase(HeaderKey(name));
 }
 
 // There are a couple implementation details of the Headers iterators worth calling out.
@@ -382,18 +391,18 @@ jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
       // single value, so the values iterator must separate them. It seems a bit silly, but
       // the keys iterator can end up having multiple set-cookie instances.
-      if (entry.first == "set-cookie") {
-        for (auto n = 0; n < entry.second.values.size(); n++) {
-          keysCopy.add(js.accountedByteString(entry.first));
+      if (entry.key == "set-cookie") {
+        for (auto n = 0; n < entry.value.values.size(); n++) {
+          keysCopy.add(jsg::ByteString(toLower(entry.key.name)));
         }
       } else {
-        keysCopy.add(js.accountedByteString(entry.first));
+        keysCopy.add(jsg::ByteString(toLower(entry.key.name)));
       }
     }
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
   } else {
     auto keysCopy =
-        KJ_MAP(mapEntry, headers) { return js.accountedByteString(mapEntry.second.key); };
+        KJ_MAP(mapEntry, headers) { return jsg::ByteString(toLower(mapEntry.value.name.str)); };
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
@@ -403,18 +412,18 @@ jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
     for (auto& entry: headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
       // single value, so the values iterator must separate them.
-      if (entry.first == "set-cookie") {
-        for (auto& value: entry.second.values) {
-          values.add(js.accountedByteString(value));
+      if (entry.key == "set-cookie") {
+        for (auto& value: entry.value.values) {
+          values.add(jsg::ByteString(kj::str(value.str)));
         }
       } else {
-        values.add(js.accountedByteString(kj::strArray(entry.second.values, ", ")));
+        values.add(jsg::ByteString(kj::strArray(entry.value.values, ", ")));
       }
     }
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
   } else {
     auto valuesCopy = KJ_MAP(mapEntry, headers) {
-      return js.accountedByteString(kj::strArray(mapEntry.second.values, ", "));
+      return jsg::ByteString(kj::strArray(mapEntry.value.values, ", "));
     };
     return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
   }
@@ -537,23 +546,23 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Write the count of headers.
   uint count = 0;
   for (auto& entry: headers) {
-    count += entry.second.values.size();
+    count += entry.value.values.size();
   }
   serializer.writeRawUint32(count);
 
   // Now write key/values.
   auto& commonHeaders = getCommonHeaderMap();
   for (auto& entry: headers) {
-    auto& header = entry.second;
-    auto commonId = commonHeaders.find(header.key);
+    auto& header = entry.value;
+    auto commonId = commonHeaders.find(header.name.str);
     for (auto& value: header.values) {
       KJ_IF_SOME(c, commonId) {
         serializer.writeRawUint32(c);
       } else {
         serializer.writeRawUint32(0);
-        serializer.writeLengthDelimited(header.name);
+        serializer.writeLengthDelimited(header.name.str);
       }
-      serializer.writeLengthDelimited(value);
+      serializer.writeLengthDelimited(value.str);
     }
   }
 }
@@ -579,7 +588,7 @@ jsg::Ref<Headers> Headers::deserialize(
 
     auto value = deserializer.readLengthDelimitedString();
 
-    result->append(js, js.accountedByteString(kj::mv(name)), js.accountedByteString(kj::mv(value)));
+    result->append(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
   }
 
   // Don't actually set the guard until here because it may block the ability to call `append()`.
@@ -736,7 +745,7 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.set(
-                js, js.accountedByteString("Content-Type"_kj), js.accountedByteString(kj::mv(ct)));
+                js, jsg::ByteString(kj::str("Content-Type"_kj)), jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
@@ -1558,11 +1567,10 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
 
 jsg::Ref<Response> Response::json_(
     jsg::Lock& js, jsg::JsValue any, jsg::Optional<Initializer> maybeInit) {
-
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(MimeType::JSON.toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };
@@ -2285,8 +2293,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       }
 
       auto headers = js.alloc<Headers>();
-      headers->set(js, js.accountedByteString("content-type"_kj),
-          js.accountedByteString(dataUrl.getMimeType().toString()));
+      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+        jsg::ByteString(dataUrl.getMimeType().toString()));
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,

@@ -173,14 +173,31 @@ public:
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
+      tracker.trackField(entry.key.name, entry.value);
     }
   }
 
-private:
+  struct Str {
+      kj::StringPtr str;
+      kj::Maybe<kj::String> storage = kj::none;
+
+      Str(kj::String data) {
+        storage = kj::mv(data);
+        str = KJ_REQUIRE_NONNULL(storage).asPtr();
+      }
+      Str(kj::StringPtr data) : str(data) {}
+
+      operator kj::StringPtr() const { return str; }
+
+      bool operator<(const Str& other) const {
+        return strcasecmp(str.cStr(), other.str.cStr()) < 0;
+      }
+  };
+
+  using Values = kj::Vector<Str>;
+
   struct Header {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString name;
+    Str name;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
     // able to re-serialize them separately. This is particularly important for the Set-Cookie
@@ -192,27 +209,57 @@ private:
     //
     // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
-    kj::Vector<jsg::ByteString> values;
+    // kj::OneOf<kj::StringPtr, kj::Vector<kj::OneOf<kj::String, kj::Vector<kj::String>>>> values;
+    // kj::Vector<jsg::ByteString> values;
+    Values values;
 
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
+    explicit Header(Str name, Values values)
+        : name(kj::mv(name)), values(kj::mv(values)) {}
+    explicit Header(Str name, Str value)
+        :name(kj::mv(name)), values(1) {
       values.add(kj::mv(value));
     }
 
     JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
-      tracker.trackField("name", name);
+      KJ_IF_SOME(storage, name.storage) {
+        tracker.trackField("name", storage);
+      }
       for (const auto& value : values) {
-        tracker.trackField(nullptr, value);
+        KJ_IF_SOME(storage, value.storage) {
+          tracker.trackField(nullptr, storage);
+        }
       }
     }
   };
 
+  struct HeaderKey {
+    kj::StringPtr name;
+
+    HeaderKey(const Str& input) {
+      name = input.str;
+    }
+
+    HeaderKey(const jsg::ByteString& input) {
+      name = input.asPtr();
+    }
+
+    bool operator==(const HeaderKey& other) const {
+      return strcasecmp(name.begin(), other.name.begin()) == 0;
+    }
+
+    bool operator==(kj::StringPtr other) const {
+      return strcasecmp(name.begin(), other.begin()) == 0;
+    }
+
+    bool operator==(const char* other) const {
+      return strcasecmp(name.begin(), other) == 0;
+    }
+  };
+  private:
+
   Guard guard;
-  std::map<kj::StringPtr, Header> headers;
+  kj::HashMap<HeaderKey, Header> headers;
+  kj::Maybe<kj::Array<char>> buffer;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
@@ -1323,6 +1370,18 @@ bool isRedirectStatusCode(uint statusCode);
 kj::String makeRandomBoundaryCharacters();
 // Make a boundary string for FormData serialization.
 // TODO(cleanup): Move to form-data.{h,c++}?
+
+inline auto KJ_HASHCODE(const Headers::HeaderKey& key) {
+  uint hash = 0;
+  for (unsigned char c : key.name) {
+    // Branchless ASCII uppercase to lowercase conversion
+    // Create a mask that's 0x20 for uppercase letters, 0 otherwise
+    unsigned char is_upper = ((c - 'A') <= ('Z' - 'A'));
+    c |= (is_upper << 5);  // Set bit 5 if uppercase (converts to lowercase)
+    hash = hash * 31 + c;
+  }
+  return hash;
+}
 
 #define EW_HTTP_ISOLATE_TYPES         \
   api::FetchEvent,                    \
