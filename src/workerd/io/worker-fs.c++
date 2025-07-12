@@ -623,7 +623,9 @@ class FileImpl final: public File {
   FileImpl(kj::ArrayPtr<const kj::byte> data): ownedOrView(data), lastModified(kj::UNIX_EPOCH) {}
 
   // Constructor used to create a writable file.
-  FileImpl(kj::Array<kj::byte> owned): ownedOrView(kj::mv(owned)), lastModified(kj::UNIX_EPOCH) {}
+  FileImpl(jsg::Lock& js, kj::Array<kj::byte> owned)
+      : ownedOrView(Owned(js, kj::mv(owned))),
+        lastModified(kj::UNIX_EPOCH) {}
 
   kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
     if (isWritable()) {
@@ -664,14 +666,13 @@ class FileImpl final: public File {
     if (!isWritable()) {
       return FsError::READ_ONLY;
     }
-    auto& owned = writableView();
     size_t end = offset + buffer.size();
-    if (end > owned.size()) {
+    if (end > writableView().size()) {
       KJ_IF_SOME(err, resize(js, end)) {
         return err;
       }
     }
-    owned.slice(offset, end).copyFrom(buffer);
+    writableView().slice(offset, end).copyFrom(buffer);
     return static_cast<uint32_t>(buffer.size());
   }
 
@@ -679,8 +680,8 @@ class FileImpl final: public File {
     if (!isWritable()) {
       return FsError::READ_ONLY;
     }
-    auto& owned = writableView();
-    if (size == owned.size()) return kj::none;  // Nothing to do.
+    auto& owned = ownedOrView.get<Owned>();
+    if (size == owned.data.size()) return kj::none;  // Nothing to do.
 
     auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
     if (size > maxSize) {
@@ -689,15 +690,16 @@ class FileImpl final: public File {
 
     auto newData = kj::heapArray<kj::byte>(size);
 
-    if (size > owned.size()) {
+    if (size > owned.data.size()) {
       // To grow the file, we need to allocate a new array, copy the old data over,
       // and replace the original.
-      newData.first(owned.size()).copyFrom(owned);
-      newData.slice(owned.size()).fill(0);
+      newData.first(owned.data.size()).copyFrom(owned.data);
+      newData.slice(owned.data.size()).fill(0);
     } else {
-      newData.asPtr().copyFrom(owned.first(size));
+      newData.asPtr().copyFrom(owned.data.first(size));
     }
-    ownedOrView = newData.attach(js.getExternalMemoryAdjustment(newData.size()));
+    owned.adjustment.setNow(js, newData.size());
+    owned.data = kj::mv(newData);
     return kj::none;
   }
 
@@ -705,7 +707,7 @@ class FileImpl final: public File {
     if (!isWritable()) {
       return FsError::READ_ONLY;
     }
-    auto& view = writableView();
+    auto view = writableView();
     int actualOffset = offset.orDefault(0);
     if (actualOffset >= view.size() || view.size() == 0) return kj::none;
     view.slice(actualOffset).fill(value);
@@ -723,8 +725,8 @@ class FileImpl final: public File {
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {
     // We only track the memory if we own the data.
     KJ_SWITCH_ONEOF(ownedOrView) {
-      KJ_CASE_ONEOF(owned, kj::Array<kj::byte>) {
-        tracker.trackField("owned", owned);
+      KJ_CASE_ONEOF(owned, Owned) {
+        tracker.trackField("owned", owned.data);
         return;
       }
       KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
@@ -736,11 +738,11 @@ class FileImpl final: public File {
   kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock& js) override {
     auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
     KJ_SWITCH_ONEOF(ownedOrView) {
-      KJ_CASE_ONEOF(owned, kj::Array<kj::byte>) {
-        if (owned.size() > maxSize) [[unlikely]] {
+      KJ_CASE_ONEOF(owned, Owned) {
+        if (owned.data.size() > maxSize) [[unlikely]] {
           return FsError::FILE_SIZE_LIMIT_EXCEEDED;
         }
-        kj::Rc<File> file = kj::rc<FileImpl>(kj::heapArray<kj::byte>(owned));
+        kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(owned.data));
         return kj::mv(file);
       }
       KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
@@ -760,10 +762,11 @@ class FileImpl final: public File {
     }
 
     auto stat = file->stat(js);
-    auto buffer =
-        kj::heapArray<kj::byte>(stat.size).attach(js.getExternalMemoryAdjustment(stat.size));
+    auto buffer = kj::heapArray<kj::byte>(stat.size);
     file->read(js, 0, buffer.asPtr());
-    ownedOrView = kj::mv(buffer);
+    auto& owned = ownedOrView.get<Owned>();
+    owned.adjustment.setNow(js, buffer.size());
+    owned.data = kj::mv(buffer);
     lastModified = stat.lastModified;
     return kj::none;
   }
@@ -780,17 +783,30 @@ class FileImpl final: public File {
   }
 
  private:
-  kj::OneOf<kj::Array<kj::byte>, kj::ArrayPtr<const kj::byte>> ownedOrView;
+  struct Owned {
+    kj::Array<kj::byte> data;
+    jsg::ExternalMemoryAdjustment adjustment;
+    Owned(jsg::Lock& js, kj::Array<kj::byte>&& data)
+        : data(kj::mv(data)),
+          adjustment(js.getExternalMemoryAdjustment(0)) {
+      adjustment.adjustNow(js, this->data.size());
+    }
+  };
+  kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>> ownedOrView;
   kj::Date lastModified;
   mutable kj::Maybe<kj::String> maybeUniqueId;
 
   bool isWritable() const {
     // Our file is only writable if it owns the actual data buffer.
-    return ownedOrView.is<kj::Array<kj::byte>>();
+    return ownedOrView.is<Owned>();
   }
 
-  kj::Array<kj::byte>& writableView() {
-    return KJ_REQUIRE_NONNULL(ownedOrView.tryGet<kj::Array<kj::byte>>());
+  kj::ArrayPtr<kj::byte> writableView() {
+    return KJ_REQUIRE_NONNULL(ownedOrView.tryGet<Owned>()).data.asPtr();
+  }
+
+  jsg::ExternalMemoryAdjustment& getAdjustment() {
+    return KJ_REQUIRE_NONNULL(ownedOrView.tryGet<Owned>()).adjustment;
   }
 
   kj::ArrayPtr<const kj::byte> readableView() const {
@@ -798,8 +814,8 @@ class FileImpl final: public File {
       KJ_CASE_ONEOF(view, kj::ArrayPtr<const kj::byte>) {
         return view;
       }
-      KJ_CASE_ONEOF(owned, kj::Array<kj::byte>) {
-        return owned.asPtr().asConst();
+      KJ_CASE_ONEOF(owned, Owned) {
+        return owned.data.asPtr().asConst();
       }
     }
     KJ_UNREACHABLE;
@@ -1093,8 +1109,7 @@ kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
   auto actualSize = kj::min(size.orDefault(0), maxSize);
   auto data = kj::heapArray<kj::byte>(actualSize);
   if (actualSize > 0) data.asPtr().fill(0);
-  auto owned = data.attach(js.getExternalMemoryAdjustment(actualSize));
-  return kj::rc<FileImpl>(kj::mv(owned));
+  return kj::rc<FileImpl>(js, kj::mv(data));
 }
 
 kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
