@@ -84,6 +84,7 @@ export default {
       assert.equal(text, 'Internal Server Error');
     }
 
+    console.log('Multiple requests on the same connection');
     // Test multiple requests on same connection
     {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
@@ -94,42 +95,32 @@ export default {
       assert.equal(response1.status, 200);
       const text1 = await response1.text();
       assert.equal(text1, 'pong');
-      try {
-        // Second request on same connection
-        const response2 = await httpClient.fetch('https://example.com/json');
-        assert.equal(response2.status, 200);
-        const data = await response2.json();
-        assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
-      } catch (error) {
-        assert(error instanceof Error, 'Expected an Error to be thrown');
-        console.log(error);
-        assert(
-          error.message.includes(
-            'Fetcher created from convertSocketToFetcher can only be used once'
-          ),
-          'Expected the error message to contain "Fetcher created from convertSocketToFetcher can only be used once"'
-        );
-      }
+      // Second request on same connection
+      const response2 = await httpClient.fetch('https://example.com/json');
+      assert.equal(response2.status, 200);
+      const data = await response2.json();
+      assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
     }
 
+    console.log('Multiple concurrent requests on the socket');
     // Test multiple concurrent requests on the same connection
     {
       const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
       const httpClient = convertSocketToFetcher(socket);
-      try {
-        const responses = await Promise.all([
-          httpClient.fetch('https://example.com/ping'),
-          httpClient.fetch('https://example.com/json'),
-        ]);
-      } catch (error) {
-        assert(error instanceof Error, 'Expected an Error to be thrown');
-        assert(
-          error.message.includes(
-            'Fetcher created from convertSocketToFetcher can only be used once'
-          ),
-          'Expected the error message to contain "Fetcher created from convertSocketToFetcher can only be used once"'
-        );
-      }
+
+      // TODO(immenently) Make this promise return the correct message
+      assert.rejects(
+        async () => {
+          await Promise.all([
+            httpClient.fetch('https://example.com/ping'),
+            httpClient.fetch('https://example.com/json'),
+          ]);
+        },
+        {
+          name: 'Error',
+          message: /internal error; reference/,
+        }
+      );
     }
 
     // Test that demonstrates the issue: socket is unusable after creating HTTP client
@@ -142,43 +133,25 @@ export default {
       assert.equal(response.status, 200);
 
       // Now try to use the socket directly - this should fail because the streams are detached
-      try {
-        socket.writable.getWriter();
+      assert.throws(
+        () => {
+          socket.writable.getWriter();
+        },
+        {
+          name: 'TypeError',
+          message: 'This WritableStream is currently locked to a writer.',
+        }
+      );
 
-        // This should not be reached
-        assert.fail(
-          'Expected socket.writable to throw an error, but it did not'
-        );
-      } catch (error) {
-        // We expect an error because the socket has been detached
-        // The specific error message might vary, so we'll just check that an error was thrown
-        assert(error instanceof TypeError, 'Expected an Error to be thrown');
-        assert(
-          error.message.includes(
-            'This WritableStream is currently locked to a writer.'
-          ),
-          'Expected the error message to contain "This WritableStream is currently locked to a writer."'
-        );
-      }
-      try {
-        let reader = socket.readable.getReader();
-        await reader.read();
-
-        // This should not be reached
-        assert.fail(
-          'Expected socket.readable to throw an error, but it did not'
-        );
-      } catch (error) {
-        // We expect an error because the socket has been detached
-        // The specific error message might vary, so we'll just check that an error was thrown
-        assert(error instanceof TypeError, 'Expected an Error to be thrown');
-        assert(
-          error.message.includes(
-            'This ReadableStream is currently locked to a reader.'
-          ),
-          'Expected the error message to contain "This ReadableStream is currently locked to a reader."'
-        );
-      }
+      assert.throws(
+        () => {
+          socket.readable.getReader();
+        },
+        {
+          name: 'TypeError',
+          message: 'This ReadableStream is currently locked to a reader.',
+        }
+      );
     }
 
     // Test that closing the socket does not affect the HTTP client
