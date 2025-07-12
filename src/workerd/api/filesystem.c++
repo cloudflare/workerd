@@ -863,9 +863,17 @@ void FileSystemModule::renameOrCopy(
           // destination directory.
           KJ_SWITCH_ONEOF(srcNode) {
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-              auto newFile = options.copy ? file->clone(js) : file.addRef();
-              KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(newFile))) {
-                throwFsError(js, err, opName);
+              kj::OneOf<workerd::FsError, kj::Rc<workerd::File>> errOrFile =
+                  options.copy ? file->clone(js) : file.addRef();
+              KJ_SWITCH_ONEOF(errOrFile) {
+                KJ_CASE_ONEOF(err, workerd::FsError) {
+                  throwFsError(js, err, "cp"_kj);
+                }
+                KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+                  KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
+                    throwFsError(js, err, opName);
+                  }
+                }
               }
             }
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
@@ -1350,9 +1358,16 @@ void handleCpFile(jsg::Lock& js,
           }
         }
         // Now, we can add the symbolic link to the directory.
-        KJ_IF_SOME(err, dir->add(js, relative.name, file->clone(js))) {
-          // If we got here, an error was reported
-          return throwFsError(js, err, "cp"_kj);
+        KJ_SWITCH_ONEOF(file->clone(js)) {
+          KJ_CASE_ONEOF(err, workerd::FsError) {
+            return throwFsError(js, err, "cp"_kj);
+          }
+          KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+            KJ_IF_SOME(err, dir->add(js, relative.name, kj::mv(file))) {
+              // If we got here, an error was reported
+              return throwFsError(js, err, "cp"_kj);
+            }
+          }
         }
         // If we got here, success!
         return;
@@ -1416,9 +1431,16 @@ void handleCpDir(jsg::Lock& js,
                     // Ignore the return value.
                   }
                 }
-                KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
-                  // If we got here, an error was reported
-                  return throwFsError(js, err, "cp"_kj);
+                KJ_SWITCH_ONEOF(file->clone(js)) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
+                    KJ_IF_SOME(err, dest->add(js, name, kj::mv(cloned))) {
+                      // If we got here, an error was reported
+                      return throwFsError(js, err, "cp"_kj);
+                    }
+                  }
                 }
               } else if (options.errorOnExist) {
                 return throwUVException(
@@ -1442,9 +1464,16 @@ void handleCpDir(jsg::Lock& js,
                     // Ignore the return value.
                   }
                 }
-                KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
-                  // If we got here, an error was reported
-                  return throwFsError(js, err, "cp"_kj);
+                KJ_SWITCH_ONEOF(file->clone(js)) {
+                  KJ_CASE_ONEOF(err, workerd::FsError) {
+                    return throwFsError(js, err, "cp"_kj);
+                  }
+                  KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+                    KJ_IF_SOME(err, dest->add(js, name, kj::mv(file))) {
+                      // If we got here, an error was reported
+                      return throwFsError(js, err, "cp"_kj);
+                    }
+                  }
                 }
               } else if (options.errorOnExist) {
                 return throwUVException(
@@ -1456,9 +1485,18 @@ void handleCpDir(jsg::Lock& js,
               return throwFsError(js, err, "cp"_kj);
             }
           }
-        } else KJ_IF_SOME(err, dest->add(js, name, file->clone(js))) {
-          // If we got here, an error was reported
-          return throwFsError(js, err, "cp"_kj);
+        } else {
+          KJ_SWITCH_ONEOF(file->clone(js)) {
+            KJ_CASE_ONEOF(err, workerd::FsError) {
+              return throwFsError(js, err, "cp"_kj);
+            }
+            KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
+              KJ_IF_SOME(err, dest->add(js, name, kj::mv(cloned))) {
+                // If we got here, an error was reported
+                return throwFsError(js, err, "cp"_kj);
+              }
+            }
+          }
         }
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
@@ -1662,8 +1700,15 @@ void cpImpl(jsg::Lock& js,
                 KJ_IF_SOME(target, link->resolve(js)) {
                   KJ_SWITCH_ONEOF(target) {
                     KJ_CASE_ONEOF(targetFile, kj::Rc<workerd::File>) {
-                      KJ_IF_SOME(err, targetFile->replace(js, file->clone(js))) {
-                        return throwFsError(js, err, "cp"_kj);
+                      KJ_SWITCH_ONEOF(file->clone(js)) {
+                        KJ_CASE_ONEOF(err, workerd::FsError) {
+                          return throwFsError(js, err, "cp"_kj);
+                        }
+                        KJ_CASE_ONEOF(clonedFile, kj::Rc<workerd::File>) {
+                          KJ_IF_SOME(err, targetFile->replace(js, kj::mv(clonedFile))) {
+                            return throwFsError(js, err, "cp"_kj);
+                          }
+                        }
                       }
                       return;
                     }
@@ -2236,8 +2281,29 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   // anything, the original file data is lost.
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
+  kj::Maybe<kj::Rc<workerd::File>> fileData = ([&]() -> kj::Maybe<kj::Rc<workerd::File>> {
+    if (keepExistingData) {
+      KJ_SWITCH_ONEOF(inner->clone(js)) {
+        KJ_CASE_ONEOF(err, workerd::FsError) {
+          // The only error we expect here would be the file being too large to clone.
+          KJ_DASSERT(err == workerd::FsError::FILE_SIZE_LIMIT_EXCEEDED);
+          return kj::none;
+        }
+        KJ_CASE_ONEOF(cloned, kj::Rc<workerd::File>) {
+          return kj::mv(cloned);
+        }
+      }
+    }
+    return workerd::File::newWritable(js);
+  })();
+  if (fileData == kj::none) {
+    // The file is too large to clone, so we cannot create a writable...
+    return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
+        deHandler.wrap(js, fsErrorToDomException(js, workerd::FsError::FILE_SIZE_LIMIT_EXCEEDED)));
+  }
+
   auto sharedState = kj::rc<FileSystemWritableFileStream::State>(
-      inner.addRef(), keepExistingData ? inner->clone(js) : workerd::File::newWritable(js));
+      inner.addRef(), KJ_ASSERT_NONNULL(kj::mv(fileData)));
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
   // clang-format off
