@@ -44,7 +44,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.40",
+    version = "4.5.41",
     deps = [
         "@crates_vendor__anstyle-1.0.11//:anstyle",
         "@crates_vendor__clap_lex-0.7.5//:clap_lex",

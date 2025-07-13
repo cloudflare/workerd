@@ -301,7 +301,7 @@ _NORMAL_DEPENDENCIES = {
             "capnpc": Label("@crates_vendor//:capnpc-0.21.1"),
             "cc": Label("@crates_vendor//:cc-1.2.29"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.31"),
-            "clap": Label("@crates_vendor//:clap-4.5.40"),
+            "clap": Label("@crates_vendor//:clap-4.5.41"),
             "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
             "flate2": Label("@crates_vendor//:flate2-1.1.2"),
             "foldhash": Label("@crates_vendor//:foldhash-0.1.5"),
@@ -540,12 +540,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__castaway-0.2.3",
-        sha256 = "0abae9be0aaf9ea96a3b1b8b1b55c602ca751eba1b1500220cea4ecbafe7c0d5",
+        name = "crates_vendor__castaway-0.2.4",
+        sha256 = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/castaway/0.2.3/download"],
-        strip_prefix = "castaway-0.2.3",
-        build_file = Label("//deps/rust/crates:BUILD.castaway-0.2.3.bazel"),
+        urls = ["https://static.crates.io/crates/castaway/0.2.4/download"],
+        strip_prefix = "castaway-0.2.4",
+        build_file = Label("//deps/rust/crates:BUILD.castaway-0.2.4.bazel"),
     )
 
     maybe(
@@ -590,32 +590,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap-4.5.40",
-        sha256 = "40b6887a1d8685cebccf115538db5c0efe625ccac9696ad45c409d96566e910f",
+        name = "crates_vendor__clap-4.5.41",
+        sha256 = "be92d32e80243a54711e5d7ce823c35c41c9d929dc4ab58e1276f625841aadf9",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap/4.5.40/download"],
-        strip_prefix = "clap-4.5.40",
-        build_file = Label("//deps/rust/crates:BUILD.clap-4.5.40.bazel"),
+        urls = ["https://static.crates.io/crates/clap/4.5.41/download"],
+        strip_prefix = "clap-4.5.41",
+        build_file = Label("//deps/rust/crates:BUILD.clap-4.5.41.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap_builder-4.5.40",
-        sha256 = "e0c66c08ce9f0c698cbce5c0279d0bb6ac936d8674174fe48f736533b964f59e",
+        name = "crates_vendor__clap_builder-4.5.41",
+        sha256 = "707eab41e9622f9139419d573eca0900137718000c517d47da73045f54331c3d",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap_builder/4.5.40/download"],
-        strip_prefix = "clap_builder-4.5.40",
-        build_file = Label("//deps/rust/crates:BUILD.clap_builder-4.5.40.bazel"),
+        urls = ["https://static.crates.io/crates/clap_builder/4.5.41/download"],
+        strip_prefix = "clap_builder-4.5.41",
+        build_file = Label("//deps/rust/crates:BUILD.clap_builder-4.5.41.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap_derive-4.5.40",
-        sha256 = "d2c7947ae4cc3d851207c1adb5b5e260ff0cca11446b1d6d1423788e442257ce",
+        name = "crates_vendor__clap_derive-4.5.41",
+        sha256 = "ef4f52386a59ca4c860f7393bcf8abd8dfd91ecccc0f774635ff68e92eeef491",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap_derive/4.5.40/download"],
-        strip_prefix = "clap_derive-4.5.40",
-        build_file = Label("//deps/rust/crates:BUILD.clap_derive-4.5.40.bazel"),
+        urls = ["https://static.crates.io/crates/clap_derive/4.5.41/download"],
+        strip_prefix = "clap_derive-4.5.41",
+        build_file = Label("//deps/rust/crates:BUILD.clap_derive-4.5.41.bazel"),
     )
 
     maybe(
@@ -1753,7 +1753,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__capnpc-0.21.1", is_dev_dep = False),
         struct(repo = "crates_vendor__cc-1.2.29", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.31", is_dev_dep = False),
-        struct(repo = "crates_vendor__clap-4.5.40", is_dev_dep = False),
+        struct(repo = "crates_vendor__clap-4.5.41", is_dev_dep = False),
         struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.1.2", is_dev_dep = False),
         struct(repo = "crates_vendor__foldhash-0.1.5", is_dev_dep = False),
