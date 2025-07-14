@@ -42,7 +42,7 @@ struct FastMethodFixture: public benchmark::Fixture {
 BENCHMARK_F(FastMethodFixture, SlowAPI)(benchmark::State& state) {
   FastMethodIsolate isolate(system, kj::heap<jsg::IsolateObserver>(), {});
   auto code =
-      "var result = 0; for (let i = 0; i < 100000; i++) { result += slowAdd(2, 3); } result"_kj;
+      "var result = 0; for (let i = 0; i < 500000; i++) { result += slowAdd(2, 3); } result"_kj;
 
   isolate.runInLockScope([&](FastMethodIsolate::Lock& isolateLock) {
     auto context = isolateLock.newContext<FastMethodContext>();
@@ -63,7 +63,7 @@ BENCHMARK_F(FastMethodFixture, SlowAPI)(benchmark::State& state) {
 BENCHMARK_F(FastMethodFixture, SlowAPIWithLock)(benchmark::State& state) {
   FastMethodIsolate isolate(system, kj::heap<jsg::IsolateObserver>(), {});
   auto code =
-      "var result = 0; for (let i = 0; i < 100000; i++) { result += slowAddWithLock(2, 3); } result"_kj;
+      "var result = 0; for (let i = 0; i < 500000; i++) { result += slowAddWithLock(2, 3); } result"_kj;
 
   isolate.runInLockScope([&](FastMethodIsolate::Lock& isolateLock) {
     auto context = isolateLock.newContext<FastMethodContext>();
