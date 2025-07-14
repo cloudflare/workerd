@@ -112,8 +112,8 @@ eslint:
   just stream-test //src/node:node@eslint
 
 coverage path="//...":
-  bazel coverage --nocache_test_results --config=clang-coverage --instrumentation_filter="^//,-//external" {{path}}
-  genhtml --branch-coverage --synthesize-missing --keep-going --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
+  bazel coverage {{path}}
+  genhtml --branch-coverage --output coverage "$(bazel info output_path)/_coverage/_coverage_report.dat"
   open coverage/index.html
 
 profile path:

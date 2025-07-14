@@ -395,14 +395,25 @@ build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unuse
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-# enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
-build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
-build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
-# disabled due to clang: warning: argument unused during compilation: '--coverage'
-build:clang-coverage --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
+build:coverage --action_env=GCOV=llvm-profdata-19
+build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+build:coverage --copt=-DNDEBUG
+build:coverage --combined_report=lcov
+build:coverage --strategy=TestRunner=remote,sandboxed,local
+build:coverage --strategy=CoverageReport=sandboxed,local
+build:coverage --experimental_use_llvm_covmap
+build:coverage --experimental_generate_llvm_lcov
+build:coverage --experimental_fetch_all_coverage_outputs
+build:coverage --collect_code_coverage
+build:coverage --instrumentation_filter="^//,-//external"
+build:coverage --remote_download_minimal
+build:coverage --define=tcmalloc=gperftools
+build:coverage --test_timeout=120,120,120,120
+build:coverage --instrument_test_targets
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
 
-coverage --test_timeout=120,120,120,120 --strategy=CoverageReport=local --instrument_test_targets --combined_report=lcov
+coverage --build_tests_only
+coverage --config=coverage
