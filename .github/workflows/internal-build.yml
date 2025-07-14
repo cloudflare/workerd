@@ -1,19 +1,41 @@
 name: Run internal build
 
 on:
-  pull_request:
+  pull_request_target:
+
+# Read-only permissions are enough
+permissions: read-all
 
 concurrency:
   # Cancel existing builds for the same PR.
   # Otherwise, all other builds will be allowed to run through.
-  group: internal-build.yml-${{ github.event.pull_request.number || github.run_id }}
+  group: internal-build-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   internal-build:
-    if: "${{! github.event.pull_request.head.repo.fork}}" # Don't run on forks
     runs-on: ubuntu-latest
     steps:
+      # Check if this is a fork and if the author is a Cloudflare org member
+      - name: Check fork status and org membership
+        if: github.event.pull_request.head.repo.fork
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          echo "Fork detected. Checking if $AUTHOR is a Cloudflare org member..."
+
+          if gh api orgs/cloudflare/members/$AUTHOR --silent 2>/dev/null; then
+            echo "✓ Cloudflare org member confirmed"
+          else
+            echo "✗ Not a Cloudflare org public member"
+            echo ""
+            echo "This workflow only runs for forks from Cloudflare organization public members."
+            echo "If you're an external contributor, please ask the auto-assigned reviewers"
+            echo "to run the internal build workflow on your behalf."
+            exit 1
+          fi
+
       # Try to checkout the merge commit - will fail if PR isn't mergeable
       - uses: actions/checkout@v4
         id: checkout_merge
@@ -37,13 +59,22 @@ jobs:
           CI_URL: ${{ secrets.CI_URL }}
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          USER_LOGIN: ${{ github.event.pull_request.user.login }}
         run: |
+          # Format ref based on whether this is a fork
+          if [ "${{ github.event.pull_request.head.repo.fork }}" = "true" ]; then
+            REF="$USER_LOGIN/$HEAD_REF"
+          else
+            REF="$HEAD_REF"
+          fi
+
           python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
             ${{steps.get_sha.outputs.sha}} \
             ${{github.event.pull_request.head.sha}} \
             ${{github.run_attempt}} \
-            "${{github.event.pull_request.head.ref}}" \
+            "$REF" \
             $CI_URL \
             $CI_CLIENT_ID \
             $CI_CLIENT_SECRET
