@@ -118,7 +118,7 @@ export function getEncodingOps(enc: unknown): Encoding | undefined {
   return undefined;
 }
 
-export function spliceOne(list: (string | undefined)[], index: number): void {
+export function spliceOne(list: unknown[], index: number): void {
   for (; index + 1 < list.length; index++) list[index] = list[index + 1];
   list.pop();
 }

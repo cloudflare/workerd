@@ -85,7 +85,6 @@ import type {
 } from 'node:fs';
 import { isArrayBufferView } from 'node-internal:internal_types';
 
-// @ts-expect-error TS2507 EventEmitter is not a constructor function type.
 export class FileHandle extends EventEmitter {
   // The FileHandle class is a wrapper around a file descriptor.
   // When the #handle is cleared, the reference to the underlying
@@ -101,7 +100,7 @@ export class FileHandle extends EventEmitter {
     if (badge !== kBadge) {
       throw new TypeError('Illegal constructor');
     }
-    super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
+    super();
     this.#fd = fd;
     this.#handle = cffs.getFdHandle(fd);
   }
@@ -313,7 +312,7 @@ export class FileHandle extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    if (this.#handle !== undefined) this.#handle.close();
+    this.#handle?.close();
     this.#fd = undefined;
     this.#handle = undefined;
     (this as unknown as EventEmitter).emit('close');

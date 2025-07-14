@@ -388,7 +388,7 @@ function construct(
   if (typeof (stream as any).open === 'function') {
     // Backwards compat for monkey patching open().
     const orgEmit = ee.emit;
-    ee.emit = function (...args): void {
+    ee.emit = function (...args): boolean {
       if (args[0] === 'open') {
         this.emit = orgEmit;
         callback(null);
@@ -399,6 +399,7 @@ function construct(
       } else {
         Reflect.apply(orgEmit, this, args);
       }
+      return true;
     };
     (stream as any).open();
     return;
@@ -954,7 +955,8 @@ function writeImpl(
     if (this.destroyed) {
       // Tell ._destroy() that it's safe to close the fd now.
       callback(er);
-      return ee.emit(kIoDone, er);
+      ee.emit(kIoDone, er);
+      return;
     }
 
     callback(er);
@@ -985,7 +987,8 @@ function writevImpl(
     if (this.destroyed) {
       // Tell ._destroy() that it's safe to close the fd now.
       callback(er);
-      return ee.emit(kIoDone, er);
+      ee.emit(kIoDone, er);
+      return;
     }
 
     callback(er);
