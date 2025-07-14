@@ -64,13 +64,14 @@ jobs:
           CI_URL: ${{ secrets.CI_URL }}
           CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
           CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           python3 -u ./tools/cross/internal_build.py \
             ${{github.event.pull_request.number}} \
             ${{steps.get_sha.outputs.sha}} \
             ${{github.event.pull_request.head.sha}} \
             ${{github.run_attempt}} \
-            "${{github.event.pull_request.user.login}}/${{github.event.pull_request.head.ref}}" \
+            "${{github.event.pull_request.user.login}}/$HEAD_REF" \
             $CI_URL \
             $CI_CLIENT_ID \
             $CI_CLIENT_SECRET
