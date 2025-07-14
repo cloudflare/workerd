@@ -5,11 +5,8 @@ name: Run internal build (forks)
 on:
   pull_request_target:
 
-# We only need to access membership info
-permissions:
-  contents: read
-  pull-requests: read
-  metadata: read
+# Read-only permissions are enough
+permissions: read-all
 
 concurrency:
   # Cancel existing builds for the same PR.
