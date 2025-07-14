@@ -69,9 +69,9 @@ def deps_v8():
 
     http_archive(
         name = "perfetto",
-        integrity = "sha256-wiMNBHkOtQIxpYYWo/H/bc93LY4iAzOncRYF+Zxcbbk=",
-        strip_prefix = "perfetto-50.1",
-        url = "https://github.com/google/perfetto/archive/refs/tags/v50.1.tar.gz",
+        integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
+        strip_prefix = "perfetto-51.2",
+        url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
     )
 
     # For use with perfetto
