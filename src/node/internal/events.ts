@@ -35,8 +35,8 @@ import {
   ERR_UNHANDLED_ERROR,
 } from 'node-internal:internal_errors';
 import type {
-  EventEmitter as _EventEmitter,
   EventEmitterAsyncResource as _EventEmitterAsyncResource,
+  EventEmitter as _EventEmitter,
 } from 'node:events';
 import {
   validateAbortSignal,
@@ -64,19 +64,19 @@ export interface EventEmitterOptions {
   captureRejections?: boolean;
 }
 
-export type EventName = string | symbol;
+export type EventName = string | symbol | number;
 export type EventCallback = ((...args: any[]) => unknown) & {
   listener?: EventCallback;
 };
-// @ts-expect-error TS2507 Reexport
-export declare class EventEmitter<
-  T extends Record<typeof T, any> = never,
-> extends _EventEmitter<T> {
+// @ts-expect-error TS2417 Unrelated error.
+export declare class EventEmitter extends _EventEmitter {
   constructor(opts?: EventEmitterOptions);
   listenerCount(eventName: EventName): number;
   emit(eventName: EventName, ...args: any[]): boolean;
   on(eventName: EventName, listener: EventCallback): this;
   once(eventName: EventName, listener: EventCallback): this;
+  addEventListener(eventName: EventName, listener: EventCallback): this;
+  removeEventListener(eventName: EventName, listener: EventCallback): this;
 
   [kRejection](err: unknown, eventName: EventName, ...args: unknown[]): void;
   [kCapture]: boolean;
