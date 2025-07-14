@@ -650,12 +650,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__crc32fast-1.4.2",
-        sha256 = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3",
+        name = "crates_vendor__crc32fast-1.5.0",
+        sha256 = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/crc32fast/1.4.2/download"],
-        strip_prefix = "crc32fast-1.4.2",
-        build_file = Label("//deps/rust/crates:BUILD.crc32fast-1.4.2.bazel"),
+        urls = ["https://static.crates.io/crates/crc32fast/1.5.0/download"],
+        strip_prefix = "crc32fast-1.5.0",
+        build_file = Label("//deps/rust/crates:BUILD.crc32fast-1.5.0.bazel"),
     )
 
     maybe(
@@ -980,19 +980,19 @@ def crate_repositories():
 
     maybe(
         new_git_repository,
-        name = "crates_vendor__lol_html-2.3.0",
-        commit = "41960f9bb073e34c476516b878123076f8aae182",
+        name = "crates_vendor__lol_html-2.5.0",
+        commit = "0b0b8b1cd1af77a1ab49290d4a922cfd42676f5b",
         init_submodules = True,
-        remote = "https://github.com/cloudflare/lol-html.git",
-        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.3.0.bazel"),
+        remote = "https://github.com/cloudflare/lol-html",
+        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.5.0.bazel"),
     )
 
     maybe(
         new_git_repository,
         name = "crates_vendor__lol_html_c_api-1.3.0",
-        commit = "41960f9bb073e34c476516b878123076f8aae182",
+        commit = "0b0b8b1cd1af77a1ab49290d4a922cfd42676f5b",
         init_submodules = True,
-        remote = "https://github.com/cloudflare/lol-html.git",
+        remote = "https://github.com/cloudflare/lol-html",
         build_file = Label("//deps/rust/crates:BUILD.lol_html_c_api-1.3.0.bazel"),
         strip_prefix = "c-api",
     )
@@ -1240,9 +1240,9 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_ast-0.0.0",
-        commit = "7186d5e9add868037df5bb9a42c43d5340c7ea44",
+        commit = "32c54189cb45a9d0409a1140265ce6d5fcec214d",
         init_submodules = True,
-        remote = "https://github.com/astral-sh/ruff.git",
+        remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_python_ast-0.0.0.bazel"),
         strip_prefix = "crates/ruff_python_ast",
     )
@@ -1250,9 +1250,9 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_parser-0.0.0",
-        commit = "7186d5e9add868037df5bb9a42c43d5340c7ea44",
+        commit = "32c54189cb45a9d0409a1140265ce6d5fcec214d",
         init_submodules = True,
-        remote = "https://github.com/astral-sh/ruff.git",
+        remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_python_parser-0.0.0.bazel"),
         strip_prefix = "crates/ruff_python_parser",
     )
@@ -1260,9 +1260,9 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_python_trivia-0.0.0",
-        commit = "7186d5e9add868037df5bb9a42c43d5340c7ea44",
+        commit = "32c54189cb45a9d0409a1140265ce6d5fcec214d",
         init_submodules = True,
-        remote = "https://github.com/astral-sh/ruff.git",
+        remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_python_trivia-0.0.0.bazel"),
         strip_prefix = "crates/ruff_python_trivia",
     )
@@ -1270,9 +1270,9 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_source_file-0.0.0",
-        commit = "7186d5e9add868037df5bb9a42c43d5340c7ea44",
+        commit = "32c54189cb45a9d0409a1140265ce6d5fcec214d",
         init_submodules = True,
-        remote = "https://github.com/astral-sh/ruff.git",
+        remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_source_file-0.0.0.bazel"),
         strip_prefix = "crates/ruff_source_file",
     )
@@ -1280,9 +1280,9 @@ def crate_repositories():
     maybe(
         new_git_repository,
         name = "crates_vendor__ruff_text_size-0.0.0",
-        commit = "7186d5e9add868037df5bb9a42c43d5340c7ea44",
+        commit = "32c54189cb45a9d0409a1140265ce6d5fcec214d",
         init_submodules = True,
-        remote = "https://github.com/astral-sh/ruff.git",
+        remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_text_size-0.0.0.bazel"),
         strip_prefix = "crates/ruff_text_size",
     )

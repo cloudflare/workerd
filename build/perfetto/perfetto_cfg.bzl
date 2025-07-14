@@ -136,4 +136,5 @@ PERFETTO_CONFIG = struct(
     # for now we shouldn't need any perfetto-specific compiler options, should already be set up
     # properly through .bazelrc.
     default_copts = [],
+    default_cxxopts = [],
 )
