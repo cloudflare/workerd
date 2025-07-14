@@ -28,7 +28,6 @@ export function request(...args: unknown[]): ClientRequest {
     Object.assign(options, args.shift());
   }
 
-  // @ts-expect-error TS2740 We don't fully implement all Agent attributes.
   options._defaultAgent = globalAgent;
   args.unshift(options);
 

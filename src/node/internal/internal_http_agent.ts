@@ -19,7 +19,6 @@ import type { Duplex } from 'node:stream';
 // This is mostly a stub implementation.
 // We don't intend to support the Agent API right now beyond providing a very limited stub API.
 //
-// @ts-expect-error TS2507 EventEmitter is not a constructor function type.
 export class Agent extends EventEmitter implements _Agent {
   defaultPort = 80;
   protocol: string = 'http:';
@@ -37,7 +36,7 @@ export class Agent extends EventEmitter implements _Agent {
   readonly requests: NodeJS.ReadOnlyDict<IncomingMessage[]> = {};
 
   constructor(options?: AgentOptions) {
-    super(); // eslint-disable-line @typescript-eslint/no-unsafe-call
+    super({});
     this.options = { __proto__: null, ...options };
 
     if (this.options.noDelay === undefined) this.options.noDelay = true;

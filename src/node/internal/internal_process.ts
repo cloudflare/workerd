@@ -305,9 +305,7 @@ export function emitWarning(
   // Emit the warning event on the process object
   // Use nextTick to ensure the warning is emitted asynchronously
   queueMicrotask(() => {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if ((_process as typeof publicProcessType).emit)
-      (_process as typeof publicProcessType).emit('warning', err);
+    (_process as typeof publicProcessType).emit('warning', err);
   });
 }
 
