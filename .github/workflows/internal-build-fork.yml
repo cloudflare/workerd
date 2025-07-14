@@ -45,12 +45,12 @@ jobs:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           show-progress: false
 
-      - name: Validate merge commit exists
+      # Fail the workflow if checkout failed (PR isn't mergeable)
+      - name: Fail if PR isn't mergeable
+        if: steps.checkout_merge.outcome != 'success'
         run: |
-          if [[ "${{ github.event.pull_request.merge_commit_sha }}" == "" ]]; then
-            echo "No merge commit SHA - PR may have conflicts"
-            exit 1
-          fi
+          echo "The pull request is not mergeable. Please rebase and resolve any conflicts."
+          exit 1
 
       - name: Get merge commit SHA
         id: get_sha
