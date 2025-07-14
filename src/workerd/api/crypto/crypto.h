@@ -790,3 +790,4 @@ class Crypto: public jsg::Object {
 }  // namespace workerd::api
 
 KJ_DECLARE_NON_POLYMORPHIC(EVP_MD_CTX)
+KJ_DECLARE_NON_POLYMORPHIC(BIO);
