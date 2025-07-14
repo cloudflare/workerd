@@ -7,6 +7,7 @@
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
+#include <workerd/api/base64.h>
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/encoding.h>
@@ -75,6 +76,7 @@
   F("websocket", EW_WEBSOCKET_ISOLATE_TYPES)                                                       \
   F("sql", EW_SQL_ISOLATE_TYPES)                                                                   \
   F("sockets", EW_SOCKETS_ISOLATE_TYPES)                                                           \
+  F("base64", EW_BASE64_ISOLATE_TYPES)                                                             \
   F("node", EW_NODE_ISOLATE_TYPES)                                                                 \
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                                                 \
   F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
