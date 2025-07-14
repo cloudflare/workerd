@@ -36,6 +36,8 @@ interface VectorizeError {
 type VectorizeVectorMetadataFilterOp =
   | '$eq'
   | '$ne'
+  | '$in'
+  | '$nin'
   | '$lt'
   | '$lte'
   | '$gt'
