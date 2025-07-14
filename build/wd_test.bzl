@@ -54,6 +54,7 @@ def wd_test(
     ] + args
 
     _wd_test(
+        src = src,
         name = name,
         data = data,
         args = args,
@@ -173,17 +174,43 @@ def _wd_test_impl(ctx):
         if default_runfiles:
             runfiles = runfiles.merge(default_runfiles)
 
+    # IMPORTANT: The workerd binary must be listed in dependency_attributes
+    # to ensure its transitive dependencies (all the C++ source files) are
+    # included in the coverage instrumentation. Without this, coverage data
+    # won't be collected for the actual workerd implementation code.
+    instrumented_files_info = coverage_common.instrumented_files_info(
+        ctx,
+        source_attributes = ["src", "data"],
+        dependency_attributes = ["workerd", "sidecar", "sidecar_supervisor"],
+        # Include all file types that might contain testable code
+        extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
+    )
+
     return [
         DefaultInfo(
             executable = executable,
             runfiles = runfiles,
         ),
+        instrumented_files_info,
     ]
 
 _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
     attrs = {
+        # Implicit dependencies used by Bazel to generate coverage reports.
+        "_lcov_merger": attr.label(
+            default = configuration_field(fragment = "coverage", name = "output_generator"),
+            executable = True,
+            cfg = config.exec(exec_group = "test"),
+        ),
+        "_collect_cc_coverage": attr.label(
+            default = "@bazel_tools//tools/test:collect_cc_coverage",
+            executable = True,
+            cfg = config.exec(exec_group = "test"),
+        ),
+        # Source file
+        "src": attr.label(allow_single_file = True),
         # The workerd executable is used to run all tests
         "workerd": attr.label(
             allow_single_file = True,
@@ -216,7 +243,7 @@ _wd_test = rule(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
-            default = "//src/workerd/api/node:sidecar-supervisor",
+            default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
         # A reference to the Windows platform label, needed for the implementation of wd_test
