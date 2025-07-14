@@ -189,7 +189,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, METHOD_STR, cache.get(js, kj::str(info.method)));
   obj.set(js, URL_STR, js.str(info.url));
-  obj.set(js, CFJSON_STR, js.str(info.cfJson));
+  if (info.cfJson.size() > 0) {
+    obj.set(js, CFJSON_STR, jsg::JsValue(js.parseJson(info.cfJson).getHandle(js)));
+  }
 
   auto ToJs = [](jsg::Lock& js, const tracing::FetchEventInfo::Header& header, StringCache& cache) {
     auto obj = js.obj();
@@ -517,7 +519,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
-  obj.set(js, MESSAGE_STR, js.str(log.message));
+  // TODO(o11y): Check that we are always returning an object here
+  obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
   return obj;
 }
 

@@ -444,8 +444,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
     auto& context = IoContext::current();
     auto client = r2GetClient(context, clientIndex,
-        {"r2_put"_kjc, {"rpc.method"_kjc, "PutObject"_kjc}, this->adminBucketName(),
-          {{"cloudflare.r2.key"_kjc, name.asPtr()}}});
+        {"r2_put"_kjc, {"rpc.method"_kjc, "PutObject"_kjc}, this->adminBucketName(), kj::none});
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();

@@ -9,7 +9,7 @@ interface FetchEventInfo {
   readonly type: "fetch";
   readonly method: string;
   readonly url: string;
-  readonly cfJson: string;
+  readonly cfJson?: object;
   readonly headers: Header[];
 }
 
@@ -149,7 +149,7 @@ interface Exception {
 interface Log {
   readonly type: "log";
   readonly level: "debug" | "error" | "info" | "log" | "warn";
-  readonly message: string;
+  readonly message: object;
 }
 
 interface Return {
