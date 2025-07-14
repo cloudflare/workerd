@@ -1,0 +1,77 @@
+name: Run internal build (forks)
+
+# Handle fork PRs from Cloudflare org members
+# Uses pull_request_target to access secrets
+on:
+  pull_request_target:
+
+# We only need to access membership info
+permissions:
+  contents: read
+  pull-requests: read
+  metadata: read
+
+concurrency:
+  # Cancel existing builds for the same PR.
+  # Otherwise, all other builds will be allowed to run through.
+  group: internal-build-fork.yml-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # Handle forks from Cloudflare org members by creating mirror branches
+  handle-fork:
+    if: "${{ github.event.pull_request.head.repo.fork }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Cloudflare org membership
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          author="${{ github.event.pull_request.user.login }}"
+          echo "Fork detected. Checking if $author is a Cloudflare org member..."
+
+          if gh api orgs/cloudflare/members/$author --silent 2>/dev/null; then
+            echo "✓ Cloudflare org member confirmed"
+          else
+            echo "✗ Not a Cloudflare org public member"
+            echo ""
+            echo "This workflow only runs for forks from Cloudflare organization public members."
+            echo "If you're an external contributor, please ask the auto-assigned reviewers"
+            echo "to run the internal build workflow on your behalf."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        id: checkout_merge
+        continue-on-error: true
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          show-progress: false
+
+      - name: Validate merge commit exists
+        run: |
+          if [[ "${{ github.event.pull_request.merge_commit_sha }}" == "" ]]; then
+            echo "No merge commit SHA - PR may have conflicts"
+            exit 1
+          fi
+
+      - name: Get merge commit SHA
+        id: get_sha
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Run internal build for fork
+        env:
+          CI_URL: ${{ secrets.CI_URL }}
+          CI_CLIENT_ID: ${{ secrets.CI_CF_ACCESS_CLIENT_ID }}
+          CI_CLIENT_SECRET: ${{ secrets.CI_CF_ACCESS_CLIENT_SECRET }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          python3 -u ./tools/cross/internal_build.py \
+            ${{github.event.pull_request.number}} \
+            ${{steps.get_sha.outputs.sha}} \
+            ${{github.event.pull_request.head.sha}} \
+            ${{github.run_attempt}} \
+            "${{github.event.pull_request.user.login}}/$HEAD_REF" \
+            $CI_URL \
+            $CI_CLIENT_ID \
+            $CI_CLIENT_SECRET
