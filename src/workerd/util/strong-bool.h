@@ -20,8 +20,11 @@ namespace workerd {
 //
 // `StrongBool` supports the following explicit and contextual boolean conversions:
 // - Explicit conversion from boolean values: `StrongBool(true)`, `StrongBool(false)`
-// - Explicit conversion to boolean values: `bool(StrongBool::YES)`, `bool(StrongBool::NO)`
+// - Explicit conversion to boolean values: `bool(StrongBool::YES)`, `StrongBool::NO.toBool()`
 // - Contextual boolean conversion: `if (strongBool)`, `while (strongBool)`, `!strongBool`
+//
+// The `.toBool()` function exists to make safe, explicit conversion to `bool` more convenient,
+// avoiding the verbosity of `static_cast` and the risk of C-style/functional casts.
 //
 // `StrongBool` supports the full suite of comparison and logical operators. Note that ! is
 // supported via contextual conversion (`explicit operator bool()`), rather than `operator!()`.
@@ -36,6 +39,9 @@ namespace workerd {
     static const Type YES;                                                                         \
     constexpr explicit Type(bool booleanValue): value(booleanValue ? Value::YES : Value::NO) {}    \
     constexpr explicit operator bool() const {                                                     \
+      return toBool();                                                                             \
+    }                                                                                              \
+    constexpr bool toBool() const {                                                                \
       return value == YES;                                                                         \
     }                                                                                              \
     constexpr auto operator<=>(const Type&) const = default;                                       \

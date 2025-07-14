@@ -108,19 +108,19 @@ KJ_TEST("WD_STRONG_BOOL can be explicitly converted to and from `bool`") {
   Strongbad strongbadNo{Strongbad::NO};
   Strongbad strongbadYes{Strongbad::YES};
 
-  auto booleanValue = bool(strongbadNo);
+  auto booleanValue = strongbadNo.toBool();
   static_assert(kj::isSameType<decltype(booleanValue), bool>());
 
   auto strongbadNo2 = Strongbad(booleanValue);
   static_assert(kj::isSameType<decltype(strongbadNo2), Strongbad>());
 
   // Literals can be explicitly converted in both directions, too.
-  static_assert(kj::isSameType<decltype(bool(Strongbad::NO)), bool>());
+  static_assert(kj::isSameType<decltype(Strongbad::NO.toBool()), bool>());
   static_assert(kj::isSameType<decltype(Strongbad(false)), Strongbad>());
 
   // Can't use static_assert because they're not constexpr. We'll test constexpr elsewhere.
-  KJ_EXPECT(!bool(strongbadNo));
-  KJ_EXPECT(bool(strongbadYes));
+  KJ_EXPECT(!strongbadNo.toBool());
+  KJ_EXPECT(strongbadYes.toBool());
   KJ_EXPECT(Strongbad(false) == Strongbad::NO);
   KJ_EXPECT(Strongbad(true) == Strongbad::YES);
 }
@@ -161,7 +161,7 @@ KJ_TEST("WD_STRONG_BOOL is constexpr") {
   constexpr Strongbad strongbadValue{Strongbad::NO};
   if constexpr (strongbadValue) {}
   if constexpr (Strongbad(true)) {}
-  if constexpr (bool(Strongbad::NO)) {}
+  if constexpr (Strongbad::NO.toBool()) {}
   if constexpr (Strongbad::NO || Strongbad::YES) {}
   if constexpr (Strongbad::NO && Strongbad::YES) {}
   [[maybe_unused]] constexpr auto order = Strongbad::YES <=> Strongbad::NO;
