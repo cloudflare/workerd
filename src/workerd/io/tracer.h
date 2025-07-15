@@ -18,13 +18,13 @@ class TailStreamWriter final: public kj::Refcounted {
   // closed state.
   using Reporter = kj::Function<bool(TailEvent&&)>;
 
-  // A callback that provides the timestamps for tail stream events.
-  // Ideally this uses the same time context as IoContext:now().
-  using TimeSource = kj::Function<kj::Date()>;
-  TailStreamWriter(Reporter reporter, TimeSource timeSource);
+  TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
+  // TODO(streaming-tail): Provide proper time stamps in all cases, getting rid of UNIX_EPOCH here.
+  void report(const InvocationSpanContext& context,
+      TailEvent::Event&& event,
+      kj::Date time = kj::UNIX_EPOCH);
 
   inline bool isClosed() const {
     return state == kj::none;
@@ -33,11 +33,8 @@ class TailStreamWriter final: public kj::Refcounted {
  private:
   struct State {
     Reporter reporter;
-    TimeSource timeSource;
     uint32_t sequence = 0;
-    State(Reporter reporter, TimeSource timeSource)
-        : reporter(kj::mv(reporter)),
-          timeSource(kj::mv(timeSource)) {}
+    State(Reporter reporter): reporter(kj::mv(reporter)) {}
   };
   kj::Maybe<State> state;
   bool onsetSeen = false;

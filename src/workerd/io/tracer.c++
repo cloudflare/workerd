@@ -23,11 +23,11 @@ static constexpr size_t MAX_USER_SPANS = 512;
 }  // namespace
 
 namespace tracing {
-TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
-    : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
+TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
 
-void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::Event&& event) {
-  // Becomes a no-op if a terminal event (close or hibernate) has been reported, of if the stream
+void TailStreamWriter::report(
+    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
+  // Becomes a no-op if a terminal event (close or hibernate) has been reported, or if the stream
   // closed due to not receiving a well-formed event handler. We need to disambiguate these cases as
   // the former indicates an implementation error resulting in trailing events whereas the latter
   // case is caused by a user error and events being reported after the stream being closed are
@@ -50,7 +50,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
     }
   }
 
-  tracing::TailEvent tailEvent(context, s.timeSource(), s.sequence++, kj::mv(event));
+  tracing::TailEvent tailEvent(context, timestamp, s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
   if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
@@ -206,14 +206,15 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
     // Compose span events
     // TODO(o11y): Actually report the spanOpen event at span creation time
-    writer->report(context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)));
+    writer->report(
+        context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)), span.startTime);
     if (span.tags.size()) {
-      kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) {
+      tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
-      writer->report(context, kj::mv(attr));
+      writer->report(context, kj::mv(attr), span.startTime);
     }
-    writer->report(context, tracing::SpanClose());
+    writer->report(context, tracing::SpanClose(), span.endTime);
   }
 
   trace->bytesUsed = newSize;
