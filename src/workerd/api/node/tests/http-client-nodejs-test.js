@@ -484,5 +484,5 @@ export const testGetExport = {
 // - test/parallel/test-http-client-upload-buf.js
 // - test/parallel/test-http-client-upload.js
 // - test/parallel/test-http-client-with-create-connection.js
-// - [ ] test/parallel/test-http-request-method-delete-payload.js
-// - [ ] test/parallel/test-http-request-methods.js
+// - test/parallel/test-http-request-method-delete-payload.js
+// - test/parallel/test-http-request-methods.js
