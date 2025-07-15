@@ -13,6 +13,8 @@ const unitTests :Workerd.Config = (
           (name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT"),
           (name = "ASD_SERVER_PORT", fromEnvironment = "ASD_SERVER_PORT"),
           (name = "DEFAULT_HEADERS_EXIST_PORT", fromEnvironment = "DEFAULT_HEADERS_EXIST_PORT"),
+          (name = "REQUEST_ARGUMENTS_PORT", fromEnvironment = "REQUEST_ARGUMENTS_PORT"),
+          (name = "HELLO_WORLD_SERVER_PORT", fromEnvironment = "HELLO_WORLD_SERVER_PORT"),
         ],
       )
     ),

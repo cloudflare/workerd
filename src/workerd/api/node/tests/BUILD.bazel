@@ -376,6 +376,8 @@ wd_test(
         "PONG_SERVER_PORT",
         "ASD_SERVER_PORT",
         "DEFAULT_HEADERS_EXIST_PORT",
+        "REQUEST_ARGUMENTS_PORT",
+        "HELLO_WORLD_SERVER_PORT",
     ],
 )
 
