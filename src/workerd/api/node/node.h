@@ -67,7 +67,15 @@ bool isNodeJsCompatEnabled(auto featureFlags) {
   return featureFlags.getNodeJsCompat() || featureFlags.getNodeJsCompatV2();
 }
 
-bool isExperimentalNodeJsCompatModule(kj::StringPtr name);
+constexpr bool isExperimentalNodeJsCompatModule(kj::StringPtr name) {
+  return name == "node:fs"_kj;
+}
+
+constexpr bool isNodeHttpModule(kj::StringPtr name) {
+  return name == "node:http"_kj || name == "node:_http_common"_kj ||
+      name == "node:_http_outgoing"_kj || name == "node:_http_client"_kj ||
+      name == "node:_http_incoming"_kj || name == "node:_http_agent"_kj || name == "node:https"_kj;
+}
 
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
@@ -85,7 +93,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
   bool nodeJsCompatEnabled = isNodeJsCompatEnabled(featureFlags);
 
   registry.addBuiltinBundleFiltered(NODE_BUNDLE, [&](jsg::Module::Reader module) {
-    // node:fs and node:http will be considered experimental until they are completed,
+    // node:fs will be considered experimental until it's completed,
     // so unless the experimental flag is enabled, don't register them.
     if (isExperimentalNodeJsCompatModule(module.getName())) {
       return featureFlags.getWorkerdExperimental();
@@ -95,6 +103,12 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       // If the `nodejs_compat` flag isn't enabled, only register internal modules.
       // We need these for `console.log()`ing when running `workerd` locally.
       return module.getType() == jsg::ModuleType::INTERNAL;
+    }
+
+    // We put node:http and node:https modules behind a compat flag
+    // for securing backward compatibility.
+    if (isNodeHttpModule(module.getName())) {
+      return featureFlags.getEnableNodejsHttpModules();
     }
 
     return true;
