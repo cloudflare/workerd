@@ -12,12 +12,10 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT"),
           (name = "ASD_SERVER_PORT", fromEnvironment = "ASD_SERVER_PORT"),
-          (name = "TIMEOUT_SERVER_PORT", fromEnvironment = "TIMEOUT_SERVER_PORT"),
-          (name = "HELLO_WORLD_SERVER_PORT", fromEnvironment = "HELLO_WORLD_SERVER_PORT"),
-          (name = "HEADER_VALIDATION_SERVER_PORT", fromEnvironment = "HEADER_VALIDATION_SERVER_PORT"),
+          (name = "DEFAULT_HEADERS_EXIST_PORT", fromEnvironment = "DEFAULT_HEADERS_EXIST_PORT"),
         ],
       )
     ),
-    ( name = "internet", network = ( allow = ["private", "public"] ) ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
   ],
 );

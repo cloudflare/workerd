@@ -4,10 +4,7 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http';
-import {
-  kHeadersSent,
-  kOutHeaders,
-} from 'node-internal:internal_http_outgoing';
+import { kOutHeaders } from 'node-internal:internal_http_outgoing';
 import { Buffer } from 'node-internal:internal_buffer';
 import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
 import {
@@ -223,6 +220,9 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     const headers = options.headers;
     if (!Array.isArray(headers)) {
       if (headers != null) {
+        if ('host' in headers) {
+          validateString(headers.host, 'host');
+        }
         for (const [key, value] of Object.entries(headers)) {
           this.setHeader(key, value as unknown as string);
         }
@@ -336,7 +336,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     url.port = this.port;
     url.pathname = this.path;
 
-    this[kHeadersSent] = true;
+    // Sets headersSent to true
+    this._header = '';
 
     // Our fetch implementation has the following limitations.
     //
