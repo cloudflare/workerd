@@ -1685,7 +1685,8 @@ class WorkerTracerSpanObserver: public SpanObserver,
 
       CompleteSpan completeSpan(0, 0, kj::ConstString(kj::str(span.operationName)), span.startTime,
           span.endTime, kj::mv(tags));
-      tracer->addSpan(kj::mv(completeSpan));
+      tracer->addSpan(kj::mv(completeSpan),
+          IoContext::hasCurrent() ? IoContext::current().now() : kj::UNIX_EPOCH);
     }
   }
 

@@ -250,6 +250,10 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     return;
   }
 
+  KJ_IF_SOME(w, workerTracer) {
+    w->recordTimestamp(ioChannelFactory->getTimer().now());
+    metrics->clockRead();
+  }
   if (&context->incomingRequests.front() == this) {
     // We're the current request, make sure to consume CPU time attribution.
     context->limitEnforcer->reportMetrics(*metrics);

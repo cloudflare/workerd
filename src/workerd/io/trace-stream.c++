@@ -677,11 +677,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       for (auto reader: eventReaders) {
         events.add(tracing::TailEvent(reader));
       }
-      // TODO(streaming-tail): Timestamp handling here serves as a placeholder, proper
-      // implementation will be more work, incl. addressing potential spectre concerns.
-      for (auto& event: events) {
-        event.timestamp = ioContext.now();
-      }
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
@@ -1219,12 +1214,6 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     // dropping this lambda.
 
     return !state.closing;
-  }, []() -> kj::Date {
-    // TODO(streaming-tail): Return proper timestamps. This callback is used to
-    // acquire the timestamps used in the tail stream events. Ideally this will
-    // use the same timesource that backs `IoContext::now()` and includes the
-    // same spectre mitigations.
-    return kj::UNIX_EPOCH;
   }).attach(kj::mv(state));
 }
 

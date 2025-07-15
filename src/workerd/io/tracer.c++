@@ -23,10 +23,10 @@ static constexpr size_t MAX_USER_SPANS = 512;
 }  // namespace
 
 namespace tracing {
-TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
-    : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
+TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
 
-void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::Event&& event) {
+void TailStreamWriter::report(
+    const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
   // Becomes a non-op if a terminal event (close or hibernate) has been reported, of if the stream
   // closed due to not receiving a well-formed event handler. We need to disambiguate these cases as
   // the former indicates an implementation error resulting in trailing events whereas the latter
@@ -51,7 +51,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
     }
   }
 
-  tracing::TailEvent tailEvent(context, s.timeSource(), s.sequence++, kj::mv(event));
+  tracing::TailEvent tailEvent(context, timestamp, s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
   if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
@@ -146,12 +146,12 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))});
+    writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))}, timestamp);
   }
   trace->logs.add(timestamp, logLevel, kj::mv(message));
 }
 
-void WorkerTracer::addSpan(CompleteSpan&& span) {
+void WorkerTracer::addSpan(CompleteSpan&& span, kj::Date timestamp) {
   // This is where we'll actually encode the span.
   // Drop any spans beyond MAX_USER_SPANS.
   if (trace->spans.size() >= MAX_USER_SPANS) {
@@ -204,7 +204,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
         return topLevelContext.newChild();
       }
     }();
-    writer->report(context, span.clone());
+    writer->report(context, span.clone(), timestamp == kj::UNIX_EPOCH ? completeTime : timestamp);
   }
 
   trace->bytesUsed = newSize;
@@ -239,7 +239,8 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
   trace->bytesUsed = newSize;
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
-        {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))});
+        {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))},
+        timestamp);
   }
   trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
@@ -268,7 +269,8 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     writer->report(context,
         {tracing::DiagnosticChannelEvent(
-            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))});
+            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))},
+        timestamp);
   }
   trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }
@@ -325,7 +327,8 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
+    writer->report(
+        context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none), timestamp);
   }
   trace->eventInfo = kj::mv(info);
 }
@@ -345,10 +348,10 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
     if (isPredictableModeForTest()) {
-      writer->report(
-          spanContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+      writer->report(spanContext,
+          tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS), completeTime);
     } else {
-      writer->report(spanContext, tracing::Outcome(outcome, cpuTime, wallTime));
+      writer->report(spanContext, tracing::Outcome(outcome, cpuTime, wallTime), completeTime);
     }
   }
 }
@@ -367,8 +370,8 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-    writer->report(
-        spanContext, tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}));
+    writer->report(spanContext,
+        tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}), completeTime);
   }
 }
 

@@ -17,13 +17,10 @@ class TailStreamWriter final: public kj::Refcounted {
   // closed state.
   using Reporter = kj::Function<bool(TailEvent&&)>;
 
-  // A callback that provides the timestamps for tail stream events.
-  // Ideally this uses the same time context as IoContext:now().
-  using TimeSource = kj::Function<kj::Date()>;
-  TailStreamWriter(Reporter reporter, TimeSource timeSource);
+  TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
+  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
 
   inline bool isClosed() const {
     return state == kj::none;
@@ -32,11 +29,8 @@ class TailStreamWriter final: public kj::Refcounted {
  private:
   struct State {
     Reporter reporter;
-    TimeSource timeSource;
     uint32_t sequence = 0;
-    State(Reporter reporter, TimeSource timeSource)
-        : reporter(kj::mv(reporter)),
-          timeSource(kj::mv(timeSource)) {}
+    State(Reporter reporter): reporter(kj::mv(reporter)) {}
   };
   kj::Maybe<State> state;
   bool onsetSeen = false;
@@ -109,7 +103,7 @@ class BaseTracer: public kj::Refcounted {
       LogLevel logLevel,
       kj::String message) = 0;
   // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
-  virtual void addSpan(CompleteSpan&& span) = 0;
+  virtual void addSpan(CompleteSpan&& span, kj::Date timestamp) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -139,6 +133,12 @@ class BaseTracer: public kj::Refcounted {
     return self->addRef();
   }
 
+  // Report time as seen from the incoming Request when the request is complete, since it will not
+  // be available afterwards.
+  void recordTimestamp(kj::Date timestamp) {
+    completeTime = timestamp;
+  }
+
   virtual SpanParent getUserRequestSpan() = 0;
 
   // A weak reference for the internal span submitter. We use this so that the span submitter can
@@ -147,6 +147,7 @@ class BaseTracer: public kj::Refcounted {
   // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
   // span submitter may exist for longer than the tracer).
   kj::Own<WeakRef<BaseTracer>> self;
+  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
@@ -164,7 +165,7 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(CompleteSpan&& span) override;
+  void addSpan(CompleteSpan&& span, kj::Date timestamp) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
