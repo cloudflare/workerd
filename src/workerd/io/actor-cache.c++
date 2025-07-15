@@ -3032,7 +3032,11 @@ kj::Promise<void> ActorCache::flushImplDeleteAll(uint retryCount) {
       e.setDescription(kj::str("broken.outputGateBroken; ", msg));
       return kj::mv(e);
     } else {
-      LOG_EXCEPTION("actorCacheDeleteAll", e);
+      if (isInterestingException(e)) {
+        LOG_EXCEPTION("actorCacheDeleteAll", e);
+      } else {
+        LOG_NOSENTRY(ERROR, "actorCacheDeleteAll failed", e);
+      }
       // Pass through exception type to convey appropriate retry behavior.
       return kj::Exception(e.getType(), __FILE__, __LINE__,
           kj::str(
