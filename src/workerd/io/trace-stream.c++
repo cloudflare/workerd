@@ -867,7 +867,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // prematurely. This applies even if promises were rejected.
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) { doneFulfiller->fulfill(); });
+            [&](jsg::Lock& js, jsg::Value&& value) {
+          doneFulfiller->reject(
+              JSG_KJ_EXCEPTION(FAILED, Error, "Streaming tail session exception"));
+        });
       }
       return ioContext.awaitJs(js, kj::mv(p));
     }
@@ -905,23 +908,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   capFulfiller->fulfill(kj::heap<TailStreamTarget>(
       ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
 
-  // What is happening here? I'm glad you asked! When this method is called we are
-  // starting a tail stream session. Our TailStreamTarget created above is an RPC
-  // server that accepts events over time as individual RPC calls. Those always
-  // start with an onset event and should always end with an outcome event. It is
-  // possible for the client stub to be dropped early before the outcome event
-  // is delivered.
-  //
-  // When either the outcome event is received, or if the client stub is dropped
-  // early, the donePromise should be fulfilled or rejected. Below we arrange for
-  // the IoContext for the tail stream request to remain alive until the donePromise
-  // is settled. We also block completion of the call to run on the same condition.
-  //
-  // Attaching the registerPendingEvent() to the promise is necessary to keep the
-  // IoContext alive during the times our tail worker is idle waiting for more
-  // events to be delivered.
-  kj::ForkedPromise<void> forked = donePromise.fork();
-  ioContext.addWaitUntil(forked.addBranch().attach(ioContext.registerPendingEvent()));
+  donePromise = donePromise.attach(ioContext.registerPendingEvent());
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -929,12 +916,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
+  auto result = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
+    return ioContext.waitUntilStatus();
+  }, [](kj::Exception&& e) { return EventOutcome::EXCEPTION; });
 
-  // Return the outcome. Synchronous draining is not required.
   co_return WorkerInterface::CustomEvent::Result{
-    .outcome = ioContext.waitUntilStatus(),
-  };
+    .outcome = result };
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
