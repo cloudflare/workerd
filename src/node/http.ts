@@ -10,6 +10,7 @@ import {
 import { METHODS, STATUS_CODES } from 'node-internal:internal_http_constants';
 import { ClientRequest } from 'node-internal:internal_http_client';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
+import { IncomingMessage } from 'node-internal:internal_http_incoming';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
@@ -44,6 +45,7 @@ export {
   OutgoingMessage,
   Agent,
   globalAgent,
+  IncomingMessage,
 };
 export default {
   validateHeaderName,
@@ -57,4 +59,5 @@ export default {
   OutgoingMessage,
   Agent,
   globalAgent,
+  IncomingMessage,
 };

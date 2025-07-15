@@ -8,8 +8,16 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "http-nodejs-test.js")
         ],
         compatibilityDate = "2025-01-15",
-        compatibilityFlags = ["nodejs_compat", "experimental"]
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT"),
+          (name = "ASD_SERVER_PORT", fromEnvironment = "ASD_SERVER_PORT"),
+          (name = "TIMEOUT_SERVER_PORT", fromEnvironment = "TIMEOUT_SERVER_PORT"),
+          (name = "HELLO_WORLD_SERVER_PORT", fromEnvironment = "HELLO_WORLD_SERVER_PORT"),
+          (name = "HEADER_VALIDATION_SERVER_PORT", fromEnvironment = "HEADER_VALIDATION_SERVER_PORT"),
+        ],
       )
     ),
+    ( name = "internet", network = ( allow = ["private", "public"] ) ),
   ],
 );

@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import http from 'node:http';
+import https from 'node:https';
 import { strictEqual, ok } from 'node:assert';
 
 export const checkPortsSetCorrectly = {
@@ -75,3 +76,54 @@ export const testHttpAgentNull = {
     await promise;
   },
 };
+
+// Test is taken from test/parallel/test-https-agent-constructor.js
+export const testHttpsAgentConstructor = {
+  async test() {
+    ok(new https.Agent() instanceof https.Agent);
+    strictEqual(typeof https.request, 'function');
+    strictEqual(typeof http.get, 'function');
+  },
+};
+
+// Tests covering http-agent
+// - [ ] test/parallel/test-http-agent-abort-controller.js
+// - [ ] test/parallel/test-http-agent-close.js
+// - [ ] test/parallel/test-http-agent-destroyed-socket.js
+// - [ ] test/parallel/test-http-agent-domain-reused-gc.js
+// - [ ] test/parallel/test-http-agent-error-on-idle.js
+// - [ ] test/parallel/test-http-agent-false.js
+// - [x] test/parallel/test-http-agent-getname.js
+// - [ ] test/parallel/test-http-agent-keepalive-delay.js
+// - [ ] test/parallel/test-http-agent-keepalive.js
+// - [ ] test/parallel/test-http-agent-maxsockets-respected.js
+// - [ ] test/parallel/test-http-agent-maxsockets.js
+// - [ ] test/parallel/test-http-agent-maxtotalsockets.js
+// - [ ] test/parallel/test-http-agent-no-protocol.js
+// - [x] test/parallel/test-http-agent-null.js
+// - [ ] test/parallel/test-http-agent-remove.js
+// - [ ] test/parallel/test-http-agent-reuse-drained-socket-only.js
+// - [ ] test/parallel/test-http-agent-scheduling.js
+// - [ ] test/parallel/test-http-agent-timeout-option.js
+// - [ ] test/parallel/test-http-agent-timeout.js
+// - [ ] test/parallel/test-http-agent-uninitialized-with-handle.js
+// - [ ] test/parallel/test-http-agent.js
+// - [ ] test/parallel/test-https-agent-abort-controller.js
+// - [ ] test/parallel/test-https-agent-additional-options.js
+// - [x] test/parallel/test-https-agent-constructor.js
+// - [ ] test/parallel/test-https-agent-create-connection.js
+// - [ ] test/parallel/test-https-agent-disable-session-reuse.js
+// - [ ] test/parallel/test-https-agent-getname.js
+// - [ ] test/parallel/test-https-agent-keylog.js
+// - [ ] test/parallel/test-https-agent-servername.js
+// - [ ] test/parallel/test-https-agent-session-eviction.js
+// - [ ] test/parallel/test-https-agent-session-injection.js
+// - [ ] test/parallel/test-https-agent-session-reuse.js
+// - [ ] test/parallel/test-https-agent-sni.js
+// - [ ] test/parallel/test-https-agent-sockets-leak.js
+// - [ ] test/parallel/test-https-agent-unref-socket.js
+// - [ ] test/parallel/test-https-agent.js
+
+// Tests doesn't make sense for workerd:
+//
+// - [ ] test/parallel/test-http-agent-uninitialized.js

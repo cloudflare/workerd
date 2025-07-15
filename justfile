@@ -36,7 +36,7 @@ stream-test *args:
 
 # e.g. just node-test zlib
 node-test test_name *args:
-  just stream-test //src/workerd/api/node:tests/{{test_name}}-nodejs-test {{args}}
+  just stream-test //src/workerd/api/node/tests:{{test_name}}-nodejs-test {{args}}
 
 # e.g. just wpt-test urlpattern
 wpt-test test_name:

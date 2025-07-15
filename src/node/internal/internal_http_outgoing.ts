@@ -8,6 +8,7 @@ import {
   ERR_HTTP_HEADERS_SENT,
   ERR_INVALID_ARG_TYPE,
   ERR_STREAM_CANNOT_PIPE,
+  ERR_STREAM_DESTROYED,
   ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import {
@@ -16,13 +17,16 @@ import {
 } from 'node-internal:internal_http';
 import { Writable } from 'node-internal:streams_writable';
 import { EventEmitter } from 'node-internal:events';
-import type { OutgoingMessage as _OutgoingMessage } from 'node:http';
+import type {
+  OutgoingMessage as _OutgoingMessage,
+  OutgoingHttpHeaders,
+} from 'node:http';
 
 export const kUniqueHeaders = Symbol('kUniqueHeaders');
 export const kHighWaterMark = Symbol('kHighWaterMark');
 export const kNeedDrain = Symbol('kNeedDrain');
 export const kOutHeaders = Symbol('kOutHeaders');
-export const kHeadersSent = Symbol('kHeadersSent');
+export const kErrored = Symbol('kErrored');
 
 export function parseUniqueHeadersOption(
   headers?: string[] | null
@@ -39,11 +43,30 @@ export function parseUniqueHeadersOption(
 }
 
 export class OutgoingMessage extends Writable implements _OutgoingMessage {
-  [kHeadersSent]: boolean = false;
-  [kOutHeaders]: Record<string, Record<string, string | string[]>> = {};
+  [kOutHeaders]: Record<string, { name: string; value: string | string[] }> =
+    {};
+  [kErrored]: Error | null = null;
+
+  #header: unknown;
+
+  override writable = true;
+  override destroyed = false;
+  finished = false;
+
+  get _header(): unknown {
+    return this.#header;
+  }
+
+  set _header(value: unknown) {
+    this.#header = value;
+  }
+
+  get header(): unknown {
+    return this.#header;
+  }
 
   setHeader(name: string, value: string | string[]): this {
-    if (this[kHeadersSent]) {
+    if (this.headersSent) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
     validateHeaderName(name);
@@ -61,7 +84,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   setHeaders(
     headers: Headers | Map<string, string | number | readonly string[]>
   ): this {
-    if (this[kHeadersSent]) {
+    if (this.headersSent) {
       throw new ERR_HTTP_HEADERS_SENT('set');
     }
 
@@ -103,7 +126,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   }
 
   appendHeader(name: string, value: string | string[]): this {
-    if (this[kHeadersSent]) {
+    if (this.headersSent) {
       throw new ERR_HTTP_HEADERS_SENT('append');
     }
 
@@ -118,7 +141,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
     // Prepare the field for appending, if required
     if (!Array.isArray(headers[field].value)) {
-      headers[field].value = [headers[field].value as string];
+      headers[field].value = [headers[field].value];
     }
 
     const existingValues = headers[field].value;
@@ -144,7 +167,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   removeHeader(name: string): void {
     validateString(name, 'name');
 
-    if (this[kHeadersSent]) {
+    if (this.headersSent) {
       throw new ERR_HTTP_HEADERS_SENT('remove');
     }
 
@@ -165,11 +188,24 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   }
 
   flushHeaders(): void {
-    // Not implemented
+    if (!this._header) {
+      this._implicitHeader();
+    }
+
+    // Force-flush the headers.
+    this._send('');
+  }
+
+  getHeaders(): OutgoingHttpHeaders {
+    const headers: Record<string, string | string[]> = {};
+    for (const [_key, entry] of Object.entries(this[kOutHeaders])) {
+      headers[entry.name] = entry.value;
+    }
+    return headers;
   }
 
   get headersSent(): boolean {
-    return this[kHeadersSent];
+    return this.#header != null;
   }
 
   // @ts-expect-error TS2416 Unnecessary type assertion
@@ -183,5 +219,61 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   _implicitHeader(): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('_implicitHeader()');
+  }
+
+  _renderHeaders(): Record<string, string | string[]> {
+    if (this.headersSent) {
+      throw new ERR_HTTP_HEADERS_SENT('render');
+    }
+    const headers: Record<string, string | string[]> = {};
+    for (const [_key, entry] of Object.entries(this[kOutHeaders])) {
+      headers[entry.name] = entry.value;
+    }
+    return headers;
+  }
+
+  _send(_val: unknown): void {
+    // Unimplemented.
+  }
+
+  override _write(
+    _chunk: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    _encoding: BufferEncoding,
+    cb: (error?: Error | null) => void
+  ): void {
+    // The only reason for us to override this method is to increase the Node.js test coverage.
+    // Otherwise, we don't implement _write yet.
+    if (this.destroyed) {
+      cb(new ERR_STREAM_DESTROYED('_write'));
+      return;
+    }
+
+    throw new ERR_METHOD_NOT_IMPLEMENTED('_write');
+  }
+
+  override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
+    if (this.destroyed) {
+      return this;
+    }
+    this.destroyed = true;
+    this[kErrored] = err as Error;
+
+    return this;
+  }
+
+  // @ts-expect-error TS2611 Property accessor.
+  get writableObjectMode(): boolean {
+    return false;
+  }
+
+  // @ts-expect-error TS2611 Property accessor.
+  get errored(): Error | null {
+    return this[kErrored];
+  }
+
+  // @ts-expect-error TS2611 Property accessor.
+  get writableEnded(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    return this.finished;
   }
 }
