@@ -73,7 +73,7 @@ export function createBase64EncoderTransformStream(
   }
 
   return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
+    transform(chunk, controller): void {
       if (leftover != null) {
         const requiredBytes = 3 - leftover.length;
 
@@ -112,7 +112,7 @@ export function createBase64EncoderTransformStream(
       leftover = nextLeftover;
     },
 
-    flush(controller) {
+    flush(controller): void {
       if (leftover != null) {
         controller.enqueue(toBase64(leftover));
       }
@@ -131,7 +131,7 @@ export function createBase64DecoderTransformStream(
   let paddingSeen = false;
 
   return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
+    transform(chunk, controller): void {
       try {
         // If we see a chunk with padding, we aren't allowed to see any more data, as padding is allowed only at the end
         if (paddingSeen && chunk.length > 0) {
@@ -182,7 +182,7 @@ export function createBase64DecoderTransformStream(
       }
     },
 
-    flush(controller) {
+    flush(controller): void {
       if (leftover != null) {
         // We have leftovers, but they aren't decodable
         controller.error(
