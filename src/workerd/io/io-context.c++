@@ -250,6 +250,14 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     return;
   }
 
+  // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
+  // not be available when the outcome event gets reported. Define the outcome event time as the
+  // time when the incoming request shuts down.
+  KJ_IF_SOME(w, workerTracer) {
+    w->recordTimestamp(ioChannelFactory->getTimer().now());
+    metrics->clockRead();
+  }
+
   if (&context->incomingRequests.front() == this) {
     // We're the current request, make sure to consume CPU time attribution.
     context->limitEnforcer->reportMetrics(*metrics);

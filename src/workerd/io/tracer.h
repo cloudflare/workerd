@@ -21,10 +21,7 @@ class TailStreamWriter final: public kj::Refcounted {
   TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  // TODO(streaming-tail): Provide proper time stamps in all cases, getting rid of UNIX_EPOCH here.
-  void report(const InvocationSpanContext& context,
-      TailEvent::Event&& event,
-      kj::Date time = kj::UNIX_EPOCH);
+  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
 
   inline bool isClosed() const {
     return state == kj::none;
@@ -128,7 +125,19 @@ class BaseTracer: public kj::Refcounted {
   // final event, causing the stream to terminate.
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
 
+  // Report time as seen from the incoming Request when the request is complete, since it will not
+  // be available afterwards.
+  void recordTimestamp(kj::Date timestamp) {
+    if (completeTime == kj::UNIX_EPOCH) {
+      completeTime = timestamp;
+    }
+  }
+
   virtual SpanParent getUserRequestSpan() = 0;
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the

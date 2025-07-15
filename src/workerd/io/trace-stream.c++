@@ -619,15 +619,6 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       for (auto reader: eventReaders) {
         events.add(tracing::TailEvent(reader));
       }
-      // TODO(streaming-tail): Timestamp handling here serves as a placeholder, proper
-      // implementation will be more work. For span events, we already make sure to provide proper
-      // time stamps.
-      for (auto& event: events) {
-        if (!(event.event.is<tracing::SpanOpen>() || event.event.is<tracing::SpanClose>() ||
-                event.event.is<tracing::CustomInfo>())) {
-          event.timestamp = ioContext.now();
-        }
-      }
 
       // If we have not yet received the onset event, the first event in the
       // received collection must be an Onset event and must be handled separately.
