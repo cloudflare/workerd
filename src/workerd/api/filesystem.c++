@@ -2022,21 +2022,14 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
-  return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(jsg::USVString(), vfs.getRoot(js)));
+  return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(
+      KJ_ASSERT_NONNULL(jsg::Url::tryParse("file:///"_kj)), jsg::USVString(), vfs.getRoot(js)));
 }
 
 FileSystemDirectoryHandle::FileSystemDirectoryHandle(
-    jsg::USVString name, kj::Rc<workerd::Directory> inner)
-    : FileSystemHandle(kj::mv(name)),
+    jsg::Url locator, jsg::USVString name, kj::Rc<workerd::Directory> inner)
+    : FileSystemHandle(kj::mv(locator), kj::mv(name)),
       inner(kj::mv(inner)) {}
-
-jsg::Promise<bool> FileSystemDirectoryHandle::isSameEntry(
-    jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
-  KJ_IF_SOME(other, kj::dynamicDowncastIfAvailable<FileSystemDirectoryHandle>(*other)) {
-    return js.resolvedPromise(other.inner.get() == inner.get());
-  }
-  return js.resolvedPromise(false);
-}
 
 jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileHandle(jsg::Lock& js,
     jsg::USVString name,
@@ -2057,7 +2050,9 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
           })) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        return js.resolvedPromise(js.alloc<FileSystemFileHandle>(kj::mv(name), kj::mv(file)));
+        auto locator = KJ_ASSERT_NONNULL(getLocator().tryResolve(name));
+        return js.resolvedPromise(
+            js.alloc<FileSystemFileHandle>(kj::mv(locator), kj::mv(name), kj::mv(file)));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto ex =
@@ -2100,7 +2095,9 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
           })) {
     KJ_SWITCH_ONEOF(node) {
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        return js.resolvedPromise(js.alloc<FileSystemDirectoryHandle>(kj::mv(name), kj::mv(dir)));
+        auto locator = KJ_ASSERT_NONNULL(getLocator().tryResolve(kj::str(name, "/")));
+        return js.resolvedPromise(
+            js.alloc<FileSystemDirectoryHandle>(kj::mv(locator), kj::mv(name), kj::mv(dir)));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::File>) {
         auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("File name is a file"));
@@ -2158,17 +2155,19 @@ jsg::Promise<kj::Array<jsg::USVString>> FileSystemDirectoryHandle::resolve(
 
 namespace {
 kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(
-    jsg::Lock& js, kj::Rc<workerd::Directory>& inner) {
+    jsg::Lock& js, kj::Rc<workerd::Directory>& inner, const jsg::Url& parentLocator) {
   kj::Vector<jsg::Ref<FileSystemHandle>> entries;
   for (auto& entry: *inner.get()) {
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-        entries.add(
-            js.alloc<FileSystemFileHandle>(js.accountedUSVString(entry.key), file.addRef()));
+        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
+        entries.add(js.alloc<FileSystemFileHandle>(
+            kj::mv(locator), js.accountedUSVString(entry.key), file.addRef()));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        entries.add(
-            js.alloc<FileSystemDirectoryHandle>(js.accountedUSVString(entry.key), dir.addRef()));
+        auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
+        entries.add(js.alloc<FileSystemDirectoryHandle>(
+            kj::mv(locator), js.accountedUSVString(entry.key), dir.addRef()));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         SymbolicLinkRecursionGuardScope guardScope;
@@ -2179,12 +2178,14 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(
         KJ_IF_SOME(res, link->resolve(js)) {
           KJ_SWITCH_ONEOF(res) {
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
-              entries.add(
-                  js.alloc<FileSystemFileHandle>(js.accountedUSVString(entry.key), file.addRef()));
+              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
+              entries.add(js.alloc<FileSystemFileHandle>(
+                  kj::mv(locator), js.accountedUSVString(entry.key), file.addRef()));
             }
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+              auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
               entries.add(js.alloc<FileSystemDirectoryHandle>(
-                  js.accountedUSVString(entry.key), dir.addRef()));
+                  kj::mv(locator), js.accountedUSVString(entry.key), dir.addRef()));
             }
             KJ_CASE_ONEOF(_, workerd::FsError) {
               JSG_FAIL_REQUIRE(DOMOperationError, "Symbolic link recursion detected"_kj);
@@ -2200,16 +2201,16 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(
 
 jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::entries(
     jsg::Lock& js) {
-  return js.alloc<EntryIterator>(IteratorState(JSG_THIS, collectEntries(js, inner)));
+  return js.alloc<EntryIterator>(IteratorState(JSG_THIS, collectEntries(js, inner, getLocator())));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys(jsg::Lock& js) {
-  return js.alloc<KeyIterator>(IteratorState(JSG_THIS, collectEntries(js, inner)));
+  return js.alloc<KeyIterator>(IteratorState(JSG_THIS, collectEntries(js, inner, getLocator())));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::values(
     jsg::Lock& js) {
-  return js.alloc<ValueIterator>(IteratorState(JSG_THIS, collectEntries(js, inner)));
+  return js.alloc<ValueIterator>(IteratorState(JSG_THIS, collectEntries(js, inner, getLocator())));
 }
 
 void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
@@ -2225,22 +2226,15 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
   }
   callback.setReceiver(js.v8Ref(receiver));
 
-  for (auto& entry: collectEntries(js, inner)) {
+  for (auto& entry: collectEntries(js, inner, getLocator())) {
     callback(js, js.accountedUSVString(entry->getName(js)), entry.addRef(), JSG_THIS);
   }
 }
 
-FileSystemFileHandle::FileSystemFileHandle(jsg::USVString name, kj::Rc<workerd::File> inner)
-    : FileSystemHandle(kj::mv(name)),
+FileSystemFileHandle::FileSystemFileHandle(
+    jsg::Url locator, jsg::USVString name, kj::Rc<workerd::File> inner)
+    : FileSystemHandle(kj::mv(locator), kj::mv(name)),
       inner(kj::mv(inner)) {}
-
-jsg::Promise<bool> FileSystemFileHandle::isSameEntry(
-    jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
-  KJ_IF_SOME(other, kj::dynamicDowncastIfAvailable<FileSystemFileHandle>(*other)) {
-    return js.resolvedPromise(other.inner.get() == inner.get());
-  }
-  return js.resolvedPromise(false);
-}
 
 jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {

@@ -270,7 +270,10 @@ class FileSystemHandle: public jsg::Object {
   // file handle. It would still likely be useful tho. As a follow up
   // step, we will implement serialization/deserialization of these objects.
  public:
-  FileSystemHandle(jsg::USVString name): name(kj::mv(name)) {}
+  FileSystemHandle(jsg::Url&& locator, jsg::USVString name)
+      : locator(kj::mv(locator)),
+        name(kj::mv(name)) {}
+
   const jsg::USVString& getName(jsg::Lock& js) {
     return name;
   }
@@ -279,9 +282,16 @@ class FileSystemHandle: public jsg::Object {
     // Implemented by subclasses.
     KJ_UNIMPLEMENTED("getKind() not implemented");
   }
-  virtual jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
-    // Implemented by subclasses.
-    KJ_UNIMPLEMENTED("isSameEntry() not implemented");
+
+  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
+    // Per the spec, two handles are the same if they refer to the same entry (that is,
+    // have the same locator). It does not matter if they are different actual entries.
+    return locator.equal(other->getLocator(),
+               jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS |
+                   jsg::Url::EquivalenceOption::IGNORE_SEARCH |
+                   jsg::Url::EquivalenceOption::NORMALIZE_PATH)
+        ? js.resolvedPromise(true)
+        : js.resolvedPromise(false);
   }
 
   JSG_RESOURCE_TYPE(FileSystemHandle) {
@@ -290,19 +300,22 @@ class FileSystemHandle: public jsg::Object {
     JSG_METHOD(isSameEntry);
   }
 
+  const jsg::Url& getLocator() const {
+    return locator;
+  }
+
  private:
+  const jsg::Url locator;
   jsg::USVString name;
 };
 
 class FileSystemFileHandle: public FileSystemHandle {
  public:
-  FileSystemFileHandle(jsg::USVString name, kj::Rc<workerd::File> inner);
+  FileSystemFileHandle(jsg::Url locator, jsg::USVString name, kj::Rc<workerd::File> inner);
 
   kj::StringPtr getKind(jsg::Lock& js) override {
     return "file"_kj;
   }
-
-  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) override;
 
   struct FileSystemCreateWritableOptions {
     jsg::Optional<bool> keepExistingData;
@@ -379,13 +392,12 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
   };
 
  public:
-  FileSystemDirectoryHandle(jsg::USVString name, kj::Rc<workerd::Directory> inner);
+  FileSystemDirectoryHandle(
+      jsg::Url locator, jsg::USVString name, kj::Rc<workerd::Directory> inner);
 
   kj::StringPtr getKind(jsg::Lock& js) override {
     return "directory"_kj;
   }
-
-  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) override;
 
   struct FileSystemGetFileOptions {
     bool create = false;
