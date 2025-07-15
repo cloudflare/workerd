@@ -375,57 +375,6 @@ export const testHttpRequestEndTwice = {
   },
 };
 
-// Test is taken from test/parallel/test-http-request-host-header.js
-export const testHttpRequestHostHeader = {
-  async test(_ctrl, env) {
-    // From RFC 7230 5.4 https://datatracker.ietf.org/doc/html/rfc7230#section-5.4
-    // A server MUST respond with a 400 (Bad Request) status code to any
-    // HTTP/1.1 request message that lacks a Host header field
-    const { promise, resolve } = Promise.withResolvers();
-    http.get(
-      { port: env.HEADER_VALIDATION_SERVER_PORT, headers: [] },
-      (res) => {
-        strictEqual(res.statusCode, 400);
-        strictEqual(res.headers.connection, 'close');
-        resolve();
-      }
-    );
-    await promise;
-  },
-};
-
-// Test is taken from test/parallel/test-http-request-join-authorization-headers.js
-export const testHttpRequestJoinAuthorizationHeaders = {
-  async test(_ctrl, env) {
-    const { promise, resolve } = Promise.withResolvers();
-    http.get(
-      {
-        port: env.HELLO_WORLD_SERVER_PORT,
-        method: 'POST',
-        headers: [
-          'authorization',
-          '1',
-          'authorization',
-          '2',
-          'cookie',
-          'foo',
-          'cookie',
-          'bar',
-        ],
-        joinDuplicateHeaders: true,
-        path: '/join-duplicate-headers',
-      },
-      (res) => {
-        strictEqual(res.statusCode, 200);
-        strictEqual(res.headers.authorization, '3, 4');
-        strictEqual(res.headers.cookie, 'foo; bar');
-        resolve();
-      }
-    );
-    await promise;
-  },
-};
-
 // Test is taken from test/parallel/test-http-set-timeout.js
 export const testHttpSetTimeout = {
   async test(_ctrl, env) {
@@ -459,3 +408,15 @@ export const httpRedirectsAreNotFollowed = {
     await promise;
   },
 };
+
+// The following tests does not make sense for workerd
+//
+// - [ ] test/parallel/test-http-parser-bad-ref.js
+// - [ ] test/parallel/test-http-parser-finish-error.js
+// - [ ] test/parallel/test-http-parser-free.js
+// - [ ] test/parallel/test-http-parser-freed-before-upgrade.js
+// - [ ] test/parallel/test-http-parser-lazy-loaded.js
+// - [ ] test/parallel/test-http-parser-memory-retention.js
+// - [ ] test/parallel/test-http-parser-multiple-execute.js
+// - [ ] test/parallel/test-http-parser-timeout-reset.js
+// - [ ] test/parallel/test-http-parser.js

@@ -62,3 +62,37 @@ asdServer.listen(process.env.ASD_SERVER_PORT, () => reportPort(asdServer));
     reportPort(defaultHeadersExistServer)
   );
 }
+
+const requestArgumentsServer = http.createServer((req, res) => {
+  assert.strictEqual(req.url, '/testpath');
+  res.end();
+});
+requestArgumentsServer.listen(process.env.REQUEST_ARGUMENTS_PORT, () =>
+  reportPort(requestArgumentsServer)
+);
+
+const helloWorldServer = http.createServer((req, res) => {
+  res.removeHeader('Date');
+  res.setHeader('Keep-Alive', 'timeout=1');
+
+  switch (req.url.slice(1)) {
+    case 'join-duplicate-headers':
+      res.writeHead(200, [
+        'authorization',
+        '3',
+        'authorization',
+        '4',
+        'cookie',
+        'foo',
+        'cookie',
+        'bar',
+      ]);
+      res.end();
+      break;
+    default:
+      res.end();
+  }
+});
+helloWorldServer.listen(process.env.HELLO_WORLD_SERVER_PORT, () =>
+  reportPort(helloWorldServer)
+);
