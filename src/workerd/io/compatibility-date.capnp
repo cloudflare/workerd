@@ -874,6 +874,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodejsHttpModules @100 :Bool
       $compatEnableFlag("enable_nodejs_http_modules")
       $compatDisableFlag("disable_nodejs_http_modules")
-      $impliedByAfterDate(names = ["nodeJsCompat", "nodeJsCompatV2"], date = "2025-08-01");
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2025-08-15");
   # Enables Node.js http related modules such as node:http and node:https
 }
