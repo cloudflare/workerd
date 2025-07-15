@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import http from 'node:http';
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { once } from 'node:events';
 import { mock } from 'node:test';
+import { get } from 'node:http';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -397,6 +398,13 @@ export const testHttpRequestJoinAuthorizationHeaders = {
       }
     );
     await promise;
+  },
+};
+
+export const testGetExport = {
+  async test() {
+    const { get: getFn } = await import('node:http');
+    deepStrictEqual(get, getFn);
   },
 };
 
