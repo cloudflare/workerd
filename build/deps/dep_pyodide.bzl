@@ -25,9 +25,26 @@ def _pyodide_packages(*, tag, lockfile_hash, all_wheels_hash, **_kwds):
         urls = ["https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/all_wheels.zip" % tag],
     )
 
+def _py_vendor_test_deps(name, sha256, url):
+    http_archive(
+        name = name,
+        build_file_content = """
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+""",
+        sha256 = sha256,
+        url = url,
+    )
+
 def dep_pyodide():
     for info in PYODIDE_VERSIONS:
         _pyodide_core(**info)
 
     for info in PYTHON_LOCKFILES:
         _pyodide_packages(**info)
+
+    _py_vendor_test_deps(name = "beautifulsoup4_src", sha256 = "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd", url = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip")
+    _py_vendor_test_deps(name = "fastapi_src", sha256 = "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c", url = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip")

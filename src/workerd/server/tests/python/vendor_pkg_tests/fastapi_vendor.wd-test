@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "fastapi-vendor-test",
+      worker = (
+        modules = [
+          (name = "main.py", pythonModule = embed "fastapi.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityDate = "2024-01-15",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);
