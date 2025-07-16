@@ -983,8 +983,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
-        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
+    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(), CustomEventInfo());
   }
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
