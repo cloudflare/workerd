@@ -15,8 +15,6 @@ import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions } from 'node:http';
 
-const { WebSocket } = globalThis;
-
 export function request(
   url: string | URL | RequestOptions,
   options?: RequestOptions | IncomingMessageCallback,
@@ -41,7 +39,6 @@ export {
   METHODS,
   STATUS_CODES,
   ClientRequest,
-  WebSocket,
   OutgoingMessage,
   Agent,
   globalAgent,
@@ -55,7 +52,6 @@ export default {
   ClientRequest,
   request,
   get,
-  WebSocket,
   OutgoingMessage,
   Agent,
   globalAgent,
