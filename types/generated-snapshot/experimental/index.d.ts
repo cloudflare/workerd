@@ -6362,16 +6362,6 @@ declare abstract class AutoRAG {
     params: AutoRagAiSearchRequest,
   ): Promise<AutoRagAiSearchResponse | Response>;
 }
-declare module "cloudflare:base64" {
-  function _encodeArrayBuffer(input: ArrayBufferLike): ArrayBuffer;
-  function _encodeArrayBufferToString(input: ArrayBufferLike): string;
-  function _decodeArrayBuffer(input: ArrayBufferLike): ArrayBuffer | null;
-  export {
-    _encodeArrayBuffer as encodeArrayBuffer,
-    _encodeArrayBufferToString as encodeArrayBufferToString,
-    _decodeArrayBuffer as decodeArrayBuffer,
-  };
-}
 interface BasicImageTransformations {
   /**
    * Maximum width in image pixels. The value must be an integer.
