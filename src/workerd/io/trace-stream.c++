@@ -12,6 +12,9 @@
 namespace workerd::tracing {
 namespace {
 
+// Uniquely identifies js tail session failures
+constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xfa110000bad0e0e0;
+
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
@@ -868,8 +871,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
             [&](jsg::Lock& js, jsg::Value&& value) {
-          doneFulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, Error, "Streaming tail session exception"));
+          kj::Exception exception = KJ_EXCEPTION(FAILED, "Streaming tail session exception");
+          exception.setDetail(TAIL_STREAM_JS_FAILURE, kj::heapArray<kj::byte>(0));
+          doneFulfiller->reject(kj::mv(exception));
         });
       }
       return ioContext.awaitJs(js, kj::mv(p));
@@ -916,12 +920,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  auto result = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
+  auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
     return ioContext.waitUntilStatus();
-  }, [](kj::Exception&& e) { return EventOutcome::EXCEPTION; });
+  }, [](kj::Exception&& e) {
+    if (e.getDetail(TAIL_STREAM_JS_FAILURE) != kj::none) {
+      return EventOutcome::EXCEPTION;
+    }
+    kj::throwRecoverableException(kj::mv(e));
+    KJ_UNREACHABLE;
+  });
 
   co_return WorkerInterface::CustomEvent::Result{
-    .outcome = result };
+    .outcome = eventOutcome };
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
