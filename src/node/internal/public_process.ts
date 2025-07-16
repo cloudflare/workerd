@@ -30,6 +30,7 @@ import {
   features,
   _setEventsProcess,
 } from 'node-internal:internal_process';
+import { validateString } from './validators';
 
 export { platform, nextTick, emitWarning, env, features };
 
@@ -39,15 +40,11 @@ export const stdout = undefined;
 export const stderr = undefined;
 
 export function chdir(path: string | Buffer | URL): void {
-  if (typeof path !== 'string') {
-    throw new ERR_INVALID_ARG_TYPE('directory', 'string', path);
-  }
+  validateString(path, 'directory');
   processImpl.setCwd(path);
 }
 
-export function cwd(): string {
-  return processImpl.getCwd();
-}
+export const cwd = processImpl.getCwd.bind(processImpl);
 
 // We do not support setting the umask as we do not have a fine-grained
 // permissions on the VFS. Instead we only support validation of input

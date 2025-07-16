@@ -698,13 +698,13 @@ class TmpDirStoreScope final {
     return kj::PathPtr(cwd);
   }
 
-  void setCwd(kj::Path newCwd) const {
+  void setCwd(kj::Path newCwd) {
     cwd = kj::mv(newCwd);
   }
 
  private:
   mutable kj::Rc<Directory> dir;
-  mutable kj::Path cwd;
+  kj::Path cwd;
   bool onStack = false;
 };
 
