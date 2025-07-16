@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/vscode/devcontainers/javascript-node:22
+FROM mcr.microsoft.com/vscode/devcontainers/base:dev-bookworm
 
 # Install dependencies, including clang via through LLVM APT repository. Note that this
 # will also install lldb and clangd alongside dependencies.
@@ -11,6 +11,3 @@ ENV PATH /usr/lib/llvm-${LLVM_VERSION}/bin:$PATH
 
 # Install Bazel (via Bazelisk)
 RUN npm install -g @bazel/bazelisk
-
-# Install Just
-RUN npm install -g rust-just

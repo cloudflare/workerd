@@ -144,7 +144,7 @@ kj::String ProcessModule::getCwd(jsg::Lock& js) {
   if (cwd == nullptr) {
     return kj::str("/");
   }
-  return kj::str("/", cwd.toString());
+  return cwd.toString(true);
 }
 
 void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
@@ -158,7 +158,6 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   }
 
   auto& vfs = VirtualFileSystem::current(js);
-  auto url = KJ_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
 
   // Resolve the path against current working directory if it's relative
   kj::Path resolvedPath = [&]() {

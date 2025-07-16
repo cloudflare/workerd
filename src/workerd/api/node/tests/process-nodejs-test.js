@@ -776,11 +776,11 @@ export const processRejectionListeners = {
   },
 };
 
-// TODO: figure out how to test static IO context
-// const staticCwd = process.cwd();
+const staticCwd = process.cwd();
 
 export const processCwd = {
   test() {
+    // TODO: FIXME!
     // assert.strictEqual(staticCwd, '/bundle');
 
     assert.strictEqual(process.cwd(), '/tmp');

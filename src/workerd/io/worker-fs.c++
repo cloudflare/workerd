@@ -13,7 +13,7 @@ namespace workerd {
 KNOWN_VFS_ROOTS(DEFINE_DEFAULTS_FOR_ROOTS)
 #undef DEFINE_DEFAULTS_FOR_ROOTS
 
-static kj::Path tmpPath = kj::Path::parse("tmp");
+static const kj::Path tmpPath = kj::Path::parse("tmp");
 
 // Helper function to get the current working directory path.
 // Returns the Cwd if available, otherwise returns an empty path (root).
@@ -1177,7 +1177,7 @@ TmpDirStoreScope& TmpDirStoreScope::current() {
 
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
     : dir(Directory::newWritable()),
-      cwd(kj::Path::parse("tmp")) {  // Initialize to tmp path
+      cwd(kj::Path({"tmp"})) {  // Initialize to tmp path
   if (guard == kj::none) {
     kj::requireOnStack(this, "must be created on the stack");
     onStack = true;
