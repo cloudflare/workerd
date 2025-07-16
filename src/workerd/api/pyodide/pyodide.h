@@ -49,6 +49,7 @@ struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
   const PyodideBundleManager pyodideBundleManager;
+  const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
   bool loadSnapshotFromDisk;
@@ -500,15 +501,28 @@ kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
     const PyodidePackageManager& pyodidePackageManager,
     kj::StringPtr packagesVersion,
     kj::StringPtr filename,
-    kj::HttpClient& client,
-    kj::Timer& timer,
-    kj::HttpHeaderTable& table);
+    kj::Network& network,
+    kj::Timer& timer);
 
 // Preloads all required Python packages for a worker
-void fetchPyodidePackages(const PythonConfig& pyConfig,
+kj::Promise<void> fetchPyodidePackages(const PythonConfig& pyConfig,
     const PyodidePackageManager& pyodidePackageManager,
     kj::ArrayPtr<kj::String> pythonRequirements,
-    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease);
+    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease,
+    kj::Network& network,
+    kj::Timer& timer);
+
+// Preload Pyodide bundle during workerd startup
+kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
+    const PythonConfig& pyConfig, kj::String version, kj::Network& network, kj::Timer& timer);
+
+// Helper functions for bundle file operations
+kj::Path getPyodideBundleFileName(kj::StringPtr version);
+kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
+    const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir, kj::StringPtr version);
+void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir,
+    kj::StringPtr version,
+    kj::ArrayPtr<byte> bytes);
 
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {

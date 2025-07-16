@@ -4005,12 +4005,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     }
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
-        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
     auto isPythonWorker = def.featureFlags.getPythonWorkers();
     auto artifactBundler = isPythonWorker
-        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
-              .attach(kj::mv(pyodidePackageManager))
+        ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
         : ArtifactBundler::makeDisabledBundler();
 
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
@@ -4087,12 +4084,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
   }
 
   using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
-      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
   auto isPythonWorker = def.featureFlags.getPythonWorkers();
   auto artifactBundler = isPythonWorker
-      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
-            .attach(kj::mv(pyodidePackageManager))
+      ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
       : ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, kj::mv(def.source), IsolateObserver::StartType::COLD,
@@ -4841,7 +4835,7 @@ kj::Promise<void> Server::run(
 
   auto forkedDrainWhen = handleDrain(kj::mv(drainWhen)).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
 
@@ -4923,13 +4917,59 @@ uint startInspector(
       [](const uint& port) { return port; });
 }
 
-void Server::startServices(jsg::V8System& v8System,
+kj::Promise<void> Server::preloadPython(config::Config::Reader config) {
+  for (auto serviceConf: config.getServices()) {
+    if (serviceConf.isWorker()) {
+      ConfigErrorReporter errorReporter(*this, serviceConf.getName());
+      auto workerConf = serviceConf.getWorker();
+
+      // Check feature flags to determine if this is a Python worker
+      capnp::MallocMessageBuilder arena;
+      auto featureFlags = arena.initRoot<CompatibilityFlags>();
+      // If no compat date is specified then the user will get an error in a later part of the
+      // worker startup.
+      if (workerConf.hasCompatibilityDate()) {
+        compileCompatibilityFlags(workerConf.getCompatibilityDate(),
+            workerConf.getCompatibilityFlags(), featureFlags, errorReporter, experimental,
+            CompatibilityDateValidation::CODE_VERSION);
+      }
+
+      if (featureFlags.asReader().getPythonWorkers()) {
+        auto pythonRelease = getPythonSnapshotRelease(featureFlags.asReader());
+        KJ_IF_SOME(release, pythonRelease) {
+          auto version = getPythonBundleName(release);
+
+          // Fetch the Pyodide bundle.
+          co_await api::pyodide::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
+
+          // Preload Python packages.
+          auto source = WorkerdApi::extractSource(serviceConf.getName(), workerConf, errorReporter);
+          KJ_IF_SOME(modulesSource, source.variant.tryGet<Worker::Script::ModulesSource>()) {
+            if (modulesSource.isPython) {
+              auto pythonRequirements = getPythonRequirements(modulesSource);
+
+              // Store the packages in the package manager that is stored in the pythonConfig
+              co_await fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
+                  pythonRequirements, release, network, timer);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     config::Config::Reader config,
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure services
   TRACE_EVENT("workerd", "startServices");
+
+  // Pre-load Python bundles for all Python workers before creating services
+  co_await preloadPython(config);
+
   // First pass: Extract actor namespace configs.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
@@ -5205,7 +5245,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
 
   auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange
   // to wait on them. Crash if listening fails.
