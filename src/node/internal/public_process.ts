@@ -30,7 +30,7 @@ import {
   features,
   _setEventsProcess,
 } from 'node-internal:internal_process';
-import { validateString } from './validators';
+import { validateString } from 'node-internal:validators';
 
 export { platform, nextTick, emitWarning, env, features };
 

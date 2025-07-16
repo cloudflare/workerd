@@ -871,7 +871,7 @@ export const copyAndRenameAsyncCallbackTest = {
 
 export const fsCwdTest = {
   test() {
-    const originalCwd = process.cwd();
+    process.chdir('/bundle');
 
     throws(
       () => {
@@ -887,7 +887,7 @@ export const fsCwdTest = {
     ok(existsSync('/tmp/test-cwd.txt'));
 
     ok(existsSync('test-cwd.txt'));
-    ok(!existsSync(`${originalCwd}/test-cwd.txt`));
+    ok(!existsSync(`/bundle/test-cwd.txt`));
 
     strictEqual(readFileSync('test-cwd.txt').toString(), 'Hello from /tmp');
     strictEqual(
@@ -895,7 +895,7 @@ export const fsCwdTest = {
       'Hello from /tmp'
     );
 
-    process.chdir(originalCwd);
+    process.chdir('/bundle');
 
     ok(!existsSync('test-cwd.txt'));
     throws(

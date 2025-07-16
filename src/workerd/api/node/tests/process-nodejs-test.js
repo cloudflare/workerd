@@ -711,7 +711,7 @@ export const processLoadEnvFile = {
 
     // supports not-passing a path
     {
-      // Uses `/bundle/.env` file.
+      // Uses `/tmp/.env` file.
       try {
         process.loadEnvFile();
         assert.fail();
@@ -742,16 +742,8 @@ export const processLoadEnvFile = {
     // supports cwd
     {
       const originalCwd = process.cwd();
+      writeFileSync('.env', validEnv);
       try {
-        process.chdir('/tmp');
-        assert.throws(
-          () => {
-            process.loadEnvFile();
-          },
-          { code: 'ENOENT' }
-        );
-
-        writeFileSync('.env', validEnv);
         process.loadEnvFile();
       } finally {
         process.chdir(originalCwd);
@@ -784,11 +776,14 @@ export const processRejectionListeners = {
   },
 };
 
+// TODO: figure out how to test static IO context
+// const staticCwd = process.cwd();
+
 export const processCwd = {
   test() {
-    const cwd = process.cwd();
-    assert.strictEqual(typeof cwd, 'string');
-    assert.ok(cwd.length > 0);
+    // assert.strictEqual(staticCwd, '/bundle');
+
+    assert.strictEqual(process.cwd(), '/tmp');
 
     const originalCwd = process.cwd();
 
