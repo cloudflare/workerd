@@ -69,6 +69,7 @@ import {
 import { strictEqual } from 'node-internal:internal_assert';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import processImpl from 'node-internal:process';
 export type FilePath = string | URL | Buffer;
 
 import type {
@@ -129,13 +130,18 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // implementation will end up seeing slightly different behavior
   // here but that's not something we need to worry about for now.
   if (typeof path === 'string') {
-    return new URL(path, 'file://');
+    // fallthrough for typical case
   } else if (path instanceof URL) {
     return path;
   } else if (Buffer.isBuffer(path)) {
-    return new URL(path.toString(encoding), 'file://');
+    path = path.toString(encoding);
+  } else {
+    throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
   }
-  throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
+  return new URL(
+    path,
+    path.startsWith('/') ? 'file://' : `file://${processImpl.getCwd()}/`
+  );
 }
 
 export const kMaxUserId = 2 ** 32 - 1;

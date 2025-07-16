@@ -681,7 +681,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
-  const TmpDirStoreScope& getTmpDirStoreScope() {
+  TmpDirStoreScope& getTmpDirStoreScope() {
     return *tmpDirStoreScope;
   }
 
