@@ -13,6 +13,33 @@ namespace workerd {
 KNOWN_VFS_ROOTS(DEFINE_DEFAULTS_FOR_ROOTS)
 #undef DEFINE_DEFAULTS_FOR_ROOTS
 
+// Helper function to get the current working directory path.
+// Returns the Cwd if available, otherwise returns an empty path (root).
+kj::PathPtr getCurrentWorkingDirectory() {
+  if (IoContext::hasCurrent()) {
+    return IoContext::current().getTmpDirStoreScope().getCwd();
+  }
+  if (TmpDirStoreScope::hasCurrent()) {
+    return TmpDirStoreScope::current().getCwd();
+  }
+  // Default to root if no context is available
+  return kj::PathPtr(nullptr);
+}
+
+// Helper function to set the current working directory path.
+// Returns false if no context is available.
+bool setCurrentWorkingDirectory(kj::Path newCwd) {
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    ioContext.getTmpDirStoreScope().setCwd(kj::mv(newCwd));
+    return true;
+  } else if (TmpDirStoreScope::hasCurrent()) {
+    TmpDirStoreScope::current().setCwd(kj::mv(newCwd));
+    return true;
+  }
+  return false;
+}
+
 namespace {
 // The SymbolicLinkRecursionGuardScope is used on-stack to guard against
 // circular symbolic links. As soon as a cycle is detected, it throws.
@@ -905,7 +932,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     }
 
     KJ_IF_SOME(node,
-        rootDir->tryOpen(js, root.eval(str),
+        rootDir->tryOpen(js, path,
             Directory::OpenOptions{
               .createAs = FsType::FILE,
               .followLinks = opts.followLinks,
@@ -1146,7 +1173,8 @@ TmpDirStoreScope& TmpDirStoreScope::current() {
 }
 
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
-    : dir(Directory::newWritable()) {
+    : dir(Directory::newWritable()),
+      cwd(kj::Path::parse("bundle")) {  // Initialize to bundle path
   if (guard == kj::none) {
     kj::requireOnStack(this, "must be created on the stack");
     onStack = true;

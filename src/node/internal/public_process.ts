@@ -11,6 +11,7 @@ import { default as EventEmitter } from 'node-internal:events';
 import {
   ERR_EPERM,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
   ERR_OUT_OF_RANGE,
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
@@ -37,10 +38,45 @@ export const stdin = undefined;
 export const stdout = undefined;
 export const stderr = undefined;
 
-// TODO(soon): Implement along with FS work (and as a requirement for removing experimental).
-export const chdir = undefined;
-export const cwd = undefined;
-export const umask = undefined;
+export function chdir(path: string | Buffer | URL): void {
+  if (typeof path !== 'string') {
+    throw new ERR_INVALID_ARG_TYPE('directory', 'string', path);
+  }
+  processImpl.setCwd(path);
+}
+
+export function cwd(): string {
+  return processImpl.getCwd();
+}
+
+// We do not support setting the umask as we do not have a fine-grained
+// permissions on the VFS. Instead we only support validation of input
+// and then ignoring it.
+export function umask(mask: number | string | undefined): number {
+  if (mask !== undefined) {
+    if (typeof mask === 'string') {
+      if (!/^[0-7]+$/.test(mask)) {
+        throw new ERR_INVALID_ARG_VALUE(
+          'mask',
+          mask,
+          'must be a 32-bit unsigned integer or an octal string'
+        );
+      }
+      mask = parseInt(mask, 8);
+    } else if (typeof mask !== 'number') {
+      throw new ERR_INVALID_ARG_TYPE('mask', 'number', mask);
+    }
+    if (mask < 0 || mask > 0xffffffff || !Number.isInteger(mask)) {
+      throw new ERR_INVALID_ARG_VALUE(
+        'mask',
+        mask,
+        'must be a 32-bit unsigned integer or an octal string'
+      );
+    }
+  }
+  // just return Node.js default of 18
+  return 18;
+}
 
 export const versions = processImpl.versions;
 
@@ -169,9 +205,7 @@ export function uptime(): number {
 
 // TODO(soon): Support with proper process.cwd() resolution along with
 //             test in process-nodejs-test.
-export function loadEnvFile(
-  path: string | URL | Buffer = '/bundle/.env'
-): void {
+export function loadEnvFile(path: string | URL | Buffer = '.env'): void {
   if (!compatibilityFlags.experimental || !compatibilityFlags.nodejs_compat) {
     throw new ERR_UNSUPPORTED_OPERATION();
   }

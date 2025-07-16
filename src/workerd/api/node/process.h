@@ -5,6 +5,7 @@
 
 #include <workerd/api/node/i18n.h>
 #include <workerd/api/node/node-version.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/mimetype.h>
 
@@ -46,10 +47,16 @@ class ProcessModule final: public jsg::Object {
 
   jsg::JsObject getVersions(jsg::Lock& js) const;
 
+  kj::String getCwd(jsg::Lock& js);
+
+  void setCwd(jsg::Lock& js, kj::String path);
+
   JSG_RESOURCE_TYPE(ProcessModule) {
     JSG_METHOD(getEnvObject);
     JSG_METHOD(getBuiltinModule);
     JSG_METHOD(exitImpl);
+    JSG_METHOD(getCwd);
+    JSG_METHOD(setCwd);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(versions, getVersions);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
   }

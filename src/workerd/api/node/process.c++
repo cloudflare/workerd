@@ -3,9 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "process.h"
 
+#include <workerd/api/filesystem.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/worker-fs.h>
 #include <workerd/jsg/jsg.h>
 
 #include <kj/vector.h>
@@ -135,6 +137,58 @@ void ProcessModule::exitImpl(jsg::Lock& js, int code) {
           .tryCast<jsg::JsObject>());
   err.set(js, "name"_kj, js.str());
   js.logWarning(kj::str(err.get(js, "stack"_kj)));
+}
+
+kj::String ProcessModule::getCwd(jsg::Lock& js) {
+  auto cwd = getCurrentWorkingDirectory();
+  if (cwd == nullptr) {
+    return kj::str("/");
+  }
+  return kj::str("/", cwd.toString());
+}
+
+void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
+  static constexpr size_t MAX_PATH_LENGTH = 4096;
+  if (path.size() > MAX_PATH_LENGTH) {
+    throwUVException(js, UV_ENAMETOOLONG, "chdir"_kj);
+  }
+
+  if (path.size() == 0) {
+    throwUVException(js, UV_ENOENT, "chdir"_kj);
+  }
+
+  auto& vfs = VirtualFileSystem::current(js);
+  auto url = KJ_REQUIRE_NONNULL(jsg::Url::tryParse(path, "file:///"_kj));
+
+  // Resolve the path against current working directory if it's relative
+  kj::Path resolvedPath = [&]() {
+    if (path.startsWith("/")) {
+      // Absolute path - parse without leading slash
+      return kj::Path::parse(path.slice(1));
+    } else {
+      // Relative path - resolve against current working directory
+      auto cwd = getCurrentWorkingDirectory();
+      return cwd.eval(path);
+    }
+  }();
+
+  KJ_IF_SOME(stat, vfs.getRoot(js)->stat(js, resolvedPath)) {
+    KJ_SWITCH_ONEOF(stat) {
+      KJ_CASE_ONEOF(fsError, FsError) {
+        throwUVException(js, UV_ENOENT, "chdir"_kj);
+      }
+      KJ_CASE_ONEOF(statInfo, workerd::Stat) {
+        if (statInfo.type != FsType::DIRECTORY) {
+          throwUVException(js, UV_ENOTDIR, "chdir"_kj);
+        }
+        if (!setCurrentWorkingDirectory(kj::mv(resolvedPath))) {
+          throwUVException(js, UV_EPERM, "chdir"_kj);
+        }
+      }
+    }
+  } else {
+    throwUVException(js, UV_ENOENT, "chdir"_kj);
+  }
 }
 
 }  // namespace workerd::api::node

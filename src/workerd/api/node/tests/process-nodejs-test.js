@@ -331,9 +331,6 @@ export const processProperties = {
 export const processUndefined = {
   test() {
     // TODO(soon): Implement these!
-    assert.strictEqual(process.cwd, undefined);
-    assert.strictEqual(process.chdir, undefined);
-    assert.strictEqual(process.umask, undefined);
     assert.strictEqual(process.stdin, undefined);
     assert.strictEqual(process.stdout, undefined);
     assert.strictEqual(process.stderr, undefined);
@@ -742,24 +739,24 @@ export const processLoadEnvFile = {
       assert.strictEqual(process.env.BASIC, 'overriden');
     }
 
-    // TODO(soon): Enable once process.chdir() is supported
-    // The whole chdir flow here is to address a case where a developer
-    // has a .env in the worktree which is probably in the global .gitignore.
-    // In that case this test would fail. To avoid confusion, chdir to lib will
-    // make this way less likely to happen. Probably a temporary directory would
-    // be the best choice but given how edge this case is this is fine.
-    // should throw when `.env` does not exist
-    // {
-    //   const originalCwd = process.cwd();
-    //   try {
-    //     process.chdir(join(originalCwd, 'lib'));
-    //     assert.throws(() => {
-    //       process.loadEnvFile();
-    //     }, { code: 'ENOENT', syscall: 'open', path: '.env' });
-    //   } finally {
-    //     process.chdir(originalCwd);
-    //   }
-    // }
+    // supports cwd
+    {
+      const originalCwd = process.cwd();
+      try {
+        process.chdir('/tmp');
+        assert.throws(
+          () => {
+            process.loadEnvFile();
+          },
+          { code: 'ENOENT' }
+        );
+
+        writeFileSync('.env', validEnv);
+        process.loadEnvFile();
+      } finally {
+        process.chdir(originalCwd);
+      }
+    }
   },
 };
 
@@ -784,5 +781,138 @@ export const processRejectionListeners = {
       const { promise: promise2 } = await handledPromise;
       assert.strictEqual(promise, promise2);
     }
+  },
+};
+
+export const processCwd = {
+  test() {
+    const cwd = process.cwd();
+    assert.strictEqual(typeof cwd, 'string');
+    assert.ok(cwd.length > 0);
+
+    const originalCwd = process.cwd();
+
+    process.chdir('/tmp');
+    assert.strictEqual(process.cwd(), '/tmp');
+
+    process.chdir(originalCwd);
+    assert.strictEqual(process.cwd(), originalCwd);
+
+    assert.throws(
+      () => {
+        process.chdir('/nonexistent/directory');
+      },
+      { code: 'ENOENT' }
+    );
+  },
+};
+
+export const processCwdRelative = {
+  test() {
+    const originalCwd = process.cwd();
+
+    // Test relative path navigation
+    process.chdir('/tmp');
+    assert.strictEqual(process.cwd(), '/tmp');
+
+    // Test going up from /tmp (should work if parent exists)
+    try {
+      process.chdir('..');
+      const newCwd = process.cwd();
+      assert.strictEqual(newCwd, '/');
+    } catch (e) {
+      // If parent doesn't exist, that's fine for this test
+      if (e.code !== 'ENOENT') {
+        throw e;
+      }
+    }
+
+    // Test relative path from root
+    process.chdir('/');
+    process.chdir('tmp');
+    assert.strictEqual(process.cwd(), '/tmp');
+
+    // Test current directory "."
+    process.chdir('.');
+    assert.strictEqual(process.cwd(), '/tmp');
+
+    // Restore original directory
+    process.chdir(originalCwd);
+    assert.strictEqual(process.cwd(), originalCwd);
+  },
+};
+
+export const processCwdBadInput = {
+  test() {
+    const longPath = 'a'.repeat(4097); // Just over the path length limit
+    assert.throws(
+      () => {
+        process.chdir(longPath);
+      },
+      { code: 'ENAMETOOLONG' }
+    );
+
+    try {
+      process.chdir('/tmp/basic-valid.env');
+      assert.fail('Expected chdir to throw an error');
+    } catch (err) {
+      assert.strictEqual(err.code, 'ENOENT');
+    }
+
+    assert.throws(
+      () => {
+        process.chdir('');
+      },
+      { code: 'ENOENT' }
+    );
+  },
+};
+
+export const processUmask = {
+  test() {
+    assert.strictEqual(typeof process.umask, 'function');
+
+    assert.strictEqual(process.umask(), 18);
+
+    assert.strictEqual(process.umask(0), 18);
+    assert.strictEqual(process.umask(0o022), 18);
+    assert.strictEqual(process.umask(0o755), 18);
+    assert.strictEqual(process.umask(0xffffffff), 18);
+
+    assert.strictEqual(process.umask('0'), 18);
+    assert.strictEqual(process.umask('022'), 18);
+    assert.strictEqual(process.umask('755'), 18);
+    assert.strictEqual(process.umask('37777777777'), 18); // max 32-bit octal
+
+    assert.throws(() => process.umask('8'), { code: 'ERR_INVALID_ARG_VALUE' });
+    assert.throws(() => process.umask('9'), { code: 'ERR_INVALID_ARG_VALUE' });
+    assert.throws(() => process.umask('abc'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+    assert.throws(() => process.umask('0x123'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+    assert.throws(() => process.umask(''), { code: 'ERR_INVALID_ARG_VALUE' });
+
+    assert.throws(() => process.umask(-1), { code: 'ERR_INVALID_ARG_VALUE' });
+    assert.throws(() => process.umask(1.5), { code: 'ERR_INVALID_ARG_VALUE' });
+    assert.throws(
+      () => process.umask(0x100000000), // 2^32
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
+    assert.throws(() => process.umask(NaN), { code: 'ERR_INVALID_ARG_VALUE' });
+    assert.throws(() => process.umask(Infinity), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    assert.throws(() => process.umask({}), { code: 'ERR_INVALID_ARG_TYPE' });
+    assert.throws(() => process.umask([]), { code: 'ERR_INVALID_ARG_TYPE' });
+    assert.throws(() => process.umask(null), { code: 'ERR_INVALID_ARG_TYPE' });
+    assert.throws(() => process.umask(true), { code: 'ERR_INVALID_ARG_TYPE' });
+
+    assert.throws(
+      () => process.umask('40000000000'), // > 32-bit max octal
+      { code: 'ERR_INVALID_ARG_VALUE' }
+    );
   },
 };

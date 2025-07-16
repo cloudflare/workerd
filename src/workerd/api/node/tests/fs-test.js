@@ -868,3 +868,43 @@ export const copyAndRenameAsyncCallbackTest = {
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
   },
 };
+
+export const fsCwdTest = {
+  test() {
+    const originalCwd = process.cwd();
+
+    throws(
+      () => {
+        writeFileSync('test-cwd.txt', 'Hello from original cwd');
+      },
+      { code: 'EPERM' }
+    );
+
+    process.chdir('/tmp');
+
+    writeFileSync('test-cwd.txt', 'Hello from /tmp');
+    ok(existsSync('test-cwd.txt'));
+    ok(existsSync('/tmp/test-cwd.txt'));
+
+    ok(existsSync('test-cwd.txt'));
+    ok(!existsSync(`${originalCwd}/test-cwd.txt`));
+
+    strictEqual(readFileSync('test-cwd.txt').toString(), 'Hello from /tmp');
+    strictEqual(
+      readFileSync('/tmp/test-cwd.txt').toString(),
+      'Hello from /tmp'
+    );
+
+    process.chdir(originalCwd);
+
+    ok(!existsSync('test-cwd.txt'));
+    throws(
+      () => {
+        readFileSync('test-cwd.txt');
+      },
+      { code: 'ENOENT' }
+    );
+
+    unlinkSync('/tmp/test-cwd.txt');
+  },
+};
