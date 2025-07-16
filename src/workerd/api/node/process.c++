@@ -140,11 +140,10 @@ void ProcessModule::exitImpl(jsg::Lock& js, int code) {
 }
 
 kj::String ProcessModule::getCwd(jsg::Lock& js) {
-  auto cwd = getCurrentWorkingDirectory();
-  if (cwd == nullptr) {
-    return kj::str("/");
+  KJ_IF_SOME(cwd, getCurrentWorkingDirectory()) {
+    return cwd.toString(true);
   }
-  return cwd.toString(true);
+  return kj::str("/");
 }
 
 void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
@@ -166,8 +165,10 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
       return kj::Path::parse(path.slice(1));
     } else {
       // Relative path - resolve against current working directory
-      auto cwd = getCurrentWorkingDirectory();
-      return cwd.eval(path);
+      KJ_IF_SOME(cwd, getCurrentWorkingDirectory()) {
+        return cwd.eval(path);
+      }
+      return kj::Path({"/"}).eval(path);
     }
   }();
 

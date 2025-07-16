@@ -751,7 +751,7 @@ kj::Rc<File> getDevRandom() KJ_WARN_UNUSED_RESULT;
 kj::Rc<Directory> getDevDirectory() KJ_WARN_UNUSED_RESULT;
 
 // Helper functions for current working directory management
-kj::PathPtr getCurrentWorkingDirectory() KJ_WARN_UNUSED_RESULT;
+kj::Maybe<kj::PathPtr> getCurrentWorkingDirectory() KJ_WARN_UNUSED_RESULT;
 bool setCurrentWorkingDirectory(kj::Path newCwd) KJ_WARN_UNUSED_RESULT;
 
 }  // namespace workerd

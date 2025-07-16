@@ -13,20 +13,16 @@ namespace workerd {
 KNOWN_VFS_ROOTS(DEFINE_DEFAULTS_FOR_ROOTS)
 #undef DEFINE_DEFAULTS_FOR_ROOTS
 
-static const kj::Path tmpPath = kj::Path::parse("tmp");
-
 // Helper function to get the current working directory path.
 // Returns the Cwd if available, otherwise returns an empty path (root).
-kj::PathPtr getCurrentWorkingDirectory() {
+kj::Maybe<kj::PathPtr> getCurrentWorkingDirectory() {
   if (IoContext::hasCurrent()) {
     return IoContext::current().getTmpDirStoreScope().getCwd();
   }
   if (TmpDirStoreScope::hasCurrent()) {
     return TmpDirStoreScope::current().getCwd();
   }
-  // Default to "bundle" if no context is available
-  // this way bundle is used during init
-  return kj::PathPtr(tmpPath);
+  return kj::none;
 }
 
 // Helper function to set the current working directory path.
@@ -1177,7 +1173,9 @@ TmpDirStoreScope& TmpDirStoreScope::current() {
 
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
     : dir(Directory::newWritable()),
-      cwd(kj::Path({"tmp"})) {  // Initialize to tmp path
+      // we use the /bundle cwd for the isolate vfs
+      // and the /tmp cwd for the iocontext vfs
+      cwd(kj::Path({guard == kj::none ? "bundle" : "tmp"})) {
   if (guard == kj::none) {
     kj::requireOnStack(this, "must be created on the stack");
     onStack = true;

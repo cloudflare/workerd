@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { writeFileSync } from 'node:fs';
+import { readdirSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
 
 export const processPlatform = {
@@ -776,13 +776,14 @@ export const processRejectionListeners = {
   },
 };
 
-const staticCwd = process.cwd();
+// init time process.cwd checks
+assert.strictEqual(process.cwd(), '/bundle');
+process.chdir('/');
+assert.deepStrictEqual(readdirSync('.'), ['bundle', 'tmp', 'dev']);
 
 export const processCwd = {
   test() {
-    // TODO: FIXME!
-    // assert.strictEqual(staticCwd, '/bundle');
-
+    // cwd gets changed by iocontext
     assert.strictEqual(process.cwd(), '/tmp');
 
     const originalCwd = process.cwd();
