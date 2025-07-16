@@ -21,7 +21,7 @@ jobs:
         if: github.event.pull_request.head.repo.fork
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
+          AUTHOR: ${{ github.actor }}
         run: |
           echo "Fork detected. Checking if $AUTHOR is a Cloudflare org member..."
 
