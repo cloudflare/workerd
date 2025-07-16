@@ -4,10 +4,10 @@
 // @ts-ignore
 import * as assert from 'node:assert';
 
+const encoder = new TextEncoder();
 function inputStream(chunks) {
   return new ReadableStream({
     start(controller) {
-      const encoder = new TextEncoder();
       for (const chunk of chunks) {
         controller.enqueue(encoder.encode(chunk));
       }

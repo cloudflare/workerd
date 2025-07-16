@@ -1,6 +1,7 @@
 import base64 from 'cloudflare-internal:base64';
 
 function base64Error(cause: unknown): Error {
+  // TODO(soon): Remove once we update to TS 5.9
   // @ts-expect-error: Error.isError seems to be missing from types?
   const isError: (_: unknown) => boolean = Error.isError; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
   if (isError(cause)) {
@@ -57,7 +58,7 @@ function getProcessableChunk(
   return { processable, leftover };
 }
 
-const PADDING_CHAR_CODE = '='.charCodeAt(0);
+const PADDING_CHAR_CODE = 61; // '='
 function isPaddedBase64Chunk(chunk: Uint8Array): boolean {
   return chunk.length > 0 && chunk[chunk.length - 1] === PADDING_CHAR_CODE;
 }
@@ -68,7 +69,7 @@ export function createBase64EncoderTransformStream(
   let leftover: Uint8Array | null = null;
 
   if (maxEncodeChunkSize % 3 != 0) {
-    // Try to minimise padding
+    // Try to minimize padding
     throw new Error('maxChunkSize must be a multiple of 3');
   }
 

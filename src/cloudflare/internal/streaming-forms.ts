@@ -37,19 +37,19 @@ function chainStreams<T>(streams: ReadableStream<T>[]): ReadableStream<T> {
 type EntryOptions = { type: 'file' | 'string' };
 
 export class StreamableFormData {
-  private entries: {
+  #entries: {
     field: string;
     value: ReadableStream;
     options: EntryOptions;
   }[];
-  private boundary: string;
+  #boundary: string;
 
   constructor() {
-    this.entries = [];
+    this.#entries = [];
 
-    this.boundary = '--------------------------';
+    this.#boundary = '--------------------------';
     for (let i = 0; i < 24; i++) {
-      this.boundary += Math.floor(Math.random() * 10).toString(16);
+      this.#boundary += Math.floor(Math.random() * 10).toString(16);
     }
   }
 
@@ -65,21 +65,18 @@ export class StreamableFormData {
       valueStream = new Blob([value]).stream();
     }
 
-    this.entries.push({
+    this.#entries.push({
       field,
       value: valueStream,
       options: options || { type: 'string' },
     });
   }
 
-  private multipartBoundary(): ReadableStream {
-    return new Blob(['--', this.boundary, CRLF]).stream();
+  #multipartBoundary(): ReadableStream {
+    return new Blob(['--', this.#boundary, CRLF]).stream();
   }
 
-  private multipartHeader(
-    name: string,
-    type: 'file' | 'string'
-  ): ReadableStream {
+  #multipartHeader(name: string, type: 'file' | 'string'): ReadableStream {
     let filenamePart;
 
     if (type === 'file') {
@@ -95,26 +92,26 @@ export class StreamableFormData {
     ]).stream();
   }
 
-  private multipartBody(stream: ReadableStream): ReadableStream {
+  #multipartBody(stream: ReadableStream): ReadableStream {
     return chainStreams([stream, new Blob([CRLF]).stream()]);
   }
 
-  private multipartFooter(): ReadableStream {
-    return new Blob(['--', this.boundary, '--', CRLF]).stream();
+  #multipartFooter(): ReadableStream {
+    return new Blob(['--', this.#boundary, '--', CRLF]).stream();
   }
 
   contentType(): string {
-    return `multipart/form-data; boundary=${this.boundary}`;
+    return `multipart/form-data; boundary=${this.#boundary}`;
   }
 
   stream(): ReadableStream {
-    const streams: ReadableStream[] = [this.multipartBoundary()];
+    const streams: ReadableStream[] = [this.#multipartBoundary()];
 
     const valueStreams = [];
-    for (const { field, value, options } of this.entries) {
-      valueStreams.push(this.multipartHeader(field, options.type));
-      valueStreams.push(this.multipartBody(value));
-      valueStreams.push(this.multipartBoundary());
+    for (const { field, value, options } of this.#entries) {
+      valueStreams.push(this.#multipartHeader(field, options.type));
+      valueStreams.push(this.#multipartBody(value));
+      valueStreams.push(this.#multipartBoundary());
     }
 
     if (valueStreams.length) {
@@ -124,7 +121,7 @@ export class StreamableFormData {
 
     streams.push(...valueStreams);
 
-    streams.push(this.multipartFooter());
+    streams.push(this.#multipartFooter());
 
     return chainStreams(streams);
   }
