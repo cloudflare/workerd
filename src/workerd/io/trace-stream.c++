@@ -12,6 +12,9 @@
 namespace workerd::tracing {
 namespace {
 
+// Uniquely identifies js tail session failures
+constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xfa110000bad0e0e0;
+
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTACHMENT, "attachment")                                                                      \
@@ -946,8 +949,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
             [&](jsg::Lock& js, jsg::Value&& value) {
-          doneFulfiller->reject(
-              JSG_KJ_EXCEPTION(FAILED, Error, "Streaming tail session exception"));
+          kj::Exception exception = KJ_EXCEPTION(FAILED, "Streaming tail session exception");
+          exception.setDetail(TAIL_STREAM_JS_FAILURE, kj::heapArray<kj::byte>(0));
+          doneFulfiller->reject(kj::mv(exception));
         });
       }
       return ioContext.awaitJs(js, kj::mv(p));
@@ -987,16 +991,18 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
       ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
-  // I question if ^ is long enough.
 
-  // TODO must fix.
-  // This is catching too wide, we can catch a js exception, even the specific one we want, and re thrown the others.
-  bool result = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([]() {
-    return true;
-  }, [](kj::Exception&& e) { return false; });
+  auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([]() {
+    return EventOutcome::OK;
+  }, [](kj::Exception&& e) {
+    if (e.getDetail(TAIL_STREAM_JS_FAILURE) != kj::none) {
+      return EventOutcome::EXCEPTION;
+    }
+    kj::throwRecoverableException(kj::mv(e));
+    KJ_UNREACHABLE;
+  });
   co_await incomingRequest->drain();
-  co_return WorkerInterface::CustomEvent::Result{
-    .outcome = (result ? EventOutcome::OK : EventOutcome::EXCEPTION)};
+  co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
