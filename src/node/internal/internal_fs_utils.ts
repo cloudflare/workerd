@@ -372,23 +372,21 @@ export function validateWriteArgs(
   if (isArrayBufferView(buffer)) {
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
-        offset = 0,
-        length = buffer.byteLength - offset,
+        offset = buffer.byteOffset,
+        length = buffer.byteLength,
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
     }
     position ??= null;
     offset ??= buffer.byteOffset;
+    length ??= buffer.byteLength;
 
     validateInteger(offset, 'offset', 0);
     validatePosition(position, 'position');
-
-    length ??= buffer.byteLength - offset;
-
     validateInteger(length, 'length', 0);
 
     // Validate that the offset + length do not exceed the buffer's byte length.
-    if (offset + length > buffer.byteLength) {
+    if (length > buffer.byteLength) {
       throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
     }
 
