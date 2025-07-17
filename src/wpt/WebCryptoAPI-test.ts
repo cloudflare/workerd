@@ -6,8 +6,8 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'algorithm-discards-context.https.window.js': {
-    comment: 'ReferenceError: document is not defined',
-    disabledTests: true,
+    comment: 'Secure context is only relevant in browsers',
+    omittedTests: true,
   },
   'crypto_key_cached_slots.https.any.js': {
     comment: 'Investigate this',
@@ -48,13 +48,13 @@ export default {
   'derive_bits_keys/ecdh_keys.js': {},
   'derive_bits_keys/hkdf.https.any.js': {
     comment: 'Cannot cope with this many iterations, keeps timing out',
-    disabledTests: [/with 100000 iterations/],
+    omittedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/hkdf.js': {},
   'derive_bits_keys/hkdf_vectors.js': {},
   'derive_bits_keys/pbkdf2.https.any.js': {
     comment: 'Cannot cope with this many iterations, keeps timing out',
-    disabledTests: [/with 100000 iterations/],
+    omittedTests: [/with 100000 iterations/],
   },
   'derive_bits_keys/pbkdf2.js': {},
   'derive_bits_keys/pbkdf2_vectors.js': {},
@@ -204,8 +204,8 @@ export default {
 
   'getRandomValues.any.js': {},
   'historical.any.js': {
-    comment: 'To investigate but appears irrelevant to workerd',
-    expectedFailures: [
+    comment: 'Secure context is only relevant to browsers',
+    omittedTests: [
       'Non-secure context window does not have access to crypto.subtle',
       'Non-secure context window does not have access to SubtleCrypto',
       'Non-secure context window does not have access to CryptoKey',
