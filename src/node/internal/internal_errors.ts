@@ -931,3 +931,9 @@ export class ERR_SYSTEM_ERROR extends NodeError {
     super('ERR_SYSTEM_ERROR', message);
   }
 }
+
+export class ERR_HTTP_INVALID_STATUS_CODE extends NodeRangeError {
+  constructor(statusCode: string | number) {
+    super('ERR_HTTP_INVALID_STATUS_CODE', `Invalid status code: ${statusCode}`);
+  }
+}

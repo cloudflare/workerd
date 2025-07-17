@@ -74,7 +74,8 @@ constexpr bool isExperimentalNodeJsCompatModule(kj::StringPtr name) {
 constexpr bool isNodeHttpModule(kj::StringPtr name) {
   return name == "node:http"_kj || name == "node:_http_common"_kj ||
       name == "node:_http_outgoing"_kj || name == "node:_http_client"_kj ||
-      name == "node:_http_incoming"_kj || name == "node:_http_agent"_kj || name == "node:https"_kj;
+      name == "node:_http_incoming"_kj || name == "node:_http_agent"_kj ||
+      name == "node:https"_kj || name == "node:_http_server"_kj;
 }
 
 template <class Registry>

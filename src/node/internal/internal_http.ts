@@ -9,6 +9,8 @@ import {
   ERR_HTTP_INVALID_HEADER_VALUE,
 } from 'node-internal:internal_errors';
 
+export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
+
 const tokenRegExp = /^[\^_`a-zA-Z\-0-9!#$%&'*+.|~]+$/;
 /**
  * Verifies that the given val is a valid HTTP token
@@ -52,4 +54,8 @@ export function validateHeaderValue(
   if (_checkInvalidHeaderChar(value)) {
     throw new ERR_INVALID_CHAR('header content', name);
   }
+}
+
+export function utcDate() {
+  return new Date().toUTCString();
 }

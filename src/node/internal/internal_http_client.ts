@@ -4,7 +4,11 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http';
-import { kOutHeaders } from 'node-internal:internal_http_outgoing';
+import {
+  kOutHeaders,
+  kUniqueHeaders,
+  parseUniqueHeadersOption,
+} from 'node-internal:internal_http_outgoing';
 import { Buffer } from 'node-internal:internal_buffer';
 import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
 import {
@@ -63,6 +67,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   port: string = '80';
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
+
+  [kUniqueHeaders]: Set<string> | null = null;
 
   constructor(
     input: string | URL | RequestOptions | null,
@@ -146,7 +152,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      // @ts-expect-error TS2379 Type inconsistency
       addAbortSignal(signal, this);
     }
     let method = options.method;
@@ -269,6 +274,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.on('finish', () => {
       this.#onFinish();
     });
+
+    this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
   }
 
   #onFinish(): void {
@@ -283,19 +290,21 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     const headers: [string, string][] = [];
-    for (const name of Object.keys(this[kOutHeaders])) {
-      const value = this[kOutHeaders][name]?.value;
-      if (value) {
-        if (Array.isArray(value)) {
-          if (this.joinDuplicateHeaders) {
-            headers.push([name, value.join(', ')]);
-          } else {
-            for (const item of value) {
-              headers.push([name, item]);
+    if (this[kOutHeaders] != null) {
+      for (const name of Object.keys(this[kOutHeaders])) {
+        const value = this[kOutHeaders][name]?.value;
+        if (value) {
+          if (Array.isArray(value)) {
+            if (this.joinDuplicateHeaders) {
+              headers.push([name, value.join(', ')]);
+            } else {
+              for (const item of value) {
+                headers.push([name, item]);
+              }
             }
+          } else {
+            headers.push([name, value]);
           }
-        } else {
-          headers.push([name, value]);
         }
       }
     }
@@ -311,7 +320,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (
       this.host &&
       !this.getHeader('host') &&
-      Object.keys(this[kOutHeaders]).length === 0
+      Object.keys(this[kOutHeaders] ?? {}).length === 0
     ) {
       // From RFC 7230 5.4 https://datatracker.ietf.org/doc/html/rfc7230#section-5.4
       // A server MUST respond with a 400 (Bad Request) status code to any
