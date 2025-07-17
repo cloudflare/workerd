@@ -3,6 +3,7 @@
 #     https://opensource.org/licenses/Apache-2.0
 
 from workers import WorkflowEntrypoint
+from workers.workflows import NonRetryableError
 
 
 class WorkflowEntrypointExample(WorkflowEntrypoint):
@@ -10,13 +11,13 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
         async def await_step(fn):
             try:
                 return await fn()
-            except TypeError as e:
+            except NonRetryableError as e:
                 print(f"Successfully caught {type(e).__name__}: {e}")
 
         @step.do("my_failing")
         async def my_failing():
             print("Executing my_failing")
-            raise TypeError("Intentional error in my_failing")
+            raise NonRetryableError("Intentional error in my_failing")
 
         @step.do("normal_step")
         async def normal_step():
