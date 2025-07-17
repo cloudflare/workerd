@@ -876,4 +876,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("disable_nodejs_http_modules")
       $impliedByAfterDate(name = "nodeJsCompat", date = "2025-08-15");
   # Enables Node.js http related modules such as node:http and node:https
+
+  pedanticWpt @101 :Bool
+      $compatEnableFlag("pedantic_wpt")
+      $compatDisableFlag("non_pedantic_wpt");
+  # Enables a "pedantic mode" for WPT compliance. Multiple changes are grouped under
+  # this flag that are known to be required to pass more web platform tests but which
+  # otherwise are likely not to be strictly necessary for most users.
 }

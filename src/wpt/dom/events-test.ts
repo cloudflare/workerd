@@ -45,9 +45,7 @@ export default {
   'EventTarget-addEventListener.any.js': {},
   'EventTarget-constructible.any.js': {
     comment: 'Should be null, not EventTarget',
-    expectedFailures: [
-      'A constructed EventTarget implements dispatch correctly',
-    ],
+    expectedFailures: [],
   },
   'EventTarget-removeEventListener.any.js': {
     comment: 'capture is not relevant outside of the DOM',

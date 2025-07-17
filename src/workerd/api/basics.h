@@ -129,8 +129,8 @@ class Event: public jsg::Object {
 
   // The currentTarget is the EventTarget on which the Event is being
   // dispatched. This will be set every time dispatchEvent() is called
-  // successfully and will remain set after dispatching is completed.
-  jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
+  // successfully and will be null after dispatchEvent returns.
+  kj::Maybe<jsg::Ref<EventTarget>> getCurrentTarget();
 
   // Because we don't support hierarchical EventTargets, this function
   // will always return the same value as getCurrentTarget().
@@ -155,11 +155,23 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        // The original implementation had getTarget simply deferring to
+        // getCurrentTarget, the new impl moves the original impl into
+        // getTarget here so having currentTarget point to getTarget
+        // preserves the original behavior.
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_PROTOTYPE_PROPERTY(target, getTarget);
-      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getCurrentTarget);
+      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getTarget);
       JSG_READONLY_PROTOTYPE_PROPERTY(timeStamp, getTimestamp);
-      JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(isTrusted, getIsTrusted);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      }
 
       JSG_PROTOTYPE_PROPERTY(cancelBubble, getCancelBubble, setCancelBubble);
     } else {
@@ -170,7 +182,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_INSTANCE_PROPERTY(target, getTarget);
       JSG_READONLY_INSTANCE_PROPERTY(srcElement, getCurrentTarget);
       JSG_READONLY_INSTANCE_PROPERTY(timeStamp, getTimestamp);
