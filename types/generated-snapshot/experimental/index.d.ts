@@ -8360,6 +8360,7 @@ declare namespace TailStream {
     | Link
     | Attributes;
   interface TailEvent<Event extends EventType> {
+    readonly traceId: string;
     readonly invocationId: string;
     readonly spanId: string;
     readonly timestamp: Date;
