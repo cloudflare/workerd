@@ -768,7 +768,7 @@ export declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
-  get currentTarget(): EventTarget | undefined;
+  get currentTarget(): EventTarget | null;
   /**
    * Returns the object to which event is dispatched (its target).
    *
@@ -792,7 +792,7 @@ export declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
-  get isTrusted(): boolean;
+  readonly isTrusted: boolean;
   /**
    * @deprecated
    *
