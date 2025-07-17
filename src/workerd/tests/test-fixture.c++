@@ -377,7 +377,7 @@ TestFixture::TestFixture(SetupParams&& params)
 }
 
 void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
-    kj::ArrayPtr<kj::StringPtr> errorsToIgnore) {
+    const kj::ArrayPtr<const kj::StringPtr> errorsToIgnore) {
   auto ignoreDescription = [&errorsToIgnore](kj::StringPtr description) {
     return std::any_of(errorsToIgnore.begin(), errorsToIgnore.end(),
         [&description](auto error) { return description.contains(error); });
