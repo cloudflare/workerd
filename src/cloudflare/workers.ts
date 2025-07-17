@@ -7,6 +7,7 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 import innerEnv from 'cloudflare-internal:env';
+import { portMapper } from 'cloudflare-internal:http';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
@@ -91,3 +92,25 @@ export const env = new Proxy(
 );
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+
+export function registerFetchEvents({ port }: { port?: number } = {}): unknown {
+  if (port == null) {
+    throw new Error('Port is required when calling registerFetchEvents()');
+  }
+  return {
+    async fetch(
+      request: Request,
+      env: unknown,
+      ctx: unknown
+    ): Promise<Response> {
+      const instance = portMapper.get(port);
+      if (!instance) {
+        return new Response(
+          `Http server with port ${port} not found. This is likely a bug with your code.`,
+          { status: 404 }
+        );
+      }
+      return instance.fetch(request, env, ctx);
+    },
+  };
+}

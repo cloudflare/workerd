@@ -41,14 +41,19 @@ import type {
 } from 'node:http';
 
 type WriteCallback = (err?: Error) => void;
-type OutputData = {
+export type OutputData = {
   data: string | Buffer | Uint8Array | null;
   encoding?: BufferEncoding | null | undefined;
   callback?: WriteCallback | null | undefined;
 };
-type WrittenDataBufferEntry = OutputData & {
+export type WrittenDataBufferEntry = OutputData & {
   length: number;
   written: boolean;
+};
+export type HeadersSentEvent = {
+  statusCode: number;
+  statusMessage: string;
+  headers: [string, string][];
 };
 
 export const kUniqueHeaders = Symbol('kUniqueHeaders');
@@ -259,7 +264,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   _storeHeader(
     firstLine: string,
-    headers: OutgoingHttpHeaders | [string, string] | null
+    headers: OutgoingHttpHeaders | OutgoingHttpHeader[] | null
   ): void {
     // firstLine in the case of request is: 'GET /index.html HTTP/1.1\r\n'
     // in the case of response it is: 'HTTP/1.1 200 OK\r\n'
@@ -273,14 +278,13 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       header: firstLine,
     };
 
-    if (headers) {
+    if (headers != null) {
       if (headers === this[kOutHeaders]) {
         for (const key in headers) {
           const entry = headers[key] as [string, string];
           processHeader(this, state, entry[0], entry[1], false);
         }
       } else if (Array.isArray(headers)) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (headers.length && Array.isArray(headers[0])) {
           for (let i = 0; i < headers.length; i++) {
             const entry = headers[i] as unknown as [string, string];
@@ -546,7 +550,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   appendHeader(
     name: string,
-    value: number | string | ReadonlyArray<string>
+    value: number | string | ReadonlyArray<string> | OutgoingHttpHeader
   ): this {
     if (this._header) {
       throw new ERR_HTTP_HEADERS_SENT('append');
@@ -771,7 +775,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
         statusCode,
         statusMessage,
         headers,
-      });
+      } as HeadersSentEvent);
     }
     return this._writeRaw(data, encoding, callback, byteLength);
   }

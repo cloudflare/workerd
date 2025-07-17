@@ -73,7 +73,7 @@ const kBufferGen = Symbol('kBufferGen');
 const kBytesRead = Symbol('kBytesRead');
 const kBytesWritten = Symbol('kBytesWritten');
 const kUpdateTimer = Symbol('kUpdateTimer');
-const normalizedArgsSymbol = Symbol('normalizedArgs');
+export const normalizedArgsSymbol = Symbol('normalizedArgs');
 export const kReinitializeHandle = Symbol('kReinitializeHandle');
 
 // Once the socket has been opened, the socket info provided by the
@@ -1449,16 +1449,25 @@ export function getTimerDuration(msecs: unknown, name: string): number {
   return msecs;
 }
 
-function toNumber(x: unknown): number | false {
+export function toNumber(x: unknown): number | false {
   return (x = Number(x)) >= 0 ? (x as number) : false;
 }
 
-function isPipeName(s: unknown): boolean {
+export function isPipeName(s: unknown): boolean {
   return typeof s === 'string' && toNumber(s) === false;
 }
 
-export function _normalizeArgs(args: unknown[]): unknown[] {
-  let arr: unknown[];
+export type NormalizedArgs = [
+  {
+    path?: string;
+    port?: number;
+    host?: string;
+  },
+  ((...args: unknown[]) => void) | null,
+];
+
+export function _normalizeArgs(args: unknown[]): NormalizedArgs {
+  let arr: NormalizedArgs;
 
   if (args.length === 0) {
     arr = [{}, null];
@@ -1490,7 +1499,7 @@ export function _normalizeArgs(args: unknown[]): unknown[] {
 
   const cb = args[args.length - 1];
   if (typeof cb !== 'function') arr = [options, null];
-  else arr = [options, cb];
+  else arr = [options, cb as (...args: unknown[]) => unknown];
 
   // @ts-expect-error TS2554 Required due to @types/node
   arr[normalizedArgsSymbol] = true;
