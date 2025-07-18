@@ -590,7 +590,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     KJ_CASE_ONEOF(link, tracing::Link) {
       obj.set(js, EVENT_STR, ToJs(js, link, cache));
     }
-    KJ_CASE_ONEOF(attrs, kj::Array<tracing::Attribute>) {
+    KJ_CASE_ONEOF(attrs, CustomInfo) {
       obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
     }
   }
