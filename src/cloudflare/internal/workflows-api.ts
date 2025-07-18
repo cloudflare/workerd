@@ -40,6 +40,8 @@ async function callFetcher<T>(
 }
 
 class InstanceImpl implements WorkflowInstance {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
   readonly id: string;
 
@@ -94,6 +96,8 @@ class InstanceImpl implements WorkflowInstance {
 }
 
 class WorkflowImpl {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {

@@ -128,13 +128,17 @@ function findReadableStreamKeys(
 }
 
 export class Ai {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
 
   /*
    * @deprecated this option is deprecated, do not use this
    */
   // @ts-expect-error this option is deprecated, do not use this
+  // eslint-disable-next-line no-restricted-syntax
   private logs: Array<string> = [];
+  // eslint-disable-next-line no-restricted-syntax
   private options: AiOptions = {};
   lastRequestId: string | null = null;
   aiGatewayLogId: string | null = null;
@@ -279,6 +283,8 @@ export class Ai {
     return [];
   }
 
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private async _parseError(res: Response): Promise<InferenceUpstreamError> {
     const content = await res.text();
 

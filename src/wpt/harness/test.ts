@@ -271,6 +271,8 @@ globalThis.promise_test = (func, name, properties): void => {
 };
 
 class AsyncTest extends Test {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private resolve: () => void;
 
   constructor(name: string, properties: unknown) {

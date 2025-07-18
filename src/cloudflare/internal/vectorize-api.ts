@@ -33,9 +33,14 @@ function toNdJson(arr: object[]): string {
  */
 class VectorizeIndexImpl implements Vectorize {
   constructor(
+    // TODO(soon): Can we use the # syntax here?
+    // eslint-disable-next-line no-restricted-syntax
     private readonly fetcher: Fetcher,
+    // eslint-disable-next-line no-restricted-syntax
     private readonly indexId: string,
+    // eslint-disable-next-line no-restricted-syntax
     private readonly indexVersion: VectorizeVersion,
+    // eslint-disable-next-line no-restricted-syntax
     private readonly useNdJson: boolean
   ) {}
 
@@ -208,6 +213,8 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeAsyncMutation>(res);
   }
 
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private async _send(
     operation: Operation,
     endpoint: string,
@@ -251,6 +258,8 @@ class VectorizeIndexImpl implements Vectorize {
     return res;
   }
 
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private async queryImplV2(
     vectorParams: QueryImplV2Params,
     options?: VectorizeQueryOptions

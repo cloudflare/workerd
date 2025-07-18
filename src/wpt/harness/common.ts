@@ -31,16 +31,21 @@ export type PromiseTestFn = () => Promise<unknown>;
 
 export class FilterList {
   // Matches any input
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private matchesAll: boolean = false;
 
   // List of strings to match exactly
+  // eslint-disable-next-line no-restricted-syntax
   private strings: Set<string> = new Set();
 
   // List of regexps to match against
+  // eslint-disable-next-line no-restricted-syntax
   private regexps: RegExp[] = [];
 
   // Regexes which never matched any of the inputs
   // We keep this set so we can warn the user about this.
+  // eslint-disable-next-line no-restricted-syntax
   private unmatchedRegexps: Set<RegExp> = new Set();
 
   constructor(filters: (string | RegExp)[] | true | undefined) {

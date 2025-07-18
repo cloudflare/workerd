@@ -518,6 +518,8 @@ class WPTTestResult {
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
   }
 
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private static getTestNameFromUrl(testUrl: URL): string {
     const testNameUrl = new URL(testUrl);
     testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
