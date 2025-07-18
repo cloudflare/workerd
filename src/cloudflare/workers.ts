@@ -89,3 +89,5 @@ export const env = new Proxy(
     },
   }
 );
+
+export const waitUntil = entrypoints.waitUntil.bind(entrypoints);

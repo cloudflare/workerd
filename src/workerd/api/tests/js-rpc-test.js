@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { waitUntil } from 'cloudflare:workers';
 import {
   WorkerEntrypoint,
   DurableObject,
@@ -449,6 +450,23 @@ export class MyService extends WorkerEntrypoint {
     });
 
     this.ctx.waitUntil(
+      (async () => {
+        await scheduler.wait(100);
+        resolve();
+      })()
+    );
+  }
+
+  testImportedWaitUntil() {
+    // Initialize globalWaitUntilPromise to a promise that will be resolved in a waitUntil task
+    // later on. We'll perform a cross-context wait to verify that the waitUntil task actually
+    // completes and resolves the promise.
+    let resolve;
+    globalWaitUntilPromise = new Promise((r) => {
+      resolve = r;
+    });
+
+    waitUntil(
       (async () => {
         await scheduler.wait(100);
         resolve();
@@ -1179,11 +1197,40 @@ export let crossContextSharingDoesntWork = {
 
 export let waitUntilWorks = {
   async test(controller, env, ctx) {
-    globalWaitUntilPromise = null;
-    await env.MyService.testWaitUntil();
+    // Tests ctx.waitUntil
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testWaitUntil();
 
-    assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
-    await globalWaitUntilPromise;
+      assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
+      await globalWaitUntilPromise;
+    }
+
+    // Tests `import { waitUntil } from 'cloudflare:workers` on DO
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testImportedWaitUntil();
+
+      assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
+      await globalWaitUntilPromise;
+    }
+
+    // Tests `import { waitUntil } from 'cloudflare:workers` directly
+    {
+      globalWaitUntilPromise = null;
+
+      let resolve;
+      globalWaitUntilPromise = new Promise((r) => {
+        resolve = r;
+      });
+
+      waitUntil(
+        (async () => {
+          await scheduler.wait(100);
+          resolve();
+        })()
+      );
+    }
   },
 };
 

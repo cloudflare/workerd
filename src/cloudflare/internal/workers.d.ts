@@ -24,3 +24,5 @@ export class RpcStub {
 }
 
 export class RpcTarget {}
+
+export function waitUntil(promise: Promise<unknown>): void;
