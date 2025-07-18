@@ -4,8 +4,8 @@
 
 // This file is used as a sidecar for the http-socket tests.
 // It creates an HTTP server that will respond to requests from the convertSocketToFetcher API.
-const http = require('http');
-const crypto = require('crypto');
+const http = require('node:http');
+const crypto = require('node:crypto');
 
 // Handle upgrade requests to switch from HTTP to WebSocket protocol
 function upgradeToWebSocketConnection(req, socket, head) {
@@ -15,8 +15,8 @@ function upgradeToWebSocketConnection(req, socket, head) {
     return;
   }
 
-  console.log('WebSocket upgrade request received');
-  console.log('WebSocket headers:', req.headers);
+  //console.log('WebSocket upgrade request received');
+  //console.log('WebSocket headers:', req.headers);
 
   // Get the WebSocket key from the client
   const webSocketKey = req.headers['sec-websocket-key'];
@@ -121,7 +121,7 @@ function parseWebSocketFrame(buffer) {
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
-  console.log(`Received request: ${req.method} ${req.url}`);
+  //console.log(`Received request: ${req.method} ${req.url}`);
 
   if (req.url === '/ping') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -162,7 +162,7 @@ server.on('upgrade', upgradeToWebSocketConnection);
 
 // Function to handle WebSocket connections
 function handleWebSocketConnection(socket) {
-  console.log('WebSocket connection established');
+  //console.log('WebSocket connection established');
 
   // Send a welcome message
   sendMessage(socket, 'Welcome to WebSocket server');
@@ -190,7 +190,7 @@ function handleWebSocketConnection(socket) {
       if (frame.opcode === 0x1) {
         // Text frame
         const message = frame.payload.toString('utf8');
-        console.log('Received WebSocket message:', message);
+        //console.log('Received WebSocket message:', message);
 
         // Echo the message back
         sendMessage(socket, `Echo: ${message}`);
@@ -205,7 +205,7 @@ function handleWebSocketConnection(socket) {
 
   // Handle socket close
   socket.on('end', () => {
-    console.log('WebSocket connection closed');
+    //console.log('WebSocket connection closed');
   });
 
   socket.on('error', (error) => {

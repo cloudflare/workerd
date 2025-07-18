@@ -555,6 +555,7 @@ class StreamWorkerInterface final: public WorkerInterface {
         .catch_([](kj::Exception&& exception) {
       if (exception.getDescription().contains(
               "can't read() again until previous read() completes")) {
+        // TODO write a better description
         JSG_FAIL_REQUIRE(TypeError, exception.getDescription());
       }
       throw exception;
