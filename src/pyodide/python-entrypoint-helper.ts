@@ -264,18 +264,22 @@ function makeEntrypointProxyHandler(
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop === 'fetch';
       const isWorkflowHandler = isWorkflow && prop === 'run';
-      if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
-        prop = 'on_' + prop;
-      }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        const targetProp = prop;
+        const prefixedProp = 'on_' + prop;
+        const canUsePrefixedProp =
+          isKnownHandler || isKnownDoHandler || isWorkflowHandler;
+        const definesPrefixedProp =
+          canUsePrefixedProp && typeof pyInstance[prefixedProp] === 'function';
+        const definesProp = typeof pyInstance[prop] === 'function';
 
-        if (typeof pyInstance[targetProp] !== 'function') {
-          throw new TypeError(`Method ${targetProp} does not exist`);
+        if (!definesPrefixedProp && !definesProp) {
+          throw new TypeError(`Method ${prop} does not exist`);
         }
+
+        const targetProp = definesPrefixedProp ? prefixedProp : prop;
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
           return await doPyCallHelper(true, pyInstance[targetProp], args);
@@ -321,9 +325,15 @@ function makeEntrypointClass(
   // Add dummy functions to the class so that the validator can detect them. These will never get
   // accessed because of the proxy at runtime.
   for (let method of methods) {
+    // Support handlers with and without an "on_" prefix.
     if (SUPPORTED_HANDLER_NAMES.includes(method.slice(3))) {
       // Remove the "on_" prefix.
       method = method.slice(3);
+    }
+    if (result.prototype[method]) {
+      throw new TypeError(
+        `Handler ${method} for ${className} class is defined both with and without the on_ prefix`
+      );
     }
     result.prototype[method] = function (): void {};
   }
@@ -400,12 +410,23 @@ export async function initPython(): Promise<PythonInitResult> {
 
   const mainModule = await getMainModule();
   for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-    const pyHandlerName = 'on_' + handlerName;
+    const prefixedPyHandlerName = 'on_' + handlerName;
+    const hasPrefixedHandler =
+      typeof mainModule[prefixedPyHandlerName] === 'function';
+    const hasHandler = typeof mainModule[handlerName] === 'function';
+    if (hasPrefixedHandler && hasHandler) {
+      throw new TypeError(
+        `Handler ${handlerName} is defined both with and without the on_ prefix`
+      );
+    }
     // We add all handlers when running in workerd, so that we can handle the case where the
     // handler is not defined in our own code and throw a more helpful error. See
     // undefined-handler.wd-test.
-    if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
-      handlers[handlerName] = makeHandler(pyHandlerName);
+    if (typeof mainModule[handlerName] === 'function' || IS_WORKERD) {
+      handlers[handlerName] = makeHandler(handlerName);
+    }
+    if (typeof mainModule[prefixedPyHandlerName] === 'function') {
+      handlers[handlerName] = makeHandler(prefixedPyHandlerName);
     }
   }
 

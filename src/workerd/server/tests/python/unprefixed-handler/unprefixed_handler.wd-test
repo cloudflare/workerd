@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "unprefixed-handler",
+      worker = (
+        modules = [
+          (name = "worker.py", pythonModule = embed "worker.py")
+        ],
+        bindings = [
+          ( name = "SELF", service = "unprefixed-handler" ),
+        ],
+        compatibilityDate = "2025-06-15",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+      )
+    ),
+  ],
+);
