@@ -49,10 +49,13 @@ class VirtualizedDir {
   // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private rootInfo: TarFSInfo; // site-packages directory
+  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
+  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private soFiles: FilePath[];
+  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private loadedRequirements: Set<string>;
   constructor() {

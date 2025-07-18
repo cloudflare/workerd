@@ -36,10 +36,13 @@ class VectorizeIndexImpl implements Vectorize {
     // TODO(soon): Can we use the # syntax here?
     // eslint-disable-next-line no-restricted-syntax
     private readonly fetcher: Fetcher,
+    // TODO(soon): Can we use the # syntax here?
     // eslint-disable-next-line no-restricted-syntax
     private readonly indexId: string,
+    // TODO(soon): Can we use the # syntax here?
     // eslint-disable-next-line no-restricted-syntax
     private readonly indexVersion: VectorizeVersion,
+    // TODO(soon): Can we use the # syntax here?
     // eslint-disable-next-line no-restricted-syntax
     private readonly useNdJson: boolean
   ) {}

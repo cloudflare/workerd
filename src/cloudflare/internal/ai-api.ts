@@ -135,9 +135,11 @@ export class Ai {
   /*
    * @deprecated this option is deprecated, do not use this
    */
+  // TODO(soon): Can we use the # syntax here?
   // @ts-expect-error this option is deprecated, do not use this
   // eslint-disable-next-line no-restricted-syntax
   private logs: Array<string> = [];
+  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private options: AiOptions = {};
   lastRequestId: string | null = null;
