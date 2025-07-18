@@ -31,10 +31,14 @@ type RawInfoResponse =
     };
 
 class TransformationResultImpl implements ImageTransformationResult {
-  constructor(private readonly bindingsResponse: Response) {}
+  readonly #bindingsResponse: Response;
+
+  constructor(bindingsResponse: Response) {
+    this.#bindingsResponse = bindingsResponse;
+  }
 
   contentType(): string {
-    const contentType = this.bindingsResponse.headers.get('content-type');
+    const contentType = this.#bindingsResponse.headers.get('content-type');
     if (!contentType) {
       throw new ImagesErrorImpl(
         'IMAGES_TRANSFORM_ERROR 9523: No content-type on bindings response',
@@ -48,7 +52,7 @@ class TransformationResultImpl implements ImageTransformationResult {
   image(
     options?: ImageTransformationOutputOptions
   ): ReadableStream<Uint8Array> {
-    const stream = this.bindingsResponse.body || new Blob().stream();
+    const stream = this.#bindingsResponse.body || new Blob().stream();
 
     return options?.encoding === 'base64'
       ? stream.pipeThrough(createBase64EncoderTransformStream())
@@ -72,19 +76,21 @@ class DrawTransformer {
 }
 
 class ImageTransformerImpl implements ImageTransformer {
-  private transforms: (ImageTransform | DrawTransformer)[];
-  private consumed: boolean;
+  readonly #fetcher: Fetcher;
+  readonly #stream: ReadableStream<Uint8Array>;
 
-  constructor(
-    private readonly fetcher: Fetcher,
-    private readonly stream: ReadableStream<Uint8Array>
-  ) {
-    this.transforms = [];
-    this.consumed = false;
+  #transforms: (ImageTransform | DrawTransformer)[];
+  #consumed: boolean;
+
+  constructor(fetcher: Fetcher, stream: ReadableStream<Uint8Array>) {
+    this.#fetcher = fetcher;
+    this.#stream = stream;
+    this.#transforms = [];
+    this.#consumed = false;
   }
 
   transform(transform: ImageTransform): this {
-    this.transforms.push(transform);
+    this.#transforms.push(transform);
     return this;
   }
 
@@ -93,13 +99,13 @@ class ImageTransformerImpl implements ImageTransformer {
     options: ImageDrawOptions = {}
   ): this {
     if (isTransformer(image)) {
-      image.consume();
-      this.transforms.push(new DrawTransformer(image, options));
+      image.#consume();
+      this.#transforms.push(new DrawTransformer(image, options));
     } else {
-      this.transforms.push(
+      this.#transforms.push(
         new DrawTransformer(
           new ImageTransformerImpl(
-            this.fetcher,
+            this.#fetcher,
             image as ReadableStream<Uint8Array>
           ),
           options
@@ -115,10 +121,10 @@ class ImageTransformerImpl implements ImageTransformer {
   ): Promise<ImageTransformationResult> {
     const formData = new StreamableFormData();
 
-    this.consume();
-    formData.append('image', this.stream, { type: 'file' });
+    this.#consume();
+    formData.append('image', this.#stream, { type: 'file' });
 
-    this.serializeTransforms(formData);
+    this.#serializeTransforms(formData);
 
     formData.append('output_format', options.format);
     if (options.quality !== undefined) {
@@ -129,7 +135,7 @@ class ImageTransformerImpl implements ImageTransformer {
       formData.append('background', options.background);
     }
 
-    const response = await this.fetcher.fetch(
+    const response = await this.#fetcher.fetch(
       'https://js.images.cloudflare.com/transform',
       {
         method: 'POST',
@@ -145,18 +151,18 @@ class ImageTransformerImpl implements ImageTransformer {
     return new TransformationResultImpl(response);
   }
 
-  private consume(): void {
-    if (this.consumed) {
+  #consume(): void {
+    if (this.#consumed) {
       throw new ImagesErrorImpl(
         'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() or draw a transformer once',
         9525
       );
     }
 
-    this.consumed = true;
+    this.#consumed = true;
   }
 
-  private serializeTransforms(formData: StreamableFormData): void {
+  #serializeTransforms(formData: StreamableFormData): void {
     const transforms: (TargetedTransform | DrawCommand)[] = [];
 
     // image 0 is the canvas, so the first draw_image has index 1
@@ -181,11 +187,11 @@ class ImageTransformerImpl implements ImageTransformer {
         } else {
           // Drawn child image
           // Set the input for the drawn image on the form
-          const drawImageIndex = appendDrawImage(transform.child.stream);
+          const drawImageIndex = appendDrawImage(transform.child.#stream);
 
           // Tell the backend to run any transforms (possibly involving more draws)
           // required to build this child
-          walkTransforms(drawImageIndex, transform.child.transforms);
+          walkTransforms(drawImageIndex, transform.child.#transforms);
 
           // Draw the child image on to the canvas
           transforms.push({
@@ -197,7 +203,7 @@ class ImageTransformerImpl implements ImageTransformer {
       }
     }
 
-    walkTransforms(0, this.transforms);
+    walkTransforms(0, this.#transforms);
     formData.append('transforms', JSON.stringify(transforms));
   }
 }
@@ -211,7 +217,11 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 }
 
 class ImagesBindingImpl implements ImagesBinding {
-  constructor(private readonly fetcher: Fetcher) {}
+  readonly #fetcher: Fetcher;
+
+  constructor(fetcher: Fetcher) {
+    this.#fetcher = fetcher;
+  }
 
   async info(
     stream: ReadableStream<Uint8Array>,
@@ -226,7 +236,7 @@ class ImagesBindingImpl implements ImagesBinding {
 
     body.append('image', decodedStream, { type: 'file' });
 
-    const response = await this.fetcher.fetch(
+    const response = await this.#fetcher.fetch(
       'https://js.images.cloudflare.com/info',
       {
         method: 'POST',
@@ -262,7 +272,7 @@ class ImagesBindingImpl implements ImagesBinding {
         ? stream.pipeThrough(createBase64DecoderTransformStream())
         : stream;
 
-    return new ImageTransformerImpl(this.fetcher, decodedStream);
+    return new ImageTransformerImpl(this.#fetcher, decodedStream);
   }
 }
 
