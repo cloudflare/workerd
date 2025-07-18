@@ -37,6 +37,21 @@ export function baseConfig() {
             ignoreRestSiblings: true,
           },
         ],
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "MethodDefinition[accessibility='private']",
+            "message": "Use private field syntax (#) instead of 'private' keyword for methods"
+          },
+          {
+            "selector": "PropertyDefinition[accessibility='private']:not([computed=true])",
+            "message": "Use private field syntax (#) instead of 'private' keyword for simple properties"
+          },
+          {
+            "selector": "TSParameterProperty[accessibility='private']",
+            "message": "Use private field syntax (#) instead of 'private' keyword for constructor parameters"
+          }
+        ],
       },
     },
     {

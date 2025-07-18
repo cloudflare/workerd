@@ -250,6 +250,8 @@ export class AiGateway {
     );
   }
 
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private getHeadersFromOptions(
     options?: GatewayOptions,
     extraHeaders?: object

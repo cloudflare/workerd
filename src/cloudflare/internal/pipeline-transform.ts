@@ -97,6 +97,7 @@ export class PipelineTransformImpl<
 
   // called by the dispatcher to validate that run is properly implemented by the subclass
   // @ts-expect-error thinks ping is never used
+  // eslint-disable-next-line no-restricted-syntax
   private async _ping(): Promise<void> {
     // making sure the function was overridden by an implementing subclass
     if (this.run !== PipelineTransformImpl.prototype.run) {
@@ -114,6 +115,7 @@ export class PipelineTransformImpl<
   // the reason this is typescript private and not javascript private is that this must be
   // able to be called by the dispatcher but should not be called by the class implementer
   // @ts-expect-error _run is called by rpc
+  // eslint-disable-next-line no-restricted-syntax
   private async _run(
     batch: Batch,
     metadata: PipelineBatchMetadata
