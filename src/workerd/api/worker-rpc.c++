@@ -20,6 +20,12 @@ using StreamSinkFulfiller = kj::Own<kj::PromiseFulfiller<rpc::JsValue::StreamSin
 
 }  // namespace
 
+void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
+  // No need to check if IoContext::hasCurrent since current() will throw
+  // if there is no active request.
+  IoContext::current().addWaitUntil(kj::mv(promise));
+}
+
 // Implementation of StreamSink RPC interface. The stream sender calls `startStream()` when
 // serializing each stream, and the recipient calls `setSlot()` when deserializing streams to
 // provide the appropriate destination capability. This class is designed to allow these two
