@@ -32,8 +32,12 @@ export default {
   },
   'Event-isTrusted.any.js': {
     comment: 'isTrusted must be an own property, not a prototype property',
-    // There is a single test, whose name is the empty string
-    expectedFailures: [''],
+    // With the pedantic_wpt compat flag we actually set the isTrusted property
+    // to be an own property. However, it's an own property that uses a value
+    // in the descriptor rather than a getter and the test is specifically looking
+    // for a getter for some reason. That's way more pedantic than we want to
+    // deal with so just omit the test for now.
+    omittedTests: [''],
   },
   'EventListener-addEventListener.sub.window.js': {
     comment: 'Only relevant to browsers',
@@ -45,9 +49,7 @@ export default {
   'EventTarget-addEventListener.any.js': {},
   'EventTarget-constructible.any.js': {
     comment: 'Should be null, not EventTarget',
-    expectedFailures: [
-      'A constructed EventTarget implements dispatch correctly',
-    ],
+    expectedFailures: [],
   },
   'EventTarget-removeEventListener.any.js': {
     comment: 'capture is not relevant outside of the DOM',
