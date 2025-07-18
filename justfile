@@ -109,7 +109,11 @@ bench-all:
   bazel query 'deps(//src/workerd/tests:all_benchmarks, 1)' --output=label | grep -v 'all_benchmarks' | xargs -I {} bazel run --config=benchmark {}
 
 eslint:
-  just stream-test //src/node:node@eslint
+  just stream-test \
+    //src/cloudflare:cloudflare@eslint \
+    //src/node:node@eslint \
+    //src/pyodide:pyodide_static@eslint \
+    //src/wpt:wpt-all@eslint
 
 coverage path="//...":
   bazel coverage {{path}}
