@@ -26,6 +26,8 @@ class ByteString;
 class DOMString;
 class Lock;
 class USVString;
+template <typename T>
+class Promise;
 
 // Update this list whenever a new string type is added.
 // TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
@@ -47,6 +49,12 @@ constexpr bool isKjPromise = false;
 template <typename T>
 constexpr bool isKjPromise<kj::Promise<T>> = true;
 
+template <typename T>
+constexpr bool isJsgPromise = false;
+
+template <typename T>
+constexpr bool isJsgPromise<jsg::Promise<T>> = true;
+
 // These types are passed by fast api as is and do not require wrapping/unwrapping.
 template <typename T>
 concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>() ||
@@ -56,7 +64,7 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename T>
 concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>> &&
-    !isKjPromise<kj::RemoveConst<kj::Decay<T>>>;
+    !isKjPromise<kj::RemoveConst<kj::Decay<T>>> && !isJsgPromise<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>
