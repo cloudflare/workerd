@@ -289,6 +289,9 @@ class ExecutionContext: public jsg::Object {
   }
 };
 
+static_assert(!jsg::isFastApiCompatible<decltype(&ExecutionContext::waitUntil)>,
+    "Method is not v8 fast api compatible");
+
 // AlarmEventInfo is a jsg::Object used to pass alarm invocation info to an alarm handler.
 class AlarmInvocationInfo: public jsg::Object {
  public:

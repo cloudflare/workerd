@@ -659,6 +659,9 @@ class DurableObjectState: public jsg::Object {
 
   const size_t MAX_TAGS_PER_CONNECTION = 10;
   const size_t MAX_TAG_LENGTH = 256;
+
+  static_assert(!jsg::isFastApiCompatible<decltype(&DurableObjectState::waitUntil)>,
+      "Method is not v8 fast api compatible");
 };
 
 #define EW_ACTOR_STATE_ISOLATE_TYPES                                                               \

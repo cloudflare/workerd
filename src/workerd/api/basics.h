@@ -254,6 +254,9 @@ class ExtendableEvent: public Event {
   }
 };
 
+static_assert(!jsg::isFastApiCompatible<decltype(&ExtendableEvent::waitUntil)>,
+    "Method is not v8 fast api compatible");
+
 // An implementation of the Web Platform Standard CustomEvent API
 class CustomEvent: public Event {
  public:
