@@ -554,10 +554,7 @@ class EntrypointsModule: public jsg::Object {
   EntrypointsModule() = default;
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
 
-  void waitUntil(kj::Promise<void> promise) {
-    JSG_REQUIRE(IoContext::hasCurrent(), Error, "waitUntil requires an active request");
-    IoContext::current().addWaitUntil(kj::mv(promise));
-  }
+  void waitUntil(kj::Promise<void> promise);
 
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);

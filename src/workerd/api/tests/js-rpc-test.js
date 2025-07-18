@@ -7,6 +7,16 @@ import {
   RpcTarget,
 } from 'cloudflare:workers';
 
+try {
+  waitUntil(null);
+  throw new Error('This should have thrown');
+} catch (error) {
+  assert.match(
+    error.message,
+    /Disallowed operation called within global scope./
+  );
+}
+
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
     super();
@@ -449,12 +459,7 @@ export class MyService extends WorkerEntrypoint {
       resolve = r;
     });
 
-    this.ctx.waitUntil(
-      (async () => {
-        await scheduler.wait(100);
-        resolve();
-      })()
-    );
+    this.ctx.waitUntil(scheduler.wait(100).then(resolve));
   }
 
   testImportedWaitUntil() {
@@ -466,12 +471,7 @@ export class MyService extends WorkerEntrypoint {
       resolve = r;
     });
 
-    waitUntil(
-      (async () => {
-        await scheduler.wait(100);
-        resolve();
-      })()
-    );
+    waitUntil(scheduler.wait(100).then(resolve));
   }
 }
 
@@ -1202,34 +1202,24 @@ export let waitUntilWorks = {
       globalWaitUntilPromise = null;
       await env.MyService.testWaitUntil();
 
-      assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
+      assert.ok(globalWaitUntilPromise instanceof Promise);
       await globalWaitUntilPromise;
     }
 
-    // Tests `import { waitUntil } from 'cloudflare:workers` on DO
+    // Tests `import { waitUntil } from 'cloudflare:workers` on WorkerEntrypoint
     {
       globalWaitUntilPromise = null;
       await env.MyService.testImportedWaitUntil();
 
-      assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
+      assert.ok(globalWaitUntilPromise instanceof Promise);
       await globalWaitUntilPromise;
     }
 
     // Tests `import { waitUntil } from 'cloudflare:workers` directly
     {
-      globalWaitUntilPromise = null;
-
-      let resolve;
-      globalWaitUntilPromise = new Promise((r) => {
-        resolve = r;
-      });
-
-      waitUntil(
-        (async () => {
-          await scheduler.wait(100);
-          resolve();
-        })()
-      );
+      const { promise, resolve } = Promise.withResolvers();
+      waitUntil(scheduler.wait(100).then(resolve));
+      await promise;
     }
   },
 };
