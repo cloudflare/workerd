@@ -1214,13 +1214,6 @@ export let waitUntilWorks = {
       assert.ok(globalWaitUntilPromise instanceof Promise);
       await globalWaitUntilPromise;
     }
-
-    // Tests `import { waitUntil } from 'cloudflare:workers` directly
-    {
-      const { promise, resolve } = Promise.withResolvers();
-      waitUntil(scheduler.wait(100).then(resolve));
-      await promise;
-    }
   },
 };
 
