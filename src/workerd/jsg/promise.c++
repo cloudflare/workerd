@@ -122,20 +122,7 @@ void UnhandledRejectionHandler::handledAfterRejection(
   KJ_IF_SOME(item, warnedRejections.find(key)) {
     auto promise = getLocal(js.v8Isolate, item.promise);
     if (!promise.IsEmpty()) {
-      // TODO(later): Chromium handles this differently... essentially when the
-      // inspector log is created, chromium will revoke the log entry here instead
-      // of printing a new warning (causing the previously printed warning to disappear
-      // from the inspector console). We currently don't appear to have a way of
-      // doing that yet, so printing the warning is the next best thing.
-      if (js.areWarningsLogged()) {
-        js.logWarning(kj::str("A promise rejection was handled asynchronously. This warning "
-                              "occurs when attaching a catch handler to a promise after it "
-                              "rejected. (rejection #",
-            item.rejectionNumber, ")"));
-      }
-
       AsyncContextFrame::Scope scope(js, tryGetFrame(item.asyncContextFrame));
-
       handler(js, v8::kPromiseHandlerAddedAfterReject, jsg::HashableV8Ref(js.v8Isolate, promise),
           js.v8Ref(js.v8Undefined()));
     }
