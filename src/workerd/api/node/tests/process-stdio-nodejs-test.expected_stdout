@@ -1,0 +1,14 @@
+Direct writeSync to stdout
+Test with callback
+Test with encoding and callback
+Corked write 1
+Corked write 2
+Test string write to stdout
+Test buffer write
+Hello
+Test UTF-8: café
+console.log
+Test base64: Hello World!
+console.log interleaves
+13�
+�
