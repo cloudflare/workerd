@@ -251,6 +251,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // Called when DeferredAlarmDeleter is destroyed, to delete alarm if not reset or cancelled
   // during handler.
   void maybeDeleteDeferredAlarm();
+
+  // Checks that the key and value sizes are bellow the SQLITE_LIMIT_LENGTH limit.
+  void checkKeyValSize(Key& key, Value& value);
 };
 
 }  // namespace workerd
