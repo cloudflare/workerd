@@ -688,7 +688,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_NESTED_TYPE(FileSystemFileHandle);
       JSG_NESTED_TYPE(FileSystemDirectoryHandle);
       JSG_NESTED_TYPE(FileSystemWritableFileStream);
-      JSG_NESTED_TYPE(FileSystemSyncAccessHandle);
       JSG_NESTED_TYPE(StorageManager);
     }
 
