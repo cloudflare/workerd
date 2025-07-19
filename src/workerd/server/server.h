@@ -266,7 +266,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
 
-  void startServices(jsg::V8System& v8System,
+  kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
@@ -280,6 +280,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
       bool forTest = false);
 
   void unlinkWorkerLoaders();
+
+  kj::Promise<void> preloadPython(config::Config::Reader config);
 
   friend struct FutureSubrequestChannel;
 };

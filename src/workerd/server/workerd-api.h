@@ -308,9 +308,6 @@ class WorkerdApi final: public Worker::Api {
   kj::Own<Impl> impl;
 };
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
-
 kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
 }  // namespace workerd::server
