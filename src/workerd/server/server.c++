@@ -3198,6 +3198,9 @@ class Server::WorkerService final: public Service,
   }
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
+  kj::Duration consumeTimeElapsedForPeriodicLogging() override {
+    return 0 * kj::SECONDS;
+  }
 };
 
 struct FutureSubrequestChannel {
