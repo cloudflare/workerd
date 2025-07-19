@@ -1,9 +1,73 @@
 load("//:build/wd_test.bzl", "wd_test")
 
+# TODO(soon): Replace this with https://github.com/bazelbuild/rules_docker
+# Build the Docker image required for the container test
+genrule(
+    name = "build_container_image",
+    srcs = [
+        "Dockerfile",
+        "simple-node-app.js",
+    ],
+    outs = ["container_image_built.txt"],
+    cmd = """
+        # Set Docker config to a writable location
+        export DOCKER_CONFIG=/tmp/.docker
+        mkdir -p $$DOCKER_CONFIG
+
+        # Check if Docker is available
+        if ! command -v docker >/dev/null 2>&1; then
+            echo "ERROR: Docker is not installed or not in PATH" >&2
+            exit 1
+        fi
+
+        # Check if Docker daemon is running
+        if ! docker ps >/dev/null 2>&1; then
+            echo "ERROR: Docker daemon is not running" >&2
+            exit 1
+        fi
+
+        # Clean up any existing containers with the test name
+        docker rm -f $$(docker ps -aq --filter name=workerd-container-client-test) 2>/dev/null || true
+
+        # Remove existing docker image if it exists
+        docker image rm cf-container-client-test 2>/dev/null || true
+
+        # Create a temporary directory for the Docker build context
+        BUILD_DIR=$$(mktemp -d)
+
+        # Copy the actual files (not symlinks) to the build directory
+        cp -L $(location Dockerfile) $$BUILD_DIR/Dockerfile
+        cp -L $(location simple-node-app.js) $$BUILD_DIR/simple-node-app.js
+
+        # Build the Docker image from the temporary directory
+        echo "Building Docker image from directory: $$BUILD_DIR" >&2
+        docker build -t "cf-container-client-test" "$$BUILD_DIR" 2>&1 | tee /tmp/docker_build.log || {
+            echo "Docker build failed. Log contents:" >&2
+            cat /tmp/docker_build.log >&2
+            rm -rf $$BUILD_DIR
+            exit 1
+        }
+
+        # Clean up the temporary directory
+        rm -rf $$BUILD_DIR
+
+        # Create a marker file to indicate success
+        echo "Docker image cf-container-client-test built successfully" > $@
+    """,
+    tags = [
+        "requires-container-engine",
+    ],
+)
+
 wd_test(
     size = "enormous",
     src = "test.wd-test",
     args = ["--experimental"],
-    data = ["test.js"],
-    tags = ["off-by-default"],
+    data = [
+        "test.js",
+        ":build_container_image",
+    ],
+    tags = [
+        "requires-container-engine",
+    ],
 )
