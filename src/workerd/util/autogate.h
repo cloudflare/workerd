@@ -14,7 +14,6 @@ namespace workerd::util {
 // Workerd-specific list of autogate keys (can also be used in internal repo).
 enum class AutogateKey {
   TEST_WORKERD,
-  V8_FAST_API,
   // Enables support for the streaming tail worker. Note that this is currently also guarded behind
   // an experimental compat flag.
   STREAMING_TAIL_WORKER,
