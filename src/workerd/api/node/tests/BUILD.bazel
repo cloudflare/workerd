@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -207,6 +208,25 @@ wd_test(
     src = "process-legacy-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["process-legacy-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-stdio-nodejs-test.js"],
+)
+
+sh_test(
+    name = "process-stdio-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = ["$(location //src/workerd/server:workerd)"],
+    data = [
+        "process-stdio-nodejs-test.expected_stderr",
+        "process-stdio-nodejs-test.expected_stdout",
+        "process-stdio-nodejs-test.js",
+        "process-stdio-nodejs-test.wd-test",
+        "//src/workerd/server:workerd",
+    ],
 )
 
 wd_test(

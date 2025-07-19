@@ -1690,12 +1690,68 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
+// Write stdio via console.log. Somewhat convoluted, but this then supports:
+// - inspector reporting
+// - structured logging
+// - stdio output otherwise
+void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
+  auto chars = bytes.asChars();
+  size_t endPos = chars.size();
+  if (chars[endPos - 1] == '\n') endPos--;
+  auto context = js.v8Context();
+  auto console =
+      jsg::check(context->Global()->Get(context, jsg::v8StrIntern(js.v8Isolate, "console")));
+  KJ_ASSERT(console->IsObject());
+  auto consoleObj = console.As<v8::Object>();
+
+  // Choose the appropriate console method based on stdio type
+  const char* methodName = (type == VirtualFileSystem::Stdio::OUT) ? "log" : "error";
+  auto method = jsg::check(consoleObj->Get(context, jsg::v8StrIntern(js.v8Isolate, methodName)));
+  KJ_ASSERT(method->IsFunction());
+  auto methodFunc = method.As<v8::Function>();
+
+  v8::Local<v8::Value> args[] = {jsg::v8StrIntern(js.v8Isolate, kj::str(chars.slice(0, endPos)))};
+  jsg::check(methodFunc->Call(context, consoleObj, 1, args));
+}
+
 // An StdioFile is a special file implementation used to represent stdin,
 // stdout, and stderr outputs. Writes are always forwarded to the underlying
 // logging mechanisms. Reads always return EOF (0-byte reads).
 class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
  public:
-  StdioFile(VirtualFileSystem::Stdio type): type(type) {}
+  StdioFile(VirtualFileSystem::Stdio type)
+      : type(type),
+        weakThis(kj::rc<WeakRef<StdioFile>>(kj::Badge<StdioFile>(), *this)) {}
+
+  ~StdioFile() noexcept(false) override {
+    weakThis->invalidate();
+  }
+
+  void initFlushClosure(jsg::Lock& js) {
+    // Create the flush callback closure upfront with weak reference safety
+    auto callback = js.wrapSimpleFunction(js.v8Context(),
+        [weakThis = this->weakThis.addRef()](
+            jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
+      weakThis->runIfAlive([&](StdioFile& self) {
+        self.microtaskScheduled = false;
+
+        if (self.stdoutLineBuffer.size() > 0) {
+          if (IoContext::hasCurrent()) {
+            writeStdio(js, VirtualFileSystem::Stdio::OUT, self.stdoutLineBuffer.asPtr());
+          }
+          self.stdoutLineBuffer.clear();
+        }
+
+        if (self.stderrLineBuffer.size() > 0) {
+          if (IoContext::hasCurrent()) {
+            writeStdio(js, VirtualFileSystem::Stdio::ERR, self.stderrLineBuffer.asPtr());
+          }
+          self.stderrLineBuffer.clear();
+        }
+      });
+    });
+    flushCallback.Reset(js.v8Isolate, callback);
+  }
 
   Stat stat(jsg::Lock& js) override {
     return Stat{
@@ -1739,7 +1795,7 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
   void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
 
   kj::OneOf<FsError, uint32_t> write(
-      jsg::Lock&, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
+      jsg::Lock& js, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
     // Protect against unreasonably large writes.
     if (buffer.size() > 16 * 1024) {
       return FsError::FILE_SIZE_LIMIT_EXCEEDED;
@@ -1749,31 +1805,60 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
 
     // We ignore the offset here. All writes are assumed to be appends.
     if (type != VirtualFileSystem::Stdio::IN) {
+      size_t pos = 0;
 
-      if (IoContext::hasCurrent()) {
-        auto& ioContext = IoContext::current();
-        KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-          // If there is a worker tracer, then we'll direct the log output to it.
-          LogLevel level =
-              (type == VirtualFileSystem::Stdio::OUT) ? LogLevel::INFO : LogLevel::ERROR;
-          auto timestamp = ioContext.now();
-          // The assumption here is that the buffer is a complete UTF-8 string.
-          // That's not always true if the caller doesn't take care to write
-          // complete UTF-8 sequences, but it's easiest for us to assume this
-          // case in order to avoid having to buffer partial sequences, which
-          // gets complicated. Worst case the log output is a bit garbled,
-          // which isn't the end of the world and is easier for the user to
-          // fix on their end.
-          tracer.addLog(
-              ioContext.getInvocationSpanContext(), timestamp, level, kj::str(buffer.asChars()));
+      // Newline-based buffering
+      while (pos < buffer.size()) {
+        size_t newlinePos = pos;
+        while (newlinePos < buffer.size() && buffer[newlinePos] != '\n') {
+          newlinePos++;
+        }
+
+        if (newlinePos < buffer.size()) {
+          auto lineData = buffer.slice(pos, newlinePos + 1);
+
+          auto& lineBuffer = getLineBuffer();
+          if (lineBuffer.size() > 0) {
+            // We have buffered data - append the line data to it
+            lineBuffer.addAll(lineData);
+            writeStdio(js, type, lineBuffer.asPtr());
+            lineBuffer.clear();
+          } else {
+            // No buffered data - log this line directly
+            writeStdio(js, type, lineData);
+          }
+
+          pos = newlinePos + 1;
+        } else {
+          // No newlines -> append to line buffer
+          auto& lineBuffer = getLineBuffer();
+          auto remaining = buffer.slice(pos);
+          auto totalSize = lineBuffer.size() + remaining.size();
+
+          if (totalSize <= MAX_BUFFER_SIZE) {
+            lineBuffer.addAll(remaining);
+          } else {
+            // New data alone exceeds limit, replace entire line buffer
+            if (remaining.size() >= MAX_BUFFER_SIZE) {
+              lineBuffer.clear();
+              lineBuffer.addAll(remaining.slice(remaining.size() - MAX_BUFFER_SIZE));
+            } else {
+              // Combined size exceeds limit, remove oldest data
+              auto toRemove = totalSize - MAX_BUFFER_SIZE;
+              kj::Vector<kj::byte> newBuffer;
+              newBuffer.addAll(lineBuffer.slice(toRemove, lineBuffer.size()));
+              newBuffer.addAll(remaining);
+              lineBuffer = kj::mv(newBuffer);
+            }
+          }
+
+          // Schedule a microtask to flush the lineBuffer
+          // this way synchronous writes join the line, but async writes will be on a new line
+          scheduleFlushMicrotask(js);
+
+          break;
         }
       }
-
-      // Now forward the bytes on to the the impl specific logging mechanism,
-      // if any. In workerd this will forward the output to stdout/stderr.
-      // In production this likely goes nowhere, similar to the way the
-      // handleLog method works in worker.c++.
-      Worker::Api::current().writeStdio(type, buffer);
     }
     return static_cast<uint32_t>(buffer.size());
   }
@@ -1796,6 +1881,31 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
  private:
   VirtualFileSystem::Stdio type;
   mutable kj::Maybe<kj::String> maybeUniqueId;
+
+  // Line buffering support - buffer up to 4096 bytes until newline
+  static constexpr size_t MAX_BUFFER_SIZE = 4096;
+  mutable kj::Vector<kj::byte> stdoutLineBuffer;
+  mutable kj::Vector<kj::byte> stderrLineBuffer;
+  mutable bool microtaskScheduled = false;
+
+  // Pre-created flush callback closure
+  v8::Global<v8::Function> flushCallback;
+
+  // Weak reference for safe async callbacks
+  kj::Rc<WeakRef<StdioFile>> weakThis;
+
+  kj::Vector<kj::byte>& getLineBuffer() const {
+    return (type == VirtualFileSystem::Stdio::OUT) ? stdoutLineBuffer : stderrLineBuffer;
+  }
+
+  void scheduleFlushMicrotask(jsg::Lock& js) const {
+    if (microtaskScheduled) return;
+    microtaskScheduled = true;
+
+    // Use the pre-created flush callback closure
+    auto localFlushCallback = flushCallback.Get(js.v8Isolate);
+    js.v8Isolate->EnqueueMicrotask(localFlushCallback);
+  }
 };
 
 }  // namespace
@@ -1831,7 +1941,9 @@ kj::Rc<VirtualFileSystem::OpenedFile> VirtualFileSystemImpl::getStdio(
   KJ_IF_SOME(existing, openedFiles.find(n)) {
     return existing.addRef();
   }
-  kj::Rc<workerd::File> file = kj::rc<StdioFile>(stdio);
+  auto stdioFile = kj::rc<StdioFile>(stdio);
+  stdioFile->initFlushClosure(js);
+  kj::Rc<workerd::File> file = kj::mv(stdioFile);
   auto opened = kj::rc<VirtualFileSystem::OpenedFile>(n, true, true, true, kj::mv(file));
   openedFiles.insert(n, opened.addRef());
   return kj::mv(opened);
