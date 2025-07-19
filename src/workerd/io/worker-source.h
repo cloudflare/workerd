@@ -2,11 +2,14 @@
 
 #include <capnp/schema.capnp.h>
 #include <kj/one-of.h>
+#include <kj/refcount.h>
 #include <kj/string.h>
 
 namespace workerd {
 
 using kj::byte;
+
+class DynamicEnvBuilder;
 
 // Represents the source code for a Worker.
 //
@@ -144,8 +147,27 @@ struct WorkerSource {
   // The overall value is either ScriptSource or ModulesSource.
   kj::OneOf<ScriptSource, ModulesSource> variant;
 
+  // See DynamicEnvBuilder, below. Not commonly used.
+  kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
+
   WorkerSource(ScriptSource source): variant(kj::mv(source)) {}
   WorkerSource(ModulesSource source): variant(kj::mv(source)) {}
+};
+
+// Bit of a hack: a `WorkerSource` can contain a `DynamicEnvBuilder`, which is an object that
+// has something to do with constructing the `env` object and the `IoChannelFactory`. This
+// mechanism is only used in the edge runtime when using dynamic worker loading, to work around a
+// historical mess that exists there: the script code and `env` (bindings) are loaded from
+// different places and can be mixed and matched, but the (much newer) dynamic worker loader API
+// has both of these coming from the same invocation of the loader callback. To get the correct
+// `env` through the windy passages and to the right place, we encode it in this "attachment" to
+// `WorkerSource`.
+//
+// In `workerd`, this is not needed at all, due to the design being much newer and cleaner.
+// Hopefully, the edge runtime can eventually be refactored to eliminate this!
+class DynamicEnvBuilder: public kj::AtomicRefcounted {
+  // No methods here: This type exists strictly to be downcast to the appropriate subclass in the
+  // internal codebase.
 };
 
 }  // namespace workerd
