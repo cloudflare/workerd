@@ -1122,6 +1122,9 @@ class FetchEvent final: public ExtendableEvent {
   }
 };
 
+static_assert(!jsg::isFastApiCompatible<decltype(&FetchEvent::respondWith)>,
+    "Method with jsg::Promise should not be fast api compatible");
+
 jsg::Promise<jsg::Ref<Response>> fetchImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,  // if null, use fetcher from request object
     Request::Info requestOrUrl,
