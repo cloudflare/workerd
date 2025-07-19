@@ -1,0 +1,8 @@
+Direct writeSync to stderr
+Test string write to stderr
+Test buffer write
+Hello
+console.error
+console.error interleaves
+24
+😀
