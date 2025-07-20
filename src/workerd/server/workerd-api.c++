@@ -278,6 +278,61 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
   // clang-format on
 }
 
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes.
+class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
+ public:
+  kj::Promise<void> get(GetContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> getMultiple(GetMultipleContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .sendIgnoringResult();
+  }
+  kj::Promise<void> list(ListContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .sendIgnoringResult();
+  }
+  kj::Promise<void> getAlarm(GetAlarmContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> txn(TxnContext context) override {
+    auto results = context.getResults(capnp::MessageSize{2, 1});
+    results.setTransaction(kj::heap<TransactionImpl>());
+    return kj::READY_NOW;
+  }
+
+ private:
+  class TransactionImpl final: public rpc::ActorStorage::Stage::Transaction::Server {
+   protected:
+    kj::Promise<void> get(GetContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> getMultiple(GetMultipleContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .sendIgnoringResult();
+    }
+    kj::Promise<void> list(ListContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .sendIgnoringResult();
+    }
+    kj::Promise<void> getAlarm(GetAlarmContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> commit(CommitContext context) override {
+      return kj::READY_NOW;
+    }
+  };
+};
+
 }  // namespace
 
 kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
@@ -1490,6 +1545,10 @@ void WorkerdApi::writeStdio(
     }
   }
   KJ_UNREACHABLE;
+}
+
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {
+  return kj::heap<EmptyReadOnlyActorStorageImpl>();
 }
 
 }  // namespace workerd::server

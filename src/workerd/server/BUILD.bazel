@@ -96,22 +96,16 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "server",
+    name = "workerd-api",
     srcs = [
-        "server.c++",
         "workerd-api.c++",
     ],
     hdrs = [
-        "server.h",
         "workerd-api.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
-        ":alarm-scheduler",
-        ":bundle-fs",
-        ":container-client",
-        ":facet-tree-index",
         ":fallback-service",
         ":workerd_capnp",
         "//deps/rust:runtime",
@@ -125,6 +119,37 @@ wd_cc_library(
         "//src/workerd/api:r2",
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "server",
+    srcs = [
+        "server.c++",
+    ],
+    hdrs = [
+        "server.h",
+    ],
+    deps = [
+        ":actor-id-impl",
+        ":alarm-scheduler",
+        ":bundle-fs",
+        ":container-client",
+        ":facet-tree-index",
+        ":fallback-service",
+        ":workerd-api",
+        ":workerd_capnp",
+        "//deps/rust:runtime",
+        "//src/cloudflare",
+        "//src/node",
+        "//src/pyodide:pyodide_static",
+        "//src/workerd/api:memory-cache",
+        "//src/workerd/api:pyodide",
         "//src/workerd/io",
         "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",

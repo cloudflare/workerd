@@ -15,7 +15,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
