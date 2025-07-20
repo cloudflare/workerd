@@ -313,4 +313,8 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
 
 kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
+// Helper method for defining actor storage server treating all reads as empty, defined here to be
+// used by test-fixture and server.
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
+
 }  // namespace workerd::server
