@@ -70,6 +70,8 @@ const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
   protected readonly fetcher: Fetcher;
 
@@ -363,6 +365,8 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 }
 
 class D1PreparedStatement {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly dbSession: D1DatabaseSession;
   readonly statement: string;
   readonly params: unknown[];

@@ -6,7 +6,10 @@ const root = await navigator.storage.getDirectory();
 const tmp = await root.getDirectoryHandle('tmp');
 // The root is read-only, so we need to use a writable subdirectory
 // to actually run the tests.
-navigator.storage.getDirectory = async () => tmp;
+navigator.storage.getDirectory = async () => {
+  // Let's create a new random tmp subdirectory for each test run to avoid interference
+  return tmp.getDirectoryHandle(crypto.randomUUID(), { create: true });
+};
 
 export default {
   'FileSystemBaseHandle-buckets.https.any.js': {
@@ -23,12 +26,7 @@ export default {
   },
   'FileSystemBaseHandle-isSameEntry.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'isSameEntry comparing two files pointing to the same path returns true',
-      'isSameEntry comparing two directories pointing to the same path returns true',
-      'isSameEntry comparing a file to a directory of the same path returns false',
-    ],
+    expectedFailures: [],
   },
   'FileSystemBaseHandle-postMessage-BroadcastChannel.https.window.js': {
     comment: 'BroadcastChannel is not implemented in workers',
@@ -81,7 +79,6 @@ export default {
     comment: '...',
     expectedFailures: [
       // TODO(node-fs): Fix these tests
-      'getDirectoryHandle(create=true) creates an empty directory',
       'getDirectoryHandle() with empty name',
       'getDirectoryHandle() with "." name',
       'getDirectoryHandle() with ".." name',
@@ -115,9 +112,7 @@ export default {
       // TODO(node-fs): Fix these tests
       'removeEntry() to remove a file',
       'removeEntry() on an already removed file should fail',
-      'removeEntry() to remove an empty directory',
       'removeEntry() on a non-empty directory should fail',
-      'removeEntry() on a directory recursively should delete all sub-items',
       'removeEntry() with empty name should fail',
       'removeEntry() with "." name should fail',
       'removeEntry() with ".." name should fail',

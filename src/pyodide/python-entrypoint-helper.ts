@@ -24,11 +24,13 @@ const pyodide_entrypoint_helper: any = {};
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
   cloudflareWorkers: any,
-  cloudflareSockets: any
+  cloudflareSockets: any,
+  workerEntrypoint: any
 ): void {
   pyodide_entrypoint_helper.doAnImport = func;
   pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
   pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
+  pyodide_entrypoint_helper.workerEntrypoint = workerEntrypoint;
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
@@ -414,6 +416,26 @@ export async function initPython(): Promise<PythonInitResult> {
   const introspectionMod = await getIntrospectionMod();
   pythonEntrypointClasses =
     introspectionMod.collect_entrypoint_classes(mainModule);
+
+  for (const [
+    index,
+    cls,
+  ] of pythonEntrypointClasses.workerEntrypoints.entries()) {
+    if (cls.className == 'default') {
+      // Disallow defining a `default` WorkerEntrypoint and other "default" top-level handlers.
+      if (Object.keys(handlers).length > 0) {
+        throw new TypeError('Cannot define multiple default entrypoints');
+      }
+      handlers['default'] = makeEntrypointClass(
+        'default',
+        pyodide_entrypoint_helper.workerEntrypoint,
+        cls.methodNames
+      );
+      // Remove the default entrypoint from the list of workerEntrypoints to avoid duplication.
+      pythonEntrypointClasses.workerEntrypoints.splice(index, 1);
+      break;
+    }
+  }
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

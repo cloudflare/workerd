@@ -67,7 +67,6 @@ export const test = {
       { closed: true, name: 'worker' },
       { closed: true, name: 'worker' },
       { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -174,13 +173,13 @@ export const test = {
       },
       { closed: true, name: 'worker' },
       { closed: true, name: 'worker' },
+      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
@@ -225,6 +224,7 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'arrayBuffer',
         closed: true,
       },
+      { closed: true, name: 'worker' },
       { closed: true, name: 'worker' },
       { closed: true, name: 'worker' },
     ];

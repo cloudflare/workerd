@@ -299,7 +299,7 @@ _NORMAL_DEPENDENCIES = {
             "anyhow": Label("@crates_vendor//:anyhow-1.0.98"),
             "capnp": Label("@crates_vendor//:capnp-0.21.2"),
             "capnpc": Label("@crates_vendor//:capnpc-0.21.1"),
-            "cc": Label("@crates_vendor//:cc-1.2.29"),
+            "cc": Label("@crates_vendor//:cc-1.2.30"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.31"),
             "clap": Label("@crates_vendor//:clap-4.5.41"),
             "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
@@ -315,7 +315,7 @@ _NORMAL_DEPENDENCIES = {
             "ruff_python_parser": Label("@crates_vendor//:ruff_python_parser-0.0.0"),
             "scratch": Label("@crates_vendor//:scratch-1.0.8"),
             "serde": Label("@crates_vendor//:serde-1.0.219"),
-            "serde_json": Label("@crates_vendor//:serde_json-1.0.140"),
+            "serde_json": Label("@crates_vendor//:serde_json-1.0.141"),
             "static_assertions": Label("@crates_vendor//:static_assertions-1.1.0"),
             "syn": Label("@crates_vendor//:syn-2.0.104"),
             "thiserror": Label("@crates_vendor//:thiserror-2.0.12"),
@@ -550,12 +550,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__cc-1.2.29",
-        sha256 = "5c1599538de2394445747c8cf7935946e3cc27e9625f889d979bfb2aaf569362",
+        name = "crates_vendor__cc-1.2.30",
+        sha256 = "deec109607ca693028562ed836a5f1c4b8bd77755c4e132fc5ce11b0b6211ae7",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/cc/1.2.29/download"],
-        strip_prefix = "cc-1.2.29",
-        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.29.bazel"),
+        urls = ["https://static.crates.io/crates/cc/1.2.30/download"],
+        strip_prefix = "cc-1.2.30",
+        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.30.bazel"),
     )
 
     maybe(
@@ -1369,12 +1369,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__serde_json-1.0.140",
-        sha256 = "20068b6e96dc6c9bd23e01df8827e6c7e1f2fddd43c21810382803c136b99373",
+        name = "crates_vendor__serde_json-1.0.141",
+        sha256 = "30b9eff21ebe718216c6ec64e1d9ac57087aad11efc64e32002bce4a0d4c03d3",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/serde_json/1.0.140/download"],
-        strip_prefix = "serde_json-1.0.140",
-        build_file = Label("//deps/rust/crates:BUILD.serde_json-1.0.140.bazel"),
+        urls = ["https://static.crates.io/crates/serde_json/1.0.141/download"],
+        strip_prefix = "serde_json-1.0.141",
+        build_file = Label("//deps/rust/crates:BUILD.serde_json-1.0.141.bazel"),
     )
 
     maybe(
@@ -1751,7 +1751,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__anyhow-1.0.98", is_dev_dep = False),
         struct(repo = "crates_vendor__capnp-0.21.2", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.21.1", is_dev_dep = False),
-        struct(repo = "crates_vendor__cc-1.2.29", is_dev_dep = False),
+        struct(repo = "crates_vendor__cc-1.2.30", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.31", is_dev_dep = False),
         struct(repo = "crates_vendor__clap-4.5.41", is_dev_dep = False),
         struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
@@ -1768,7 +1768,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__rustversion-1.0.21", is_dev_dep = False),
         struct(repo = "crates_vendor__scratch-1.0.8", is_dev_dep = False),
         struct(repo = "crates_vendor__serde-1.0.219", is_dev_dep = False),
-        struct(repo = "crates_vendor__serde_json-1.0.140", is_dev_dep = False),
+        struct(repo = "crates_vendor__serde_json-1.0.141", is_dev_dep = False),
         struct(repo = "crates_vendor__static_assertions-1.1.0", is_dev_dep = False),
         struct(repo = "crates_vendor__syn-2.0.104", is_dev_dep = False),
         struct(repo = "crates_vendor__thiserror-2.0.12", is_dev_dep = False),

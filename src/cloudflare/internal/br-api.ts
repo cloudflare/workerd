@@ -7,6 +7,8 @@ interface Fetcher {
 }
 
 export class BrowserRendering {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly fetcher: Fetcher;
 
   constructor(fetcher: Fetcher) {

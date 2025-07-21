@@ -1,6 +1,7 @@
 #include "worker-fs.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/tracer.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/weak-refs.h>
 
@@ -12,6 +13,32 @@ namespace workerd {
   const jsg::Url FsMap::kDefault##name##Path = path##_url;
 KNOWN_VFS_ROOTS(DEFINE_DEFAULTS_FOR_ROOTS)
 #undef DEFINE_DEFAULTS_FOR_ROOTS
+
+// Helper function to get the current working directory path.
+// Returns the Cwd if available, otherwise returns an empty path (root).
+kj::Maybe<kj::PathPtr> getCurrentWorkingDirectory() {
+  if (IoContext::hasCurrent()) {
+    return IoContext::current().getTmpDirStoreScope().getCwd();
+  }
+  if (TmpDirStoreScope::hasCurrent()) {
+    return TmpDirStoreScope::current().getCwd();
+  }
+  return kj::none;
+}
+
+// Helper function to set the current working directory path.
+// Returns false if no context is available.
+bool setCurrentWorkingDirectory(kj::Path newCwd) {
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    ioContext.getTmpDirStoreScope().setCwd(kj::mv(newCwd));
+    return true;
+  } else if (TmpDirStoreScope::hasCurrent()) {
+    TmpDirStoreScope::current().setCwd(kj::mv(newCwd));
+    return true;
+  }
+  return false;
+}
 
 namespace {
 // The SymbolicLinkRecursionGuardScope is used on-stack to guard against
@@ -848,6 +875,8 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
         weakThis(
             kj::rc<WeakRef<VirtualFileSystemImpl>>(kj::Badge<VirtualFileSystemImpl>(), *this)) {}
 
+  kj::Rc<OpenedFile> getStdio(jsg::Lock& js, Stdio stdio) const override;
+
   ~VirtualFileSystemImpl() noexcept(false) override {
     weakThis->invalidate();
   }
@@ -905,7 +934,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     }
 
     KJ_IF_SOME(node,
-        rootDir->tryOpen(js, root.eval(str),
+        rootDir->tryOpen(js, path,
             Directory::OpenOptions{
               .createAs = FsType::FILE,
               .followLinks = opts.followLinks,
@@ -963,10 +992,17 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   }
 
   void closeFd(jsg::Lock& js, int fd) const override {
+    // We do not allow closing the stdio file descriptors.
+    static constexpr int kMaxFd = static_cast<int>(Stdio::ERR);
+    if (fd <= kMaxFd) return;
     closeFdWithoutExplicitLock(fd);
   }
 
   kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(jsg::Lock& js, int fd) const override {
+    static constexpr int kMaxFd = static_cast<int>(Stdio::ERR);
+    if (fd <= kMaxFd) {
+      return getStdio(js, static_cast<Stdio>(fd));
+    }
     KJ_IF_SOME(opened, openedFiles.find(fd)) {
       return opened.addRef();
     }
@@ -989,7 +1025,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   friend class FdHandle;
 
   // The next file descriptor to be used for the next file opened.
-  mutable int nextFd = 0;
+  mutable int nextFd = static_cast<int>(Stdio::ERR) + 1;
 
   mutable kj::HashMap<int, kj::Rc<OpenedFile>> openedFiles;
 
@@ -1146,7 +1182,10 @@ TmpDirStoreScope& TmpDirStoreScope::current() {
 }
 
 TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
-    : dir(Directory::newWritable()) {
+    : dir(Directory::newWritable()),
+      // we use the /bundle cwd for the isolate vfs
+      // and the /tmp cwd for the iocontext vfs
+      cwd(kj::Path({guard == kj::none ? "bundle" : "tmp"})) {
   if (guard == kj::none) {
     kj::requireOnStack(this, "must be created on the stack");
     onStack = true;
@@ -1593,6 +1632,114 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
+// An StdioFile is a special file implementation used to represent stdin,
+// stdout, and stderr outputs. Writes are always forwarded to the underlying
+// logging mechanisms. Reads always return EOF (0-byte reads).
+class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
+ public:
+  StdioFile(VirtualFileSystem::Stdio type): type(type) {}
+
+  Stat stat(jsg::Lock& js) override {
+    return Stat{
+      .type = FsType::FILE,
+      .size = 0,
+      .lastModified = kj::UNIX_EPOCH,
+      .writable = true,
+      .device = false,
+    };
+  }
+
+  kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock&) override {
+    kj::Rc<File> ref = addRefToThis();
+    return kj::mv(ref);
+  }
+
+  kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> setLastModified(jsg::Lock& js, kj::Date date = kj::UNIX_EPOCH) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> fill(jsg::Lock& js, kj::byte value, kj::Maybe<uint32_t> offset) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::Maybe<FsError> resize(jsg::Lock& js, uint32_t size) override {
+    return FsError::NOT_PERMITTED;
+  }
+
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "stdio"_kj;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(StdioFile);
+  }
+
+  void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const override {}
+
+  kj::OneOf<FsError, uint32_t> write(
+      jsg::Lock&, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
+    // Protect against unreasonably large writes.
+    if (buffer.size() > 16 * 1024) {
+      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    }
+
+    if (buffer.size() == 0) return uint32_t(0);
+
+    // We ignore the offset here. All writes are assumed to be appends.
+    if (type != VirtualFileSystem::Stdio::IN) {
+
+      if (IoContext::hasCurrent()) {
+        auto& ioContext = IoContext::current();
+        KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+          // If there is a worker tracer, then we'll direct the log output to it.
+          LogLevel level =
+              (type == VirtualFileSystem::Stdio::OUT) ? LogLevel::INFO : LogLevel::ERROR;
+          auto timestamp = ioContext.now();
+          // The assumption here is that the buffer is a complete UTF-8 string.
+          // That's not always true if the caller doesn't take care to write
+          // complete UTF-8 sequences, but it's easiest for us to assume this
+          // case in order to avoid having to buffer partial sequences, which
+          // gets complicated. Worst case the log output is a bit garbled,
+          // which isn't the end of the world and is easier for the user to
+          // fix on their end.
+          tracer.addLog(
+              ioContext.getInvocationSpanContext(), timestamp, level, kj::str(buffer.asChars()));
+        }
+      }
+
+      // Now forward the bytes on to the the impl specific logging mechanism,
+      // if any. In workerd this will forward the output to stdout/stderr.
+      // In production this likely goes nowhere, similar to the way the
+      // handleLog method works in worker.c++.
+      Worker::Api::current().writeStdio(type, buffer);
+    }
+    return static_cast<uint32_t>(buffer.size());
+  }
+
+  uint32_t read(jsg::Lock&, uint32_t, kj::ArrayPtr<kj::byte>) const override {
+    return 0;  // EOF
+  }
+
+  kj::StringPtr getUniqueId(jsg::Lock&) const override {
+    KJ_IF_SOME(id, maybeUniqueId) {
+      return id;
+    }
+    // Generating a UUID requires randomness, which requires an IoContext.
+    JSG_REQUIRE(IoContext::hasCurrent(), Error, "Cannot generate a unique ID outside of a request");
+    auto& ioContext = IoContext::current();
+    maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
+    return KJ_ASSERT_NONNULL(maybeUniqueId);
+  }
+
+ private:
+  VirtualFileSystem::Stdio type;
+  mutable kj::Maybe<kj::String> maybeUniqueId;
+};
+
 }  // namespace
 
 kj::Rc<File> getDevNull() {
@@ -1618,6 +1765,18 @@ kj::Rc<Directory> getDevDirectory() {
   builder.add("full", getDevFull());
   builder.add("random", getDevRandom());
   return builder.finish();
+}
+
+kj::Rc<VirtualFileSystem::OpenedFile> VirtualFileSystemImpl::getStdio(
+    jsg::Lock& js, Stdio stdio) const {
+  int n = static_cast<int>(stdio);
+  KJ_IF_SOME(existing, openedFiles.find(n)) {
+    return existing.addRef();
+  }
+  kj::Rc<workerd::File> file = kj::rc<StdioFile>(stdio);
+  auto opened = kj::rc<VirtualFileSystem::OpenedFile>(n, true, true, true, kj::mv(file));
+  openedFiles.insert(n, opened.addRef());
+  return kj::mv(opened);
 }
 
 }  // namespace workerd

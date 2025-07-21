@@ -66,6 +66,7 @@ wpt_test(
 
 wpt_test(
     name = "dom/events",
+    compat_flags = ["pedantic_wpt"],
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
 )

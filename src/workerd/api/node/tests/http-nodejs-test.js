@@ -2,6 +2,7 @@ import { throws, ok, strictEqual, deepStrictEqual } from 'node:assert';
 import { validateHeaderName, validateHeaderValue, METHODS } from 'node:http';
 import httpCommon from 'node:_http_common';
 import { inspect } from 'node:util';
+import http from 'node:http';
 
 // Tests are taken from
 // https://github.com/nodejs/node/blob/c514e8f781b2acedb6a2b42208d8f8f4d8392f09/test/parallel/test-http-header-validators.js
@@ -230,3 +231,192 @@ export const testHttpCommon = {
     strictEqual(checkInvalidHeaderChar('ttttt'), false);
   },
 };
+
+// Test is taken from test/parallel/test-http-request-invalid-method-error.js
+export const testHttpRequestInvalidMethodError = {
+  async test() {
+    throws(() => http.request({ method: '\0' }), {
+      code: 'ERR_INVALID_HTTP_TOKEN',
+      name: 'TypeError',
+      message: 'Method must be a valid HTTP token ["\u0000"]',
+    });
+  },
+};
+
+// Test is taken from test/parallel/test-http-content-length.js
+export const testHttpContentLength = {
+  async test(_ctrl, env) {
+    const expectedHeadersEndWithData = {
+      connection: 'keep-alive',
+      'content-length': String('hello world'.length),
+    };
+
+    const expectedHeadersEndNoData = {
+      connection: 'keep-alive',
+      'content-length': '0',
+    };
+
+    const { promise, resolve } = Promise.withResolvers();
+    let req;
+
+    req = http.request({
+      port: env.HELLO_WORLD_SERVER_PORT,
+      method: 'POST',
+      path: '/end-with-data',
+    });
+    req.removeHeader('Date');
+    req.end('hello world');
+    req.on('response', function (res) {
+      deepStrictEqual(res.headers, {
+        ...expectedHeadersEndWithData,
+        'keep-alive': 'timeout=1',
+      });
+      res.resume();
+    });
+
+    req = http.request({
+      port: env.HELLO_WORLD_SERVER_PORT,
+      method: 'POST',
+      path: '/empty',
+    });
+    req.removeHeader('Date');
+    req.end();
+    req.on('response', function (res) {
+      deepStrictEqual(res.headers, {
+        ...expectedHeadersEndNoData,
+        'keep-alive': 'timeout=1',
+      });
+      res.resume();
+      resolve();
+    });
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-contentLength0.js
+export const testHttpContentLength0 = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const request = http.request(
+      {
+        port: env.HELLO_WORLD_SERVER_PORT,
+        method: 'POST',
+        path: '/content-length0',
+      },
+      (response) => {
+        response.on('error', reject);
+        response.resume();
+        response.on('end', resolve);
+      }
+    );
+    request.on('error', reject);
+    request.end();
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-dont-set-default-headers-with-set-header.js
+export const testHttpDontSetDefaultHeadersWithSetHeader = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const req = http.request({
+      method: 'POST',
+      port: env.HEADER_VALIDATION_SERVER_PORT,
+      setDefaultHeaders: false,
+      path: '/test-1',
+    });
+
+    req.setHeader('test', 'value');
+    req.setHeader('HOST', `localhost:${env.HEADER_VALIDATION_SERVER_PORT}`);
+    req.setHeader('foo', ['bar', 'baz']);
+    req.setHeader('connection', 'close');
+    req.on('response', resolve);
+    req.on('error', reject);
+    strictEqual(req.headersSent, false);
+    req.end();
+    await promise;
+    strictEqual(req.headersSent, true);
+  },
+};
+
+// Test is taken from test/parallel/test-http-dont-set-default-headers-with-setHost.js
+export const testHttpDontSetDefaultHeadersWithSetHost = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    http
+      .request({
+        method: 'POST',
+        port: env.HEADER_VALIDATION_SERVER_PORT,
+        setDefaultHeaders: false,
+        setHost: true,
+        path: '/test-2',
+      })
+      .on('error', reject)
+      .on('response', resolve)
+      .end();
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-request-end-twice.js
+export const testHttpRequestEndTwice = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const req = http
+      .get({ port: env.HEADER_VALIDATION_SERVER_PORT }, function (res) {
+        res.on('error', reject).on('end', function () {
+          strictEqual(req.end(), req);
+          resolve();
+        });
+        res.resume();
+      })
+      .on('error', reject);
+    await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-set-timeout.js
+export const testHttpSetTimeout = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const request = http.get({ port: env.TIMEOUT_SERVER_PORT, path: '/' });
+    request.setTimeout(100);
+    request.on('error', reject);
+    request.on('timeout', resolve);
+    request.end();
+    await promise;
+  },
+};
+
+export const httpRedirectsAreNotFollowed = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const req = http.request(
+      {
+        port: 80,
+        method: 'GET',
+        protocol: 'http:',
+        hostname: 'cloudflare.com',
+        path: '/',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 301);
+        resolve();
+      }
+    );
+    req.end();
+    await promise;
+  },
+};
+
+// The following tests does not make sense for workerd
+//
+// - [ ] test/parallel/test-http-parser-bad-ref.js
+// - [ ] test/parallel/test-http-parser-finish-error.js
+// - [ ] test/parallel/test-http-parser-free.js
+// - [ ] test/parallel/test-http-parser-freed-before-upgrade.js
+// - [ ] test/parallel/test-http-parser-lazy-loaded.js
+// - [ ] test/parallel/test-http-parser-memory-retention.js
+// - [ ] test/parallel/test-http-parser-multiple-execute.js
+// - [ ] test/parallel/test-http-parser-timeout-reset.js
+// - [ ] test/parallel/test-http-parser.js

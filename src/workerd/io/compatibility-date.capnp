@@ -870,4 +870,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # The original version of the headers sent to edgeworker were truncated to a single
   # value for specific header names, such as To and Cc. With this compat flag we will send
   # the full header values to the worker script.
+
+  enableNodejsHttpModules @100 :Bool
+      $compatEnableFlag("enable_nodejs_http_modules")
+      $compatDisableFlag("disable_nodejs_http_modules")
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2025-08-15");
+  # Enables Node.js http related modules such as node:http and node:https
+
+  pedanticWpt @101 :Bool
+      $compatEnableFlag("pedantic_wpt")
+      $compatDisableFlag("non_pedantic_wpt");
+  # Enables a "pedantic mode" for WPT compliance. Multiple changes are grouped under
+  # this flag that are known to be required to pass more web platform tests but which
+  # otherwise are likely not to be strictly necessary for most users.
 }

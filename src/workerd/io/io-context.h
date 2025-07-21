@@ -681,7 +681,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
-  const TmpDirStoreScope& getTmpDirStoreScope() {
+  TmpDirStoreScope& getTmpDirStoreScope() {
     return *tmpDirStoreScope;
   }
 
@@ -741,6 +741,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     // The name to use for the request's span if tracing is turned on.
     kj::Maybe<kj::ConstString> operationName;
+
+    // The tracing context to use for the subrequest if tracing is enabled.
+    kj::Maybe<TraceContext&> existingTraceContext;
   };
 
   kj::Own<WorkerInterface> getSubrequestNoChecks(
@@ -780,6 +783,27 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
+  // Get WorkerInterface objects to use for subrequests.
+  //
+  // `channel` specifies which outgoing channel to use. The special channel 0 refers to the "null"
+  // binding (used for fetches where `request.fetcher` is not set), and channel 1 refers to the
+  // "next" binding (used when request.fetcher is carried over from the incoming request).
+  // Named bindings, e.g. Worker2Worker bindings, will have indices starting from 2. Fetcher
+  // bindings declared via Worker::Global::Fetcher have a corresponding `channel` property to refer
+  // to these outgoing bindings.
+  //
+  // `isInHouse` is true if this client represents an "in house" endpoint, i.e. some API provided
+  // by the Workers platform. For example, KV namespaces are in-house. This primarily affects
+  // metrics and limits:
+  // - In-house requests do not count as "subrequests" for metrics and logging purposes.
+  // - In-house requests are not subject to the same limits on the number of subrequests per
+  //   request.
+  // - In preview, in-house requests do not show up in the network tab.
+  //
+  // `traceContext` is the trace context to use for the subrequest, if tracing is turned on.
+  kj::Own<WorkerInterface> getSubrequestChannel(
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
+
   kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
@@ -798,6 +822,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
+
+  kj::Own<kj::HttpClient> getHttpClient(
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
   // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
   kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,

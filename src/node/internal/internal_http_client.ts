@@ -5,8 +5,9 @@
 
 import { _checkIsHttpToken as checkIsHttpToken } from 'node-internal:internal_http';
 import {
-  kHeadersSent,
   kOutHeaders,
+  kUniqueHeaders,
+  parseUniqueHeadersOption,
 } from 'node-internal:internal_http_outgoing';
 import { Buffer } from 'node-internal:internal_buffer';
 import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
@@ -17,6 +18,7 @@ import {
   ERR_UNESCAPED_CHARACTERS,
   ERR_INVALID_PROTOCOL,
   ERR_INVALID_ARG_VALUE,
+  ERR_HTTP_HEADERS_SENT,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -31,6 +33,7 @@ import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
   RequestOptions,
+  OutgoingHttpHeaders,
 } from 'node:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
@@ -66,6 +69,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   port: string = '80';
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
+
+  [kUniqueHeaders]: Set<string> | null = null;
 
   constructor(
     input: string | URL | RequestOptions | null,
@@ -149,7 +154,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      // @ts-expect-error TS2379 Type inconsistency
       addAbortSignal(signal, this);
     }
     let method = options.method;
@@ -223,6 +227,9 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     const headers = options.headers;
     if (!Array.isArray(headers)) {
       if (headers != null) {
+        if ('host' in headers) {
+          validateString(headers.host, 'host');
+        }
         for (const [key, value] of Object.entries(headers)) {
           this.setHeader(key, value as unknown as string);
         }
@@ -269,6 +276,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this.on('finish', () => {
       this.#onFinish();
     });
+
+    this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
   }
 
   #onFinish(): void {
@@ -278,20 +287,20 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       const value = this.getHeader('content-type') ?? '';
       body = new Blob(this.#body, {
-        type: typeof value === 'string' ? value : value.join(', '),
+        type: Array.isArray(value) ? value.join(', ') : `${value}`,
       });
     }
 
     const headers: [string, string][] = [];
-    for (const name of Object.keys(this[kOutHeaders])) {
-      const value = this[kOutHeaders][name]?.value;
+    for (const [name, value] of Object.entries(this[kOutHeaders] ?? {})) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (value) {
         if (Array.isArray(value)) {
           if (this.joinDuplicateHeaders) {
             headers.push([name, value.join(', ')]);
           } else {
             for (const item of value) {
-              headers.push([name, item]);
+              headers.push([name, item as string]);
             }
           }
         } else {
@@ -311,7 +320,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (
       this.host &&
       !this.getHeader('host') &&
-      Object.keys(this[kOutHeaders]).length === 0
+      Object.keys(this[kOutHeaders] ?? {}).length === 0
     ) {
       // From RFC 7230 5.4 https://datatracker.ietf.org/doc/html/rfc7230#section-5.4
       // A server MUST respond with a 400 (Bad Request) status code to any
@@ -336,8 +345,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     url.port = this.port;
     url.pathname = this.path;
 
-    this[kHeadersSent] = true;
-
     // Our fetch implementation has the following limitations.
     //
     // 1. Content decoding is handled automatically by fetch,
@@ -361,6 +368,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   #handleFetchResponse(response: Response): void {
+    // Sets headersSent
+    this._header = Array.from(response.headers.keys())
+      .map((key) => `${key}=${response.headers.get(key)}}`)
+      .join('\r\n');
     this.#incomingMessage = new IncomingMessage(
       response,
       this.#resetTimers.bind(this)
@@ -370,6 +381,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     });
 
     this.emit('response', this.#incomingMessage);
+    // @ts-expect-error TS2540 This is a read-only property.
+    this.req = this.#incomingMessage;
   }
 
   #handleFetchError(error: Error): void {
@@ -468,5 +481,15 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
         this.#abortController.abort();
       }, this.timeout) as unknown as number;
     }
+  }
+
+  override _implicitHeader(): void {
+    if (this._header) {
+      throw new ERR_HTTP_HEADERS_SENT('render');
+    }
+    this._storeHeader(
+      this.method + ' ' + this.path + ' HTTP/1.1\r\n',
+      this[kOutHeaders] as OutgoingHttpHeaders
+    );
   }
 }

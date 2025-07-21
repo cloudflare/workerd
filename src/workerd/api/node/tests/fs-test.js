@@ -253,7 +253,9 @@ export const writeSyncTest = {
       kErrInvalidArgType
     );
     throws(() => writeSync(123, 'Hello World'), kErrEBadf);
-    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), kErrOutOfRange);
+    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => writeSync(fd, Buffer.alloc(2), { length: 5 }),
       kErrInvalidArgValue
@@ -313,10 +315,9 @@ export const writeAsyncCallbackTest = {
       () => write(fd, 'Hello World', { position: 'hello' }, mustNotCall),
       kErrInvalidArgType
     );
-    throws(
-      () => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall),
-      kErrOutOfRange
-    );
+    throws(() => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => write(fd, Buffer.alloc(2), { length: 5 }, mustNotCall),
       kErrInvalidArgValue
@@ -429,7 +430,7 @@ export const writeSyncTest4 = {
 
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 100, 3), {
-      message: /out of bounds/,
+      message: /outside of buffer bounds/,
     });
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 0, 100), {
@@ -866,5 +867,45 @@ export const copyAndRenameAsyncCallbackTest = {
     ok(!existsSync('/tmp/test.txt'));
     ok(existsSync('/tmp/test3.txt'));
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
+  },
+};
+
+export const fsCwdTest = {
+  test() {
+    process.chdir('/bundle');
+
+    throws(
+      () => {
+        writeFileSync('test-cwd.txt', 'Hello from original cwd');
+      },
+      { code: 'EPERM' }
+    );
+
+    process.chdir('/tmp');
+
+    writeFileSync('test-cwd.txt', 'Hello from /tmp');
+    ok(existsSync('test-cwd.txt'));
+    ok(existsSync('/tmp/test-cwd.txt'));
+
+    ok(existsSync('test-cwd.txt'));
+    ok(!existsSync(`/bundle/test-cwd.txt`));
+
+    strictEqual(readFileSync('test-cwd.txt').toString(), 'Hello from /tmp');
+    strictEqual(
+      readFileSync('/tmp/test-cwd.txt').toString(),
+      'Hello from /tmp'
+    );
+
+    process.chdir('/bundle');
+
+    ok(!existsSync('test-cwd.txt'));
+    throws(
+      () => {
+        readFileSync('test-cwd.txt');
+      },
+      { code: 'ENOENT' }
+    );
+
+    unlinkSync('/tmp/test-cwd.txt');
   },
 };

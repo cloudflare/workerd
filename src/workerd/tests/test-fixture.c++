@@ -15,7 +15,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
@@ -377,7 +376,7 @@ TestFixture::TestFixture(SetupParams&& params)
 }
 
 void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
-    kj::ArrayPtr<kj::StringPtr> errorsToIgnore) {
+    const kj::ArrayPtr<const kj::StringPtr> errorsToIgnore) {
   auto ignoreDescription = [&errorsToIgnore](kj::StringPtr description) {
     return std::any_of(errorsToIgnore.begin(), errorsToIgnore.end(),
         [&description](auto error) { return description.contains(error); });

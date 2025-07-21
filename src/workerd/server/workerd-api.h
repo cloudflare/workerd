@@ -50,6 +50,7 @@ class WorkerdApi final: public Worker::Api {
   static const WorkerdApi& from(const Worker::Api&);
 
   const VirtualFileSystem& getVirtualFileSystem() const override;
+  void writeStdio(VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) const override;
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
@@ -311,5 +312,9 @@ kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
 
 kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
+
+// Helper method for defining actor storage server treating all reads as empty, defined here to be
+// used by test-fixture and server.
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

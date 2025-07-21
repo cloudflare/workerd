@@ -325,28 +325,16 @@ wd_test(
     data = ["streams-nodejs-test.js"],
 )
 
+js_binary(
+    name = "http-nodejs-server",
+    entry_point = "http-nodejs-server.js",
+)
+
 wd_test(
     src = "http-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["http-nodejs-test.js"],
-)
-
-wd_test(
-    src = "http-outgoing-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["http-outgoing-nodejs-test.js"],
-)
-
-js_binary(
-    name = "http-client-server",
-    entry_point = "http-client-server.js",
-)
-
-wd_test(
-    src = "http-client-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["http-client-nodejs-test.js"],
-    sidecar = "http-client-server",
+    sidecar = "http-nodejs-server",
     sidecar_port_bindings = [
         "PONG_SERVER_PORT",
         "ASD_SERVER_PORT",
@@ -358,15 +346,51 @@ wd_test(
 )
 
 js_binary(
-    name = "http-agent-server",
-    entry_point = "http-agent-server.js",
+    name = "http-outgoing-nodejs-server",
+    entry_point = "http-outgoing-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-outgoing-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-outgoing-nodejs-test.js"],
+    sidecar = "http-outgoing-nodejs-server",
+    sidecar_port_bindings = [
+        "FINISH_WRITABLE_PORT",
+        "WRITABLE_FINISHED_PORT",
+        "PROPERTIES_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-client-nodejs-server",
+    entry_point = "http-client-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-client-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-client-nodejs-test.js"],
+    sidecar = "http-client-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+        "ASD_SERVER_PORT",
+        "DEFAULT_HEADERS_EXIST_PORT",
+        "REQUEST_ARGUMENTS_PORT",
+        "HELLO_WORLD_SERVER_PORT",
+    ],
+)
+
+js_binary(
+    name = "http-agent-nodejs-server",
+    entry_point = "http-agent-nodejs-server.js",
 )
 
 wd_test(
     src = "http-agent-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["http-agent-nodejs-test.js"],
-    sidecar = "http-agent-server",
+    sidecar = "http-agent-nodejs-server",
     sidecar_port_bindings = [
         "PONG_SERVER_PORT",
     ],

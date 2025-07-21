@@ -477,7 +477,7 @@ export function SlowBuffer(length: number) {
 Object.setPrototypeOf(SlowBuffer.prototype, Uint8Array.prototype);
 Object.setPrototypeOf(SlowBuffer, Uint8Array);
 
-Buffer.isBuffer = function isBuffer(b: unknown) {
+Buffer.isBuffer = function isBuffer(b: unknown): b is Buffer {
   return b != null && (b as any)[kIsBuffer] && b !== Buffer.prototype;
 };
 

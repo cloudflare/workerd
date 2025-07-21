@@ -22,7 +22,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/io",
         "//src/workerd/jsg",
-        "//src/workerd/server",
+        "//src/workerd/server:workerd-api",
         "//src/workerd/util:autogate",
     ],
 )
@@ -82,12 +82,6 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
-    name = "bench-fast-api",
-    srcs = ["bench-fast-api.c++"],
-    deps = ["//src/workerd/jsg"],
-)
-
-wd_cc_benchmark(
     name = "bench-util",
     srcs = ["bench-util.c++"],
     deps = [
@@ -106,7 +100,6 @@ filegroup(
     name = "all_benchmarks",
     srcs = [
         ":bench-api-headers",
-        ":bench-fast-api",
         ":bench-global-scope",
         ":bench-json",
         ":bench-kj-headers",

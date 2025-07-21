@@ -69,6 +69,7 @@ import {
 import { strictEqual } from 'node-internal:internal_assert';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import processImpl from 'node-internal:process';
 export type FilePath = string | URL | Buffer;
 
 import type {
@@ -129,13 +130,18 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // implementation will end up seeing slightly different behavior
   // here but that's not something we need to worry about for now.
   if (typeof path === 'string') {
-    return new URL(path, 'file://');
+    // fallthrough for typical case
   } else if (path instanceof URL) {
     return path;
   } else if (Buffer.isBuffer(path)) {
-    return new URL(path.toString(encoding), 'file://');
+    path = path.toString(encoding);
+  } else {
+    throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
   }
-  throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
+  return new URL(
+    path,
+    path.startsWith('/') ? 'file://' : `file://${processImpl.getCwd()}/`
+  );
 }
 
 export const kMaxUserId = 2 ** 32 - 1;
@@ -366,23 +372,21 @@ export function validateWriteArgs(
   if (isArrayBufferView(buffer)) {
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
-        offset = 0,
-        length = buffer.byteLength - offset,
+        offset = buffer.byteOffset,
+        length = buffer.byteLength,
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
     }
     position ??= null;
     offset ??= buffer.byteOffset;
+    length ??= buffer.byteLength;
 
     validateInteger(offset, 'offset', 0);
     validatePosition(position, 'position');
-
-    length ??= buffer.byteLength - offset;
-
     validateInteger(length, 'length', 0);
 
     // Validate that the offset + length do not exceed the buffer's byte length.
-    if (offset + length > buffer.byteLength) {
+    if (length > buffer.byteLength) {
       throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
     }
 

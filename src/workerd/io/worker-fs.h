@@ -589,6 +589,13 @@ class VirtualFileSystem {
     uint32_t position = 0;
   };
 
+  enum class Stdio {
+    IN,
+    OUT,
+    ERR,
+  };
+  virtual kj::Rc<OpenedFile> getStdio(jsg::Lock& js, Stdio stdio) const KJ_WARN_UNUSED_RESULT = 0;
+
   // Attempts to open a file descriptor for the given file URL. It's critical
   // to understand that the file descriptor table is shared for the entire
   // worker. This means that if a file descriptor is opened, it will remain
@@ -694,8 +701,17 @@ class TmpDirStoreScope final {
     return dir.addRef();
   }
 
+  kj::PathPtr getCwd() const {
+    return kj::PathPtr(cwd);
+  }
+
+  void setCwd(kj::Path newCwd) {
+    cwd = kj::mv(newCwd);
+  }
+
  private:
   mutable kj::Rc<Directory> dir;
+  kj::Path cwd;
   bool onStack = false;
 };
 
@@ -740,4 +756,9 @@ kj::Rc<File> getDevZero() KJ_WARN_UNUSED_RESULT;
 kj::Rc<File> getDevFull() KJ_WARN_UNUSED_RESULT;
 kj::Rc<File> getDevRandom() KJ_WARN_UNUSED_RESULT;
 kj::Rc<Directory> getDevDirectory() KJ_WARN_UNUSED_RESULT;
+
+// Helper functions for current working directory management
+kj::Maybe<kj::PathPtr> getCurrentWorkingDirectory() KJ_WARN_UNUSED_RESULT;
+bool setCurrentWorkingDirectory(kj::Path newCwd) KJ_WARN_UNUSED_RESULT;
+
 }  // namespace workerd

@@ -166,12 +166,15 @@ kj::StringPtr Event::getType() {
   return type;
 }
 
-jsg::Optional<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
-  return target.map([&](jsg::Ref<EventTarget>& t) { return t.addRef(); });
+kj::Maybe<jsg::Ref<EventTarget>> Event::getCurrentTarget() {
+  if (isBeingDispatched) {
+    return getTarget();
+  }
+  return kj::none;
 }
 
 jsg::Optional<jsg::Ref<EventTarget>> Event::getTarget() {
-  return getCurrentTarget();
+  return target.map([&](jsg::Ref<EventTarget>& t) { return t.addRef(); });
 }
 
 kj::Array<jsg::Ref<EventTarget>> Event::composedPath() {

@@ -1,10 +1,21 @@
 import assert from 'node:assert';
+import { waitUntil } from 'cloudflare:workers';
 import {
   WorkerEntrypoint,
   DurableObject,
   RpcStub,
   RpcTarget,
 } from 'cloudflare:workers';
+
+try {
+  waitUntil(null);
+  throw new Error('This should have thrown');
+} catch (error) {
+  assert.match(
+    error.message,
+    /Disallowed operation called within global scope./
+  );
+}
 
 class MyCounter extends RpcTarget {
   constructor(i = 0) {
@@ -448,12 +459,19 @@ export class MyService extends WorkerEntrypoint {
       resolve = r;
     });
 
-    this.ctx.waitUntil(
-      (async () => {
-        await scheduler.wait(100);
-        resolve();
-      })()
-    );
+    this.ctx.waitUntil(scheduler.wait(100).then(resolve));
+  }
+
+  testImportedWaitUntil() {
+    // Initialize globalWaitUntilPromise to a promise that will be resolved in a waitUntil task
+    // later on. We'll perform a cross-context wait to verify that the waitUntil task actually
+    // completes and resolves the promise.
+    let resolve;
+    globalWaitUntilPromise = new Promise((r) => {
+      resolve = r;
+    });
+
+    waitUntil(scheduler.wait(100).then(resolve));
   }
 }
 
@@ -1179,11 +1197,23 @@ export let crossContextSharingDoesntWork = {
 
 export let waitUntilWorks = {
   async test(controller, env, ctx) {
-    globalWaitUntilPromise = null;
-    await env.MyService.testWaitUntil();
+    // Tests ctx.waitUntil
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testWaitUntil();
 
-    assert.strictEqual(globalWaitUntilPromise instanceof Promise, true);
-    await globalWaitUntilPromise;
+      assert.ok(globalWaitUntilPromise instanceof Promise);
+      await globalWaitUntilPromise;
+    }
+
+    // Tests `import { waitUntil } from 'cloudflare:workers` on WorkerEntrypoint
+    {
+      globalWaitUntilPromise = null;
+      await env.MyService.testImportedWaitUntil();
+
+      assert.ok(globalWaitUntilPromise instanceof Promise);
+      await globalWaitUntilPromise;
+    }
   },
 };
 
