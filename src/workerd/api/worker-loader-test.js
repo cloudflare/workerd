@@ -439,3 +439,34 @@ export let codeLoaderException = {
     }
   },
 };
+
+// Test that ctx.exports works in dynamically-loaded workers.
+export let ctxExports = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('ctxExports', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        mainModule: 'foo.js',
+        allowExperimental: true,
+        modules: {
+          'foo.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              async greet(name) {
+                let greeting = await this.ctx.exports.AltEntrypoint.greet(name);
+                return greeting + "!";
+              }
+            }
+            export class AltEntrypoint extends WorkerEntrypoint {
+              greet(name) { return "Hello, " + name; }
+            }
+          `,
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().greet('Alice');
+    assert.strictEqual(result, 'Hello, Alice!');
+  },
+};
