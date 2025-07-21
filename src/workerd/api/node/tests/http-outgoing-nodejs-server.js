@@ -29,14 +29,10 @@ finishWritableServer.listen(process.env.FINISH_WRITABLE_PORT, () =>
 
 const writableFinishedServer = http.createServer((req, res) => {
   assert.strictEqual(res.writableFinished, false);
-  res
-    .on(
-      'finish',
-      common.mustCall(() => {
-        assert.strictEqual(res.writableFinished, true);
-      })
-    )
-    .end();
+  res.on('finish', () => {
+    assert.strictEqual(res.writableFinished, true);
+  });
+  res.end();
 });
 writableFinishedServer.listen(process.env.WRITABLE_FINISHED_PORT, () =>
   reportPort(writableFinishedServer)

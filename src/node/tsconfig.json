@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "lib": ["ESNext", "dom"],
+    "lib": ["ESNext", "dom", "Webworker.Iterable"],
     "alwaysStrict": true,
     "strict": true,
     "allowJs": true,

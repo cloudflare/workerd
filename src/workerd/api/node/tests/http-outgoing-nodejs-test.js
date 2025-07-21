@@ -53,49 +53,6 @@ export const testHttpOutgoingFinishWritable = {
   },
 };
 
-// TODO(soon): Implement _write method of OutgoingMessage
-// Tests are taken from test/parallel/test-http-outgoing-message-inheritance.js
-// export const testHttpOutgoingMessageInheritance = {
-//   async test() {
-//     // Check that http.OutgoingMessage can be used without a proper Socket
-//     // Refs: https://github.com/nodejs/node/issues/14386
-//     // Refs: https://github.com/nodejs/node/issues/14381
-//     const { promise, resolve } = Promise.withResolvers();
-
-//     class Response extends http.OutgoingMessage {
-//       _implicitHeader() {}
-//     }
-
-//     const res = new Response();
-
-//     let firstChunk = true;
-//     const writeFn = mock.fn((chunk, encoding, callback) => {
-//       if (firstChunk) {
-//         ok(chunk.toString().endsWith('hello world'));
-//         firstChunk = false;
-//       } else {
-//         strictEqual(chunk.length, 0);
-//       }
-//       setImmediate(callback);
-
-//       if (writeFn.mock.callCount() === 2) {
-//         resolve();
-//       }
-//     });
-
-//     const ws = new Writable({
-//       write: writeFn,
-//     });
-
-//     res.socket = ws;
-//     ws._httpMessage = res;
-//     res.connection = ws;
-
-//     res.end('hello world');
-//     await promise;
-//   }
-// }
-
 // Tests are taken from test/parallel/test-http-outgoing-properties.js
 export const testHttpOutgoingProperties = {
   async test(_ctrl, env) {
@@ -227,8 +184,6 @@ export const testHttpOutgoingWritableFinished = {
 // - [ ] test/parallel/test-http-outgoing-end-cork.js
 // - [ ] test/parallel/test-http-outgoing-end-multiple.js
 // - [x] test/parallel/test-http-outgoing-finish-writable.js
-// - [ ] test/parallel/test-http-outgoing-message-capture-rejection.js
-// - [ ] test/parallel/test-http-outgoing-message-inheritance.js
 // - [x] test/parallel/test-http-outgoing-properties.js
 // - [x] test/parallel/test-http-outgoing-proto.js
 // - [x] test/parallel/test-http-outgoing-renderHeaders.js
@@ -241,6 +196,8 @@ export const testHttpOutgoingWritableFinished = {
 // - [ ] test/parallel/test-http-outgoing-finish.js
 // - [ ] test/parallel/test-http-outgoing-finished.js
 // - [ ] test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
+// - [ ] test/parallel/test-http-outgoing-message-capture-rejection.js
+// - [ ] test/parallel/test-http-outgoing-message-inheritance.js
 // - [ ] test/parallel/test-http-outgoing-message-write-callback.js
 // - [ ] test/parallel/test-http-outgoing-settimeout.js
 // - [ ] test/parallel/test-http-outgoing-write-types.js
