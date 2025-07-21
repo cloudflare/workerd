@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+// We have deprecations because @types/node defines this.finished as deprecated.
 /* eslint-disable @typescript-eslint/no-deprecated */
 
 import { validateString } from 'node-internal:validators';
