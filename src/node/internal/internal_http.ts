@@ -26,11 +26,13 @@ const headerCharRegex = /[^\t\x20-\x7e\x80-\xff]/;
  *  field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
  *  field-vchar    = VCHAR / obs-text
  */
-export function _checkInvalidHeaderChar(val: string | string[]): boolean {
+export function _checkInvalidHeaderChar(
+  val: number | string | ReadonlyArray<string>
+): boolean {
   if (Array.isArray(val)) {
-    return val.some((v) => headerCharRegex.test(v));
+    return val.some((v: string) => headerCharRegex.test(v));
   }
-  return headerCharRegex.test(val);
+  return headerCharRegex.test(`${val}`);
 }
 
 export function validateHeaderName(
@@ -44,8 +46,8 @@ export function validateHeaderName(
 
 export function validateHeaderValue(
   name: string,
-  value: string | string[] | undefined
-): void {
+  value: number | string | ReadonlyArray<string> | undefined
+): asserts value is string {
   if (value === undefined) {
     throw new ERR_HTTP_INVALID_HEADER_VALUE(value, name);
   }
@@ -53,3 +55,9 @@ export function validateHeaderValue(
     throw new ERR_INVALID_CHAR('header content', name);
   }
 }
+
+export function utcDate(): string {
+  return new Date().toUTCString();
+}
+
+export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
