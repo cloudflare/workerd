@@ -138,7 +138,6 @@ def pyodide_static():
             "internal/*.ts",
             "internal/topLevelEntropy/*.ts",
             "types/*.ts",
-            "types/*/*.ts",
         ],
     )
     modules = ["python-entrypoint-helper.ts"]

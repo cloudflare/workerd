@@ -20,6 +20,9 @@ def _to_name(file_name):
 def _to_d_ts(file_name):
     return file_name.removesuffix(".js") + ".d.ts"
 
+def _to_js_map(file_name):
+    return file_name.removesuffix(".js") + ".js.map"
+
 def _relative_path(file_path, dir_path):
     if not file_path.startswith(dir_path):
         fail("file_path need to start with dir_path: " + file_path + " vs " + dir_path)
@@ -99,10 +102,16 @@ def _gen_api_bundle_capnpn_impl(ctx):
                 output_dir,
             ) + "\", "
         ) if name in ctx.attr.declarations else ""
+        source_map_extra = (
+            "sourceMap = embed \"" + _relative_path(
+                ctx.expand_location("$(location {})".format(ctx.attr.source_maps[name]), ctx.attr.data),
+                output_dir,
+            ) + "\", "
+        ) if name in ctx.attr.source_maps else ""
         cache_extra = (
             "compileCache = embed \"{}\", ".format(_relative_path(cache, output_dir))
         ) if cache else ""
-        extras = ts_declaration_extra + cache_extra
+        extras = ts_declaration_extra + source_map_extra + cache_extra
 
         return MODULE_TEMPLATE.format(
             name = name,
@@ -162,6 +171,7 @@ gen_api_bundle_capnpn = rule(
         "internal_data_modules": attr.label_keyed_string_dict(allow_files = True),
         "internal_json_modules": attr.label_keyed_string_dict(allow_files = True),
         "declarations": attr.string_dict(),
+        "source_maps": attr.string_dict(),
         "data": attr.label_list(allow_files = True),
         "const_name": attr.string(mandatory = True),
         "deps": attr.label_list(),
@@ -169,7 +179,7 @@ gen_api_bundle_capnpn = rule(
     },
 )
 
-def _copy_modules(modules, declarations, out_dir = ""):
+def _copy_modules(modules, declarations, source_maps, out_dir = ""):
     """Copy files from the modules map to the current package.
 
     Returns new module map using file copies.
@@ -177,6 +187,7 @@ def _copy_modules(modules, declarations, out_dir = ""):
     """
     result = dict()
     declarations_result = dict()
+    source_maps_result = dict()
     for m in modules:
         new_filename = out_dir + modules[m].replace(":", "_").replace("/", "_")
         copy_file(name = new_filename + "@copy", src = m, out = new_filename)
@@ -187,8 +198,14 @@ def _copy_modules(modules, declarations, out_dir = ""):
             copy_file(name = new_d_ts_filename + "@copy", src = m_d_ts, out = new_d_ts_filename)
             declarations_result[modules[m]] = str(native.package_relative_label(new_d_ts_filename))
 
+        m_js_map = _to_js_map(m)
+        if m_js_map in source_maps:
+            new_map_filename = new_filename + ".js.map"
+            copy_file(name = new_map_filename + "@copy", src = m_js_map, out = new_map_filename)
+            source_maps_result[modules[m]] = str(native.package_relative_label(new_map_filename))
+
         result[new_filename] = modules[m]
-    return result, declarations_result
+    return result, declarations_result, source_maps_result
 
 def wd_js_bundle(
         name,
@@ -200,6 +217,7 @@ def wd_js_bundle(
         internal_data_modules = [],
         internal_json_modules = [],
         declarations = [],
+        source_maps = [],
         deps = [],
         gen_compile_cache = False,
         out_dir = ""):
@@ -223,6 +241,7 @@ def wd_js_bundle(
      internal_data_modules: list of data source files
      internal_json_modules: list of json source files
      declarations: d.ts label set
+     source_maps: js.map label set
      deps: dependency list
      gen_compile_cache: generate compilation cache of every file and include into the bundle
     """
@@ -247,29 +266,34 @@ def wd_js_bundle(
         for m in internal_json_modules
     }
 
-    builtin_modules_dict, builtin_declarations = _copy_modules(
+    builtin_modules_dict, builtin_declarations, builtin_source_maps = _copy_modules(
         builtin_modules_dict,
         declarations,
+        source_maps,
         out_dir,
     )
-    internal_modules_dict, internal_declarations = _copy_modules(
+    internal_modules_dict, internal_declarations, internal_source_maps = _copy_modules(
         internal_modules_dict,
         declarations,
+        source_maps,
         out_dir,
     )
-    internal_wasm_modules_dict, _ = _copy_modules(
+    internal_wasm_modules_dict, _, _ = _copy_modules(
         internal_wasm_modules_dict,
         declarations,
+        source_maps,
         out_dir,
     )
-    internal_data_modules_dict, _ = _copy_modules(
+    internal_data_modules_dict, _, _ = _copy_modules(
         internal_data_modules_dict,
         declarations,
+        source_maps,
         out_dir,
     )
-    internal_json_modules_dict, _ = _copy_modules(
+    internal_json_modules_dict, _, _ = _copy_modules(
         internal_json_modules_dict,
         declarations,
+        source_maps,
         out_dir,
     )
 
@@ -280,7 +304,9 @@ def wd_js_bundle(
         list(internal_data_modules_dict) +
         list(internal_json_modules_dict) +
         list(builtin_declarations.values()) +
-        list(internal_declarations.values())
+        list(internal_declarations.values()) +
+        list(builtin_source_maps.values()) +
+        list(internal_source_maps.values())
     )
 
     compile_cache = None
@@ -304,6 +330,7 @@ def wd_js_bundle(
         internal_data_modules = internal_data_modules_dict,
         internal_json_modules = internal_json_modules_dict,
         declarations = builtin_declarations | internal_declarations,
+        source_maps = builtin_source_maps | internal_source_maps,
         data = data,
         deps = deps,
         compile_cache = compile_cache,

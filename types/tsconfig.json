@@ -7,7 +7,6 @@
     "moduleResolution": "node",
     "esModuleInterop": true,
     "types": ["@types/node", "@types/debug"],
-    "sourceMap": true,
     "baseUrl": ".",
     "rootDir": ".",
     "paths": {
@@ -16,7 +15,9 @@
     "checkJs": true,
     "allowJs": true,
     "composite": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "declaration": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "eslint.config.mjs"],
   "exclude": ["test/types/**/*.ts", "src/worker/**"]

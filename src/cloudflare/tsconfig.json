@@ -20,10 +20,7 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "declaration": true,
-    "types": [
-      // TODO: consume generated workerd types
-      // "@cloudflare/workers-types"
-    ],
+    "sourceMap": true,
     "paths": {
       "cloudflare:*": ["./*"],
       "cloudflare-internal:*": ["./internal/*"],

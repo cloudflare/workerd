@@ -10,6 +10,9 @@
     "paths": {
       "pyodide:*": ["./*"],
       "pyodide-internal:*": ["./internal/*", "./types/*"],
+      "pyodide-internal:runtime-generated": [
+        "./internal/types/runtime-generated"
+      ],
       // generated/emscriptenSetup is an esbuild-bundled version of pool/emscriptenSetup. They have
       // the same exports, so tell TypeScript to redirect the import.
       "pyodide-internal:generated/emscriptenSetup": [
@@ -18,11 +21,11 @@
       "internal:*": ["./types/*"]
     },
     "typeRoots": ["./types"],
-    "types": [],
     "declaration": true,
     "noEmit": false,
     "noEmitOnError": false,
-    "allowArbitraryExtensions": true
+    "allowArbitraryExtensions": true,
+    "sourceMap": true
   },
   "include": ["./**/*"],
   "exclude": ["./**/generated/**/*"]

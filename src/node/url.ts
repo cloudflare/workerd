@@ -19,12 +19,13 @@ import {
 
 const { URL, URLSearchParams } = globalThis;
 
-export function domainToASCII(domain?: unknown): string {
+export function domainToASCII(_domain?: unknown): string {
   if (arguments.length < 1) {
     throw new ERR_MISSING_ARGS('domain');
   }
 
-  return urlUtil.domainToASCII(`${domain}`);
+  throw new Error('Not implemented');
+  // return urlUtil.domainToASCII(`${domain}`);
 }
 
 export function domainToUnicode(domain?: unknown): string {
