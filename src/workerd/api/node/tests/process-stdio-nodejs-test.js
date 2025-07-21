@@ -205,3 +205,31 @@ export const fdBasedOperationsTest = {
     );
   },
 };
+
+export const largeWriteTruncationTest = {
+  test() {
+    const largeBuffer = Buffer.alloc(4001 * 5, 'A'.repeat(4000) + '\n');
+    largeBuffer[0] = 66;
+    largeBuffer[4001 * 5 - 1] = 67;
+    const bytesWritten = writeSync(1, largeBuffer);
+
+    assert.strictEqual(
+      bytesWritten,
+      16 * 1024,
+      'Direct fd write should be truncated to 16KiB'
+    );
+  },
+};
+
+export const lineBufferTruncationTest = {
+  async test() {
+    process.stdout.write(Buffer.alloc(4096, 'AB'));
+    process.stdout.write('X');
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    process.stdout.write('AFTER_FLUSH\n');
+    process.stdout.write(Buffer.alloc(3000, 'C'));
+    process.stdout.write(Buffer.alloc(2000, 'D'));
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    process.stdout.write('END_ROLLING\n');
+  },
+};

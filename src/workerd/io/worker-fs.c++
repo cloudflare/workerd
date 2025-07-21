@@ -1796,9 +1796,9 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
 
   kj::OneOf<FsError, uint32_t> write(
       jsg::Lock& js, uint32_t, kj::ArrayPtr<const kj::byte> buffer) override {
-    // Protect against unreasonably large writes.
-    if (buffer.size() > 16 * 1024) {
-      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    static constexpr size_t MAX_WRITE_SIZE = 16 * 1024;
+    if (buffer.size() > MAX_WRITE_SIZE) {
+      buffer = buffer.first(MAX_WRITE_SIZE);
     }
 
     if (buffer.size() == 0) return uint32_t(0);
