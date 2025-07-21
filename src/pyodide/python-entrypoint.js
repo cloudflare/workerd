@@ -26,7 +26,12 @@ async function doAnImport(name) {
 }
 
 // Pass the import function to the helper
-setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
+setDoAnImport(
+  doAnImport,
+  cloudflareWorkersModule,
+  cloudflareSocketsModule,
+  WorkerEntrypoint
+);
 
 // Initialise Python only after the import function has been set above.
 const { handlers, pythonEntrypointClasses, makeEntrypointClass } =
@@ -53,4 +58,4 @@ const pythonEntrypoints = Object.fromEntries(
 );
 
 export { pythonEntrypoints };
-export default handlers;
+export default 'default' in handlers ? handlers['default'] : handlers;
