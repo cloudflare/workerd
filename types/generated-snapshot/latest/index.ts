@@ -1735,9 +1735,15 @@ export interface RequestInit<Cf = CfProperties> {
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-export type Service<
-  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
-> = Fetcher<T>;
+export type Service<T = undefined> = Fetcher<
+  T extends new (...args: any[]) => infer EntrypointClass
+    ? EntrypointClass extends Rpc.WorkerEntrypointBranded
+      ? EntrypointClass
+      : undefined
+    : T extends Rpc.WorkerEntrypointBranded
+      ? T
+      : undefined
+>;
 export type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
