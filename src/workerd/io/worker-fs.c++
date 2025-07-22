@@ -1719,39 +1719,32 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
 // logging mechanisms. Reads always return EOF (0-byte reads).
 class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
  public:
-  StdioFile(VirtualFileSystem::Stdio type)
-      : type(type),
-        weakThis(kj::rc<WeakRef<StdioFile>>(kj::Badge<StdioFile>(), *this)) {}
+  StdioFile(VirtualFileSystem::Stdio type): type(type) {}
 
   ~StdioFile() noexcept(false) override {
-    weakThis->invalidate();
-    if (!flushCallback.IsEmpty()) {
-      flushCallback.Reset();
-    }
+    // flushCallback will be automatically cleaned up when V8 isolate is destroyed
+    // The strong reference in the callback keeps this object alive until callback completes
   }
 
-  void initFlushClosure(jsg::Lock& js) {
-    // Create the flush callback closure upfront with weak reference safety
+  void initFlushClosure(jsg::Lock& js, kj::Rc<StdioFile> self) {
+    // Create the flush callback closure upfront with strong reference to keep object alive
     auto callback = js.wrapSimpleFunction(js.v8Context(),
-        [weakThis = this->weakThis.addRef()](
-            jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
-      weakThis->runIfAlive([&](StdioFile& self) {
-        self.microtaskScheduled = false;
+        [self = kj::mv(self)](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) mutable {
+      self->microtaskScheduled = false;
 
-        if (self.stdoutLineBuffer.size() > 0) {
-          if (IoContext::hasCurrent()) {
-            writeStdio(js, VirtualFileSystem::Stdio::OUT, self.stdoutLineBuffer.asPtr());
-          }
-          self.stdoutLineBuffer.clear();
+      if (self->stdoutLineBuffer.size() > 0) {
+        if (IoContext::hasCurrent()) {
+          writeStdio(js, VirtualFileSystem::Stdio::OUT, self->stdoutLineBuffer.asPtr());
         }
+        self->stdoutLineBuffer.clear();
+      }
 
-        if (self.stderrLineBuffer.size() > 0) {
-          if (IoContext::hasCurrent()) {
-            writeStdio(js, VirtualFileSystem::Stdio::ERR, self.stderrLineBuffer.asPtr());
-          }
-          self.stderrLineBuffer.clear();
+      if (self->stderrLineBuffer.size() > 0) {
+        if (IoContext::hasCurrent()) {
+          writeStdio(js, VirtualFileSystem::Stdio::ERR, self->stderrLineBuffer.asPtr());
         }
-      });
+        self->stderrLineBuffer.clear();
+      }
     });
     flushCallback.Reset(js.v8Isolate, callback);
   }
@@ -1894,9 +1887,6 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
   // Pre-created flush callback closure
   v8::Global<v8::Function> flushCallback;
 
-  // Weak reference for safe async callbacks
-  kj::Rc<WeakRef<StdioFile>> weakThis;
-
   kj::Vector<kj::byte>& getLineBuffer() const {
     return (type == VirtualFileSystem::Stdio::OUT) ? stdoutLineBuffer : stderrLineBuffer;
   }
@@ -1945,7 +1935,7 @@ kj::Rc<VirtualFileSystem::OpenedFile> VirtualFileSystemImpl::getStdio(
     return existing.addRef();
   }
   auto stdioFile = kj::rc<StdioFile>(stdio);
-  stdioFile->initFlushClosure(js);
+  stdioFile->initFlushClosure(js, stdioFile.addRef());
   kj::Rc<workerd::File> file = kj::mv(stdioFile);
   auto opened = kj::rc<VirtualFileSystem::OpenedFile>(n, true, true, true, kj::mv(file));
   openedFiles.insert(n, opened.addRef());
