@@ -135,34 +135,6 @@ static const PythonConfig defaultConfig{
   .createBaselineSnapshot = false,
 };
 
-kj::Path getPyodideBundleFileName(kj::StringPtr version) {
-  return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
-}
-
-kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
-    const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir, kj::StringPtr version) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundleFileName(version);
-    auto file = dir->tryOpenFile(filename);
-
-    return file;
-  }
-
-  return kj::none;
-}
-
-void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir,
-    kj::StringPtr version,
-    kj::ArrayPtr<byte> bytes) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundleFileName(version);
-    auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-
-    replacer->get().writeAll(bytes);
-    replacer->commit();
-  }
-}
-
 kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     const Worker::Script::ModulesSource& source,
     const PythonConfig& pythonConfig,
@@ -335,61 +307,10 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 
 }  // namespace
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
+jsg::Bundle::Reader retrievePyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
-    return pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  }
-
-  auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
-  KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
-    auto body = pyodideBundleFile->readAllBytes();
-    pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-    return pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  }
-
-  if (version == "dev") {
-    // the "dev" version is special and indicates we're using the tip-of-tree version built for testing
-    // so we shouldn't fetch it from the internet, only check for its existence in the disk cache
-    return kj::none;
-  }
-
-  {
-    kj::Thread([&]() {
-      kj::String url =
-          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
-      KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
-      kj::AsyncIoContext io = kj::setupAsyncIo();
-      kj::HttpHeaderTable table;
-
-      kj::TlsContext::Options options;
-      options.useSystemTrustStore = true;
-
-      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
-      auto& network = io.provider->getNetwork();
-      auto tlsNetwork = tls->wrapNetwork(network);
-      auto& timer = io.provider->getTimer();
-
-      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
-
-      kj::HttpHeaders headers(table);
-
-      auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
-
-      auto res = req.response.wait(io.waitScope);
-      KJ_ASSERT(res.statusCode == 200,
-          kj::str(
-              "Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
-      auto body = res.body->readAllBytes().wait(io.waitScope);
-
-      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
-
-      pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-    });
-  }
-
-  KJ_LOG(INFO, "Loaded Pyodide package from internet");
-  return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle");
 }
 
 /**
@@ -788,8 +709,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
           "The python_workers compatibility flag is required to use Python.");
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
-      auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+      auto bundle = retrievePyodideBundle(impl->pythonConfig, version);
       // Inject SetupEmscripten module
       {
         auto emscriptenRuntime =
@@ -797,14 +717,6 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
         modules->addBuiltinModule("internal:setup-emscripten",
             jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
             workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      }
-
-      // Get Python requirements and fetch packages
-      KJ_IF_SOME(a, artifacts) {
-        KJ_IF_SOME(pm, a->packageManager) {
-          auto pythonRequirements = getPythonRequirements(source);
-          fetchPyodidePackages(impl->pythonConfig, pm, pythonRequirements, pythonRelease);
-        }
       }
 
       // Inject Pyodide bundle
@@ -1291,16 +1203,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       // Inject metadata that the entrypoint module will read.
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
-      auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
-
-      // Get Python requirements and fetch packages
-      KJ_IF_SOME(a, artifacts) {
-        KJ_IF_SOME(pm, a->packageManager) {
-          auto pythonRequirements = getPythonRequirements(source);
-          fetchPyodidePackages(pythonConfig, pm, pythonRequirements, pythonRelease);
-        }
-      }
+      auto bundle = retrievePyodideBundle(pythonConfig, version);
 
       // We end up add modules from the bundle twice, once to get BUILTIN modules
       // and again to get the BUILTIN_ONLY modules. These end up in two different

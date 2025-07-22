@@ -734,12 +734,10 @@ kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
     const PyodidePackageManager& pyodidePackageManager,
     kj::StringPtr packagesVersion,
     kj::StringPtr filename,
-    kj::HttpClient& client,
-    kj::Timer& timer,
-    kj::HttpHeaderTable& table) {
+    kj::Network& network,
+    kj::Timer& timer) {
 
   auto path = kj::str("python-package-bucket/", packagesVersion, "/", filename);
-
   // First check if we already have this package in memory
   if (pyodidePackageManager.getPyodidePackage(path) != kj::none) {
     co_return;
@@ -770,10 +768,17 @@ kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
   }
 
   // Need to fetch from network
-  kj::String url =
-      kj::str("https://storage.googleapis.com/cloudflare-edgeworker-python-packages/", path);
+  kj::HttpHeaderTable table;
+  kj::TlsContext::Options tlsOptions;
+  tlsOptions.useSystemTrustStore = true;
+  kj::Own<kj::TlsContext> tlsContext = kj::heap<kj::TlsContext>(kj::mv(tlsOptions));
 
-  auto maybeBody = co_await downloadPackageWithRetry(client, timer, table, url, path);
+  auto tlsNetwork = tlsContext->wrapNetwork(network);
+  auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
+
+  kj::String url = kj::str(PYTHON_PACKAGES_URL, path);
+
+  auto maybeBody = co_await downloadPackageWithRetry(*client, timer, table, url, path);
   KJ_IF_SOME(body, maybeBody) {
     // Successfully downloaded the package
     // Save the compressed data to disk cache (if enabled)
@@ -801,41 +806,107 @@ kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
   co_return;
 }
 
-void fetchPyodidePackages(const PythonConfig& pyConfig,
+kj::Promise<void> fetchPyodidePackages(const PythonConfig& pyConfig,
     const PyodidePackageManager& pyodidePackageManager,
     kj::ArrayPtr<kj::String> pythonRequirements,
-    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease) {
+    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease,
+    kj::Network& network,
+    kj::Timer& timer) {
   auto packagesVersion = pythonSnapshotRelease.getPackages();
 
   auto pyodideLock = getPyodideLock(pythonSnapshotRelease);
   if (pyodideLock == kj::none) {
     KJ_LOG(WARNING, "No lock file found for Python packages version", packagesVersion);
-    return;
+    co_return;
   }
 
   auto filenames =
       getPythonPackageFiles(KJ_ASSERT_NONNULL(pyodideLock), pythonRequirements, packagesVersion);
 
-  kj::Thread([&]() {
-    kj::AsyncIoContext ioContext = kj::setupAsyncIo();
-    kj::HttpHeaderTable table;
-    kj::TlsContext::Options tlsOptions;
-    tlsOptions.useSystemTrustStore = true;
-    kj::Own<kj::TlsContext> tlsContext = kj::heap<kj::TlsContext>(kj::mv(tlsOptions));
+  kj::Vector<kj::Promise<void>> promises;
+  for (const auto& filename: filenames) {
+    promises.add(loadPyodidePackage(
+        pyConfig, pyodidePackageManager, packagesVersion, filename, network, timer));
+  }
 
-    auto& network = ioContext.provider->getNetwork();
-    auto tlsNetwork = tlsContext->wrapNetwork(network);
-    auto& timer = ioContext.provider->getTimer();
+  co_await kj::joinPromisesFailFast(promises.releaseAsArray());
+}
 
-    auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
-    kj::Vector<kj::Promise<void>> promises;
-    for (const auto& filename: filenames) {
-      promises.add(loadPyodidePackage(
-          pyConfig, pyodidePackageManager, packagesVersion, filename, *client, timer, table));
-    }
+// Helper functions for bundle file operations
+kj::Path getPyodideBundleFileName(kj::StringPtr version) {
+  return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
+}
 
-    kj::joinPromises(promises.releaseAsArray()).wait(ioContext.waitScope);
-  });
+kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
+    const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir, kj::StringPtr version) {
+  KJ_IF_SOME(dir, maybeDir) {
+    kj::Path filename = getPyodideBundleFileName(version);
+    auto file = dir->tryOpenFile(filename);
+
+    return file;
+  }
+
+  return kj::none;
+}
+
+void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir,
+    kj::StringPtr version,
+    kj::ArrayPtr<byte> bytes) {
+  KJ_IF_SOME(dir, maybeDir) {
+    kj::Path filename = getPyodideBundleFileName(version);
+    auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+    replacer->get().writeAll(bytes);
+    replacer->commit();
+  }
+}
+
+// Used to preload the Pyodide bundle during workerd startup
+kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
+    const PythonConfig& pyConfig, kj::String version, kj::Network& network, kj::Timer& timer) {
+  if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
+    co_return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  }
+
+  auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
+  KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
+    auto body = pyodideBundleFile->readAllBytes();
+    pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
+    co_return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  }
+
+  if (version == "dev") {
+    // the "dev" version is special and indicates we're using the tip-of-tree version built for testing
+    // so we shouldn't fetch it from the internet, only check for its existence in the disk cache
+    co_return kj::none;
+  }
+
+  kj::String url =
+      kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
+  KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
+  kj::HttpHeaderTable table;
+
+  kj::TlsContext::Options options;
+  options.useSystemTrustStore = true;
+
+  kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
+  auto tlsNetwork = tls->wrapNetwork(network);
+  auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
+
+  kj::HttpHeaders headers(table);
+
+  auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
+
+  auto res = co_await req.response;
+  KJ_ASSERT(res.statusCode == 200,
+      kj::str("Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
+  auto body = co_await res.body->readAllBytes();
+
+  writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
+
+  pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
+
+  co_return pyConfig.pyodideBundleManager.getPyodideBundle(version);
 }
 
 }  // namespace api::pyodide

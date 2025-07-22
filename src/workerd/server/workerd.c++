@@ -840,8 +840,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto features = message.getRoot<CompatibilityFlags>();
       features.setPythonWorkers(true);
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(features));
-      auto version = getPythonBundleName(pythonRelease);
-      KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
 
       auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
 
