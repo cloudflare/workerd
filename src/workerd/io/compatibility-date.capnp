@@ -883,4 +883,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables a "pedantic mode" for WPT compliance. Multiple changes are grouped under
   # this flag that are known to be required to pass more web platform tests but which
   # otherwise are likely not to be strictly necessary for most users.
+
+  d1DirectBinding @102 :Bool
+      $compatEnableFlag("d1_direct_binding")
+      $experimental;
+  # Enables bypassing FL by translating pipeline tunnel configuration to subpipeline.
+  # This flag is used only by the internal repo and not directly by workerd.
 }
