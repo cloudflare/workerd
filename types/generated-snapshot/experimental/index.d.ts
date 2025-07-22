@@ -1761,14 +1761,20 @@ interface RequestInit<Cf = CfProperties> {
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-type Service<T = undefined> = Fetcher<
+type Service<
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = Fetcher<
   T extends new (...args: any[]) => infer EntrypointClass
-    ? EntrypointClass extends Rpc.WorkerEntrypointBranded
-      ? EntrypointClass
-      : undefined
+    ? EntrypointClass
     : T extends Rpc.WorkerEntrypointBranded
       ? T
-      : undefined
+      : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+        ? never
+        : undefined
 >;
 type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
