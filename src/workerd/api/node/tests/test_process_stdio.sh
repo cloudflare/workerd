@@ -23,16 +23,16 @@ trap "rm -f $ACTUAL_STDOUT $ACTUAL_STDERR $FILTERED_STDOUT $FILTERED_STDERR" EXI
 # Remove [ PASS ] [ TEST ] [ FAIL ] lines from stderr
 grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]" "$ACTUAL_STDERR" > "$FILTERED_STDERR"
 
-# Compare with expected output
+# Compare with expected output (normalize line endings for cross-platform compatibility)
 echo "Comparing stdout..."
-if ! diff -u "$SCRIPT_DIR/process-stdio-nodejs-test.expected_stdout" "$ACTUAL_STDOUT"; then
+if ! diff -u <(tr -d '\r' < "$SCRIPT_DIR/process-stdio-nodejs-test.expected_stdout") <(tr -d '\r' < "$ACTUAL_STDOUT"); then
     echo "FAIL: stdout does not match expected output"
     exit 1
 fi
 
 # Compare with expected output
 echo "Comparing stderr..."
-if ! diff -u "$SCRIPT_DIR/process-stdio-nodejs-test.expected_stderr" "$FILTERED_STDERR"; then
+if ! diff -u <(tr -d '\r' < "$SCRIPT_DIR/process-stdio-nodejs-test.expected_stderr") <(tr -d '\r' < "$FILTERED_STDERR"); then
     echo "FAIL: stderr does not match expected output"
     exit 1
 fi

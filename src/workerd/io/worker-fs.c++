@@ -1725,6 +1725,7 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
 
   ~StdioFile() noexcept(false) override {
     weakThis->invalidate();
+    flushCallback.Reset();
   }
 
   void initFlushClosure(jsg::Lock& js) {
