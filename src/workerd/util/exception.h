@@ -10,5 +10,7 @@ namespace workerd {
 
 // If an exception is thrown for exceeding memory limits, it will contain this detail.
 constexpr kj::Exception::DetailTypeId MEMORY_LIMIT_DETAIL_ID = 0xbaf76dd7ce5bd8cfull;
+// If an exception is thrown during script startup, it will contain this detail.
+constexpr kj::Exception::DetailTypeId STARTUP_EXCEPTION_DETAIL_ID = 0xcaf0272e1ce736b6ull;
 
 }  // namespace workerd

@@ -302,8 +302,10 @@ void reportStartupError(kj::StringPtr id,
               message.addJsStackTrace(js, lines);
               auto trace = kj::strArray(lines, "; ");
               auto description = KJ_ASSERT_NONNULL(permanentException).getDescription();
-              KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
-              KJ_FAIL_REQUIRE("script startup threw exception");
+              auto e =
+                  KJ_EXCEPTION(FAILED, "script startup threw exception", id, description, trace);
+              e.setDetail(STARTUP_EXCEPTION_DETAIL_ID, kj::heapArray<kj::byte>(0));
+              kj::throwFatalException(kj::mv(e));
             }
           });
         } else {
