@@ -29,6 +29,10 @@ class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
   const kj::Maybe<jsg::Bundle::Reader> getPyodideBundle(kj::StringPtr version) const;
+  
+  // Get or create a forked promise for concurrent bundle loading
+  kj::Promise<void> getOrCreateBundlePromise(kj::String version, 
+      kj::Function<kj::Promise<void>()> createPromise) const;
 
  private:
   struct MessageBundlePair {
@@ -36,15 +40,25 @@ class PyodideBundleManager {
     jsg::Bundle::Reader bundle;
   };
   const kj::MutexGuarded<kj::HashMap<kj::String, MessageBundlePair>> bundles;
+  
+  // Store forked promises for concurrent access
+  const kj::MutexGuarded<kj::HashMap<kj::String, kj::ForkedPromise<void>>> bundlePromises;
 };
 
 class PyodidePackageManager {
  public:
   void setPyodidePackageData(kj::String id, kj::Array<unsigned char> data) const;
   const kj::Maybe<const kj::Array<unsigned char>&> getPyodidePackage(kj::StringPtr id) const;
+  
+  // Get or create a forked promise for concurrent package loading
+  kj::Promise<void> getOrCreatePackagePromise(kj::String id, 
+      kj::Function<kj::Promise<void>()> createPromise) const;
 
  private:
   const kj::MutexGuarded<kj::HashMap<kj::String, kj::Array<unsigned char>>> packages;
+  
+  // Store forked promises for concurrent access
+  const kj::MutexGuarded<kj::HashMap<kj::String, kj::ForkedPromise<void>>> packagePromises;
 };
 
 struct PythonConfig {
