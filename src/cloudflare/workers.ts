@@ -100,8 +100,8 @@ export function registerFetchEvents({ port }: { port?: number } = {}): unknown {
   return {
     async fetch(
       request: Request,
-      env: unknown,
-      ctx: unknown
+      _env: unknown,
+      _ctx: unknown
     ): Promise<Response> {
       const instance = portMapper.get(port);
       if (!instance) {
@@ -110,7 +110,7 @@ export function registerFetchEvents({ port }: { port?: number } = {}): unknown {
           { status: 404 }
         );
       }
-      return instance.fetch(request, env, ctx);
+      return instance.fetch(request);
     },
   };
 }

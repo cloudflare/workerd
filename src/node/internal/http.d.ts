@@ -1,4 +1,4 @@
 export const portMapper: Map<
   number,
-  { fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> }
+  { fetch: (request: Request) => Promise<Response> }
 >;

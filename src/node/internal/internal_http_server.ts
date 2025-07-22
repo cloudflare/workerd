@@ -24,7 +24,6 @@ import {
   validateBoolean,
   validateInteger,
   validateObject,
-  validateLinkHeaderValue,
   validatePort,
 } from 'node-internal:validators';
 import { portMapper } from 'cloudflare-internal:http';
@@ -39,6 +38,7 @@ import {
   _checkInvalidHeaderChar,
 } from 'node-internal:internal_http';
 import { _normalizeArgs } from 'node-internal:internal_net';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import type {
   Server as _Server,
@@ -212,11 +212,7 @@ export class Server
     return this;
   }
 
-  async #onRequest(
-    request: Request,
-    _env: unknown,
-    _ctx: unknown
-  ): Promise<Response> {
+  async #onRequest(request: Request): Promise<Response> {
     const { incoming, response } = this.#toReqRes(request);
     this.emit('connection', this, incoming);
     this.emit('request', incoming, response);
@@ -315,8 +311,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
   implements _ServerResponse
 {
-  _sent100 = false;
-  _expect_continue = false;
   override [kOutHeaders]: Record<string, [string, string | string[]]> | null =
     null;
 
@@ -464,7 +458,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       }
     }
 
-    return data ?? Buffer.from([]);
+    return data ?? Buffer.alloc(0);
   }
 
   assignSocket(_socket: Socket): void {
@@ -479,44 +473,21 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     throw new ERR_METHOD_NOT_IMPLEMENTED('detachSocket');
   }
 
-  writeContinue(cb: VoidFunction): void {
-    this._writeRaw('HTTP/1.1 100 Continue\r\n\r\n', 'ascii', cb);
-    this._sent100 = true;
+  writeContinue(_cb: VoidFunction): void {
+    // There is no path forward to support this with fetch or kj.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeContinue');
   }
 
   // Ref: https://github.com/DefinitelyTyped/DefinitelyTyped/pull/73275
   // @ts-expect-error TS2416 This is a bug with @types/node.
-  writeProcessing(cb: VoidFunction): void {
-    this._writeRaw('HTTP/1.1 102 Processing\r\n\r\n', 'ascii', cb);
+  writeProcessing(_cb: VoidFunction): void {
+    // There is no path forward to support this with fetch or kj.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeProcessing');
   }
 
-  writeEarlyHints(hints: unknown, cb: VoidFunction): void {
-    let head = 'HTTP/1.1 103 Early Hints\r\n';
-
-    validateObject(hints, 'hints');
-
-    if (hints.link === null || hints.link === undefined) {
-      return;
-    }
-
-    const link = validateLinkHeaderValue(hints.link);
-
-    if (link.length === 0) {
-      return;
-    }
-
-    head += 'Link: ' + link + '\r\n';
-
-    for (const key of Object.keys(hints)) {
-      if (key !== 'link') {
-        // eslint-disable-next-line @typescript-eslint/restrict-plus-operands
-        head += key + ': ' + hints[key] + '\r\n';
-      }
-    }
-
-    head += '\r\n';
-
-    this._writeRaw(head, 'ascii', cb);
+  writeEarlyHints(_hints: unknown, _cb: VoidFunction): void {
+    // There is no path forward to support this with fetch or kj.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('writeEarlyHints');
   }
 
   override _implicitHeader(): void {
@@ -614,12 +585,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       // consisting only of the Status-Line and optional headers, and is
       // terminated by an empty line.
       this._hasBody = false;
-    }
-
-    // Don't keep alive connections where the client expects 100 Continue
-    // but we sent a final status; they may put extra bytes on the wire.
-    if (this._expect_continue && !this._sent100) {
-      this.shouldKeepAlive = false;
     }
 
     // Convert headers to a compatible type for _storeHeader
