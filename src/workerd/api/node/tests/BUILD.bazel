@@ -219,7 +219,12 @@ wd_test(
 sh_test(
     name = "process-stdio-sh-test",
     srcs = ["test_process_stdio.sh"],
-    args = ["$(location //src/workerd/server:workerd_cross)"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-nodejs-test.wd-test)",
+        "$(location process-stdio-nodejs-test.expected_stdout)",
+        "$(location process-stdio-nodejs-test.expected_stderr)",
+    ],
     data = [
         "process-stdio-nodejs-test.expected_stderr",
         "process-stdio-nodejs-test.expected_stdout",
