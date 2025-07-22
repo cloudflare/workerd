@@ -4,9 +4,12 @@
 
 #include <workerd/io/worker.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
-MessagePort::MessagePort(): state(Pending()) {
+MessagePort::MessagePort()
+    : weakThis(kj::refcounted<WeakRef<MessagePort>>(kj::Badge<MessagePort>{}, *this)),
+      state(Pending()) {
   // We set a callback on the underlying EventTarget to be notified when
   // a listener for the message event is added or removed. When there
   // are no listeners, we move back to the Pending state, otherwise we
@@ -79,8 +82,8 @@ void MessagePort::deliver(jsg::Lock& js, const jsg::JsValue& value) {
 // Binds two ports to each other such that messages posted to one
 // are delivered on the other.
 void MessagePort::entangle(MessagePort& port1, MessagePort& port2) {
-  port1.other = port2.addRef();
-  port2.other = port1.addRef();
+  port1.other = port2.addWeakRef();
+  port2.other = port1.addWeakRef();
 }
 
 // Post a message to the entangled port.
@@ -105,7 +108,7 @@ void MessagePort::postMessage(jsg::Lock& js,
   JSG_REQUIRE(!hasTransfer, Error, "Transfer list is not supported");
 
   // If the port is closed, other will be kj::none and we will just drop the message.
-  KJ_IF_SOME(o, other) {
+  other->runIfAlive([&](MessagePort& o) {
     jsg::Serializer ser(js);
 
     KJ_IF_SOME(d, data) {
@@ -121,8 +124,8 @@ void MessagePort::postMessage(jsg::Lock& js,
     // Now, deserialize the message into a JsValue
     jsg::Deserializer deserializer(js, released);
     auto clonedData = deserializer.readValue(js);
-    o->deliver(js, clonedData);
-  }
+    o.deliver(js, clonedData);
+  });
 }
 
 void MessagePort::closeImpl() {
@@ -130,21 +133,15 @@ void MessagePort::closeImpl() {
   // already scheduled for delivery in the `start()` or `deliver()` methods.
   if (state.is<Closed>()) return;
   state = Closed{};
-  KJ_IF_SOME(o, other) {
-    auto closing = kj::mv(o);
-    other = kj::none;
-    closing->closeImpl();
-  }
+  weakThis->invalidate();
+  other->runIfAlive([&](MessagePort& o) { o.closeImpl(); });
 }
 
 void MessagePort::close(jsg::Lock& js) {
   if (state.is<Closed>()) return;
   state = Closed{};
-  KJ_IF_SOME(o, other) {
-    auto closing = kj::mv(o);
-    other = kj::none;
-    closing->close(js);
-  }
+  weakThis->invalidate();
+  other->runIfAlive([&](MessagePort& o) { o.close(js); });
   auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
   dispatchEventImpl(js, kj::mv(closeEvent));
 }

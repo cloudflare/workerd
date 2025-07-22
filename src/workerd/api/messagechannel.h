@@ -4,13 +4,52 @@
 #include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/weak-refs.h>
 
 namespace workerd::api {
 
-// An implementation of the Web platform standard MessagePort.
+// A closely approximate implementation of the Web platform standard MessagePort.
 // MessagePorts always come in pairs. When a message is posted to
 // one it is delivered to the other, and vice versa. When one port
 // is closed both ports are closed.
+//
+// This intentionally does not implement the full MessagePort spec and we know
+// that it varies from the standard definition in a number of ways:
+//
+// - It does not support transfer lists. We do not implement the transfer
+//   list semantics, but we do validate the transfer list input to an extent.
+// - It does not support serialization/deserialization. It's not possible to
+//   send a MessagePort anywhere currently.
+// - The `messageerror` event is only partially implemented. Currently, if a
+//   message data cannot be serialized/deserialized it will throw an error
+//   synchronously when posted rather than dispatching the `messageerror` event
+//   on the receiving port, this is just easiest to implement for now and makes
+//   the most sense for our current use case since the MessagePort only ever
+//   passes messages around within the same isolate (that is, we're not sending
+//   the serialized data off anywhere, we're just cloning it and dispatching it.)
+// - We intentionally do not implement the "port message queue" semantics exactly
+//   as they are described in the spec. When a MessagePort has an onmessage listener,
+//   the message delivery is flowing, when there is no onmessage listener, the
+//   messages are queued up until the port is started. Because we are storing
+//   these as JS values, we don't worry about extra memory accounting for the queue.
+// - We do not emit the close event on entangled ports when one of them is GC'd.
+// - We do not check to see if a MessagePort is entangled with another when we
+//   call entangle because there's only one way to entangle them currently and
+//   it's impossible for them to be already entangled.
+// - We do not implement disentangle steps other than to invalidate the weak
+//   ref to the other port when one of them is closed.
+// - We do not prevent a MessagePort from being garbage collected while it has
+//   messages queued up. Eventually when we implement ser/deser this might change.
+// - Unlike the implementation in Node.js, not closing a MessagePort does not
+//   prevent anything from exiting. It's best to close MessagePorts manually
+//   but the current implementation does not require it.
+//
+// Because of these differences we do not currently run the full suite of web
+// platform tests against our implementation -- we know most of them will fail
+// since most of them depend on the ability to transfer MessagePorts or depend
+// on the mechanisms we do not implement. And yes, we know that this means that
+// if we need stricter compliance with the spec in the future we will likely
+// need to introduce a compat flag.
 class MessagePort final: public EventTarget {
  public:
   // While we do not support transfer lists in the implementation
@@ -68,7 +107,7 @@ class MessagePort final: public EventTarget {
   static void entangle(MessagePort& port1, MessagePort& port2);
 
   kj::Maybe<MessagePort&> getOther() {
-    return other.map([](auto& port) mutable -> MessagePort& { return *port; });
+    return other->tryGet().map([](MessagePort& o) -> MessagePort& { return o; });
   }
 
   // TODO(soon): Support serialization/deserialization to use MessagePort
@@ -85,8 +124,20 @@ class MessagePort final: public EventTarget {
 
   void dispatchMessage(jsg::Lock& js, const jsg::JsValue& value);
 
+  kj::Own<WeakRef<MessagePort>> addWeakRef() {
+    KJ_ASSERT(weakThis->isValid());
+    return kj::addRef(*weakThis);
+  }
+
+  kj::Own<WeakRef<MessagePort>> weakThis;
   kj::OneOf<Pending, Started, Closed> state;
-  kj::Maybe<jsg::Ref<MessagePort>> other;
+
+  // Two ports are entangled when they weakly reference each other.
+  // Keep in mind that this is a weak reference! So if one of the
+  // ports gets GC'd the other will will also end up being closed.
+  // To keep them both alive, maintain strong references to both
+  // ports!
+  kj::Own<WeakRef<MessagePort>> other;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> onmessageValue;
 };
 
