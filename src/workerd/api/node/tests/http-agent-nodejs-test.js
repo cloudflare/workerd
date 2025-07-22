@@ -8,7 +8,7 @@ import { strictEqual, ok } from 'node:assert';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
-    const keys = ['PONG_SERVER_PORT'];
+    const keys = ['SIDECAR_HOST', 'PONG_SERVER_PORT'];
     for (const key of keys) {
       strictEqual(typeof env[key], 'string');
       ok(env[key].length > 0);
@@ -70,6 +70,7 @@ export const testHttpAgentNull = {
       {
         agent: null,
         port: env.PONG_SERVER_PORT,
+        host: env.SIDECAR_HOST,
       },
       resolve
     );

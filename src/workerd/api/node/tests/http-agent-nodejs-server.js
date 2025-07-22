@@ -6,8 +6,9 @@
 // It is executed using the appropriate Node.js version defined in WORKSPACE.
 const http = require('node:http');
 
-function reportPort(server) {
-  console.info(`Listening on port ${server.address().port}`);
+function reportAddress(server) {
+  const address = server.address();
+  console.info(`Listening on ${address.address}:${address.port}`);
 }
 
 const pongServer = http.createServer((req, res) => {
@@ -17,4 +18,6 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(process.env.PONG_SERVER_PORT, () => reportPort(pongServer));
+pongServer.listen(process.env.PONG_SERVER_PORT, process.env.SIDECAR_HOST, () =>
+  reportAddress(pongServer)
+);

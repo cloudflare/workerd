@@ -284,6 +284,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "wpt", service = "wpt"),
           (name = "unsafe", unsafeEval = void),
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
           (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
@@ -383,7 +384,7 @@ export PATH="$PATH:/usr/sbin"
 cd $(dirname $0)
 {python} wpt.py serve --no-h2 --config /dev/stdin <<EOF
 {{
-  "server_host": "localhost",
+  "server_host": "$SIDECAR_HOSTNAME",
   "check_subdomains": false,
   "ports": {{
     "http": [$HTTP_PORT, "auto"],
