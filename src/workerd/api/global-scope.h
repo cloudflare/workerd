@@ -684,10 +684,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(CountQueuingStrategy);
     JSG_NESTED_TYPE(ErrorEvent);
 
-    if (flags.getEnableMessageChannel()) {
-      JSG_NESTED_TYPE(MessageChannel);
-      JSG_NESTED_TYPE(MessagePort);
-    }
+    JSG_NESTED_TYPE(MessageChannel);
+    JSG_NESTED_TYPE(MessagePort);
 
     if (flags.getWebFileSystem()) {
       JSG_NESTED_TYPE(FileSystemHandle);

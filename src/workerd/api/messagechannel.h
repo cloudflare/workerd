@@ -13,64 +13,6 @@ namespace workerd::api {
 // is closed both ports are closed.
 class MessagePort final: public EventTarget {
  public:
-  // There are several variations of MessageEvent implemented in
-  // the runtime. This one is specific to MessagePort.
-  class MessageEvent final: public Event {
-   public:
-    static jsg::Ref<MessageEvent> New(jsg::Lock& js,
-        jsg::JsRef<jsg::JsValue> data,
-        kj::String lastEventId,
-        jsg::Ref<MessagePort> source,
-        kj::Array<jsg::Ref<MessagePort>> ports);
-    static jsg::Ref<MessageEvent> NewError(jsg::Lock& js,
-        jsg::JsRef<jsg::JsValue> data,
-        kj::String lastEventId,
-        jsg::Ref<MessagePort> source,
-        kj::Array<jsg::Ref<MessagePort>> ports);
-
-    MessageEvent(kj::String name,
-        jsg::JsRef<jsg::JsValue> data,
-        kj::String lastEventId,
-        jsg::Ref<MessagePort> source,
-        kj::Array<jsg::Ref<MessagePort>> ports)
-        : Event(kj::mv(name)),
-          data(kj::mv(data)),
-          lastEventId(kj::mv(lastEventId)),
-          source(kj::mv(source)),
-          ports(kj::mv(ports)) {}
-
-    static jsg::Ref<MessageEvent> constructor() = delete;
-
-    jsg::JsRef<jsg::JsValue> getData(jsg::Lock& js) {
-      return data.addRef(js);
-    }
-    kj::StringPtr getLastEventId() {
-      return lastEventId;
-    };
-    jsg::Ref<MessagePort> getSource(jsg::Lock& js) {
-      return source.addRef();
-    };
-    kj::ArrayPtr<jsg::Ref<MessagePort>> getPorts(jsg::Lock& js) {
-      return ports;
-    }
-
-    JSG_RESOURCE_TYPE(MessageEvent) {
-      JSG_INHERIT(Event);
-      JSG_READONLY_PROTOTYPE_PROPERTY(data, getData);
-      JSG_READONLY_PROTOTYPE_PROPERTY(lastEventId, getLastEventId);
-      JSG_READONLY_PROTOTYPE_PROPERTY(source, getSource);
-      JSG_READONLY_PROTOTYPE_PROPERTY(ports, getPorts);
-      // The standard also defines the origin property, but we don't
-      // implement origin in this case so we leave it out.
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> data;
-    kj::String lastEventId;
-    jsg::Ref<MessagePort> source;
-    kj::Array<jsg::Ref<MessagePort>> ports;
-  };
-
   // While we do not support transfer lists in the implementation
   // currently, we do want to validate those inputs.
   using TransferList = kj::Array<jsg::JsRef<jsg::JsValue>>;
@@ -178,5 +120,4 @@ class MessageChannel final: public jsg::Object {
 }  // namespace workerd::api
 
 #define EW_MESSAGECHANNEL_ISOLATE_TYPES                                                            \
-  api::MessagePort, api::MessageChannel, api::MessagePort::PostMessageOptions,                     \
-      api::MessagePort::MessageEvent
+  api::MessagePort, api::MessageChannel, api::MessagePort::PostMessageOptions

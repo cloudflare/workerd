@@ -19,6 +19,7 @@
 #include <workerd/api/hyperdrive.h>
 #include <workerd/api/kv.h>
 #include <workerd/api/memory-cache.h>
+#include <workerd/api/messagechannel.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
@@ -81,7 +82,8 @@
   F("rtti", EW_RTTI_ISOLATE_TYPES)                                                                 \
   F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
   F("container", EW_CONTAINER_ISOLATE_TYPES)                                                       \
-  F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)
+  F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
+  F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)
 
 namespace workerd::api {
 

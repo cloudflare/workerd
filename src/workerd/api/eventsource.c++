@@ -5,6 +5,7 @@
 #include "eventsource.h"
 
 #include "http.h"
+#include "messagechannel.h"
 #include "streams/common.h"
 
 #include <workerd/io/features.h>
@@ -306,9 +307,10 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
     for (auto& message: messages) {
       auto data = kj::str(kj::delimited(kj::mv(message.data), "\n"_kjc));
       if (data.size() == 0) continue;
+      kj::String type = kj::mv(message.event).orDefault(kj::str("message"));
       dispatchEventImpl(js,
-          js.alloc<MessageEvent>(kj::mv(message.event), kj::mv(data), kj::mv(message.id),
-              impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
+          js.alloc<MessageEvent>(js, kj::mv(type), js.str(data), kj::mv(message.id),
+              kj::none /** source **/, impl.map([](FetchImpl& i) -> jsg::Url& { return i.url; })));
     }
   }, [&](jsg::Value exception) {
     // If we end up with an exception being thrown in one of the event handlers, we will

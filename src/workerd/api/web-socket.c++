@@ -5,6 +5,7 @@
 #include "web-socket.h"
 
 #include "events.h"
+#include "messagechannel.h"
 #include "util.h"
 
 #include <workerd/io/features.h>

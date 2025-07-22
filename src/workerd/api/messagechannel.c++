@@ -1,27 +1,11 @@
 #include "messagechannel.h"
 
+#include "events.h"
+
 #include <workerd/io/worker.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
-jsg::Ref<MessagePort::MessageEvent> MessagePort::MessageEvent::New(jsg::Lock& js,
-    jsg::JsRef<jsg::JsValue> data,
-    kj::String lastEventId,
-    jsg::Ref<MessagePort> source,
-    kj::Array<jsg::Ref<MessagePort>> ports) {
-  return jsg::alloc<MessagePort::MessageEvent>(
-      kj::str("message"), kj::mv(data), kj::mv(lastEventId), kj::mv(source), kj::mv(ports));
-}
-
-jsg::Ref<MessagePort::MessageEvent> MessagePort::MessageEvent::NewError(jsg::Lock& js,
-    jsg::JsRef<jsg::JsValue> data,
-    kj::String lastEventId,
-    jsg::Ref<MessagePort> source,
-    kj::Array<jsg::Ref<MessagePort>> ports) {
-  return jsg::alloc<MessagePort::MessageEvent>(
-      kj::str("messageerror"), kj::mv(data), kj::mv(lastEventId), kj::mv(source), kj::mv(ports));
-}
-
 MessagePort::MessagePort(): state(Pending()) {
   // We set a callback on the underlying EventTarget to be notified when
   // a listener for the message event is added or removed. When there
@@ -56,16 +40,14 @@ MessagePort::MessagePort(): state(Pending()) {
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
   js.tryCatch([&] {
-    auto message =
-        MessageEvent::New(js, jsg::JsRef<jsg::JsValue>(js, value), kj::String(), addRef(), {});
+    auto message = jsg::alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
   }, [&](jsg::Value exception) {
     // There was an error dispatching the message event.
     // We will dispatch a messageerror event instead.
-    auto errorMessage = MessageEvent::NewError(js,
-        jsg::JsRef<jsg::JsValue>(js, jsg::JsValue(exception.getHandle(js))), kj::String(), addRef(),
-        {});
-    dispatchEventImpl(js, kj::mv(errorMessage));
+    auto message = jsg::alloc<MessageEvent>(
+        js, kj::str("message"), jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
+    dispatchEventImpl(js, kj::mv(message));
     // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
   });
 }
@@ -78,6 +60,8 @@ void MessagePort::deliver(jsg::Lock& js, const jsg::JsValue& value) {
     KJ_CASE_ONEOF(pending, Pending) {
       // We have not yet started the port so buffer the message.
       // It will be delivered when the port is started.
+      // We don't know how many messages will be buffered, if any,
+      // so we avoid reserving space in the array.
       pending.add(jsg::JsRef(js, value));
     }
     KJ_CASE_ONEOF(started, Started) {
