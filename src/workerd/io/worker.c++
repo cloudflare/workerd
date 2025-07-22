@@ -3222,6 +3222,26 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     fprintf(stderr, "%s\n", description.cStr());
     fflush(stderr);
   }
+
+  KJ_DBG("logWarning", description);
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      auto timestamp = ioContext.now();
+
+      // JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+      //   auto jsDescription = js.str(description);
+      //   tracer.addLog(ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN,
+      //       js.serializeJson(jsDescription));
+      // });
+      auto codec = kj::heap<capnp::JsonCodec>();
+      auto jsonDescription = codec->encode(capnp::Text::Reader(description));
+      KJ_DBG(jsonDescription);
+
+      tracer.addLog(
+          ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN, kj::mv(jsonDescription));
+    }
+  }
 }
 
 void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
