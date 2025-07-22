@@ -12,13 +12,13 @@ export const checkPortsSetCorrectly = {
   },
 };
 
+// Tests is taken from test/parallel/test-http-server-multiheaders.js
 export const testHttpServerMultiHeaders = {
   async test(_ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
     const server = http.createServer(function (req, res) {
       strictEqual(req.headers.accept, 'abc, def, ghijklmnopqrst');
-      // TODO(soon): host should not be joined.
-      // strictEqual(req.headers.host, 'foo');
+      strictEqual(req.headers.host, 'foo');
       strictEqual(req.headers['www-authenticate'], 'foo, bar, baz');
       strictEqual(req.headers['proxy-authenticate'], 'foo, bar, baz');
       strictEqual(req.headers['x-foo'], 'bingo');
@@ -76,6 +76,82 @@ export const testHttpServerMultiHeaders = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server-non-utf8-header.js
+export const testHttpServerNonUtf8Header = {
+  async test(_ctrl, env) {
+    const nonUtf8Header = 'bår';
+    const nonUtf8ToLatin1 = Buffer.from(nonUtf8Header).toString('latin1');
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, [
+          'content-disposition',
+          Buffer.from(nonUtf8Header).toString('binary'),
+        ]);
+        res.end('hello');
+      });
+
+      server.listen(8080, async () => {
+        const res = await env.SERVICE.fetch('https://cloudflare.com', {
+          method: 'GET',
+        });
+        strictEqual(res.status, 200);
+        strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
+        server.close();
+        resolve();
+      });
+
+      await promise;
+    }
+
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      // Test multi-value header
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, [
+          'content-disposition',
+          [Buffer.from(nonUtf8Header).toString('binary')],
+        ]);
+        res.end('hello');
+      });
+
+      server.listen(8080, async () => {
+        const res = await env.SERVICE.fetch('https://cloudflare.com');
+        strictEqual(res.status, 200);
+        strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
+        server.close();
+        resolve();
+      });
+      await promise;
+    }
+
+    // TODO(soon): Investigate this.
+    // {
+    //   const { promise, resolve } = Promise.withResolvers();
+    //   const server = http.createServer((req, res) => {
+    //     res.writeHead(200, [
+    //       'Content-Length',
+    //       '5',
+    //       'content-disposition',
+    //       Buffer.from(nonUtf8Header).toString('binary'),
+    //     ]);
+    //     res.end('hello');
+    //   });
+    //
+    //   server.listen(8080);
+    //
+    //   const res = await env.SERVICE.fetch('https://cloudflare.com');
+    //   strictEqual(res.status, 200);
+    //   strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
+    //   server.close();
+    //   resolve();
+    //
+    //   await promise;
+    // }
+  },
+};
+
 export default registerFetchEvents({ port: 8080 });
 
 // Relevant Node.js tests
@@ -107,12 +183,10 @@ export default registerFetchEvents({ port: 8080 });
 // - [x] test/parallel/test-http-server-multiheaders.js
 // - [ ] test/parallel/test-http-server-multiheaders2.js
 // - [ ] test/parallel/test-http-server-multiple-client-error.js
-// - [ ] test/parallel/test-http-server-non-utf8-header.js
-// - [ ] test/parallel/test-http-server-options-highwatermark.js
+// - [x] test/parallel/test-http-server-non-utf8-header.js
 // - [ ] test/parallel/test-http-server-options-incoming-message.js
 // - [ ] test/parallel/test-http-server-options-server-response.js
 // - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
-// - [ ] test/parallel/test-http-server-reject-cr-no-lf.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-body.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-request-timeout-interrupted-body.js
@@ -128,3 +202,7 @@ export default registerFetchEvents({ port: 8080 });
 // - [ ] test/parallel/test-http-server-write-after-end.js
 // - [ ] test/parallel/test-http-server-write-end-after-end.js
 // - [ ] test/parallel/test-http-server.js
+
+// Tests that does not apply to workerd.
+// - [ ] test/parallel/test-http-server-options-highwatermark.js
+// - [ ] test/parallel/test-http-server-reject-cr-no-lf.js

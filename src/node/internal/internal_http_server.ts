@@ -233,7 +233,13 @@ export class Server
 
     const headers = [];
     for (const [key, value] of request.headers) {
-      headers.push(key, value);
+      if (key === 'host') {
+        // By default fetch implementation will join "host" header values with a comma.
+        // But in order to be node.js compatible, we need to select the first if possible.
+        headers.push(key, value.split(', ').at(0) as string);
+      } else {
+        headers.push(key, value);
+      }
     }
     incoming._addHeaderLines(headers, headers.length);
 
@@ -272,7 +278,9 @@ export class Server
 
     this.port = Number(options.port);
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
-    callback?.();
+    queueMicrotask(() => {
+      callback?.();
+    });
     return this;
   }
 
