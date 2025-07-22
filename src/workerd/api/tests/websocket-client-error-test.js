@@ -7,7 +7,9 @@
 
 export default {
   async test(controller, env) {
-    const ws = new WebSocket(`ws://localhost:${env.BIG_MESSAGE_SERVER_PORT}/`);
+    const ws = new WebSocket(
+      `ws://${env.SIDECAR_HOSTNAME}:${env.BIG_MESSAGE_SERVER_PORT}/`
+    );
     let receivedError = false;
 
     // Set up a promise to wait for errors

@@ -6,6 +6,7 @@ import { Writable } from 'node:stream';
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
     const keys = [
+      'SIDECAR_HOSTNAME',
       'FINISH_WRITABLE_PORT',
       'WRITABLE_FINISHED_PORT',
       'PROPERTIES_PORT',
@@ -38,6 +39,7 @@ export const testHttpOutgoingDestroy = {
 export const testHttpOutgoingFinishWritable = {
   async test(_ctrl, env) {
     const clientRequest = http.request({
+      hostname: env.SIDECAR_HOSTNAME,
       port: env.FINISH_WRITABLE_PORT,
       method: 'GET',
       path: '/',
@@ -67,6 +69,7 @@ export const testHttpOutgoingProperties = {
 
     {
       const req = http.request({
+        hostname: env.SIDECAR_HOSTNAME,
         port: env.PROPERTIES_PORT,
         method: 'GET',
         path: '/',
@@ -74,7 +77,7 @@ export const testHttpOutgoingProperties = {
 
       strictEqual(req.path, '/');
       strictEqual(req.method, 'GET');
-      strictEqual(req.host, 'localhost');
+      strictEqual(req.host, env.SIDECAR_HOSTNAME);
       strictEqual(req.protocol, 'http:');
       req.end();
     }
@@ -160,6 +163,7 @@ export const testHttpOutgoingWritableFinished = {
   async test(_ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
     const clientRequest = http.request({
+      hostname: env.SIDECAR_HOSTNAME,
       port: env.WRITABLE_FINISHED_PORT,
       method: 'GET',
       path: '/',

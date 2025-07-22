@@ -18,6 +18,8 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(process.env.PONG_SERVER_PORT, process.env.SIDECAR_HOST, () =>
-  reportAddress(pongServer)
+pongServer.listen(
+  process.env.PONG_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportAddress(pongServer)
 );

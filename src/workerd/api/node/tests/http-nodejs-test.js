@@ -4,6 +4,23 @@ import httpCommon from 'node:_http_common';
 import { inspect } from 'node:util';
 import http from 'node:http';
 
+export const checkPortsSetCorrectly = {
+  test(ctrl, env, ctx) {
+    const keys = [
+      'SIDECAR_HOSTNAME',
+      'PONG_SERVER_PORT',
+      'ASD_SERVER_PORT',
+      'TIMEOUT_SERVER_PORT',
+      'HELLO_WORLD_SERVER_PORT',
+      'HEADER_VALIDATION_SERVER_PORT',
+    ];
+    for (const key of keys) {
+      strictEqual(typeof env[key], 'string');
+      ok(env[key].length > 0);
+    }
+  },
+};
+
 // Tests are taken from
 // https://github.com/nodejs/node/blob/c514e8f781b2acedb6a2b42208d8f8f4d8392f09/test/parallel/test-http-header-validators.js
 export const testHttpHeaderValidators = {
@@ -260,6 +277,7 @@ export const testHttpContentLength = {
     let req;
 
     req = http.request({
+      hostname: env.SIDECAR_HOSTNAME,
       port: env.HELLO_WORLD_SERVER_PORT,
       method: 'POST',
       path: '/end-with-data',
@@ -275,6 +293,7 @@ export const testHttpContentLength = {
     });
 
     req = http.request({
+      hostname: env.SIDECAR_HOSTNAME,
       port: env.HELLO_WORLD_SERVER_PORT,
       method: 'POST',
       path: '/empty',
@@ -299,6 +318,7 @@ export const testHttpContentLength0 = {
     const { promise, resolve, reject } = Promise.withResolvers();
     const request = http.request(
       {
+        hostname: env.SIDECAR_HOSTNAME,
         port: env.HELLO_WORLD_SERVER_PORT,
         method: 'POST',
         path: '/content-length0',
@@ -321,13 +341,17 @@ export const testHttpDontSetDefaultHeadersWithSetHeader = {
     const { promise, resolve, reject } = Promise.withResolvers();
     const req = http.request({
       method: 'POST',
+      hostname: env.SIDECAR_HOSTNAME,
       port: env.HEADER_VALIDATION_SERVER_PORT,
       setDefaultHeaders: false,
       path: '/test-1',
     });
 
     req.setHeader('test', 'value');
-    req.setHeader('HOST', `localhost:${env.HEADER_VALIDATION_SERVER_PORT}`);
+    req.setHeader(
+      'HOST',
+      `${env.SIDECAR_HOSTNAME}:${env.HEADER_VALIDATION_SERVER_PORT}`
+    );
     req.setHeader('foo', ['bar', 'baz']);
     req.setHeader('connection', 'close');
     req.on('response', resolve);
@@ -346,6 +370,7 @@ export const testHttpDontSetDefaultHeadersWithSetHost = {
     http
       .request({
         method: 'POST',
+        hostname: env.SIDECAR_HOSTNAME,
         port: env.HEADER_VALIDATION_SERVER_PORT,
         setDefaultHeaders: false,
         setHost: true,
@@ -363,13 +388,19 @@ export const testHttpRequestEndTwice = {
   async test(_ctrl, env) {
     const { promise, resolve, reject } = Promise.withResolvers();
     const req = http
-      .get({ port: env.HEADER_VALIDATION_SERVER_PORT }, function (res) {
-        res.on('error', reject).on('end', function () {
-          strictEqual(req.end(), req);
-          resolve();
-        });
-        res.resume();
-      })
+      .get(
+        {
+          hostname: env.SIDECAR_HOSTNAME,
+          port: env.HEADER_VALIDATION_SERVER_PORT,
+        },
+        function (res) {
+          res.on('error', reject).on('end', function () {
+            strictEqual(req.end(), req);
+            resolve();
+          });
+          res.resume();
+        }
+      )
       .on('error', reject);
     await promise;
   },
@@ -379,7 +410,11 @@ export const testHttpRequestEndTwice = {
 export const testHttpSetTimeout = {
   async test(_ctrl, env) {
     const { promise, resolve, reject } = Promise.withResolvers();
-    const request = http.get({ port: env.TIMEOUT_SERVER_PORT, path: '/' });
+    const request = http.get({
+      hostname: env.SIDECAR_HOSTNAME,
+      port: env.TIMEOUT_SERVER_PORT,
+      path: '/',
+    });
     request.setTimeout(100);
     request.on('error', reject);
     request.on('timeout', resolve);
