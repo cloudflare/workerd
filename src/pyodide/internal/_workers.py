@@ -18,6 +18,7 @@ from typing import Any, TypedDict, Unpack
 import _pyodide_entrypoint_helper
 import js
 from js import Object
+from workers.workflows import NonRetryableError
 
 import pyodide.http
 from pyodide import __version__ as pyodide_version
@@ -201,12 +202,6 @@ def _to_python_exception(exc: JsException) -> Exception:
         return exc
 
 
-class NonRetryableError(Exception):
-    # This is a marker exception used to signal that a workflow step should not be retried.
-    # This is a special exception used by workflows
-    pass
-
-
 def _from_js_error(exc: JsException) -> Exception:
     # convert into Python exception after a full round trip
     # Python - JS - Python
@@ -219,7 +214,7 @@ def _from_js_error(exc: JsException) -> Exception:
         return TypeError(error_message_last_line)
     elif error_message_last_line.startswith("ValueError"):
         return ValueError(error_message_last_line)
-    elif error_message_last_line.startswith("_workers.NonRetryableError"):
+    elif error_message_last_line.startswith("workers.workflows.NonRetryableError"):
         return NonRetryableError(error_message_last_line)
     else:
         return _to_python_exception(exc)
@@ -989,6 +984,15 @@ class _WorkflowStepWrapper:
 
     def sleep_until(self, *args, **kwargs):
         return self._js_step.sleepUntil(*args, **kwargs)
+
+    def wait_for_event(self, name, event_type, /, timeout="24 hours"):
+        return self._js_step.waitForEvent(
+            name,
+            to_js(
+                {"type": event_type, "timeout": timeout},
+                dict_converter=Object.fromEntries,
+            ),
+        )
 
     async def _resolve_dependency(self, dep):
         if dep._step_name in self._memoized_dependencies:
