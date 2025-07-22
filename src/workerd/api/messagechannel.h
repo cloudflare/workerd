@@ -24,7 +24,7 @@ class MessagePort final: public EventTarget {
 
   MessagePort();
   ~MessagePort() noexcept(false) {
-    close();
+    closeImpl();
   }
 
   // MessagePort instances cannot be created directly.
@@ -34,7 +34,8 @@ class MessagePort final: public EventTarget {
   void postMessage(jsg::Lock& js,
       jsg::Optional<jsg::JsRef<jsg::JsValue>> data = kj::none,
       jsg::Optional<TransferListOrOptions> options = kj::none);
-  void close();
+  void closeImpl();
+  void close(jsg::Lock& js);
   void start(jsg::Lock& js);
 
   // Support the onmessage getter and setter. Per the spec, when

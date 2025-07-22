@@ -125,15 +125,28 @@ void MessagePort::postMessage(jsg::Lock& js,
   }
 }
 
-void MessagePort::close() {
+void MessagePort::closeImpl() {
   // Any pending messages will be dropped on the floor, except for those that were
   // already scheduled for delivery in the `start()` or `deliver()` methods.
+  if (state.is<Closed>()) return;
   state = Closed{};
   KJ_IF_SOME(o, other) {
     auto closing = kj::mv(o);
     other = kj::none;
-    closing->close();
+    closing->closeImpl();
   }
+}
+
+void MessagePort::close(jsg::Lock& js) {
+  if (state.is<Closed>()) return;
+  state = Closed{};
+  KJ_IF_SOME(o, other) {
+    auto closing = kj::mv(o);
+    other = kj::none;
+    closing->close(js);
+  }
+  auto closeEvent = js.alloc<Event>(kj::str("close"), Event::Init{}, true);
+  dispatchEventImpl(js, kj::mv(closeEvent));
 }
 
 // Start delivering messages on this port. Any messages that are

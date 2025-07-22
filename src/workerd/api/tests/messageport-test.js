@@ -43,12 +43,18 @@ export const simple2 = {
 export const simple3 = {
   async test() {
     const { port1, port2 } = new MessageChannel();
+
+    const closeHandler = mock.fn();
+    port1.onclose = closeHandler;
+    port2.onclose = closeHandler;
+
     port1.close();
     port2.onmessage = () => {
       throw new Error('should not be called');
     };
     port1.postMessage('nope');
     await scheduler.wait(10);
+    strictEqual(closeHandler.mock.callCount(), 2);
   },
 };
 
