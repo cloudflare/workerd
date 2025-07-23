@@ -1717,6 +1717,7 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
  public:
   StdioFile(VirtualFileSystem::Stdio type)
       : type(type),
+        // TODO(sometime): Investigate if we can refactor out the weakref here?
         weakThis(kj::rc<WeakRef<StdioFile>>(kj::Badge<StdioFile>(), *this)) {}
 
   ~StdioFile() noexcept(false) override {

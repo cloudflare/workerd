@@ -1,5 +1,5 @@
 import { ReadStream } from 'node:fs';
-import { readSync, writeSync } from 'node:fs';
+import { writeSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
 import { Readable, Writable } from 'node:stream';
 import assert from 'node:assert';
@@ -231,5 +231,25 @@ export const lineBufferTruncationTest = {
     process.stdout.write(Buffer.alloc(2000, 'D'));
     await new Promise((resolve) => setTimeout(resolve, 1));
     process.stdout.write('END_ROLLING\n');
+  },
+};
+
+export const multipleNewlinesStdoutTest = {
+  test() {
+    process.stdout.write('Line 1\nLine 2\nLine 3\n');
+    process.stdout.write('First\n\nSecond with empty line before\n');
+    process.stdout.write('Multiple trailing newlines\n\n\n');
+    process.stdout.write('Start\nMiddle1\nMiddle2\nEnd');
+    process.stdout.write('\n');
+  },
+};
+
+export const multipleNewlinesStderrTest = {
+  test() {
+    process.stderr.write('Error Line 1\nError Line 2\nError Line 3\n');
+    process.stderr.write('Error First\n\nError Second with empty line\n');
+    process.stderr.write('Error with trailing newlines\n\n\n');
+    process.stderr.write('Error Start\nError Mid1\nError Mid2\nError End');
+    process.stderr.write('\n');
   },
 };
