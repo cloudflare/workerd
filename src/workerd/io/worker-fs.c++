@@ -1698,20 +1698,16 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
   auto chars = bytes.asChars();
   size_t endPos = chars.size();
   if (chars[endPos - 1] == '\n') endPos--;
-  auto context = js.v8Context();
-  auto console =
-      jsg::check(context->Global()->Get(context, jsg::v8StrIntern(js.v8Isolate, "console")));
-  KJ_ASSERT(console->IsObject());
-  auto consoleObj = console.As<v8::Object>();
 
-  // Choose the appropriate console method based on stdio type
-  const char* methodName = (type == VirtualFileSystem::Stdio::OUT) ? "log" : "error";
-  auto method = jsg::check(consoleObj->Get(context, jsg::v8StrIntern(js.v8Isolate, methodName)));
-  KJ_ASSERT(method->IsFunction());
-  auto methodFunc = method.As<v8::Function>();
-
-  v8::Local<v8::Value> args[] = {jsg::v8StrIntern(js.v8Isolate, kj::str(chars.slice(0, endPos)))};
-  jsg::check(methodFunc->Call(context, consoleObj, 1, args));
+  KJ_IF_SOME(console, js.global().get(js, js.str("console"_kj)).tryCast<jsg::JsObject>()) {
+    auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "error"_kj);
+    v8::Local<v8::Value> methodVal(method);
+    if (methodVal->IsFunction()) {
+      auto methodFunc = methodVal.As<v8::Function>();
+      v8::Local<v8::Value> args[] = {js.str(chars.first(endPos))};
+      jsg::check(methodFunc->Call(js.v8Context(), console, 1, args));
+    }
+  }
 }
 
 // An StdioFile is a special file implementation used to represent stdin,
@@ -1790,7 +1786,6 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
         if (newlinePos < buffer.size()) {
           auto lineData = buffer.slice(pos, newlinePos + 1);
 
-          auto& lineBuffer = getLineBuffer();
           if (lineBuffer.size() > 0) {
             // We have buffered data - append the line data to it
             lineBuffer.addAll(lineData);
@@ -1804,7 +1799,6 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
           pos = newlinePos + 1;
         } else {
           // No newlines -> append to line buffer
-          auto& lineBuffer = getLineBuffer();
           auto remaining = buffer.slice(pos);
           auto totalSize = lineBuffer.size() + remaining.size();
 
@@ -1818,7 +1812,7 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
             } else {
               // Combined size exceeds limit, remove oldest data
               auto toRemove = totalSize - MAX_LINE_BUFFER_SIZE;
-              kj::Vector<kj::byte> newBuffer;
+              kj::Vector<kj::byte> newBuffer(MAX_LINE_BUFFER_SIZE);
               newBuffer.addAll(lineBuffer.slice(toRemove, lineBuffer.size()));
               newBuffer.addAll(remaining);
               lineBuffer = kj::mv(newBuffer);
@@ -1857,15 +1851,10 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
 
   static constexpr size_t MAX_LINE_BUFFER_SIZE = 4096;
   static constexpr size_t MAX_WRITE_SIZE = 16 * 1024;
-  mutable kj::Vector<kj::byte> stdoutLineBuffer;
-  mutable kj::Vector<kj::byte> stderrLineBuffer;
+  mutable kj::Vector<kj::byte> lineBuffer;
   mutable bool microtaskScheduled = false;
 
   kj::Rc<WeakRef<StdioFile>> weakThis;
-
-  kj::Vector<kj::byte>& getLineBuffer() const {
-    return (type == VirtualFileSystem::Stdio::OUT) ? stdoutLineBuffer : stderrLineBuffer;
-  }
 
   void scheduleFlushMicrotask(jsg::Lock& js) {
     if (microtaskScheduled) return;
@@ -1877,18 +1866,11 @@ class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
       weakThis->runIfAlive([&](StdioFile& self) {
         self.microtaskScheduled = false;
 
-        if (self.stdoutLineBuffer.size() > 0) {
+        if (self.lineBuffer.size() > 0) {
           if (IoContext::hasCurrent()) {
-            writeStdio(js, VirtualFileSystem::Stdio::OUT, self.stdoutLineBuffer.asPtr());
+            writeStdio(js, self.type, self.lineBuffer.asPtr());
           }
-          self.stdoutLineBuffer.clear();
-        }
-
-        if (self.stderrLineBuffer.size() > 0) {
-          if (IoContext::hasCurrent()) {
-            writeStdio(js, VirtualFileSystem::Stdio::ERR, self.stderrLineBuffer.asPtr());
-          }
-          self.stderrLineBuffer.clear();
+          self.lineBuffer.clear();
         }
       });
     });
