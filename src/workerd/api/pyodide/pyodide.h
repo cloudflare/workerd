@@ -491,33 +491,6 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
 
-// Downloads a package with retry logic (up to 3 attempts with 5-second delays)
-kj::Promise<kj::Maybe<kj::Array<byte>>> downloadPackageWithRetry(kj::HttpClient& client,
-    kj::Timer& timer,
-    kj::HttpHeaderTable& headerTable,
-    kj::StringPtr url,
-    kj::StringPtr path);
-
-// Loads a single Python package, either from disk cache or by downloading it
-kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
-    const PyodidePackageManager& pyodidePackageManager,
-    kj::StringPtr packagesVersion,
-    kj::StringPtr filename,
-    kj::Network& network,
-    kj::Timer& timer);
-
-// Preloads all required Python packages for a worker
-kj::Promise<void> fetchPyodidePackages(const PythonConfig& pyConfig,
-    const PyodidePackageManager& pyodidePackageManager,
-    kj::ArrayPtr<kj::String> pythonRequirements,
-    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease,
-    kj::Network& network,
-    kj::Timer& timer);
-
-// Preload Pyodide bundle during workerd startup
-kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
-    const PythonConfig& pyConfig, kj::String version, kj::Network& network, kj::Timer& timer);
-
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {
   // We add `pyodide:` packages here including python-entrypoint-helper.js.

@@ -96,6 +96,26 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "pyodide",
+    srcs = [
+        "pyodide.c++",
+    ],
+    hdrs = [
+        "pyodide.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
@@ -107,6 +127,7 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":fallback-service",
+        ":pyodide",
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/cloudflare",
