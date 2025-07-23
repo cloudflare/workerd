@@ -15,7 +15,9 @@
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/uuid.h>
 
+#include <capnp/message.h>
 #include <capnp/schema.h>
+#include <capnp/serialize.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -121,6 +123,17 @@ kj::String enumToStr(const Enum& var) {
   uint i = static_cast<uint>(var);
   KJ_ASSERT(i < enums.size(), "invalid enum value");
   return kj::str(enums[i].getProto().getName());
+}
+
+template <typename Enum>
+kj::Maybe<Enum> strToEnum(kj::StringPtr str) {
+  auto enums = capnp::Schema::from<Enum>().getEnumerants();
+  for (uint i = 0; i < enums.size(); i++) {
+    if (enums[i].getProto().getName() == str) {
+      return static_cast<Enum>(i);
+    }
+  }
+  return kj::none;  // Not found
 }
 
 kj::Own<TraceItem::FetchEventInfo::Request::Detail> getFetchRequestDetail(
@@ -308,6 +321,302 @@ uint TraceItem::getCpuTime() {
 
 uint TraceItem::getWallTime() {
   return wallTime;
+}
+
+void TraceItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  capnp::MallocMessageBuilder traceMessage;
+  auto trace = traceMessage.initRoot<rpc::Trace>();
+
+  auto outcome_ = strToEnum<workerd::EventOutcome>(outcome);
+  KJ_IF_SOME(o, outcome_) {
+    trace.setOutcome(o);
+  }
+
+  auto executionModel_ = strToEnum<rpc::Trace::ExecutionModel>(executionModel);
+  KJ_IF_SOME(em, executionModel_) {
+    trace.setExecutionModel(em);
+  }
+
+  trace.setCpuTime(cpuTime);
+  trace.setWallTime(wallTime);
+  trace.setTruncated(truncated);
+
+  KJ_IF_SOME(et, eventTimestamp) {
+    auto timestampNs = static_cast<int64_t>(et * (kj::MILLISECONDS / kj::NANOSECONDS));
+    trace.setEventTimestampNs(timestampNs);
+  }
+
+  KJ_IF_SOME(sn, scriptName) {
+    trace.setScriptName(sn);
+  }
+
+  KJ_IF_SOME(e, entrypoint) {
+    trace.setEntrypoint(e);
+  }
+
+  KJ_IF_SOME(dn, dispatchNamespace) {
+    trace.setDispatchNamespace(dn);
+  }
+
+  KJ_IF_SOME(sv, scriptVersion) {
+    auto version = trace.initScriptVersion();
+    KJ_IF_SOME(id, sv.id) {
+      KJ_IF_SOME(uuid, UUID::fromString(id)) {
+        auto versionId = version.initId();
+        versionId.setUpper(uuid.getUpper());
+        versionId.setLower(uuid.getLower());
+      }
+    }
+    KJ_IF_SOME(tag, sv.tag) {
+      version.setTag(tag);
+    }
+    KJ_IF_SOME(message, sv.message) {
+      version.setMessage(message);
+    }
+  }
+
+  KJ_IF_SOME(tags, scriptTags) {
+    auto list = trace.initScriptTags(tags.size());
+    for (auto i: kj::indices(tags)) {
+      list.set(i, tags[i]);
+    }
+  }
+
+  if (logs.size() > 0) {
+    auto logList = trace.initLogs(logs.size());
+    for (auto i: kj::indices(logs)) {
+      auto logBuilder = logList[i];
+
+      auto timestampNs =
+          static_cast<int64_t>(logs[i]->getTimestamp() * (kj::MILLISECONDS / kj::NANOSECONDS));
+      logBuilder.setTimestampNs(timestampNs);
+
+      // Convert level string back to enum using strToEnum
+      auto levelStr = logs[i]->getLevel();
+      KJ_IF_SOME(level, strToEnum<rpc::Trace::Log::Level>(levelStr)) {
+        logBuilder.setLogLevel(level);
+      }
+
+      auto messageJson = js.serializeJson(logs[i]->getMessage(js));
+      logBuilder.setMessage(messageJson);
+    }
+  }
+
+  if (exceptions.size() > 0) {
+    auto exceptionList = trace.initExceptions(exceptions.size());
+    for (auto i: kj::indices(exceptions)) {
+      auto exceptionBuilder = exceptionList[i];
+
+      auto timestampNs = static_cast<int64_t>(
+          exceptions[i]->getTimestamp() * (kj::MILLISECONDS / kj::NANOSECONDS));
+      exceptionBuilder.setTimestampNs(timestampNs);
+
+      exceptionBuilder.setName(exceptions[i]->getName());
+      exceptionBuilder.setMessage(exceptions[i]->getMessage());
+
+      KJ_IF_SOME(stack, exceptions[i]->getStack(js)) {
+        exceptionBuilder.setStack(stack);
+      }
+    }
+  }
+
+  if (diagnosticChannelEvents.size() > 0) {
+    auto diagnosticList = trace.initDiagnosticChannelEvents(diagnosticChannelEvents.size());
+    for (auto i: kj::indices(diagnosticChannelEvents)) {
+      auto diagnosticBuilder = diagnosticList[i];
+
+      auto timestampNs = static_cast<int64_t>(
+          diagnosticChannelEvents[i]->getTimestamp() * (kj::MILLISECONDS / kj::NANOSECONDS));
+      diagnosticBuilder.setTimestampNs(timestampNs);
+
+      diagnosticBuilder.setChannel(diagnosticChannelEvents[i]->getChannel());
+
+      auto jsValue = diagnosticChannelEvents[i]->getMessage(js);
+      jsg::Serializer serializer(js);
+      serializer.write(js, jsValue);
+      auto released = serializer.release();
+      diagnosticBuilder.setMessage(released.data);
+    }
+  }
+
+  KJ_IF_SOME(info, eventInfo) {
+    KJ_SWITCH_ONEOF(info) {
+      KJ_CASE_ONEOF(info, jsg::Ref<FetchEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto fetchInfo = eventInfo.initFetch();
+
+        auto request = info->getRequest();
+
+        auto methodStr = request->getMethod();
+        KJ_IF_SOME(httpMethod, strToEnum<capnp::HttpMethod>(methodStr)) {
+          fetchInfo.setMethod(httpMethod);
+        }
+
+        fetchInfo.setUrl(request->getUrl());
+
+        KJ_IF_SOME(cfObj, request->getCf(js)) {
+          auto cfJson = js.serializeJson(cfObj.addRef(js));
+          fetchInfo.setCfJson(cfJson);
+        } else {
+          fetchInfo.setCfJson("");
+        }
+
+        auto headersDict = request->getHeaders(js);
+        auto headersList = fetchInfo.initHeaders(headersDict.fields.size());
+
+        for (auto i: kj::indices(headersDict.fields)) {
+          auto headerBuilder = headersList[i];
+          headerBuilder.setName(headersDict.fields[i].name);
+          headerBuilder.setValue(headersDict.fields[i].value);
+        }
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<JsRpcEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto jsRpc = eventInfo.initJsRpc();
+        jsRpc.setMethodName(info->getRpcMethod());
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<ScheduledEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto scheduled = eventInfo.initScheduled();
+        scheduled.setScheduledTime(info->getScheduledTime());
+        scheduled.setCron(info->getCron());
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<AlarmEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto alarm = eventInfo.initAlarm();
+        // Convert kj::Date to milliseconds since epoch
+        auto scheduledTimeMs = (info->getScheduledTime() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+        alarm.setScheduledTimeMs(scheduledTimeMs);
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<QueueEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto queue = eventInfo.initQueue();
+        queue.setQueueName(info->getQueueName());
+        queue.setBatchSize(info->getBatchSize());
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<EmailEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto email = eventInfo.initEmail();
+        email.setMailFrom(info->getMailFrom());
+        email.setRcptTo(info->getRcptTo());
+        email.setRawSize(info->getRawSize());
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<TailEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto tailEvent = eventInfo.initTrace();
+
+        auto consumedEvents = info->getConsumedEvents();
+        auto tracesList = tailEvent.initTraces(consumedEvents.size());
+
+        for (auto i: kj::indices(consumedEvents)) {
+          auto traceItemBuilder = tracesList[i];
+          KJ_IF_SOME(scriptName, consumedEvents[i]->getScriptName()) {
+            traceItemBuilder.setScriptName(scriptName);
+          }
+        }
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<HibernatableWebSocketEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        auto hibernatableWs = eventInfo.initHibernatableWebSocket();
+
+        auto eventType = info->getEvent();
+        KJ_SWITCH_ONEOF(eventType) {
+          KJ_CASE_ONEOF(message, jsg::Ref<HibernatableWebSocketEventInfo::Message>) {
+            hibernatableWs.getType().setMessage();
+          }
+          KJ_CASE_ONEOF(close, jsg::Ref<HibernatableWebSocketEventInfo::Close>) {
+            auto closeGroup = hibernatableWs.getType().initClose();
+            closeGroup.setCode(close->getCode());
+            closeGroup.setWasClean(close->getWasClean());
+          }
+          KJ_CASE_ONEOF(error, jsg::Ref<HibernatableWebSocketEventInfo::Error>) {
+            hibernatableWs.getType().setError();
+          }
+        }
+      }
+      KJ_CASE_ONEOF(info, jsg::Ref<CustomEventInfo>) {
+        auto eventInfo = trace.initEventInfo();
+        eventInfo.initCustom();
+      }
+    }
+  };
+
+  if (spans.size() > 0) {
+    auto spansList = trace.initSpans(spans.size());
+    for (auto i: kj::indices(spans)) {
+      auto spanBuilder = spansList[i];
+
+      spanBuilder.setOperationName(spans[i]->getOperation());
+
+      auto startTimeNs = (spans[i]->getStartTime() - kj::UNIX_EPOCH) / kj::NANOSECONDS;
+      auto endTimeNs = (spans[i]->getEndTime() - kj::UNIX_EPOCH) / kj::NANOSECONDS;
+      spanBuilder.setStartTimeNs(startTimeNs);
+      spanBuilder.setEndTimeNs(endTimeNs);
+
+      // Convert hex span ID back to uint64, handling network-order conversion
+      // OTelSpan stores IDs as network-order hex strings (see OTelSpan constructor)
+      auto spanIdHex = spans[i]->getSpanID();
+      auto spanIdWithPrefix = kj::str("0x", spanIdHex);
+      KJ_IF_SOME(netSpanIdValue, spanIdWithPrefix.tryParseAs<uint64_t>()) {
+        uint64_t hostSpanIdValue = __builtin_bswap64(netSpanIdValue);
+        spanBuilder.setSpanId(hostSpanIdValue);
+      }
+
+      auto parentSpanIdHex = spans[i]->getParentSpanID();
+      if (parentSpanIdHex.size() > 0) {
+        auto parentSpanIdWithPrefix = kj::str("0x", parentSpanIdHex);
+        KJ_IF_SOME(netParentSpanIdValue, parentSpanIdWithPrefix.tryParseAs<uint64_t>()) {
+          uint64_t hostParentSpanIdValue = __builtin_bswap64(netParentSpanIdValue);
+          spanBuilder.setParentSpanId(hostParentSpanIdValue);
+        }
+      } else {
+        spanBuilder.setParentSpanId(0);
+      }
+
+      auto spanTags = spans[i]->getTags();
+      auto tagsList = spanBuilder.initTags(spanTags.size());
+      for (auto j: kj::indices(spanTags)) {
+        auto tagBuilder = tagsList[j];
+        tagBuilder.setKey(spanTags[j].key);
+
+        auto& tagValue = spanTags[j].value;
+        auto valueBuilder = tagBuilder.initValue();
+        KJ_SWITCH_ONEOF(tagValue) {
+          KJ_CASE_ONEOF(str, kj::String) {
+            valueBuilder.setString(str);
+          }
+          KJ_CASE_ONEOF(b, bool) {
+            valueBuilder.setBool(b);
+          }
+          KJ_CASE_ONEOF(d, double) {
+            valueBuilder.setFloat64(d);
+          }
+          KJ_CASE_ONEOF(i, int64_t) {
+            valueBuilder.setInt64(i);
+          }
+        }
+      }
+    }
+  }
+  auto words = capnp::messageToFlatArray(traceMessage);
+  auto bytes = words.asBytes();
+  serializer.writeLengthDelimited(bytes);
+}
+
+jsg::Ref<TraceItem> TraceItem::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto bytes = deserializer.readLengthDelimitedBytes();
+
+  // Ensure alignment by copying to word-aligned memory
+  auto alignedBytes =
+      kj::heapArray<capnp::word>((bytes.size() + sizeof(capnp::word) - 1) / sizeof(capnp::word));
+  memcpy(alignedBytes.begin(), bytes.begin(), bytes.size());
+
+  capnp::FlatArrayMessageReader messageReader(alignedBytes.asPtr());
+  auto bundle = messageReader.getRoot<rpc::Trace>();
+
+  Trace trace(bundle);
+  return js.alloc<TraceItem>(js, trace);
 }
 
 TraceItem::FetchEventInfo::FetchEventInfo(jsg::Lock& js,

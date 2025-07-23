@@ -403,6 +403,8 @@ enum SerializationTag {
   # A JavaScript native error, such as Error, TypeError, etc. These are typically
   # not handled as host objects in V8 but we handle them as such in workers in
   # order to preserve additional information that we may attach to them.
+
+  traceItem @11;
 }
 
 enum StreamEncoding {
