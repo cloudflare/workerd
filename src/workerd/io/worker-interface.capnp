@@ -470,10 +470,6 @@ struct JsValue {
       # the one that will later on send the abort signal. This external will have an associated
       # stream in the corresponding `StreamSink` with type `AbortTrigger`.
 
-      messagePort :group {
-        out @8 :JsMessagePort;
-      }
-
       # TODO(soon): WebSocket, Request, Response
     }
   }
@@ -511,16 +507,6 @@ interface AbortTrigger $Cxx.allowCancellation {
   release @1 () -> ();
   # Informs a cloned signal that the original signal is being destroyed, and the abort will never
   # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
-}
-
-interface JsMessagePort $Cxx.allowCancellation {
-  struct Params {
-    data @0 :JsValue;
-  }
-
-  struct Results {}
-
-  call @0 Params -> Results;
 }
 
 interface JsRpcTarget $Cxx.allowCancellation {

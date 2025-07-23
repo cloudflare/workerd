@@ -116,6 +116,19 @@ export const postMessageBlob = {
   },
 };
 
+export const postMessageRpcTarget = {
+  async test() {
+    const { RpcTarget } = await import('cloudflare:workers');
+    class Foo extends RpcTarget {}
+
+    const { port1 } = new MessageChannel();
+    throws(() => port1.postMessage(new Foo()), {
+      code: 25, // DATA_CLONE_ERR,
+      name: 'DataCloneError',
+    });
+  },
+};
+
 // Subset of the Web Platform Tests we know we don't pass, listed for future reference:
 // Most the web messaging WPT's are set up to require a full implementation of MessagePort
 // with web workers and most of the tests are in html files. We'll come back to these
