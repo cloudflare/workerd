@@ -3680,6 +3680,15 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
   class WorkerStubImpl;
   kj::HashMap<kj::String, kj::Rc<WorkerStubImpl>> isolates;
 
+  class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
+   public:
+    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+      JSG_FAIL_REQUIRE(Error,
+          "This worker is not permitted to access the internet via global functions like fetch(). "
+          "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
+    }
+  };
+
   class WorkerStubImpl final: public WorkerStubChannel,
                               public kj::Refcounted,
                               public kj::EnableAddRefToThis<WorkerStubImpl> {
@@ -3723,29 +3732,16 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
 
+        // clang-format off
         .globalOutbound{
-          .designator = kj::mv(source.globalOutbound),
+          .designator = kj::mv(source.globalOutbound)
+              .orDefault([]() { return kj::refcounted<NullGlobalOutboundChannel>(); }),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
 
-        // clang-format off
         .compileBindings = [env = kj::mv(source.env)](
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
-          if (!env.empty()) {
-            // Copy properties of the provided `env` object into `target`.
-            js.withinHandleScope([&]() {
-              auto targetObj = jsg::JsObject(target);
-              auto sourceObj = KJ_REQUIRE_NONNULL(
-                  env.toJs(js).tryCast<jsg::JsObject>(), "'env' must be an object");
-              auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
-                  jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
-              auto propCount = props.size();
-              for (auto i: kj::zeroTo(propCount)) {
-                auto prop = props.get(js, i);
-                targetObj.set(js, prop, sourceObj.get(js, prop));
-              }
-            });
-          }
+          env.populateJsObject(js, jsg::JsObject(target));
         },
         // clang-format on
       };

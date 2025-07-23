@@ -119,6 +119,22 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
   });
 }
 
+void Frankenvalue::populateJsObject(jsg::Lock& js, jsg::JsObject target) const {
+  if (!empty()) {
+    js.withinHandleScope([&]() {
+      auto sourceObj = KJ_REQUIRE_NONNULL(toJs(js).tryCast<jsg::JsObject>(),
+          "Frankenvalue must be an object for populateJsObject()");
+      auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+          jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
+      auto propCount = props.size();
+      for (auto i: kj::zeroTo(propCount)) {
+        auto prop = props.get(js, i);
+        target.set(js, prop, sourceObj.get(js, prop));
+      }
+    });
+  }
+}
+
 Frankenvalue Frankenvalue::fromJs(jsg::Lock& js, jsg::JsValue value) {
   Frankenvalue result;
 

@@ -92,6 +92,69 @@ export let overrideGlobalOutbound = {
   },
 };
 
+// This test's own `globalOutbound` is configured to loop back to this entrypoint.
+export let defaultOutbound = {
+  async fetch(req, env, ctx) {
+    return new Response('hello from defaultOutbound');
+  },
+};
+
+// Test that globalOutbound is inherited if not specified.
+export let inheritGlobalOutbound = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('inheritGlobalOutbound', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                return fetch(req);
+              },
+            }
+          `,
+        },
+
+        // Don't set `globalOutbound` at all.
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'hello from defaultOutbound');
+  },
+};
+
+// Test setting `globalOutbound` to null.
+export let nullGlobalOutbound = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('nullGlobalOutbound', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                return fetch(req);
+              },
+            }
+          `,
+        },
+
+        globalOutbound: null,
+      };
+    });
+
+    await assert.rejects(worker.getEntrypoint().fetch('https://example.com'), {
+      name: 'Error',
+      message:
+        'This worker is not permitted to access the internet via global functions like fetch(). ' +
+        "It must use capabilities (such as bindings in 'env') to talk to the outside world.",
+    });
+  },
+};
+
 export class FacetTestActor extends DurableObject {
   async doTest() {
     let worker = this.env.loader.get('facets', () => {
@@ -374,5 +437,36 @@ export let codeLoaderException = {
     } catch (error) {
       assert.strictEqual(error.message, 'Code loader failed!');
     }
+  },
+};
+
+// Test that ctx.exports works in dynamically-loaded workers.
+export let ctxExports = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('ctxExports', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        mainModule: 'foo.js',
+        allowExperimental: true,
+        modules: {
+          'foo.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
+            export default class extends WorkerEntrypoint {
+              async greet(name) {
+                let greeting = await this.ctx.exports.AltEntrypoint.greet(name);
+                return greeting + "!";
+              }
+            }
+            export class AltEntrypoint extends WorkerEntrypoint {
+              greet(name) { return "Hello, " + name; }
+            }
+          `,
+        },
+      };
+    });
+
+    let result = await worker.getEntrypoint().greet('Alice');
+    assert.strictEqual(result, 'Hello, Alice!');
   },
 };

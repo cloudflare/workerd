@@ -1259,7 +1259,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       id(kj::str(id)),
       modular(source.variant.is<ModulesSource>()),
       python(modular && source.variant.get<ModulesSource>().isPython),
-      impl(kj::heap<Impl>()) {
+      impl(kj::heap<Impl>()),
+      dynamicEnvBuilder(kj::mv(source.dynamicEnvBuilder)) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in

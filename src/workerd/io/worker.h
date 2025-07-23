@@ -240,6 +240,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline bool isPython() const {
     return python;
   }
+  inline kj::Maybe<kj::Arc<DynamicEnvBuilder>> getDynamicEnvBuilder() const {
+    return mapAddRef(dynamicEnvBuilder);
+  }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -272,6 +275,8 @@ class Worker::Script: public kj::AtomicRefcounted {
 
   struct Impl;
   kj::Own<Impl> impl;
+
+  kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
 
   friend class Worker;
 
