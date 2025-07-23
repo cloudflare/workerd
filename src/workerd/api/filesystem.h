@@ -327,9 +327,7 @@ class FileSystemHandle: public jsg::Object {
     return vfs;
   }
 
-  virtual bool canBeModifiedCurrently() const {
-    return true;
-  }
+  bool canBeModifiedCurrently(jsg::Lock&) const;
 
  private:
   const workerd::VirtualFileSystem& vfs;
@@ -364,28 +362,17 @@ class FileSystemFileHandle final: public FileSystemHandle {
     JSG_METHOD(createWritable);
   }
 
-  bool canBeModifiedCurrently() const override {
-    return writableCount == 0;
-  }
-
  private:
   mutable size_t writableCount = 0;
   friend class FileSystemWritableFileStream;
 };
 
 class FileSystemDirectoryHandle final: public FileSystemHandle {
- public:
-  struct EntryType {
-    jsg::USVString key;
-    jsg::Ref<FileSystemHandle> value;
-    JSG_STRUCT(key, value);
-    EntryType(jsg::USVString key, jsg::Ref<FileSystemHandle> value)
-        : key(kj::mv(key)),
-          value(kj::mv(value)) {}
-  };
-
  private:
-  using EntryIteratorType = EntryType;
+  // The actual entry type is an array of two elements, the first being the key,
+  // the second being the value.
+  using EntryType = kj::OneOf<jsg::JsRef<jsg::JsString>, jsg::Ref<FileSystemHandle>>;
+  using EntryIteratorType = kj::Array<EntryType>;
   using KeyIteratorType = jsg::USVString;
   using ValueIteratorType = jsg::Ref<FileSystemHandle>;
 
@@ -513,6 +500,11 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
     JSG_METHOD(values);
     JSG_METHOD(forEach);
     JSG_ASYNC_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE({
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+      [Symbol.asyncIterator]() : AsyncIterableIterator<[string, FileSystemHandle]>;
+    });
   }
 
  private:
@@ -527,8 +519,9 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
         auto& entry = listing.entries[listing.index++];
 
         if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-          return js.resolvedPromise<kj::Maybe<Type>>(
-              EntryType(js.accountedUSVString(entry->getName(js)), entry.addRef()));
+          EntryIteratorType result = kj::arr(
+              EntryType(jsg::JsRef(js, js.str(entry->getName(js)))), EntryType(entry.addRef()));
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::mv(result));
         } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
           return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
         } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
@@ -569,6 +562,8 @@ class FileSystemWritableFileStream final: public WritableStream {
     // The file handle we are writing to
     jsg::Ref<FileSystemFileHandle> file;
 
+    kj::Maybe<kj::Own<void>> lock;
+
     // A note on file position and sizes. In the spec, file sizes and positions
     // are defined in terms of unsigned long long, or 64-bits. We are using
     // unsigned long (uint32_t) for these instead. This is largely because
@@ -576,19 +571,19 @@ class FileSystemWritableFileStream final: public WritableStream {
     // is WAY more than our isolate heap limit. A uint32_t is more than enough
     // for our purposes.
     uint32_t position = 0;
-    State(const workerd::VirtualFileSystem& vfs,
+    State(jsg::Lock& js,
+        const workerd::VirtualFileSystem& vfs,
         jsg::Ref<FileSystemFileHandle> file,
         kj::Rc<workerd::File> temp)
         : vfs(vfs),
           temp(kj::mv(temp)),
-          file(kj::mv(file)) {
-      ++this->file->writableCount;
-    }
+          file(kj::mv(file)),
+          lock(vfs.lock(js, this->file->getLocator())) {}
 
     void clear() {
       temp = kj::none;
       position = 0;
-      --this->file->writableCount;
+      lock = kj::none;
     }
   };
 
@@ -648,7 +643,6 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::FileSystemGetDirectoryOptions,                      \
       workerd::api::FileSystemDirectoryHandle::FileSystemRemoveOptions,                            \
       workerd::api::FileSystemWritableFileStream::WriteParams,                                     \
-      workerd::api::FileSystemDirectoryHandle::EntryType,                                          \
       workerd::api::FileSystemDirectoryHandle::EntryIterator,                                      \
       workerd::api::FileSystemDirectoryHandle::KeyIterator,                                        \
       workerd::api::FileSystemDirectoryHandle::ValueIterator,                                      \

@@ -3179,7 +3179,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve) */
   resolve(possibleDescendant: FileSystemHandle): Promise<string[]>;
-  entries(): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
   keys(): AsyncIterableIterator<string>;
   values(): AsyncIterableIterator<FileSystemHandle>;
   forEach(
@@ -3190,7 +3190,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
     ) => void,
     thisArg?: any,
   ): void;
-  [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
 }
 /**
  * Available only in secure contexts.
@@ -3237,10 +3237,6 @@ interface FileSystemWritableFileStreamWriteParams {
   size?: number;
   position?: number;
   data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
-}
-interface FileSystemDirectoryHandleEntryType {
-  key: string;
-  value: FileSystemHandle;
 }
 interface FileSystemHandleRemoveOptions {
   recursive?: boolean;

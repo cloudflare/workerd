@@ -21,7 +21,9 @@ strictEqual(temp.name, 'tmp');
 
 let count = 0;
 for await (const node of dir) {
-  ok(node.value instanceof FileSystemDirectoryHandle);
+  // The node is an Array of [name, handle]
+  strictEqual(typeof node[0], 'string');
+  ok(node[1] instanceof FileSystemDirectoryHandle);
   count++;
 }
 strictEqual(count, 3);
@@ -125,7 +127,8 @@ export const asyncIteratorTest = {
 
     let count = 0;
     for await (const node of dir) {
-      ok(node.value instanceof FileSystemDirectoryHandle);
+      // The node is an Array of [name, handle]
+      ok(node[1] instanceof FileSystemDirectoryHandle);
       count++;
     }
     strictEqual(count, 3);

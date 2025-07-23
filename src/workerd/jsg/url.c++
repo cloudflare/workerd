@@ -340,6 +340,15 @@ Url::Relative Url::getRelative(RelativeOption option) const {
   };
 }
 
+kj::Maybe<jsg::Url> Url::getParent() const {
+  auto parent = KJ_ASSERT_NONNULL(tryResolve("."_kj));
+  auto pathname = parent.getPathname();
+  if (pathname.size() == 1) return kj::none;
+  auto trimmed = kj::str(pathname.first(pathname.size() - 1));
+  parent.setPathname(trimmed);
+  return kj::mv(parent);
+}
+
 kj::uint Url::hashCode() const {
   return kj::hashCode(getHref());
 }
