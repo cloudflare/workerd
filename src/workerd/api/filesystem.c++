@@ -1974,7 +1974,7 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
       return js.domException(kj::str("NotSupportedError"), kj::str("Not a directory"));
     }
     case workerd::FsError::NOT_EMPTY: {
-      return js.domException(kj::str("InvalidStateError"), kj::str("Directory not empty"));
+      return js.domException(kj::str("InvalidModificationError"), kj::str("Directory not empty"));
     }
     case workerd::FsError::READ_ONLY: {
       return js.domException(kj::str("InvalidStateError"), kj::str("Read-only file system"));
@@ -2064,7 +2064,14 @@ jsg::Promise<bool> FileSystemHandle::isSameEntry(jsg::Lock& js, jsg::Ref<FileSys
 jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
     jsg::Optional<RemoveOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  auto relative = getLocator().getRelative();
+
+  if (!canBeModifiedCurrently()) {
+    auto ex = js.domException(kj::str("NoModificationAllowedError"),
+        kj::str("Cannot remove a handle that is not writable or not a directory."));
+    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+  }
+
+  auto relative = getLocator().getRelative(jsg::Url::RelativeOption::STRIP_TAILING_SLASHES);
   auto opts = options.orDefault(RemoveOptions{});
   auto recursive = opts.recursive.orDefault(false);
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base, workerd::VirtualFileSystem::ResolveOptions{})) {
@@ -2125,8 +2132,7 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
     jsg::Optional<FileSystemGetFileOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Invalid file name: ", name));
-    return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(js.typeError("Invalid file name"));
   }
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
@@ -2196,9 +2202,8 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
     jsg::Optional<FileSystemGetDirectoryOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex =
-        js.domException(kj::str("TypeMismatchError"), kj::str("Invalid directory name: ", name));
-    return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
+        js.typeError("Invalid directory name"));
   }
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
@@ -2272,8 +2277,7 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
     jsg::Optional<FileSystemRemoveOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Invalid file name: ", name));
-    return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<void>(js.typeError("Invalid name"));
   }
   auto opts = options.orDefault(FileSystemRemoveOptions{});
 
@@ -2368,11 +2372,23 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
   }
   return entries.releaseAsArray();
 }
+
+auto resolveDirectoryHandle(jsg::Lock& js, const VirtualFileSystem& vfs, const jsg::Url& locator) {
+  auto pathname = locator.getPathname();
+  if (pathname.endsWith("/"_kj)) {
+    pathname = pathname.first(pathname.size() - 1);
+    auto cloned = locator.clone();
+    cloned.setPathname(pathname);
+    return vfs.resolve(js, cloned, {});
+  }
+  // Otherwise fall-back to the original locator.
+  return vfs.resolve(js, locator, {});
+}
 }  // namespace
 
 jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::entries(
     jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2391,11 +2407,16 @@ jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::en
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<EntryIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<EntryIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys(jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2414,12 +2435,17 @@ jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<KeyIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<KeyIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::values(
     jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2438,7 +2464,12 @@ jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::va
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<ValueIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<ValueIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
@@ -2447,7 +2478,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
     jsg::Optional<jsg::Value> thisArg,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
 
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         js.throwException(js.v8Ref(exception.wrap(js, fsErrorToDomException(js, err))));
@@ -2477,7 +2508,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
     KJ_UNREACHABLE;
   }
 
-  JSG_FAIL_REQUIRE(DOMNotFoundError, "Directory not found");
+  JSG_FAIL_REQUIRE(DOMNotFoundError, "Not found");
 }
 
 FileSystemFileHandle::FileSystemFileHandle(
