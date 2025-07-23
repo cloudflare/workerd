@@ -62,14 +62,7 @@ export default {
   },
   'FileSystemBaseHandle-remove.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'remove() to remove an empty directory',
-      'remove() on an already removed directory should fail',
-      'remove() on a non-empty directory should fail',
-      'remove() on a directory recursively should delete all sub-items',
-      'remove() while the file has an open writable fails',
-
+    disabledTests: [
       // Intentionally unsupported
       'can remove the root of a sandbox file system',
     ],
@@ -78,9 +71,6 @@ export default {
     comment: '...',
     expectedFailures: [
       // TODO(node-fs): Fix these tests
-      'getDirectoryHandle() with empty name',
-      'getDirectoryHandle() with "." name',
-      'getDirectoryHandle() with ".." name',
       'getDirectoryHandle(create=false) with a path separator when the directory exists',
       'getDirectoryHandle(create=true) with a path separator',
     ],
@@ -89,9 +79,6 @@ export default {
     comment: '...',
     expectedFailures: [
       // TODO(node-fs): Fix these tests
-      'getFileHandle() with empty name',
-      'getFileHandle() with "." name',
-      'getFileHandle() with ".." name',
       'getFileHandle(create=false) with a path separator when the file exists.',
       'getFileHandle(create=true) with a path separator',
     ],
@@ -110,10 +97,6 @@ export default {
     expectedFailures: [
       // TODO(node-fs): Fix these tests
       'removeEntry() on an already removed file should fail',
-      'removeEntry() on a non-empty directory should fail',
-      'removeEntry() with empty name should fail',
-      'removeEntry() with "." name should fail',
-      'removeEntry() with ".." name should fail',
       'removeEntry() with a path separator should fail.',
       'removeEntry() while the file has an open writable fails',
       'removeEntry() of a directory while a containing file has an open writable fails',

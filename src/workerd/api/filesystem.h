@@ -327,6 +327,10 @@ class FileSystemHandle: public jsg::Object {
     return vfs;
   }
 
+  virtual bool canBeModifiedCurrently() const {
+    return true;
+  }
+
  private:
   const workerd::VirtualFileSystem& vfs;
   const jsg::Url locator;
@@ -359,6 +363,14 @@ class FileSystemFileHandle final: public FileSystemHandle {
     JSG_METHOD(getFile);
     JSG_METHOD(createWritable);
   }
+
+  bool canBeModifiedCurrently() const override {
+    return writableCount == 0;
+  }
+
+ private:
+  mutable size_t writableCount = 0;
+  friend class FileSystemWritableFileStream;
 };
 
 class FileSystemDirectoryHandle final: public FileSystemHandle {
@@ -378,24 +390,45 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
   using ValueIteratorType = jsg::Ref<FileSystemHandle>;
 
   struct IteratorState final {
-    jsg::Ref<FileSystemDirectoryHandle> parent;
-    kj::Array<jsg::Ref<FileSystemHandle>> entries;
-    uint index = 0;
+    struct Listing {
+      jsg::Ref<FileSystemDirectoryHandle> parent;
+      kj::Array<jsg::Ref<FileSystemHandle>> entries;
+      uint index = 0;
+    };
+    using Errored = jsg::JsRef<jsg::JsValue>;
+    kj::OneOf<Listing, Errored> state;
 
     IteratorState(
         jsg::Ref<FileSystemDirectoryHandle> parent, kj::Array<jsg::Ref<FileSystemHandle>> entries)
-        : parent(kj::mv(parent)),
-          entries(kj::mv(entries)) {}
+        : state(Listing{
+            .parent = kj::mv(parent),
+            .entries = kj::mv(entries),
+          }) {}
+    IteratorState(jsg::JsRef<jsg::JsValue> exception): state(kj::mv(exception)) {}
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-      visitor.visitAll(entries);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          visitor.visit(listing.parent);
+          visitor.visitAll(listing.entries);
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          visitor.visit(exception);
+        }
+      }
     }
 
     JSG_MEMORY_INFO(IteratorState) {
-      tracker.trackField("parent", parent);
-      for (auto& entry: entries) {
-        tracker.trackField("entry", entry);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          tracker.trackField("parent", listing.parent);
+          for (auto& entry: listing.entries) {
+            tracker.trackField("entry", entry);
+          }
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          tracker.trackField("exception", exception);
+        }
       }
     }
   };
@@ -485,22 +518,30 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
  private:
   template <typename Type>
   static jsg::Promise<kj::Maybe<Type>> iteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.entries.size()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
-    }
+    KJ_SWITCH_ONEOF(state.state) {
+      KJ_CASE_ONEOF(listing, IteratorState::Listing) {
+        if (listing.index >= listing.entries.size()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
+        }
 
-    auto& entry = state.entries[state.index++];
+        auto& entry = listing.entries[listing.index++];
 
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(
-          EntryType(js.accountedUSVString(entry->getName(js)), entry.addRef()));
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
-    } else {
-      static_assert(false, "invalid iterator type");
+        if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(
+              EntryType(js.accountedUSVString(entry->getName(js)), entry.addRef()));
+        } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
+        } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
+        } else {
+          static_assert(false, "invalid iterator type");
+        }
+      }
+      KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+        return js.rejectedPromise<kj::Maybe<Type>>(exception.getHandle(js));
+      }
     }
+    KJ_UNREACHABLE;
   }
 
   template <typename Type>
@@ -540,11 +581,14 @@ class FileSystemWritableFileStream final: public WritableStream {
         kj::Rc<workerd::File> temp)
         : vfs(vfs),
           temp(kj::mv(temp)),
-          file(kj::mv(file)) {}
+          file(kj::mv(file)) {
+      ++this->file->writableCount;
+    }
 
     void clear() {
       temp = kj::none;
       position = 0;
+      --this->file->writableCount;
     }
   };
 

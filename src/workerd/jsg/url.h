@@ -99,11 +99,16 @@ class Url final {
   // Resolve the input relative to this URL
   kj::Maybe<Url> tryResolve(kj::ArrayPtr<const char> input) const KJ_WARN_UNUSED_RESULT;
 
+  enum class RelativeOption {
+    DEFAULT,
+    // If the URL ends with a trailing slash, remove it before determining the basename.
+    STRIP_TAILING_SLASHES,
+  };
   struct Relative;
   // Given this URL, returns a struct that is a basename and a base Url pair
   // such that base.tryResolve(basename) is equivalent to this URL. Query
   // parameters and fragments are not preserved.
-  Relative getRelative() const KJ_LIFETIMEBOUND;
+  Relative getRelative(RelativeOption option = RelativeOption::DEFAULT) const KJ_LIFETIMEBOUND;
 
   HostType getHostType() const;
   SchemeType getSchemeType() const;

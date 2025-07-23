@@ -322,7 +322,16 @@ kj::Maybe<Url> Url::tryResolve(kj::ArrayPtr<const char> input) const {
   return tryParse(input, getHref());
 }
 
-Url::Relative Url::getRelative() const {
+Url::Relative Url::getRelative(RelativeOption option) const {
+  if (option == RelativeOption::STRIP_TAILING_SLASHES) {
+    auto pathname = getPathname();
+    if (pathname.endsWith("/"_kj)) {
+      auto cloned = clone();
+      cloned.setPathname(pathname.first(pathname.size() - 1));
+      return cloned.getRelative();
+    }
+    // Otherwise, fall-through to the default behavior.
+  }
   auto base = KJ_ASSERT_NONNULL(tryResolve("."_kj));
   auto pos = KJ_ASSERT_NONNULL(getPathname().findLast('/'));
   return {
