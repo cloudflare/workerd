@@ -32,11 +32,11 @@ kj::Array<jsg::Ref<TraceItem>> TailEvent::getEvents() {
 
 namespace {
 kj::Maybe<double> getTraceTimestamp(const Trace& trace) {
-  if (trace.eventTimestamp == kj::UNIX_EPOCH) {
-    return kj::none;
-  }
   if (isPredictableModeForTest()) {
     return 0.0;
+  }
+  if (trace.eventTimestamp == kj::UNIX_EPOCH) {
+    return kj::none;
   }
   return (trace.eventTimestamp - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 }
@@ -448,8 +448,9 @@ void TraceItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
         auto request = info->getRequest();
 
         auto methodStr = request->getMethod();
-        KJ_IF_SOME(httpMethod, strToEnum<capnp::HttpMethod>(methodStr)) {
-          fetchInfo.setMethod(httpMethod);
+        KJ_IF_SOME(kjMethod, kj::tryParseHttpMethod(methodStr)) {
+          auto capnpMethod = static_cast<capnp::HttpMethod>(kjMethod);
+          fetchInfo.setMethod(capnpMethod);
         }
 
         fetchInfo.setUrl(request->getUrl());
@@ -468,6 +469,11 @@ void TraceItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
           auto headerBuilder = headersList[i];
           headerBuilder.setName(headersDict.fields[i].name);
           headerBuilder.setValue(headersDict.fields[i].value);
+        }
+
+        KJ_IF_SOME(response, info->getResponse()) {
+          auto responseBuilder = trace.initResponse();
+          responseBuilder.setStatusCode(response->getStatus());
         }
       }
       KJ_CASE_ONEOF(info, jsg::Ref<JsRpcEventInfo>) {
@@ -553,21 +559,19 @@ void TraceItem::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       spanBuilder.setStartTimeNs(startTimeNs);
       spanBuilder.setEndTimeNs(endTimeNs);
 
-      // Convert hex span ID back to uint64, handling network-order conversion
-      // OTelSpan stores IDs as network-order hex strings (see OTelSpan constructor)
+      // Convert hex span ID back to uint64
+      // OTelSpan stores IDs as hex strings - parse them as-is without byte order conversion
       auto spanIdHex = spans[i]->getSpanID();
       auto spanIdWithPrefix = kj::str("0x", spanIdHex);
-      KJ_IF_SOME(netSpanIdValue, spanIdWithPrefix.tryParseAs<uint64_t>()) {
-        uint64_t hostSpanIdValue = __builtin_bswap64(netSpanIdValue);
-        spanBuilder.setSpanId(hostSpanIdValue);
+      KJ_IF_SOME(spanIdValue, spanIdWithPrefix.tryParseAs<uint64_t>()) {
+        spanBuilder.setSpanId(spanIdValue);
       }
 
       auto parentSpanIdHex = spans[i]->getParentSpanID();
       if (parentSpanIdHex.size() > 0) {
         auto parentSpanIdWithPrefix = kj::str("0x", parentSpanIdHex);
-        KJ_IF_SOME(netParentSpanIdValue, parentSpanIdWithPrefix.tryParseAs<uint64_t>()) {
-          uint64_t hostParentSpanIdValue = __builtin_bswap64(netParentSpanIdValue);
-          spanBuilder.setParentSpanId(hostParentSpanIdValue);
+        KJ_IF_SOME(parentSpanIdValue, parentSpanIdWithPrefix.tryParseAs<uint64_t>()) {
+          spanBuilder.setParentSpanId(parentSpanIdValue);
         }
       } else {
         spanBuilder.setParentSpanId(0);

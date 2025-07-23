@@ -4,13 +4,13 @@
 
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tail(traces) {
-    console.log(traces[0].logs);
+  async tail(events, env, ctx) {
+    await env.TAIL_SERVICE.tail(events);
   },
-  tailStream(...args) {
-    console.log(...args);
-    return (...args) => {
-      console.log(...args);
-    };
+};
+
+export const test = {
+  async test() {
+    await scheduler.wait(50);
   },
 };

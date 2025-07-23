@@ -3,8 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
-  fetch(request, env) {
-    console.log('Fetch event received in My Worker', request.method, request.url);
-    return env.SERVICE.fetch(request);
-  },
+  async fetch(req, env) {
+    console.log('hello to the tail worker!');
+    reportError('boom');
+    reportError(new Error('test'));
+    return new Response("Hello World\n");
+  }
 };
