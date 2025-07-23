@@ -93,9 +93,13 @@ export const env = new Proxy(
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
 
-export function registerFetchEvents({ port }: { port?: number } = {}): unknown {
+export function nodeCompatHttpServerHandler({
+  port,
+}: { port?: number } = {}): unknown {
   if (port == null) {
-    throw new Error('Port is required when calling registerFetchEvents()');
+    throw new Error(
+      'Port is required when calling nodeCompatHttpServerHandler()'
+    );
   }
   return {
     async fetch(
@@ -105,9 +109,8 @@ export function registerFetchEvents({ port }: { port?: number } = {}): unknown {
     ): Promise<Response> {
       const instance = portMapper.get(port);
       if (!instance) {
-        return new Response(
-          `Http server with port ${port} not found. This is likely a bug with your code.`,
-          { status: 404 }
+        throw new Error(
+          `Http server with port ${port} not found. This is likely a bug with your code.`
         );
       }
       return instance.fetch(request);

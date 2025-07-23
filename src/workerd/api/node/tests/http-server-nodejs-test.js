@@ -1,6 +1,8 @@
 import http from 'node:http';
-import { strictEqual, ok } from 'node:assert';
-import { registerFetchEvents } from 'cloudflare:workers';
+import { strictEqual, ok, throws } from 'node:assert';
+import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
+import { mock } from 'node:test';
+import { Writable } from 'node:stream';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -11,6 +13,68 @@ export const checkPortsSetCorrectly = {
     }
   },
 };
+
+// Test is taken from test/parallel/test-http-server-async-dispose.js
+export const testHttpServerAsyncDispose = {
+  async test() {
+    const server = http.createServer();
+
+    server.listen(8080);
+    ok(server.listening);
+    const closeFn = mock.fn();
+    server.on('close', closeFn);
+    await server[Symbol.asyncDispose]();
+    ok(!server.listening);
+    strictEqual(closeFn.mock.callCount(), 1);
+  },
+};
+
+// Test is taken from test/parallel/test-http-server-de-chunked-trailer.js
+export const testHttpServerDeChunkedTrailer = {
+  async test(_ctrl, env) {
+    const handlerFn = mock.fn((req, res) => {
+      res.setHeader('Trailer', 'baz');
+      const trailerInvalidErr = {
+        code: 'ERR_HTTP_TRAILER_INVALID',
+        message: 'Trailers are invalid with this transfer encoding',
+        name: 'Error',
+      };
+      throws(
+        () => res.writeHead(200, { 'Content-Length': '2' }),
+        trailerInvalidErr
+      );
+      res.removeHeader('Trailer');
+      res.end('ok');
+    });
+    const server = http.createServer(handlerFn);
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'ok');
+    strictEqual(handlerFn.mock.callCount(), 1);
+    server.close();
+  },
+};
+
+// TODO(soon): Fix this
+// // Test is taken from test/parallel/test-http-server-incomingmessage-destroy.js
+// export const testHttpServerIncomingMessageDestroy = {
+//   async test(_ctrl, env) {
+//     await using server = http.createServer((req, res) => {
+//       req.destroy(new Error('Destroy test'));
+//     });
+
+//     server.listen(8080);
+
+//     await rejects(() => {
+//       return env.SERVICE.fetch('https://cloudflare.com');
+//     }, {
+//       message: '',
+//     })
+//   }
+// }
 
 // Tests is taken from test/parallel/test-http-server-multiheaders.js
 export const testHttpServerMultiHeaders = {
@@ -152,28 +216,51 @@ export const testHttpServerNonUtf8Header = {
   },
 };
 
-export default registerFetchEvents({ port: 8080 });
+// Test is taken from test/parallel/test-http-server-write-end-after-end.js
+export const testHttpServerWriteEndAfterEnd = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const handle = mock.fn((req, res) => {
+      res.write('hello');
+      res.end();
+
+      queueMicrotask(() => {
+        res.end('world');
+        res.write('world', (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          resolve();
+        });
+      });
+    });
+    const server = http.createServer(handle);
+    server.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com');
+    await promise;
+    strictEqual(handle.mock.callCount(), 1);
+    server.close();
+  },
+};
+
+export default nodeCompatHttpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
-// - [ ] test/parallel/test-http-server-async-dispose.js
+// - [x] test/parallel/test-http-server-async-dispose.js
 // - [ ] test/parallel/test-http-server-capture-rejections.js
-// - [ ] test/parallel/test-http-server-clear-timer.js
 // - [ ] test/parallel/test-http-server-client-error.js
-// - [ ] test/parallel/test-http-server-close-all.js
 // - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-close-idle-wait-response.js
 // - [ ] test/parallel/test-http-server-close-idle.js
 // - [ ] test/parallel/test-http-server-connection-list-when-close.js
 // - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-consumed-timeout.js
-// - [ ] test/parallel/test-http-server-de-chunked-trailer.js
-// - [ ] test/parallel/test-http-server-delete-parser.js
+// - [x] test/parallel/test-http-server-de-chunked-trailer.js
 // - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
 // - [ ] test/parallel/test-http-server-headers-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-interrupted-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-headers-timeout-pipelining.js
-// - [ ] test/parallel/test-http-server-incomingmessage-destroy.js
+// - [x] test/parallel/test-http-server-incomingmessage-destroy.js
 // - [ ] test/parallel/test-http-server-keep-alive-defaults.js
 // - [ ] test/parallel/test-http-server-keep-alive-max-requests-null.js
 // - [ ] test/parallel/test-http-server-keep-alive-timeout.js
@@ -194,15 +281,18 @@ export default registerFetchEvents({ port: 8080 });
 // - [ ] test/parallel/test-http-server-request-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-request-timeout-pipelining.js
 // - [ ] test/parallel/test-http-server-request-timeout-upgrade.js
-// - [ ] test/parallel/test-http-server-response-standalone.js
 // - [ ] test/parallel/test-http-server-stale-close.js
 // - [ ] test/parallel/test-http-server-timeouts-validation.js
 // - [ ] test/parallel/test-http-server-unconsume-consume.js
 // - [ ] test/parallel/test-http-server-unconsume.js
 // - [ ] test/parallel/test-http-server-write-after-end.js
-// - [ ] test/parallel/test-http-server-write-end-after-end.js
+// - [x] test/parallel/test-http-server-write-end-after-end.js
 // - [ ] test/parallel/test-http-server.js
 
 // Tests that does not apply to workerd.
+// - [ ] test/parallel/test-http-server-clear-timer.js
+// - [ ] test/parallel/test-http-server-close-all.js
+// - [ ] test/parallel/test-http-server-delete-parser.js
 // - [ ] test/parallel/test-http-server-options-highwatermark.js
 // - [ ] test/parallel/test-http-server-reject-cr-no-lf.js
+// - [ ] test/parallel/test-http-server-response-standalone.js

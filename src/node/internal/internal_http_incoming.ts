@@ -139,6 +139,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
   }
 
+  #onError(error: Error | null, cb: (err?: Error | null) => void): void {
+    // This is to keep backward compatible behavior.
+    // An error is emitted only if there are listeners attached to the event.
+    if (this.listenerCount('error') === 0) {
+      cb();
+    } else {
+      cb(error);
+    }
+  }
+
   override _destroy(
     error: Error | null,
     callback: (error?: Error | null) => void
@@ -149,7 +159,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
 
     queueMicrotask(() => {
-      callback(error);
+      this.#onError(error, callback);
     });
   }
 

@@ -82,7 +82,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
-  port?: number;
+  port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
     super();
@@ -113,8 +113,9 @@ export class Server
 
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
-    if (this.port) {
+    if (this.port != null) {
       portMapper.delete(this.port);
+      this.port = null;
     }
     this.emit('close');
     queueMicrotask(() => {
@@ -177,6 +178,7 @@ export class Server
     }
     incoming._addHeaderLines(headers, headers.length);
 
+    // TODO(soon): It would be useful if there was a way to expose request.cf properties.
     incoming.method = request.method;
     incoming._stream = request.body;
 
@@ -198,12 +200,8 @@ export class Server
       );
     }
 
-    if (this.port != null) {
+    if (this.port != null || portMapper.has(Number(options.port))) {
       throw new ERR_SERVER_ALREADY_LISTEN();
-    }
-
-    if (portMapper.has(Number(options.port))) {
-      throw new Error(`Port ${options.port} is already in use`);
     }
 
     if (callback !== null) {
@@ -226,16 +224,14 @@ export class Server
   }
 
   ref(): this {
-    // This method is originally implemented in net.Server.
-    // Since we don't implement net.Server yet, we provide this stub implementation for now.
-    // TODO(soon): Revisit this once we implement net.Server
+    // It doesn't make sense to implement these at all as they are very specific to the way
+    // Node.js' event loop and process model works.
     return this;
   }
 
   unref(): this {
-    // This method is originally implemented in net.Server.
-    // Since we don't implement net.Server yet, we provide this stub implementation for now.
-    // TODO(soon): Revisit this once we implement net.Server
+    // It doesn't make sense to implement these at all as they are very specific to the way
+    // Node.js' event loop and process model works.
     return this;
   }
 
@@ -344,11 +340,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     chunks: (Buffer | Uint8Array)[];
     finished: boolean;
   }): Response {
-    const headers = new Headers();
-    for (const [header, value] of sentHeaders) {
-      headers.append(header, value);
-    }
-
+    const headers = new Headers(sentHeaders);
     let body = null;
 
     if (this._hasBody) {
@@ -362,7 +354,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
           if (finished) {
             controller.close();
           } else {
-            _this.on('finish', () => {
+            _this.once('finish', () => {
               finished = true;
               controller.close();
             });
@@ -470,7 +462,8 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     const originalStatusCode = statusCode;
 
     statusCode |= 0;
-    if (statusCode < 100 || statusCode > 999) {
+    if (statusCode < 200 || statusCode > 999) {
+      // < 100 status codes are not supported by cloudflare workers.
       throw new ERR_HTTP_INVALID_STATUS_CODE(originalStatusCode);
     }
 

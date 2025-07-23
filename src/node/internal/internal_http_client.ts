@@ -413,9 +413,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     chunk: Buffer,
     _encoding: BufferEncoding,
     callback: VoidFunction
-  ): void {
+  ): boolean {
     this.#body.push(chunk);
     callback();
+    return true;
   }
 
   setNoDelay(noDelay?: boolean): void {

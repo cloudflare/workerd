@@ -780,19 +780,21 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     return this._writeRaw(data, encoding, callback, byteLength);
   }
 
-  override _write(
-    _chunk: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-    _encoding: BufferEncoding,
-    cb: (error?: Error | null) => void
-  ): void {
-    // The only reason for us to override this method is to increase the Node.js test coverage.
-    // Otherwise, we don't implement _write yet.
-    if (this.destroyed) {
-      cb(new ERR_STREAM_DESTROYED('_write'));
-      return;
+  override write(
+    chunk: string | Buffer | Uint8Array,
+    encoding?: BufferEncoding | WriteCallback | null,
+    callback?: WriteCallback
+  ): boolean {
+    if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = null;
     }
 
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_write');
+    const ret = this.#write(chunk, encoding, callback, false);
+    if (!ret) {
+      this[kNeedDrain] = true;
+    }
+    return ret;
   }
 
   override end(
@@ -866,7 +868,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     } else if (!this._headerSent || this.writableLength || chunk) {
       this._send('', 'latin1', finish);
     } else {
-      setTimeout(finish, 0);
+      queueMicrotask(finish);
     }
 
     // Difference from Node.js -
@@ -985,7 +987,9 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       return;
     }
 
-    setTimeout(emitErrorNt, 0, this, err, callback);
+    queueMicrotask(() => {
+      emitErrorNt(this, err, callback);
+    });
   }
 
   #write(
@@ -1020,7 +1024,9 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       if (!this.destroyed) {
         this.#onError(err, callback);
       } else {
-        setTimeout(callback, 0, err);
+        queueMicrotask(() => {
+          callback(err);
+        });
       }
       return false;
     }
@@ -1063,14 +1069,16 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       if (this[kRejectNonStandardBodyWrites]) {
         throw new ERR_HTTP_BODY_NOT_ALLOWED();
       } else {
-        setTimeout(callback, 0);
+        queueMicrotask(callback);
         return true;
       }
     }
 
     if (!fromEnd && this.#buffer != null && !this.#buffer.writableCorked) {
       this.#buffer.cork();
-      setTimeout(connectionCorkNT, 0, this.#buffer);
+      queueMicrotask(() => {
+        connectionCorkNT(this.#buffer as MessageBuffer);
+      });
     }
 
     let ret;
