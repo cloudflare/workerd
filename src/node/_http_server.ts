@@ -4,7 +4,6 @@
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
 import {
-  STATUS_CODES,
   Server,
   ServerResponse,
   setupConnectionsTracking,
@@ -14,7 +13,9 @@ import {
   httpServerPreClose,
   kConnectionsCheckingInterval,
 } from 'node-internal:internal_http_server';
+import { STATUS_CODES } from 'node-internal:internal_http_constants';
 
+export { STATUS_CODES };
 export * from 'node-internal:internal_http_server';
 
 export default {

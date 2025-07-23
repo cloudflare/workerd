@@ -3,19 +3,18 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+// this.aborted attribute is set as deprecated in @types/node package.
+/* eslint-disable @typescript-eslint/no-deprecated */
+
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
 } from 'node:http';
 import { Readable } from 'node-internal:streams_readable';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
 const kHeadersCount = Symbol('kHeadersCount');
-const kTrailers = Symbol('kTrailers');
-const kTrailersDistinct = Symbol('kTrailersDistinct');
-const kTrailersCount = Symbol('kTrailersCount');
 
 export let setIncomingMessageFetchResponse: (
   incoming: IncomingMessage,
@@ -24,12 +23,9 @@ export let setIncomingMessageFetchResponse: (
 ) => void;
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
-  #reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  #reading: boolean = false;
   #response?: Response;
-  #resetTimers?: (opts: { finished: boolean }) => void;
-  #aborted: boolean = false;
 
+  aborted = false;
   url: string = '';
   // @ts-expect-error TS2416 Type-inconsistencies
   method: string | null = null;
@@ -42,49 +38,37 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   httpVersion: string = '1.1';
   complete = false;
   rawHeaders: string[] = [];
-  rawTrailers: string[] = [];
   joinDuplicateHeaders = false;
 
   [kHeaders]: IncomingHttpHeaders | null = null;
   [kHeadersDistinct]: Record<string, string[]> | null = null;
   [kHeadersCount]: number = 0;
-  [kTrailers]: NodeJS.Dict<string> | null = null;
-  [kTrailersDistinct]: Record<string, string[]> | null = null;
-  [kTrailersCount]: number = 0;
 
   // The underlying ReadableStream
   _stream: ReadableStream | null = null;
   // Flag for when we decide that this message cannot possibly be
   // read by the user, so there's no point continuing to handle it.
   _dumped = false;
+  _consuming = false;
 
   static {
     setIncomingMessageFetchResponse = (
       incoming: IncomingMessage,
-      response: Response,
-      resetTimers?: (opts: { finished: boolean }) => void
+      response: Response
     ): void => {
-      incoming.#setFetchResponse(response, resetTimers);
+      incoming.#setFetchResponse(response);
     };
   }
 
-  #setFetchResponse(
-    response: Response,
-    resetTimers?: (opts: { finished: boolean }) => void
-  ): void {
-    if (!(response instanceof Response) || resetTimers == null) {
-      // IncomingMessage constructor is not documented by Node.js but in order
-      // to be 100% node.js compatible we need to implement it, and expose it as
-      // a class that can be constructed.
-      //
-      // Node.js uses "Socket" as the first argument for IncomingMessage and
-      // does not have a second argument. In order to implement our "fetch"
-      // based ClientRequest class, we need to implement it as following.
-      //
-      // TODO(soon): Try to remove these from the constructor.
-      throw new ERR_METHOD_NOT_IMPLEMENTED('IncomingMessage');
-    }
+  constructor() {
+    super({});
 
+    if (this._readableState) {
+      this._readableState.readingMore = true;
+    }
+  }
+
+  #setFetchResponse(response: Response): void {
     this[kHeaders] = {};
     this[kHeadersDistinct] = {};
     for (const header of response.headers.keys()) {
@@ -94,7 +78,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this[kHeadersCount]++;
     }
 
-    this.#resetTimers = resetTimers;
     this.#response = response;
 
     if (this._readableState) {
@@ -110,41 +93,49 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     });
 
     this.on('timeout', () => {
-      this.#reading = false;
+      this._consuming = false;
     });
 
-    this.#reader = this.#response.body?.getReader();
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    this.#tryRead();
+    this._stream = this.#response.body;
   }
 
-  async #tryRead(): Promise<void> {
-    if (!this.#reader || this.#reading || this.#aborted) return;
-
-    this.#reading = true;
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      while (true) {
-        const { done, value } = await this.#reader.read();
-        if (done) {
-          break;
-        }
-        this.push(value);
+  // As this is an implementation of stream.Readable, we provide a _read()
+  // function that pumps the next chunk out of the underlying ReadableStream.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  override async _read(_n: number): Promise<void> {
+    if (!this._consuming) {
+      if (this._readableState) {
+        this._readableState.readingMore = false;
       }
-    } catch (error) {
-      this.emit('error', error);
-    } finally {
-      this.#reading = false;
-      this.#resetTimers?.({ finished: true });
-      this.push(null);
+      this._consuming = true;
     }
-  }
 
-  override _read(): void {
-    if (!this.#reading && !this.#aborted) {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      this.#tryRead();
+    // Difference from Node.js -
+    // The Node.js implementation will already have its internal buffer
+    // filled by the parserOnBody function.
+    // For our implementation, we use the ReadableStream instance.
+    if (this._stream == null) {
+      // For GET and HEAD requests, the stream would be empty.
+      // Simply signal that we're done.
+      this.complete = true;
+      this.push(null);
+      return;
+    }
+
+    const reader = this._stream.getReader();
+    try {
+      const data = await reader.read();
+      if (data.done) {
+        // Done with stream, tell Readable we have no more data;
+        this.complete = true;
+        this.push(null);
+      } else {
+        this.push(data.value);
+      }
+    } catch (e) {
+      this.destroy(e as Error);
+    } finally {
+      reader.releaseLock();
     }
   }
 
@@ -152,11 +143,10 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     error: Error | null,
     callback: (error?: Error | null) => void
   ): void {
-    if (!this.#aborted) {
-      this.#aborted = true;
+    if (!this.readableEnded || !this.complete) {
+      this.aborted = true;
       this.emit('aborted');
     }
-    this.#reading = false;
 
     queueMicrotask(() => {
       callback(error);
@@ -213,24 +203,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   _addHeaderLines(headers: string[] | null, n: number): void {
-    if (Array.isArray(headers)) {
-      let dest;
-      if (this.complete) {
-        this.rawTrailers = headers;
-        this[kTrailersCount] = n;
-        dest = this[kTrailers];
-      } else {
-        this.rawHeaders = headers;
-        this[kHeadersCount] = n;
-        dest = this[kHeaders];
-      }
+    if (Array.isArray(headers) && !this.complete) {
+      this.rawHeaders = headers;
+      this[kHeadersCount] = n;
 
-      if (dest) {
+      if (this[kHeaders]) {
         for (let i = 0; i < n; i += 2) {
           this._addHeaderLine(
             headers[i] as string,
             headers[i + 1] as string,
-            dest
+            this[kHeaders]
           );
         }
       }
@@ -278,43 +260,19 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   get trailers(): Record<string, string | undefined> {
-    if (!this[kTrailers]) {
-      this[kTrailers] = {};
-
-      const src = this.rawTrailers;
-      const dst = this[kTrailers];
-
-      for (let n = 0; n < this[kTrailersCount]; n += 2) {
-        this._addHeaderLine(src[n] as string, src[n + 1] as string, dst);
-      }
-    }
-    return this[kTrailers];
+    return {};
   }
 
-  set trailers(val: NodeJS.Dict<string>) {
-    this[kTrailers] = val;
+  set trailers(_val: NodeJS.Dict<string>) {
+    // Workerd doesn't support trailers.
   }
 
   get trailersDistinct(): Record<string, string[]> {
-    if (!this[kTrailersDistinct]) {
-      this[kTrailersDistinct] = {};
-
-      const src = this.rawTrailers;
-      const dst = this[kTrailersDistinct];
-
-      for (let n = 0; n < this[kTrailersCount]; n += 2) {
-        this._addHeaderLineDistinct(
-          src[n] as string,
-          src[n + 1] as string,
-          dst
-        );
-      }
-    }
-    return this[kTrailersDistinct];
+    return {};
   }
 
-  set trailersDistinct(val: Record<string, string[]>) {
-    this[kTrailersDistinct] = val;
+  set trailersDistinct(_val: Record<string, string[]>) {
+    // Workerd doesn't support trailers.
   }
 
   _addHeaderLineDistinct(

@@ -376,11 +376,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       .map((key) => `${key}=${response.headers.get(key)}}`)
       .join('\r\n');
     const incoming = new IncomingMessage();
-    setIncomingMessageFetchResponse(
-      incoming,
-      response,
-      this.#resetTimers.bind(this)
-    );
+    setIncomingMessageFetchResponse(incoming, response);
     incoming.on('error', (error) => {
       this.emit('error', error);
     });
