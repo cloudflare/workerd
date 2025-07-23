@@ -675,6 +675,8 @@ wd_test(
     sidecar = "http-socket-server",
     sidecar_port_bindings = [
         "HTTP_SOCKET_SERVER_PORT",
+        "SOCKET_PARTIALLY_WRITTEN",
+        "START_TLS_SOCKET",
     ],
 )
 

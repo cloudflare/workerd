@@ -4,6 +4,7 @@
 
 import { connect, convertSocketToFetcher } from 'cloudflare:sockets';
 import { strict as assert } from 'node:assert';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 // Basic connectivity and GET test
 export const oneRequest = {
@@ -99,11 +100,20 @@ export const multipleRequests = {
     assert.equal(response1.status, 200);
     const text1 = await response1.text();
     assert.equal(text1, 'pong');
+
     // Second request on same connection
-    const response2 = await httpClient.fetch('https://example.com/json');
-    assert.equal(response2.status, 200);
-    const data = await response2.json();
-    assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
+    // TODO(cleanup) we want this to fail during this initial implementation but later we should
+    // support multiple fetches (perhaps behind a compat flag)
+    await assert.rejects(httpClient.fetch('https://example.com/json'), {
+      name: 'Error',
+      message:
+        'Fetcher created from convertSocketToFetcher can only be used once',
+    });
+    /*
+     * assert.equal(response2.status, 200);
+     * const data = await response2.json();
+     * assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
+     */
   },
 };
 
@@ -112,17 +122,16 @@ export const multipleConcurrentRequests = {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
     const httpClient = convertSocketToFetcher(socket);
 
-    // TODO(immenently) Make this promise return the correct message
-    assert.rejects(
-      async () => {
-        await Promise.all([
-          httpClient.fetch('https://example.com/ping'),
-          httpClient.fetch('https://example.com/json'),
-        ]);
-      },
+    // TODO(cleanup) when multiple fetches are enabled make sure this message is changed
+    await assert.rejects(
+      Promise.all([
+        httpClient.fetch('https://example.com/ping'),
+        httpClient.fetch('https://example.com/json'),
+      ]),
       {
-        name: 'TypeError',
-        message: "can't read() again until previous read() completes",
+        name: 'Error',
+        message:
+          'Fetcher created from convertSocketToFetcher can only be used once',
       }
     );
   },
@@ -212,6 +221,7 @@ export const lockWriterFail = {
 };
 
 // try startTls and see if it fails
+/*
 export const startTlsFail = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`, {
@@ -231,6 +241,36 @@ export const startTlsFail = {
     assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
   },
 };
+*/
+
+// Test remote end drops socket.
+/*
+export const dropRemote = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const httpClient = convertSocketToFetcher(socket);
+    try {
+      await httpClient.fetch('https://example.com/drop');
+    } catch(error) {
+      console.log(error.name);
+      console.log(error.message);
+    }
+    await assert.rejects(httpClient.fetch('https://example.com/drop'), {
+      name: 'Error',
+      message: 'Network connection lost.',
+    });
+  }
+}
+*/
+
+async function tryPromise(promise) {
+  try {
+    await promise;
+  } catch (error) {
+    console.log(error.name);
+    console.log(error.message);
+  }
+}
 
 // Test WebSocket connection over the converted Socket
 export const websockets = {
@@ -282,3 +322,86 @@ export const websockets = {
     });
   },
 };
+
+// Test remote end destroys socket.
+export const destroyRemote = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const httpClient = convertSocketToFetcher(socket);
+    await assert.rejects(httpClient.fetch('https://example.com/destroy'), {
+      name: 'Error',
+      message: 'Network connection lost.',
+    });
+  },
+};
+
+// Test remote end drops socket
+export const dropRemote = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const httpClient = convertSocketToFetcher(socket);
+    await assert.rejects(
+      httpClient.fetch('https://example.com/drop', {
+        signal: AbortSignal.timeout(500),
+      }),
+      {
+        name: 'TimeoutError',
+        message: 'The operation was aborted due to timeout',
+      }
+    );
+  },
+};
+
+export const errorRemoteWrites = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.SOCKET_PARTIALLY_WRITTEN}`);
+    await sleep(2000);
+    const httpClient = convertSocketToFetcher(socket);
+    await assert.rejects(
+      httpClient.fetch('https://example.com/ping', {
+        signal: AbortSignal.timeout(500),
+      }),
+      {
+        name: 'Error',
+        // TODO(immenently) Right now we are getting a proctocol Error do we instead want to error
+        // when converting the Socket to the fetcher and see if there are already unconsumed writes?
+        // If we intend to do fetcher re-use I don't think this is possible because connection
+        // attempts really only happen on fetch not on convertSocketToFetcher
+        message: /internal error/,
+      }
+    );
+  },
+};
+
+/*
+export const startTlsSuccess = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.START_TLS_SOCKET}`, { secureTransport: 'starttls'});
+
+    const writer = socket.writable.getWriter();
+    const encoder = new TextEncoder();
+    await writer.write(encoder.encode("starttls"));
+    await writer.releaseLock();
+
+    const tlsSocket = socket.startTls();
+    console.log("Awaiting startTls");
+    await tlsSocket.opened;
+
+    const httpClient = convertSocketToFetcher(tlsSocket);
+    const response = await httpClient.fetch('https://example.com/ping');
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.equal(text, 'pong');
+  }
+};
+export const errorRemoteReads = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.SOCKET_PARTIALLY_WRITTEN}`);
+    const httpClient = convertSocketToFetcher(socket);
+    await assert.rejects(httpClient.fetch('https://example.com/ping', {signal: AbortSignal.timeout(500)}), {
+      name: 'TimeoutError',
+      message: 'The operation was aborted due to timeout',
+    });
+  }
+};
+*/

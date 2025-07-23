@@ -6,6 +6,8 @@
 // It creates an HTTP server that will respond to requests from the convertSocketToFetcher API.
 const http = require('node:http');
 const crypto = require('node:crypto');
+const net = require('node:net');
+const tls = require('node:tls');
 
 // Handle upgrade requests to switch from HTTP to WebSocket protocol
 function upgradeToWebSocketConnection(req, socket, head) {
@@ -151,6 +153,10 @@ const server = http.createServer((req, res) => {
   } else if (req.url === '/status/500') {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('Internal Server Error');
+  } else if (req.url === '/drop') {
+    res.socket.drop();
+  } else if (req.url === '/destroy') {
+    res.socket.destroy();
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
@@ -216,5 +222,57 @@ function handleWebSocketConnection(socket) {
 server.listen(process.env.HTTP_SOCKET_SERVER_PORT, () => {
   console.info(
     `HTTP Socket test server listening on port ${server.address().port}`
+  );
+});
+
+// This socket grabs connections and immediately drop them
+const dropServer = net.createServer((socket) => {
+  socket.on('error', (err) => {
+    console.log('DROP: ' + err.name);
+    console.log('DROP: ' + err.message);
+  });
+  var ready = true;
+  // Repeatedly send a page of data till the socket is borked
+  const repeatedString = 'A'.repeat(4_096);
+  while (ready) {
+    ready = socket.write(repeatedString + '\n');
+  }
+  socket.write(repeatedString + '\n');
+});
+
+dropServer.listen(process.env.SOCKET_PARTIALLY_WRITTEN, () => {
+  console.info(
+    `Drop Socket test server listening on port ${dropServer.address().port}`
+  );
+});
+
+// STARTTLS server that detects TLS Client Hello and upgrades
+const startTlsServer = net.createServer((socket) => {
+  console.log('STARTTLS: New connection received');
+
+  socket.on('data', (data) => {
+    console.log('STARTTLS: data: ', data);
+    const tlsSocket = tls.TLSSocket(socket, {
+      secureContext: tls.createSecureContext(options),
+      isServer: true,
+      rejectUnauthorized: false,
+    });
+    console.log(tlsSocket);
+    tlsSocket.write(
+      'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\npong'
+    );
+
+    tlsSocket.on('secureConnect', () => {
+      console.log(
+        'STARTTLS: TLS handshake complete, cipher:',
+        tlsSocket.getCipher()
+      );
+    });
+  });
+});
+
+startTlsServer.listen(process.env.START_TLS_SOCKET, () => {
+  console.info(
+    `STARTTLS server listening on port ${startTlsServer.address().port}`
   );
 });

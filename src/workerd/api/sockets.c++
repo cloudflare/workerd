@@ -526,8 +526,8 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
 // Definition of the StreamWorkerInterface class
 class StreamWorkerInterface final: public WorkerInterface {
  public:
-  StreamWorkerInterface(kj::AsyncIoStream& stream, const kj::HttpHeaderTable& headerTable)
-      : stream(stream),
+  StreamWorkerInterface(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
+      : stream(kj::mv(stream)),
         headerTable(headerTable) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -545,21 +545,14 @@ class StreamWorkerInterface final: public WorkerInterface {
     newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
     // Create a new HTTP client using our stream
-    auto httpClient = kj::newHttpClient(headerTable, stream);
+    auto httpClient = kj::newHttpClient(headerTable, *stream);
 
     // Create a new HTTP service from the client
     auto service = kj::newHttpService(*httpClient);
 
     // Forward the request to the service
     return service->request(method, noHostUrl, newHeaders, requestBody, response)
-        .catch_([](kj::Exception&& exception) {
-      if (exception.getDescription().contains(
-              "can't read() again until previous read() completes")) {
-        // TODO write a better description
-        JSG_FAIL_REQUIRE(TypeError, exception.getDescription());
-      }
-      throw exception;
-    }).attach(kj::mv(service), kj::mv(httpClient));
+        .attach(kj::mv(service), kj::mv(httpClient));
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -587,7 +580,7 @@ class StreamWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  kj::AsyncIoStream& stream;
+  kj::Own<kj::AsyncIoStream> stream;
   const kj::HttpHeaderTable& headerTable;
 };
 
@@ -599,12 +592,10 @@ class StreamOutgoingFactory final: public Fetcher::OutgoingFactory {
         headerTable(headerTable) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    /*
     JSG_ASSERT(stream.get() != nullptr, Error,
         "Fetcher created from convertSocketToFetcher can only be used once");
-    */
     // Create a WorkerInterface that wraps the stream
-    return kj::heap<StreamWorkerInterface>(*stream, headerTable);
+    return kj::heap<StreamWorkerInterface>(kj::mv(stream), headerTable);
   }
 
  private:

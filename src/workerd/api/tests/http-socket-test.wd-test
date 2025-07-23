@@ -16,6 +16,8 @@ const config :Workerd.Config = (
         compatibilityFlags = ["nodejs_compat", "experimental"],
         bindings = [
           (name = "HTTP_SOCKET_SERVER_PORT", fromEnvironment = "HTTP_SOCKET_SERVER_PORT"),
+          (name = "SOCKET_PARTIALLY_WRITTEN", fromEnvironment = "SOCKET_PARTIALLY_WRITTEN"),
+          (name = "START_TLS_SOCKET", fromEnvironment = "START_TLS_SOCKET"),
         ],
       )
     ),
