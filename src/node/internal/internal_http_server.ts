@@ -208,12 +208,25 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.port = Number(options.port);
+    this.port = this.#findSuitablePort(Number(options.port));
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       callback?.();
     });
     return this;
+  }
+
+  #findSuitablePort(port: number): number {
+    if (port !== 0 && !portMapper.has(port)) {
+      return port;
+    }
+
+    if (port === 0) {
+      return this.#findSuitablePort(Math.floor(Math.random() * 65535) + 1);
+    }
+
+    // Non zero port number should be unique and handled before this method is called.
+    throw new Error('This is a bug with Cloudflare Workers');
   }
 
   getConnections(_cb?: (err: Error | null, count: number) => void): this {

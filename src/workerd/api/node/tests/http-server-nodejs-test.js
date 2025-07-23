@@ -1,8 +1,7 @@
 import http from 'node:http';
-import { strictEqual, ok, throws } from 'node:assert';
+import { strictEqual, ok, throws, notStrictEqual } from 'node:assert';
 import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
 import { mock } from 'node:test';
-import { Writable } from 'node:stream';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -238,6 +237,16 @@ export const testHttpServerWriteEndAfterEnd = {
     await env.SERVICE.fetch('https://cloudflare.com');
     await promise;
     strictEqual(handle.mock.callCount(), 1);
+    server.close();
+  },
+};
+
+export const testHandleZeroPortNumber = {
+  async test() {
+    const server = http.createServer();
+    server.listen(0);
+    notStrictEqual(server.port, 0);
+    notStrictEqual(server.address().port, 0);
     server.close();
   },
 };
