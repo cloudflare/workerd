@@ -215,6 +215,60 @@ export const testHttpServerNonUtf8Header = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server-options-incoming-message.js
+export const testHttpServerOptionsIncomingMessage = {
+  async test(_ctrl, env) {
+    class MyIncomingMessage extends http.IncomingMessage {
+      getUserAgent() {
+        return this.headers['user-agent'] || 'unknown';
+      }
+    }
+
+    await using server = http.createServer(
+      {
+        IncomingMessage: MyIncomingMessage,
+      },
+      (req, res) => {
+        strictEqual(req.getUserAgent(), 'node-test');
+        res.statusCode = 200;
+        res.end();
+      }
+    );
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      headers: { 'User-Agent': 'node-test' },
+    });
+    strictEqual(res.status, 200);
+  },
+};
+
+// Test is taken from test/parallel/test-http-server-options-server-response.js
+export const testHttpServerOptionsServerResponse = {
+  async test(_ctrl, env) {
+    class MyServerResponse extends http.ServerResponse {
+      status(code) {
+        return this.writeHead(code, { 'Content-Type': 'text/plain' });
+      }
+    }
+
+    await using server = http.createServer(
+      {
+        ServerResponse: MyServerResponse,
+      },
+      (_req, res) => {
+        res.status(200);
+        res.end();
+      }
+    );
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual(res.headers.get('content-type'), 'text/plain');
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-write-end-after-end.js
 export const testHttpServerWriteEndAfterEnd = {
   async test(_ctrl, env) {
@@ -326,8 +380,8 @@ export default nodeCompatHttpServerHandler({ port: 8080 });
 // - [ ] test/parallel/test-http-server-multiheaders2.js
 // - [ ] test/parallel/test-http-server-multiple-client-error.js
 // - [x] test/parallel/test-http-server-non-utf8-header.js
-// - [ ] test/parallel/test-http-server-options-incoming-message.js
-// - [ ] test/parallel/test-http-server-options-server-response.js
+// - [x] test/parallel/test-http-server-options-incoming-message.js
+// - [x] test/parallel/test-http-server-options-server-response.js
 // - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-body.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-headers.js

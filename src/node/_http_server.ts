@@ -9,13 +9,13 @@ import {
   setupConnectionsTracking,
   storeHTTPOptions,
   _connectionListener,
-  kServerResponse,
   httpServerPreClose,
   kConnectionsCheckingInterval,
 } from 'node-internal:internal_http_server';
+import { kServerResponse } from 'node-internal:internal_http_util';
 import { STATUS_CODES } from 'node-internal:internal_http_constants';
 
-export { STATUS_CODES };
+export { STATUS_CODES, kServerResponse };
 export * from 'node-internal:internal_http_server';
 
 export default {

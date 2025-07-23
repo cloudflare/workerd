@@ -30,6 +30,10 @@ import { portMapper } from 'cloudflare-internal:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
 import { STATUS_CODES } from 'node-internal:internal_http_constants';
 import {
+  kServerResponse,
+  kIncomingMessage,
+} from 'node-internal:internal_http_util';
+import {
   kOutHeaders,
   WrittenDataBufferEntry,
   HeadersSentEvent,
@@ -51,7 +55,6 @@ import type {
 } from 'node:http';
 import type { Socket, AddressInfo } from 'node:net';
 
-export const kServerResponse = Symbol('ServerResponse');
 export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
 );
@@ -65,6 +68,10 @@ export class Server
   extends EventEmitter
   implements _Server, BaseWithHttpOptions
 {
+  // @ts-expect-error TS2416 Server is not assignable to same property in base type.
+  [kIncomingMessage]: typeof IncomingMessage = IncomingMessage;
+  // @ts-expect-error TS2416 Server is not assignable to same property in base type.
+  [kServerResponse]: typeof ServerResponse = ServerResponse;
   [kConnectionsCheckingInterval]?: number;
   [kUniqueHeaders]: Set<string> | null = null;
 
@@ -88,6 +95,7 @@ export class Server
     super();
 
     if (options != null) {
+      // @ts-expect-error TS2345 TODO(soon): Find a better way to handle this type mismatch.
       storeHTTPOptions.call(this, options);
     }
 
@@ -160,7 +168,7 @@ export class Server
     incoming: IncomingMessage;
     response: ServerResponse;
   } {
-    const incoming = new IncomingMessage();
+    const incoming = new this[kIncomingMessage]();
     const reqUrl = new URL(request.url);
     incoming.url = reqUrl.pathname + reqUrl.search;
 
@@ -180,7 +188,7 @@ export class Server
     incoming.method = request.method;
     incoming._stream = request.body;
 
-    const response = new ServerResponse(incoming);
+    const response = new this[kServerResponse](incoming);
     return { incoming, response };
   }
 
@@ -574,7 +582,12 @@ export function setupConnectionsTracking(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('setupConnectionsTracking');
 }
 
-export interface BaseWithHttpOptions {
+export interface BaseWithHttpOptions<
+  IM extends IncomingMessage = IncomingMessage,
+  SR extends ServerResponse = ServerResponse,
+> {
+  [kIncomingMessage]: IM;
+  [kServerResponse]: SR;
   requestTimeout: number;
   headersTimeout: number;
   requireHostHeader: boolean;
@@ -586,6 +599,11 @@ export function storeHTTPOptions(
   this: BaseWithHttpOptions,
   options: ServerOptions
 ): void {
+  // @ts-expect-error TS2322 Type mismatch.
+  this[kIncomingMessage] = options.IncomingMessage || IncomingMessage;
+  // @ts-expect-error TS2322 Type mismatch.
+  this[kServerResponse] = options.ServerResponse || ServerResponse;
+
   const maxHeaderSize = options.maxHeaderSize;
   if (maxHeaderSize !== undefined) {
     validateInteger(maxHeaderSize, 'maxHeaderSize', 0);
