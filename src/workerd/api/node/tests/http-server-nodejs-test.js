@@ -243,11 +243,31 @@ export const testHttpServerWriteEndAfterEnd = {
 
 export const testHandleZeroPortNumber = {
   async test() {
+    const { promise, resolve } = Promise.withResolvers();
     const server = http.createServer();
-    server.listen(0);
-    notStrictEqual(server.port, 0);
-    notStrictEqual(server.address().port, 0);
-    server.close();
+    const listeningFn = mock.fn();
+    server.on('listening', listeningFn);
+    server.listen(0, () => {
+      ok(server.listening);
+      notStrictEqual(server.port, 0);
+      notStrictEqual(server.address().port, 0);
+      strictEqual(listeningFn.mock.callCount(), 1);
+      server.close();
+      resolve();
+    });
+    await promise;
+  },
+};
+
+export const testInvalidPorts = {
+  async test() {
+    const server = http.createServer();
+    for (const value of [NaN, Infinity]) {
+      throws(() => server.listen(value), {
+        code: 'ERR_SOCKET_BAD_PORT',
+      });
+    }
+    strictEqual(server.listening, false);
   },
 };
 

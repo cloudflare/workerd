@@ -75,7 +75,7 @@ export class Server
   timeout = 0;
   maxHeadersCount: number | null = null;
   maxRequestsPerSocket = 0;
-
+  connectionsCheckingInterval = 30_000;
   requestTimeout: number = 0;
   headersTimeout: number = 0;
   requireHostHeader: boolean = false;
@@ -103,8 +103,6 @@ export class Server
     if (requestListener) {
       this.on('request', requestListener);
     }
-
-    this.on('listening', setupConnectionsTracking);
 
     this[kUniqueHeaders] = parseUniqueHeadersOption(
       options.uniqueHeaders as (string | string[])[]
@@ -211,7 +209,7 @@ export class Server
     this.port = this.#findSuitablePort(Number(options.port));
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
-      callback?.();
+      this.emit('listening');
     });
     return this;
   }
