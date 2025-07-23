@@ -442,12 +442,10 @@ class Fetcher: public JsRpcClientProvider {
           | Rpc.WorkerEntrypointBranded
           | ExportedHandler<any, any, any>
           | undefined = undefined,
-      > = Fetcher<
-        T extends new (...args: any[]) => infer EntrypointClass ? EntrypointClass
-        : T extends Rpc.WorkerEntrypointBranded ? T
+      > = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded ? Fetcher<InstanceType<T>>
+        : T extends Rpc.WorkerEntrypointBranded ? Fetcher<T>
         : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded> ? never
-        : undefined
-      >;
+        : Fetcher<undefined>
     );
 
     if (!flags.getFetcherNoGetPutDelete()) {
