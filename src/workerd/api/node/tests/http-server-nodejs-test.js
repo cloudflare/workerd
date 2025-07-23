@@ -75,6 +75,23 @@ export const testHttpServerDeChunkedTrailer = {
 //   }
 // }
 
+// Test is taken from test/parallel/test-http-server-method.query.js
+export const testHttpServerMethodQuery = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req.method, 'QUERY');
+      res.end('OK');
+    });
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'QUERY',
+    });
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'OK');
+  },
+};
+
 // Tests is taken from test/parallel/test-http-server-multiheaders.js
 export const testHttpServerMultiHeaders = {
   async test(_ctrl, env) {
@@ -269,6 +286,30 @@ export const testHttpServerOptionsServerResponse = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server-write-after-end.js
+export const testHttpServerWriteAfterEnd = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    await using server = http.createServer(handle);
+
+    function handle(_req, res) {
+      res.write('hello');
+      res.end();
+
+      queueMicrotask(() => {
+        res.write('world', (err) => {
+          strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+          resolve();
+        });
+      });
+    }
+
+    server.listen(8080);
+    await env.SERVICE.fetch('https://cloudflare.com');
+    await promise;
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-write-end-after-end.js
 export const testHttpServerWriteEndAfterEnd = {
   async test(_ctrl, env) {
@@ -360,22 +401,14 @@ export default nodeCompatHttpServerHandler({ port: 8080 });
 // - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-close-idle-wait-response.js
 // - [ ] test/parallel/test-http-server-close-idle.js
-// - [ ] test/parallel/test-http-server-connection-list-when-close.js
-// - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-consumed-timeout.js
 // - [x] test/parallel/test-http-server-de-chunked-trailer.js
-// - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
 // - [ ] test/parallel/test-http-server-headers-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-interrupted-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-headers-timeout-pipelining.js
 // - [x] test/parallel/test-http-server-incomingmessage-destroy.js
-// - [ ] test/parallel/test-http-server-keep-alive-defaults.js
-// - [ ] test/parallel/test-http-server-keep-alive-max-requests-null.js
-// - [ ] test/parallel/test-http-server-keep-alive-timeout.js
-// - [ ] test/parallel/test-http-server-keepalive-end.js
-// - [ ] test/parallel/test-http-server-keepalive-req-gc.js
-// - [ ] test/parallel/test-http-server-method.query.js
+// - [x] test/parallel/test-http-server-method.query.js
 // - [x] test/parallel/test-http-server-multiheaders.js
 // - [ ] test/parallel/test-http-server-multiheaders2.js
 // - [ ] test/parallel/test-http-server-multiple-client-error.js
@@ -390,18 +423,26 @@ export default nodeCompatHttpServerHandler({ port: 8080 });
 // - [ ] test/parallel/test-http-server-request-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-request-timeout-pipelining.js
 // - [ ] test/parallel/test-http-server-request-timeout-upgrade.js
-// - [ ] test/parallel/test-http-server-stale-close.js
 // - [ ] test/parallel/test-http-server-timeouts-validation.js
-// - [ ] test/parallel/test-http-server-unconsume-consume.js
-// - [ ] test/parallel/test-http-server-unconsume.js
-// - [ ] test/parallel/test-http-server-write-after-end.js
+// - [x] test/parallel/test-http-server-write-after-end.js
 // - [x] test/parallel/test-http-server-write-end-after-end.js
 // - [ ] test/parallel/test-http-server.js
 
 // Tests that does not apply to workerd.
+// - [ ] test/parallel/test-http-server-connection-list-when-close.js
+// - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-clear-timer.js
 // - [ ] test/parallel/test-http-server-close-all.js
 // - [ ] test/parallel/test-http-server-delete-parser.js
+// - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
+// - [ ] test/parallel/test-http-server-keep-alive-defaults.js
+// - [ ] test/parallel/test-http-server-keep-alive-max-requests-null.js
+// - [ ] test/parallel/test-http-server-keep-alive-timeout.js
+// - [ ] test/parallel/test-http-server-keepalive-end.js
+// - [ ] test/parallel/test-http-server-keepalive-req-gc.js
 // - [ ] test/parallel/test-http-server-options-highwatermark.js
 // - [ ] test/parallel/test-http-server-reject-cr-no-lf.js
 // - [ ] test/parallel/test-http-server-response-standalone.js
+// - [ ] test/parallel/test-http-server-stale-close.js
+// - [ ] test/parallel/test-http-server-unconsume.js
+// - [ ] test/parallel/test-http-server-unconsume-consume.js
