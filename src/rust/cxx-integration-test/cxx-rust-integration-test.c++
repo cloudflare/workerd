@@ -20,8 +20,13 @@ KJ_TEST("init cxx_integration") {
   rust::cxx_integration::init();
 }
 
-KJ_TEST("panic results in abort") {
-  KJ_EXPECT_SIGNAL(SIGABRT, rust::cxx_integration::trigger_panic("foobar"));
+KJ_TEST("panic results in exception") {
+  try {
+    rust::cxx_integration::trigger_panic("foobar");
+    KJ_FAIL_REQUIRE("exception is expected");
+  } catch (kj::Exception& e) {
+    KJ_EXPECT(e.getDescription().contains("foobar"_kj));
+  }
 }
 
 KJ_TEST("ok Result") {
@@ -33,9 +38,9 @@ KJ_TEST("err Result") {
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
-  } catch (::rust::Error e) {
+  } catch (kj::Exception& e) {
     // this is expected
-    KJ_EXPECT(e.what() == "test error"_kj);
+    KJ_EXPECT(e.getDescription().contains("test error"_kj));
   }
 }
 
