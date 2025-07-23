@@ -1699,10 +1699,10 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
   size_t endPos = chars.size();
   if (chars[endPos - 1] == '\n') endPos--;
 
-  KJ_IF_SOME(console, js.global().get(js, js.str("console"_kj)).tryCast<jsg::JsObject>()) {
+  KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
     auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "error"_kj);
-    v8::Local<v8::Value> methodVal(method);
-    if (methodVal->IsFunction()) {
+    if (method.isFunction()) {
+      v8::Local<v8::Value> methodVal(method);
       auto methodFunc = methodVal.As<v8::Function>();
       v8::Local<v8::Value> args[] = {js.str(chars.first(endPos))};
       jsg::check(methodFunc->Call(js.v8Context(), console, 1, args));
