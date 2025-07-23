@@ -84,9 +84,9 @@ export default {
     expectedFailures: [],
   },
   'FileSystemDirectoryHandle-resolve.https.any.js': {
-    comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
+    comment:
+      'We currently do not implement the resolve() method on directories',
+    disabledTests: [
       'Resolve returns empty array for same directory',
       'Resolve returns correct path',
       'Resolve returns correct path with non-ascii characters',

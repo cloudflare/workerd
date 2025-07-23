@@ -500,6 +500,11 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
     JSG_METHOD(values);
     JSG_METHOD(forEach);
     JSG_ASYNC_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE({
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+      [Symbol.asyncIterator]() : AsyncIterableIterator<[string, FileSystemHandle]>;
+    });
   }
 
  private:
