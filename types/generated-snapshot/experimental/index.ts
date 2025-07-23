@@ -261,7 +261,6 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FileSystemFileHandle: typeof FileSystemFileHandle;
   FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
   FileSystemWritableFileStream: typeof FileSystemWritableFileStream;
-  FileSystemSyncAccessHandle: typeof FileSystemSyncAccessHandle;
   StorageManager: typeof StorageManager;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
@@ -3153,6 +3152,8 @@ export declare abstract class FileSystemHandle {
   get name(): string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/isSameEntry) */
   isSameEntry(other: FileSystemHandle): Promise<boolean>;
+  getUniqueId(): Promise<string>;
+  remove(options?: FileSystemHandleRemoveOptions): Promise<void>;
 }
 /**
  * Available only in secure contexts.
@@ -3166,9 +3167,6 @@ export declare abstract class FileSystemFileHandle extends FileSystemHandle {
   createWritable(
     options?: FileSystemFileHandleFileSystemCreateWritableOptions,
   ): Promise<FileSystemWritableFileStream>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createSyncAccessHandle) */
-  createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>;
-  getUniqueId(): Promise<string>;
 }
 /**
  * Available only in secure contexts.
@@ -3204,7 +3202,6 @@ export declare abstract class FileSystemDirectoryHandle extends FileSystemHandle
     ) => void,
     thisArg?: any,
   ): void;
-  getUniqueId(): Promise<string>;
   [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
 }
 /**
@@ -3229,31 +3226,6 @@ export declare abstract class FileSystemWritableFileStream extends WritableStrea
 /**
  * Available only in secure contexts.
  *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle)
- */
-export declare abstract class FileSystemSyncAccessHandle {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/read) */
-  read(
-    buffer: ArrayBuffer | ArrayBufferView,
-    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
-  ): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/write) */
-  write(
-    buffer: ArrayBuffer | ArrayBufferView,
-    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
-  ): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/truncate) */
-  truncate(newSize: number): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/getSize) */
-  getSize(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/flush) */
-  flush(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/close) */
-  close(): void;
-}
-/**
- * Available only in secure contexts.
- *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/StorageManager)
  */
 export declare abstract class StorageManager {
@@ -3272,9 +3244,6 @@ export interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
 export interface FileSystemDirectoryHandleFileSystemRemoveOptions {
   recursive: boolean;
 }
-export interface FileSystemSyncAccessHandleFileSystemReadWriteOptions {
-  at?: number;
-}
 export interface FileSystemWritableFileStreamWriteParams {
   type: string;
   size?: number;
@@ -3284,6 +3253,9 @@ export interface FileSystemWritableFileStreamWriteParams {
 export interface FileSystemDirectoryHandleEntryType {
   key: string;
   value: FileSystemHandle;
+}
+export interface FileSystemHandleRemoveOptions {
+  recursive?: boolean;
 }
 export type AiImageClassificationInput = {
   image: number[];

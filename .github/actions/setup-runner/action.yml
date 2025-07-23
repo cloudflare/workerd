@@ -25,6 +25,10 @@ runs:
         sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
         echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
         echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+        echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
+        echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
+        echo "build:linux --action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+        echo "build:linux --host_action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
     - name: Setup Windows
       shell: pwsh
       if: runner.os == 'Windows'

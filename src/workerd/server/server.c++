@@ -3752,7 +3752,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
 
       DynamicErrorReporter errorReporter;
 
-      auto service = server.makeWorkerImpl(isolateName, kj::mv(def), {}, errorReporter);
+      auto service = co_await server.makeWorkerImpl(isolateName, kj::mv(def), {}, errorReporter);
       errorReporter.throwIfErrors();
 
       service->link(errorReporter);
@@ -3882,7 +3882,7 @@ kj::Own<WorkerStubChannel> Server::WorkerService::loadIsolate(uint loaderChannel
   return channels.workerLoaders[loaderChannel]->loadIsolate(kj::mv(name), kj::mv(fetchSource));
 }
 
-kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
+kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     config::Worker::Reader conf,
     capnp::List<config::Extension>::Reader extensions) {
   TRACE_EVENT("workerd", "Server::makeWorker()", "name", name.cStr());
@@ -3966,13 +3966,16 @@ kj::Own<Server::Service> Server::makeWorker(kj::StringPtr name,
     // clang-format on
   };
 
-  return makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
+  co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
-kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
+kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
+  // Load Python artifacts if this is a Python worker
+  co_await preloadPython(name, def, errorReporter);
+
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
@@ -4005,12 +4008,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
     }
 
     using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-    kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
-        kj::heap<workerd::api::pyodide::PyodidePackageManager>();
     auto isPythonWorker = def.featureFlags.getPythonWorkers();
     auto artifactBundler = isPythonWorker
-        ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
-              .attach(kj::mv(pyodidePackageManager))
+        ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
         : ArtifactBundler::makeDisabledBundler();
 
     newModuleRegistry = WorkerdApi::initializeBundleModuleRegistry(*jsgobserver,
@@ -4087,12 +4087,9 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
   }
 
   using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
-  kj::Own<workerd::api::pyodide::PyodidePackageManager> pyodidePackageManager =
-      kj::heap<workerd::api::pyodide::PyodidePackageManager>();
   auto isPythonWorker = def.featureFlags.getPythonWorkers();
   auto artifactBundler = isPythonWorker
-      ? ArtifactBundler::makePackagesOnlyBundler(*pyodidePackageManager)
-            .attach(kj::mv(pyodidePackageManager))
+      ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
       : ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, kj::mv(def.source), IsolateObserver::StartType::COLD,
@@ -4327,12 +4324,12 @@ kj::Own<Server::WorkerService> Server::makeWorkerImpl(kj::StringPtr name,
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
   result->initActorNamespaces(def.localActorConfigs, network);
-  return result;
+  co_return result;
 }
 
 // =======================================================================================
 
-kj::Own<Server::Service> Server::makeService(config::Service::Reader conf,
+kj::Promise<kj::Own<Server::Service>> Server::makeService(config::Service::Reader conf,
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     capnp::List<config::Extension>::Reader extensions) {
   kj::StringPtr name = conf.getName();
@@ -4340,25 +4337,25 @@ kj::Own<Server::Service> Server::makeService(config::Service::Reader conf,
   switch (conf.which()) {
     case config::Service::UNSPECIFIED:
       reportConfigError(kj::str("Service named \"", name, "\" does not specify what to serve."));
-      return makeInvalidConfigService();
+      co_return makeInvalidConfigService();
 
     case config::Service::EXTERNAL:
-      return makeExternalService(name, conf.getExternal(), headerTableBuilder);
+      co_return makeExternalService(name, conf.getExternal(), headerTableBuilder);
 
     case config::Service::NETWORK:
-      return makeNetworkService(conf.getNetwork());
+      co_return makeNetworkService(conf.getNetwork());
 
     case config::Service::WORKER:
-      return makeWorker(name, conf.getWorker(), extensions);
+      co_return co_await makeWorker(name, conf.getWorker(), extensions);
 
     case config::Service::DISK:
-      return makeDiskDirectoryService(name, conf.getDisk(), headerTableBuilder);
+      co_return makeDiskDirectoryService(name, conf.getDisk(), headerTableBuilder);
   }
 
   reportConfigError(kj::str("Service named \"", name,
       "\" has unrecognized type. Was the config compiled with a "
       "newer version of the schema?"));
-  return makeInvalidConfigService();
+  co_return makeInvalidConfigService();
 }
 
 void Server::taskFailed(kj::Exception&& exception) {
@@ -4841,7 +4838,7 @@ kj::Promise<void> Server::run(
 
   auto forkedDrainWhen = handleDrain(kj::mv(drainWhen)).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   auto listenPromise = listenOnSockets(config, headerTableBuilder, forkedDrainWhen);
 
@@ -4923,13 +4920,38 @@ uint startInspector(
       [](const uint& port) { return port; });
 }
 
-void Server::startServices(jsg::V8System& v8System,
+kj::Promise<void> Server::preloadPython(
+    kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter) {
+  if (workerDef.featureFlags.getPythonWorkers()) {
+    auto pythonRelease = getPythonSnapshotRelease(workerDef.featureFlags);
+    KJ_IF_SOME(release, pythonRelease) {
+      auto version = getPythonBundleName(release);
+
+      // Fetch the Pyodide bundle.
+      co_await api::pyodide::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
+
+      // Preload Python packages.
+      KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
+        if (modulesSource.isPython) {
+          auto pythonRequirements = getPythonRequirements(modulesSource);
+
+          // Store the packages in the package manager that is stored in the pythonConfig
+          co_await fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
+              pythonRequirements, release, network, timer);
+        }
+      }
+    }
+  }
+}
+
+kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     config::Config::Reader config,
     kj::HttpHeaderTable::Builder& headerTableBuilder,
     kj::ForkedPromise<void>& forkedDrainWhen) {
   // ---------------------------------------------------------------------------
   // Configure services
   TRACE_EVENT("workerd", "startServices");
+
   // First pass: Extract actor namespace configs.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
@@ -5012,7 +5034,7 @@ void Server::startServices(jsg::V8System& v8System,
   // Second pass: Build services.
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
-    auto service = makeService(serviceConf, headerTableBuilder, config.getExtensions());
+    auto service = co_await makeService(serviceConf, headerTableBuilder, config.getExtensions());
 
     services.upsert(kj::str(name), kj::mv(service), [&](auto&&...) {
       reportConfigError(kj::str("Config defines multiple services named \"", name, "\"."));
@@ -5205,7 +5227,7 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
 
   auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
 
-  startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
 
   // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange
   // to wait on them. Crash if listening fails.

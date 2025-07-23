@@ -118,7 +118,11 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
     await injectSitePackagesModule(pyodide, '_workers', '_workers');
-    await injectSitePackagesModule(pyodide, 'workers', 'workers');
+
+    // Create workers package structure with workflows submodule
+    pyodide.FS.mkdir(`${sitePackages}/workers`);
+    await injectSitePackagesModule(pyodide, 'workers', 'workers/__init__');
+    await injectSitePackagesModule(pyodide, 'workflows', 'workers/workflows');
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
