@@ -365,6 +365,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
           if (finished) {
             controller.close();
           } else {
+            _this.on('error', (error) => {
+              controller.error(error);
+            });
             _this.once('finish', () => {
               finished = true;
               controller.close();

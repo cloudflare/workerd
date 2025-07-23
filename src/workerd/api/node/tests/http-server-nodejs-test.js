@@ -271,6 +271,32 @@ export const testInvalidPorts = {
   },
 };
 
+export const consumeRequestPayloadData = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req.method, 'POST');
+      let data = '';
+      req.setEncoding('utf8');
+      req.on('data', (d) => (data += d));
+      req.on('end', () => {
+        strictEqual(data, 'hello world');
+        res.setHeaders(new Headers({ hello: 'world' }));
+        res.end(data + ' x2');
+      });
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      body: 'hello world',
+      method: 'POST',
+    });
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'hello world x2');
+    strictEqual(res.headers.get('hello'), 'world');
+  },
+};
+
 export default nodeCompatHttpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
