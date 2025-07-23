@@ -157,6 +157,9 @@ const server = http.createServer((req, res) => {
     res.socket.drop();
   } else if (req.url === '/destroy') {
     res.socket.destroy();
+  } else if (req.url === '/redirect') {
+    res.writeHead(301, { Location: '/ping' });
+    res.end('Moved Permanently');
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');

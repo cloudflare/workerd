@@ -90,6 +90,25 @@ export const response500 = {
   },
 };
 
+export const redirect301 = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const httpClient = convertSocketToFetcher(socket);
+
+    // TODO(cleanup) when enabling mulitple fetches we can only then do redirects.
+    await assert.rejects(httpClient.fetch('https://example.com/redirect'), {
+      name: 'Error',
+      message:
+        'Fetcher created from convertSocketToFetcher can only be used once',
+    });
+    /*
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.equal(text, 'pong');
+    */
+  },
+};
+
 export const multipleRequests = {
   async test(ctrl, env, ctx) {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
