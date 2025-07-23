@@ -502,7 +502,7 @@ class DirectoryBase final: public Directory {
   }
 
   // Tries to remove the file or directory at the given path. If the node does
-  // not exist, true will be returned. If the node is a directory and the recursive
+  // not exist, false will be returned. If the node is a directory and the recursive
   // option is not set, an exception will be thrown if the directory is not empty.
   // If the directory is read only, an exception will be thrown.
   // If the node is a file, it will be removed regardless of the recursive option
@@ -538,7 +538,7 @@ class DirectoryBase final: public Directory {
         }
       }
 
-      return true;
+      return false;
     } else {
       return FsError::READ_ONLY;
     }
@@ -1013,6 +1013,63 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return kj::heap<FdHandle>(weakThis.addRef(), fd);
   }
 
+  struct Lock {
+    const VirtualFileSystemImpl& vfs;
+    const jsg::Url& url;
+
+    void lock(const jsg::Url& locator) const {
+      KJ_IF_SOME(locked, vfs.locks.find(locator)) {
+        locked++;
+      } else {
+        vfs.locks.insert(locator.clone(), 1);
+      }
+    }
+
+    void unlock(const jsg::Url& locator) const {
+      KJ_IF_SOME(locked, vfs.locks.find(locator)) {
+        if (locked == 1) {
+          vfs.locks.erase(locator);
+        } else {
+          KJ_ASSERT(locked > 0);
+          --locked;
+        }
+      }
+    }
+
+    Lock(const VirtualFileSystemImpl& vfs, const jsg::Url& url): vfs(vfs), url(url) {
+      lock(url);
+
+      // This is fun... per the webfs spec, we need to prevent directories from
+      // being removed if any locks are held on any files descendent from it,
+      // so when we grab a lock, we also need to lock the parent path.
+      auto maybeParent = url.getParent();
+      while (maybeParent != kj::none) {
+        auto& parent = KJ_ASSERT_NONNULL(maybeParent);
+        lock(parent);
+        maybeParent = parent.getParent();
+      }
+    }
+    ~Lock() noexcept(false) {
+      unlock(url);
+      auto maybeParent = url.getParent();
+      while (maybeParent != kj::none) {
+        auto& parent = KJ_ASSERT_NONNULL(maybeParent);
+        unlock(parent);
+        maybeParent = parent.getParent();
+      }
+    }
+  };
+
+  kj::Own<void> lock(jsg::Lock& js, const jsg::Url& locator) const override {
+    return kj::heap<Lock>(*this, locator);
+  }
+  bool isLocked(jsg::Lock& js, const jsg::Url& locator) const override {
+    KJ_IF_SOME(locked, locks.find(locator)) {
+      return locked > 0;
+    }
+    return false;
+  }
+
  private:
   // All operations on the VFS are expected to be performed while holding the
   // isolate lock even tho the VFS itself does not depend directly on the
@@ -1028,6 +1085,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   mutable int nextFd = static_cast<int>(Stdio::ERR) + 1;
 
   mutable kj::HashMap<int, kj::Rc<OpenedFile>> openedFiles;
+  mutable kj::HashMap<jsg::Url, size_t> locks;
 
   void closeFdWithoutExplicitLock(int fd) const {
     openedFiles.erase(fd);

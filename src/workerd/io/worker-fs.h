@@ -370,7 +370,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   };
 
   // Tries to remove the file, directory, or symlink at the given path. If the
-  // node does not exist, true will be returned. If the node is a directory and
+  // node does not exist, false will be returned. If the node is a directory and
   // the recursive option is not set, an exception will be thrown if the directory
   // is not empty. If the directory is read only, an exception will be thrown.
   // If the node is a file, it will be removed regardless of the recursive option
@@ -628,6 +628,14 @@ class VirtualFileSystem {
   // Returns kj::none if the fd is not opened/known.
   virtual kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(
       jsg::Lock& js, int fd) const KJ_WARN_UNUSED_RESULT = 0;
+
+  // Locks are used by the web file system to ensure that certain mutation operations
+  // are not permitted while a lock is held. These are not true locks, they are more
+  // like simple refcounts. While the refcount is greater than 0, the lock is held.
+  // The lock is released when the returned kj::Own<void> is dropped.
+  virtual kj::Own<void> lock(
+      jsg::Lock& js, const jsg::Url& locator) const KJ_WARN_UNUSED_RESULT = 0;
+  virtual bool isLocked(jsg::Lock& js, const jsg::Url& locator) const KJ_WARN_UNUSED_RESULT = 0;
 };
 
 kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap,

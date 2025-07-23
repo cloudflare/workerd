@@ -1965,7 +1965,8 @@ jsg::JsValue createUVException(jsg::Lock& js,
 
 namespace {
 constexpr bool isValidFileName(kj::StringPtr name) {
-  return name.size() > 0 && name != "."_kj && name != ".."_kj && name.find("/"_kj) == kj::none;
+  return name.size() > 0 && name != "."_kj && name != ".."_kj && name.find("/"_kj) == kj::none &&
+      name.find("\\"_kj) == kj::none;
 }
 
 jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsError error) {
@@ -2065,7 +2066,7 @@ jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
     jsg::Optional<RemoveOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
 
-  if (!canBeModifiedCurrently()) {
+  if (!canBeModifiedCurrently(js)) {
     auto ex = js.domException(kj::str("NoModificationAllowedError"),
         kj::str("Cannot remove a handle that is not writable or not a directory."));
     return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
@@ -2114,6 +2115,16 @@ jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
   }
   auto ex = js.domException(kj::str("NotFoundError"), kj::str("The entry was not found."));
   return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+}
+
+bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
+  auto pathname = getLocator().getPathname();
+  if (pathname.endsWith("/"_kj)) {
+    auto cloned = getLocator().clone();
+    cloned.setPathname(pathname.slice(0, pathname.size() - 1));
+    return !getVfs().isLocked(js, cloned);
+  }
+  return !getVfs().isLocked(js, getLocator());
 }
 
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
@@ -2205,6 +2216,7 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
     return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
         js.typeError("Invalid directory name"));
   }
+
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
     if (opts.create) createAs = FsType::DIRECTORY;
@@ -2287,7 +2299,16 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
         return js.rejectedPromise<void>(exception.wrap(js, fsErrorToDomException(js, err)));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        KJ_SWITCH_ONEOF(dir->remove(js, kj::Path({name}),
+        kj::Path item({name});
+        auto fileLocator = KJ_ASSERT_NONNULL(getLocator().tryResolve(name));
+        if (getVfs().isLocked(js, fileLocator)) {
+          // If the file is locked, we cannot remove it.
+          auto ex = js.domException(kj::str("NoModificationAllowedError"),
+              kj::str("Cannot remove an entry that is currently locked."));
+          return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+        }
+
+        KJ_SWITCH_ONEOF(dir->remove(js, item,
                             workerd::Directory::RemoveOptions{
                               .recursive = opts.recursive,
                             })) {
@@ -2618,7 +2639,7 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   }
 
   auto sharedState = kj::rc<FileSystemWritableFileStream::State>(
-      getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
+      js, getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
 

@@ -69,39 +69,19 @@ export default {
   },
   'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'getDirectoryHandle(create=false) with a path separator when the directory exists',
-      'getDirectoryHandle(create=true) with a path separator',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-getFileHandle.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'getFileHandle(create=false) with a path separator when the file exists.',
-      'getFileHandle(create=true) with a path separator',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-iteration.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      '@@asyncIterator: full iteration works',
-      'entries: full iteration works',
-      'iteration while iterator gets garbage collected',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-removeEntry.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'removeEntry() on an already removed file should fail',
-      'removeEntry() with a path separator should fail.',
-      'removeEntry() while the file has an open writable fails',
-      'removeEntry() of a directory while a containing file has an open writable fails',
-      'removeEntry() on a non-existent directory recursively should throw NotFoundError',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-resolve.https.any.js': {
     comment: '...',

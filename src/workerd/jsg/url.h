@@ -110,6 +110,12 @@ class Url final {
   // parameters and fragments are not preserved.
   Relative getRelative(RelativeOption option = RelativeOption::DEFAULT) const KJ_LIFETIMEBOUND;
 
+  // Returns the parent URL of this URL, which is the URL with the last path component
+  // removed and the trailing slash removed if it exists. For instance, if the URL is
+  // "https://example.com/foo/bar/baz", the parent URL will be "https://example.com/foo/bar".
+  // If the URL has no parent (e.g. "https://example.com/") kj::none is returned.
+  kj::Maybe<jsg::Url> getParent() const KJ_WARN_UNUSED_RESULT;
+
   HostType getHostType() const;
   SchemeType getSchemeType() const;
 
