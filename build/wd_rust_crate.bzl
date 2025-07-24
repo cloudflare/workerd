@@ -1,28 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
-def rust_cxx_include(name, visibility = [], include_prefix = None):
-    native.genrule(
-        name = "%s/generated" % name,
-        outs = ["cxx.h"],
-        cmd = "$(location @workerd-cxx//:codegen) --header > \"$@\"",
-        tools = ["@workerd-cxx//:codegen"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
-    )
-
-    native.cc_library(
-        name = name,
-        hdrs = ["cxx.h"],
-        include_prefix = include_prefix,
-        visibility = visibility,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
-    )
-
 def rust_cxx_bridge(
         name,
         src,
@@ -107,8 +84,7 @@ def wd_rust_crate(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@workerd-cxx//:cxx",
-                "//src/rust/cxx-integration:cxx-include",
+                "@workerd-cxx//:core",
             ],
         )
 
