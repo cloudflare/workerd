@@ -6,6 +6,7 @@
 
 #include "bundle-fs.h"
 #include "container-client.h"
+#include "pyodide.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -4924,7 +4925,7 @@ kj::Promise<void> Server::preloadPython(
       auto version = getPythonBundleName(release);
 
       // Fetch the Pyodide bundle.
-      co_await api::pyodide::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
+      co_await server::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
 
       // Preload Python packages.
       KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
@@ -4932,7 +4933,7 @@ kj::Promise<void> Server::preloadPython(
           auto pythonRequirements = getPythonRequirements(modulesSource);
 
           // Store the packages in the package manager that is stored in the pythonConfig
-          co_await fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
+          co_await server::fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
               pythonRequirements, release, network, timer);
         }
       }
