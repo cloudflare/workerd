@@ -122,6 +122,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
     EW_WORKER_LOADER_ISOLATE_TYPES,
+    EW_MESSAGECHANNEL_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,

@@ -309,6 +309,11 @@ class EventTarget: public jsg::Object {
     warnOnSpecialEvents = true;
   }
 
+  // The EventListenerCallback, if given, is called whenever addEventListener
+  // or removeEventListener is invoked to report the number of registered
+  // handlers for the event.
+  using EventListenerCallback = jsg::Function<void(kj::StringPtr, size_t)>;
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -394,6 +399,11 @@ class EventTarget: public jsg::Object {
       jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once = false);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ protected:
+  void setEventListenerCallback(EventListenerCallback&& callback) {
+    maybeListenerCallback = kj::mv(callback);
+  }
 
  private:
   // RAII-style listener that can be attached to an EventTarget.
@@ -529,6 +539,8 @@ class EventTarget: public jsg::Object {
   // Event handlers are not supposed to return values. The first time one does, we'll
   // emit a warning to help users debug things but we'll otherwise ignore it.
   bool warnOnHandlerReturn = true;
+
+  kj::Maybe<EventListenerCallback> maybeListenerCallback;
 
   void visitForGc(jsg::GcVisitor& visitor);
 

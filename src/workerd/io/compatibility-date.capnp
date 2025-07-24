@@ -883,4 +883,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables a "pedantic mode" for WPT compliance. Multiple changes are grouped under
   # this flag that are known to be required to pass more web platform tests but which
   # otherwise are likely not to be strictly necessary for most users.
+
+  exposeGlobalMessageChannel @102 :Bool
+      $compatEnableFlag("expose_global_message_channel")
+      $compatDisableFlag("no_expose_global_message_channel")
+      $compatEnableDate("2025-08-15");
+  # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
 }
