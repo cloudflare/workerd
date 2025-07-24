@@ -289,10 +289,6 @@ struct Trace @0x8e8d911203762d34 {
       exception @11 :Exception;
       log @12 :Log;
       link @13 :Link;
-      # While invocation span context (EW-8821) is not fully implemented, send completed spans as
-      # events so that we can provide timestamps and parent span definitions properly. Can be
-      # removed once that is done and span API is finalized.
-      completedSpan @14 :UserSpanData;
     }
   }
 }
