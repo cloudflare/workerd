@@ -2600,8 +2600,8 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
   kj::Maybe<kj::Rc<workerd::File>> fileData;
-  if (keepExistingData) {
-    KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+    if (keepExistingData) {
       KJ_SWITCH_ONEOF(existing) {
         KJ_CASE_ONEOF(err, workerd::FsError) {
           return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
@@ -2630,12 +2630,12 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
         }
       }
     } else {
-      auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
-      return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-          deHandler.wrap(js, kj::mv(ex)));
+      fileData = workerd::File::newWritable(js);
     }
   } else {
-    fileData = workerd::File::newWritable(js);
+    auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+    return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
+        deHandler.wrap(js, kj::mv(ex)));
   }
 
   auto sharedState = kj::rc<FileSystemWritableFileStream::State>(
