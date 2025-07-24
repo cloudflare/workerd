@@ -3252,7 +3252,7 @@ export declare abstract class FileSystemWritableFileStream extends WritableStrea
       | Blob
       | (ArrayBuffer | ArrayBufferView)
       | string
-      | FileSystemWritableFileStreamWriteParams,
+      | FileSystemFileWriteParams,
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek) */
   seek(position: number): Promise<void>;
@@ -3280,11 +3280,11 @@ export interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
 export interface FileSystemDirectoryHandleFileSystemRemoveOptions {
   recursive: boolean;
 }
-export interface FileSystemWritableFileStreamWriteParams {
+export interface FileSystemFileWriteParams {
   type: string;
   size?: number;
   position?: number;
-  data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
+  data?: (Blob | (ArrayBuffer | ArrayBufferView) | string) | null;
 }
 export interface FileSystemHandleRemoveOptions {
   recursive?: boolean;
