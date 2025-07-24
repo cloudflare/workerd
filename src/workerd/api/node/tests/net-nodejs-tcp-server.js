@@ -8,7 +8,8 @@
 const net = require('node:net');
 
 function reportPort(server) {
-  console.info(`Listening on port ${server.address().port}`);
+  const address = server.address();
+  console.info(`Listening on ${address.address}:${address.port}`);
 }
 
 const server = net.createServer((s) => {
@@ -17,7 +18,9 @@ const server = net.createServer((s) => {
   });
   s.end();
 });
-server.listen(process.env.SERVER_PORT, () => reportPort(server));
+server.listen(process.env.SERVER_PORT, process.env.SIDECAR_HOSTNAME, () =>
+  reportPort(server)
+);
 
 const echoServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -26,7 +29,11 @@ const echoServer = net.createServer((s) => {
   });
   s.pipe(s);
 });
-echoServer.listen(process.env.ECHO_SERVER_PORT, () => reportPort(echoServer));
+echoServer.listen(
+  process.env.ECHO_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(echoServer)
+);
 
 const timeoutServer = net.createServer((s) => {
   s.setTimeout(100);
@@ -43,14 +50,20 @@ const timeoutServer = net.createServer((s) => {
     // Do nothing
   });
 });
-timeoutServer.listen(process.env.TIMEOUT_SERVER_PORT, () =>
-  reportPort(timeoutServer)
+timeoutServer.listen(
+  process.env.TIMEOUT_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(timeoutServer)
 );
 
 const endServer = net.createServer((s) => {
   s.end();
 });
-endServer.listen(process.env.END_SERVER_PORT, () => reportPort(endServer));
+endServer.listen(
+  process.env.END_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(endServer)
+);
 
 let count = 0;
 const serverThatDies = net.createServer(function (s) {
@@ -61,8 +74,10 @@ const serverThatDies = net.createServer(function (s) {
   }
   s.end();
 });
-serverThatDies.listen(process.env.SERVER_THAT_DIES_PORT, () =>
-  reportPort(serverThatDies)
+serverThatDies.listen(
+  process.env.SERVER_THAT_DIES_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(serverThatDies)
 );
 
 const reconnectServer = net.createServer((s) => {
@@ -75,6 +90,8 @@ const reconnectServer = net.createServer((s) => {
     s.end();
   });
 });
-reconnectServer.listen(process.env.RECONNECT_SERVER_PORT, () =>
-  reportPort(reconnectServer)
+reconnectServer.listen(
+  process.env.RECONNECT_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(reconnectServer)
 );

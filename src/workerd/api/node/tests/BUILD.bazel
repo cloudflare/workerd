@@ -342,6 +342,7 @@ wd_test(
         "JS_STREAM_SERVER_PORT",
         "STREAM_WRAP_SERVER_PORT",
     ],
+    sidecar_randomize_ip = False,
 )
 
 wd_test(

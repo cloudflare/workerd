@@ -8,7 +8,8 @@ const http = require('node:http');
 const assert = require('node:assert/strict');
 
 function reportPort(server) {
-  console.info(`Listening on port ${server.address().port}`);
+  const address = server.address();
+  console.info(`Listening on ${address.address}:${address.port}`);
 }
 
 const pongServer = http.createServer((req, res) => {
@@ -18,20 +19,30 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(process.env.PONG_SERVER_PORT, () => reportPort(pongServer));
+pongServer.listen(
+  process.env.PONG_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(pongServer)
+);
 
 const asdServer = http.createServer((_req, res) => {
   res.end('asd');
 });
-asdServer.listen(process.env.ASD_SERVER_PORT, () => reportPort(asdServer));
+asdServer.listen(
+  process.env.ASD_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(asdServer)
+);
 
 const timeoutServer = http.createServer((_req, res) => {
   setTimeout(() => {
     res.end('pong');
   }, 1000);
 });
-timeoutServer.listen(process.env.TIMEOUT_SERVER_PORT, () =>
-  reportPort(timeoutServer)
+timeoutServer.listen(
+  process.env.TIMEOUT_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(timeoutServer)
 );
 
 const helloWorldServer = http.createServer((req, res) => {
@@ -54,8 +65,10 @@ const helloWorldServer = http.createServer((req, res) => {
       res.end();
   }
 });
-helloWorldServer.listen(process.env.HELLO_WORLD_SERVER_PORT, () =>
-  reportPort(helloWorldServer)
+helloWorldServer.listen(
+  process.env.HELLO_WORLD_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(helloWorldServer)
 );
 
 let headerValidationServerCount = 0;
@@ -67,7 +80,7 @@ const headerValidationServer = http.createServer((req, res) => {
           'test',
           'value',
           'Host',
-          `localhost:${headerValidationServer.address().port}`,
+          `${process.env.SIDECAR_HOSTNAME}:${headerValidationServer.address().port}`,
           'foo',
           'bar',
           'foo',
@@ -81,7 +94,7 @@ const headerValidationServer = http.createServer((req, res) => {
           'Content-Length',
           '0',
           'Host',
-          `localhost:${headerValidationServer.address().port}`,
+          `${process.env.SIDECAR_HOSTNAME}:${headerValidationServer.address().port}`,
         ]);
         break;
       default:
@@ -91,6 +104,8 @@ const headerValidationServer = http.createServer((req, res) => {
 
   res.end('ok');
 });
-headerValidationServer.listen(process.env.HEADER_VALIDATION_SERVER_PORT, () =>
-  reportPort(headerValidationServer)
+headerValidationServer.listen(
+  process.env.HEADER_VALIDATION_SERVER_PORT,
+  process.env.SIDECAR_HOSTNAME,
+  () => reportPort(headerValidationServer)
 );
