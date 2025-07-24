@@ -145,9 +145,11 @@ function getEmscriptenSettings(
   }
   const API = { config, lockFilePromise };
   let resolveReadyPromise: (mod: Module) => void;
-  const readyPromise: Promise<Module> = new Promise(
-    (res) => (resolveReadyPromise = res)
-  );
+  let rejectReadyPromise: (e: any) => void = () => {};
+  const readyPromise: Promise<Module> = new Promise((res, rej) => {
+    resolveReadyPromise = res;
+    rejectReadyPromise = rej;
+  });
   const waitForDynlibs = getWaitForDynlibs(resolveReadyPromise!);
   const prepareFileSystem = getPrepareFileSystem(pythonStdlib);
   const instantiateWasm = getInstantiateWasm(pyodideWasmModule);
@@ -161,6 +163,7 @@ function getEmscriptenSettings(
     instantiateWasm,
     reportUndefinedSymbolsNoOp(): void {},
     readyPromise,
+    rejectReadyPromise,
     API, // Pyodide requires we pass this in.
   };
 }
@@ -210,7 +213,9 @@ export async function instantiateEmscriptenModule(
   for (const _ of featureDetectionMonkeyPatchesContextManager()) {
     // Ignore the returned promise, it won't resolve until we're done preloading dynamic
     // libraries.
-    const _promise = _createPyodideModule(emscriptenSettings);
+    const _promise = _createPyodideModule(emscriptenSettings).catch((e) =>
+      emscriptenSettings.rejectReadyPromise(e)
+    );
   }
 
   // Wait until we've executed all the preRun hooks before proceeding
