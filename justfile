@@ -3,6 +3,7 @@ alias t := test
 alias f := format
 alias st := stream-test
 alias c := coverage
+alias w := watch
 
 default:
   @just --list
