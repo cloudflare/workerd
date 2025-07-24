@@ -1,16 +1,22 @@
-// Copyright (c) 2017-2023 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
+import { WorkerEntrypoint } from 'cloudflare:workers';
 
-export default {
-  // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
-  tail(traces) {
-    console.log(traces[0].logs);
-  },
-  tailStream(...args) {
-    console.log(...args);
-    return (...args) => {
-      console.log(...args);
-    };
-  },
-};
+export default class TailWorker extends WorkerEntrypoint {
+  async fetch(request) {
+    console.log('Fetch event received in Tail Worker');
+    
+    // Echo server: respond with status 200 and the iter URL parameter
+    const url = new URL(request.url);
+    const iter = url.searchParams.get('iter') || 'no-iter-param';
+    
+    return new Response(iter, { 
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
+
+  tail(events) {
+    // Tail handler for receiving tail events via RPC
+    // Just silently process them for benchmarking
+    return;
+  }
+}

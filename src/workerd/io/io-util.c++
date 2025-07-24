@@ -13,7 +13,7 @@ namespace workerd {
 double dateNow() {
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    return (ioContext.now() - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+    return (ioContext.now() - kj::UNIX_EPOCH) / kj::MICROSECONDS;
   }
 
   return 0.0;
