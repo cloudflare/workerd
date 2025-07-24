@@ -4,7 +4,6 @@
 
 #include "server.h"
 
-#include "bundle-fs.h"
 #include "container-client.h"
 #include "pyodide.h"
 #include "workerd-api.h"
@@ -17,6 +16,7 @@
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/io/bundle-fs.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/hibernation-manager.h>

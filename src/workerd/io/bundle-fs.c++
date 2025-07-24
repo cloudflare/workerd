@@ -1,8 +1,6 @@
 #include "bundle-fs.h"
 
-#include <capnp/message.h>
-
-namespace workerd::server {
+namespace workerd {
 kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
   // Note that we are using a lazy directory here. That means we won't actually
   // build the directory structure out until it is actually accessed in order
@@ -95,4 +93,4 @@ kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
   });
 }
 
-}  // namespace workerd::server
+}  // namespace workerd

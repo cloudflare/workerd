@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include <workerd/server/bundle-fs.h>
+#include <workerd/io/bundle-fs.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
@@ -46,7 +46,7 @@ KJ_TEST("The BundleDirectoryDelegate works") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto config = readConfig();
-    auto dir = server::getBundleDirectory(config);
+    auto dir = getBundleDirectory(config);
 
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"a"})));
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"a", "esModule"})));

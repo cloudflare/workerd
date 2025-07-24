@@ -45,6 +45,7 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
+        "bundle-fs.c++",
         "compatibility-date.c++",
         "features.c++",
         "hibernation-manager.c++",
@@ -56,6 +57,7 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
+        "bundle-fs.h",
         "compatibility-date.h",
         "features.h",
         "hibernation-manager.h",
@@ -384,4 +386,12 @@ wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],
+)
+
+kj_test(
+    src = "bundle-fs-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
