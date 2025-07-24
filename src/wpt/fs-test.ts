@@ -116,7 +116,7 @@ export default {
     comment:
       'We do not currently implement the move() method on file system handles',
     expectedFailures: [
-      // TODO(node-fs): Fix these tests
+      // TODO(node-fs): Implement move and enable these tests
       'move(name) to rename a file',
       'get a handle to a moved file',
       'move(name) to rename a file the same name',
@@ -216,20 +216,12 @@ export default {
   },
   'FileSystemWritableFileStream-write.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      'write() called with a string and a valid offset',
-      'write() called with a string and a valid offset after seek',
-      'write() called with a blob and a valid offset',
-      'write() called with an offset beyond the end of the file',
-      'atomic writes: write() after close() fails',
-      'atomic writes: truncate() after close() fails',
-      'getWriter() can be used',
-      'WriteParams: truncate missing size param',
-      'WriteParams: write missing data param',
-      'WriteParams: write null data param',
-      'WriteParams: seek missing position param',
+    disabledTests: [
+      // We don't support this case. In the test a Blob is created from a
+      // file that is then removed, then that Blob is written to a file.
+      // Because our blob contains a copy of the original file's data
+      // and is not a live-reference, the expected error does not occur.
       'write() with an invalid blob to an empty file should reject',
-      'an errored writable stream releases its lock',
     ],
   },
   'idlharness.https.any.js': {
