@@ -94,7 +94,7 @@ mod ffi {
     }
 }
 
-#[allow(clippy::unnecessary_wraps)]
+#[expect(clippy::unnecessary_wraps)]
 fn result_ok() -> Result<i32> {
     Ok(42)
 }
@@ -115,7 +115,7 @@ fn call_callback(callback: Pin<&mut ffi::TestCallback>, a: usize, b: usize) -> u
     callback.call(a, b)
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn pass_shared_struct(s: ffi::SharedStruct) -> i32 {
     s.a + s.b
 }
@@ -143,8 +143,8 @@ unsafe fn pass_shared_struct_as_mut_ptr(s: *mut ffi::SharedStruct) {
     unsafe { (*s).b = 0 };
 }
 
-#[allow(clippy::boxed_local)] // clippy is right, but we want to test it anyway
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::boxed_local)] // clippy is right, but we want to test it anyway
+#[expect(clippy::needless_pass_by_value)]
 fn pass_shared_struct_as_box(s: Box<ffi::SharedStruct>) -> i32 {
     s.a + s.b
 }
