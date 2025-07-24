@@ -83,8 +83,7 @@ kj::Promise<kj::Maybe<jsg::Bundle::Reader>> fetchPyodideBundle(
   auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
 
   auto res = co_await req.response;
-  KJ_ASSERT(res.statusCode == 200,
-      kj::str("Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
+  KJ_ASSERT(res.statusCode == 200, "Request for Pyodide bundle failed", url);
   auto body = co_await res.body->readAllBytes();
 
   writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
@@ -231,7 +230,7 @@ kj::Promise<void> fetchPyodidePackages(const api::pyodide::PythonConfig& pyConfi
   auto filenames = api::pyodide::getPythonPackageFiles(
       KJ_ASSERT_NONNULL(pyodideLock), pythonRequirements, packagesVersion);
 
-  kj::Vector<kj::Promise<void>> promises;
+  kj::Vector<kj::Promise<void>> promises(filenames.size());
   for (const auto& filename: filenames) {
     promises.add(loadPyodidePackage(
         pyConfig, pyodidePackageManager, packagesVersion, filename, network, timer));
