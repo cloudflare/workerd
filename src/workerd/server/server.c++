@@ -3619,7 +3619,6 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
 // workerd config file.
 struct Server::WorkerDef {
   CompatibilityFlags::Reader featureFlags;
-  kj::Rc<Directory> bundleDirectory;
   WorkerSource source;
   kj::Maybe<kj::StringPtr> moduleFallback;
   const kj::HashMap<kj::String, ActorConfig>& localActorConfigs;
@@ -3726,9 +3725,6 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
       WorkerDef def{
         .featureFlags = source.compatibilityFlags,
-        // TODO(worker-loader): Support node FS compat backed by actual source code. For now we use
-        //   an empty bundle directory.
-        .bundleDirectory = getBundleDirectory({}),
         .source = kj::mv(source.source),
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
@@ -3916,7 +3912,6 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // Construct `WorkerDef` from `conf`.
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
-    .bundleDirectory = getBundleDirectory(conf),
     .source = WorkerdApi::extractSource(name, conf, errorReporter),
     .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
     .localActorConfigs = localActorConfigs,
@@ -3982,7 +3977,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // TODO(node-fs): This is set up to allow users to configure the "mount"
   // points for known roots but we currently do not expose that in the
   // config. So for now this just uses the defaults.
-  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), kj::mv(def.bundleDirectory));
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (def.featureFlags.getNewModuleRegistry()) {

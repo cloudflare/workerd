@@ -3,76 +3,94 @@
 #include <capnp/message.h>
 
 namespace workerd::server {
-kj::Rc<Directory> getBundleDirectory(config::Worker::Reader conf) {
+kj::Rc<Directory> getBundleDirectory(const WorkerSource& conf) {
   // Note that we are using a lazy directory here. That means we won't actually
   // build the directory structure out until it is actually accessed in order
   // to avoid unnecessary operations in the case a worker never actually uses
   // this part of the filesystem.
-  return getLazyDirectoryImpl([conf] {
-    Directory::Builder builder;
-    kj::Path kRoot{};
 
-    auto addToBundle = [&](kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
-      auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse(name, "file:///"_kj));
-      auto pathStr = kj::str(url.getPathname().slice(1));
-      auto path = kRoot.eval(pathStr);
-      builder.addPath(path, File::newReadable(data));
-    };
-
-    switch (conf.which()) {
-      case config::Worker::Which::MODULES: {
-        for (auto module: conf.getModules()) {
-          switch (module.which()) {
-            case config::Worker::Module::ES_MODULE: {
-              addToBundle(module.getName(), module.getEsModule().asBytes());
-              break;
-            }
-            case config::Worker::Module::COMMON_JS_MODULE: {
-              addToBundle(module.getName(), module.getCommonJsModule().asBytes());
-              break;
-            }
-            case config::Worker::Module::TEXT: {
-              addToBundle(module.getName(), module.getText().asBytes());
-              break;
-            }
-            case config::Worker::Module::DATA: {
-              addToBundle(module.getName(), module.getData().asBytes());
-              break;
-            }
-            case config::Worker::Module::WASM: {
-              addToBundle(module.getName(), module.getWasm().asBytes());
-              break;
-            }
-            case config::Worker::Module::JSON: {
-              addToBundle(module.getName(), module.getJson().asBytes());
-              break;
-            }
-            case config::Worker::Module::PYTHON_MODULE: {
-              addToBundle(module.getName(), module.getPythonModule().asBytes());
-              break;
-            }
-            case config::Worker::Module::PYTHON_REQUIREMENT: {
-              // Just ignore it.
-              break;
-            }
-            case config::Worker::Module::OBSOLETE: {
-              // Just ignore it.
-              break;
-            }
+  // Importantly, the WorkerSource we get here won't be sticking around.
+  // We need to copy the details we need out of it now...Critically, however,
+  // the caller needs to arrange to keep the original source alive for the
+  // lifetime of the directory since the directory only contains pointers.
+  struct Entry {
+    kj::StringPtr name;
+    kj::ArrayPtr<const kj::byte> data;
+  };
+  kj::Vector<Entry> entries;
+  KJ_SWITCH_ONEOF(conf.variant) {
+    KJ_CASE_ONEOF(script, WorkerSource::ScriptSource) {
+      entries.add(Entry{
+        .name = script.mainScriptName,
+        .data = script.mainScript.asBytes(),
+      });
+    }
+    KJ_CASE_ONEOF(modules, WorkerSource::ModulesSource) {
+      for (auto& module: modules.modules) {
+        KJ_SWITCH_ONEOF(module.content) {
+          KJ_CASE_ONEOF(esModule, WorkerSource::EsModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = esModule.body.asBytes(),
+            });
+          }
+          KJ_CASE_ONEOF(commonJsModule, WorkerSource::CommonJsModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = commonJsModule.body.asBytes(),
+            });
+          }
+          KJ_CASE_ONEOF(textModule, WorkerSource::TextModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = textModule.body.asBytes(),
+            });
+          }
+          KJ_CASE_ONEOF(dataModule, WorkerSource::DataModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = dataModule.body,
+            });
+          }
+          KJ_CASE_ONEOF(wasmModule, WorkerSource::WasmModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = wasmModule.body,
+            });
+          }
+          KJ_CASE_ONEOF(jsonModule, WorkerSource::JsonModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = jsonModule.body.asBytes(),
+            });
+          }
+          KJ_CASE_ONEOF(pythonModule, WorkerSource::PythonModule) {
+            entries.add(Entry{
+              .name = module.name,
+              .data = pythonModule.body.asBytes(),
+            });
+          }
+          KJ_CASE_ONEOF(pythonRequirement, WorkerSource::PythonRequirement) {
+            // Just ignore it.
+          }
+          KJ_CASE_ONEOF(capnpModule, WorkerSource::CapnpModule) {
+            // Capnp modules are not supported in the bundle.
+            // Just ignore it.
           }
         }
-        break;
-      }
-      case config::Worker::Which::SERVICE_WORKER_SCRIPT: {
-        addToBundle("worker.js"_kj, conf.getServiceWorkerScript().asBytes());
-        break;
-      }
-      case config::Worker::Which::INHERIT: {
-        // Doing nothing here.
-        break;
       }
     }
+  }
 
+  return getLazyDirectoryImpl([entries = entries.releaseAsArray()] {
+    Directory::Builder builder;
+    kj::Path kRoot{};
+    for (auto& entry: entries) {
+      auto url = KJ_ASSERT_NONNULL(jsg::Url::tryParse(entry.name, "file:///"_kj));
+      auto pathStr = kj::str(url.getPathname().slice(1));
+      auto path = kRoot.eval(pathStr);
+      builder.addPath(path, File::newReadable(entry.data));
+    }
     return builder.finish();
   });
 }

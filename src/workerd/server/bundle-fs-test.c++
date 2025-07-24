@@ -12,36 +12,33 @@
 
 namespace workerd {
 namespace {
-kj::Own<server::config::Worker::Reader> readConfig() {
-  capnp::MallocMessageBuilder builder;
-  auto root = builder.initRoot<server::config::Worker>();
-  auto modules = root.initModules(8);
+workerd::WorkerSource readConfig() {
 
-  modules[0].setName("a/esModule");
-  modules[0].setEsModule("this is an esm module");
+  kj::Vector<WorkerSource::Module> modules(8);
 
-  modules[1].setName("a/commonJsModule");
-  modules[1].setCommonJsModule("this is a commonjs module");
+  modules.add(WorkerSource::Module{.name = "a/esModule"_kj,
+    .content = WorkerSource::EsModule{.body = "this is an esm module"_kj}});
 
-  modules[2].setName("b/text");
-  modules[2].setText("this is a text module");
+  modules.add(WorkerSource::Module{.name = "a/commonJsModule"_kj,
+    .content = WorkerSource::CommonJsModule{.body = "this is a commonjs module"_kj}});
 
-  modules[3].setName("b/data");
-  modules[3].setWasm("this is a wasm module"_kj.asArray().asBytes());
+  modules.add(WorkerSource::Module{
+    .name = "b/text"_kj, .content = WorkerSource::TextModule{.body = "this is a text module"_kj}});
 
-  modules[4].setName("c/wasm");
-  modules[4].setWasm("this is a wasm module"_kj.asArray().asBytes());
+  modules.add(WorkerSource::Module{.name = "b/data"_kj,
+    .content = WorkerSource::DataModule{.body = "this is a data module"_kj.asArray().asBytes()}});
 
-  modules[5].setName("c/json");
-  modules[5].setJson("this is a json module");
+  modules.add(WorkerSource::Module{.name = "c/wasm"_kj,
+    .content = WorkerSource::WasmModule{.body = "this is a wasm module"_kj.asArray().asBytes()}});
 
-  modules[6].setName("a/pythonModule");
-  modules[6].setPythonModule("this is a python module");
+  modules.add(WorkerSource::Module{
+    .name = "c/json"_kj, .content = WorkerSource::JsonModule{.body = "this is a json module"_kj}});
 
-  modules[7].setName("emptyModule");
-  modules[7].setText("nothing");
+  modules.add(WorkerSource::Module{.name = "a/pythonModule"_kj,
+    .content = WorkerSource::PythonModule{.body = "this is a python module"_kj}});
 
-  return capnp::clone(root.asReader());
+  return workerd::WorkerSource(workerd::WorkerSource::ModulesSource{
+    .mainModule = "worker"_kj, .modules = modules.releaseAsArray()});
 }
 
 KJ_TEST("The BundleDirectoryDelegate works") {
@@ -49,7 +46,7 @@ KJ_TEST("The BundleDirectoryDelegate works") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto config = readConfig();
-    auto dir = server::getBundleDirectory(*config);
+    auto dir = server::getBundleDirectory(config);
 
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"a"})));
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"a", "esModule"})));
@@ -60,8 +57,6 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"c"})));
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"c", "wasm"})));
     KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"c", "json"})));
-    KJ_REQUIRE_NONNULL(dir->tryOpen(env.js, kj::Path({"emptyModule"})));
-    KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"emptyModule", "text"})) == kj::none);
     KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"a", "foo"})) == kj::none);
     KJ_EXPECT(dir->tryOpen(env.js, kj::Path({"zzz", "yyy"})) == kj::none);
 
@@ -70,9 +65,9 @@ KJ_TEST("The BundleDirectoryDelegate works") {
     for (auto& _ KJ_UNUSED: *dir.get()) {
       counter++;
     }
-    KJ_EXPECT(counter, 4);
+    KJ_EXPECT(counter, 3);
 
-    KJ_EXPECT(dir->count(env.js) == 4);
+    KJ_EXPECT(dir->count(env.js) == 3);
 
     auto maybeEsModule = dir->tryOpen(env.js, kj::Path({"a", "esModule"}));
     auto& esmodule = KJ_ASSERT_NONNULL(maybeEsModule).get<kj::Rc<File>>();

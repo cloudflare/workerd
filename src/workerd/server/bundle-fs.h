@@ -1,7 +1,7 @@
 #pragma once
 
 #include <workerd/io/worker-fs.h>
-#include <workerd/server/workerd.capnp.h>
+#include <workerd/io/worker-source.h>
 
 namespace workerd::server {
 
@@ -12,6 +12,6 @@ namespace workerd::server {
 // represented as a directory "foo" with a subdirectory "bar" and a file
 // "baz" inside it. The directory structure and files are read-only. All
 // timestamps are set to the Unix epoch.
-kj::Rc<Directory> getBundleDirectory(config::Worker::Reader conf);
+kj::Rc<Directory> getBundleDirectory(const WorkerSource& source);
 
 }  // namespace workerd::server
