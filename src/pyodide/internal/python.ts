@@ -65,12 +65,16 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      VENDOR_PATH = "/session/metadata/python_modules"
+      VENDOR_PATH = "/session/metadata/vendor"
+      PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
       if VENDOR_PATH in sys.path:
         sys.path.remove(VENDOR_PATH)
+
+      if PYTHON_MODULES_PATH in sys.path:
+        sys.path.remove(PYTHON_MODULES_PATH)
 
       # Insert vendor path after system paths but before site-packages
       # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
@@ -82,6 +86,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       for i, path in enumerate(sys.path):
         if 'site-packages' in path:
           sys.path.insert(i, VENDOR_PATH)
+          sys.path.insert(i, PYTHON_MODULES_PATH)
           break
       else:
         # If no site-packages found, fail
