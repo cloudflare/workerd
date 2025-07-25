@@ -21,5 +21,6 @@ from _workers import (
     handler,
     import_from_javascript,
     python_from_rpc,
+    python_to_js_object,
     python_to_rpc,
 )

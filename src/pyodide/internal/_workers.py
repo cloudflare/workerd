@@ -869,6 +869,24 @@ def python_to_rpc(value) -> JsProxy:
     return result
 
 
+def python_to_js_object(value) -> JsProxy:
+    """
+    Similar to `python_to_rpc`, but always tries to convert Python types into Javascript objects.
+    This is useful when the JS caller/callee is expecting the Python type to be translated into its corresponding type in JS land
+    """
+
+    # `to_js` won't always call the default_converter, for example when a list of tuples is passed
+    _raise_on_disabled_type(value)
+
+    result = to_js(
+        value,
+        default_converter=_python_to_rpc_default_converter,
+        dict_converter=Object.fromEntries,
+    )
+
+    return result
+
+
 class _FetcherWrapper:
     def __init__(self, binding):
         self._binding = binding
@@ -980,10 +998,14 @@ class _WorkflowStepWrapper:
         return decorator
 
     def sleep(self, *args, **kwargs):
+        # all types should be primitives - no need for explicit translation
         return self._js_step.sleep(*args, **kwargs)
 
-    def sleep_until(self, *args, **kwargs):
-        return self._js_step.sleepUntil(*args, **kwargs)
+    def sleep_until(self, name, timestamp):
+        if not isinstance(timestamp, str):
+            timestamp = python_to_rpc(timestamp)
+
+        return self._js_step.sleepUntil(name, timestamp)
 
     def wait_for_event(self, name, event_type, /, timeout="24 hours"):
         return self._js_step.waitForEvent(
@@ -1009,14 +1031,16 @@ async def _do_call(entrypoint, name, config, callback, *results):
 
         if inspect.iscoroutine(result):
             result = await result
-        return to_js(result, dict_converter=Object.fromEntries)
+        return python_to_js_object(result)
 
     async def _closure():
         try:
             if config is None:
                 coroutine = await entrypoint._js_step.do(name, _callback)
             else:
-                coroutine = await entrypoint._js_step.do(name, to_js(config), _callback)
+                coroutine = await entrypoint._js_step.do(
+                    name, python_to_js_object(config), _callback
+                )
 
             return python_from_rpc(coroutine)
         except Exception as exc:
