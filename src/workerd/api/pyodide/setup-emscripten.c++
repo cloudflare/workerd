@@ -81,8 +81,6 @@ EmscriptenRuntime EmscriptenRuntime::initialize(
       pyodideAsmWasmReader = module.getData();
     }
   }
-  js.setAllowEval(true);
-  KJ_DEFER(js.setAllowEval(false));
   auto module = loadEmscriptenSetupModule(js, KJ_ASSERT_NONNULL(emsciptenSetupJsReader));
   instantiateEmscriptenSetupModule(js, module);
   auto instantiateEmscriptenModule = getInstantiateEmscriptenModule(js, module);
