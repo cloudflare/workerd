@@ -4,8 +4,8 @@
 
 #include "server.h"
 
-#include "bundle-fs.h"
 #include "container-client.h"
+#include "pyodide.h"
 #include "workerd-api.h"
 
 #include <workerd/api/actor-state.h>
@@ -16,6 +16,7 @@
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/io/bundle-fs.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/hibernation-manager.h>
@@ -1683,8 +1684,8 @@ class WorkerTracerSpanObserver: public SpanObserver,
         tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       }
 
-      CompleteSpan completeSpan(0, 0, kj::ConstString(kj::str(span.operationName)), span.startTime,
-          span.endTime, kj::mv(tags));
+      CompleteSpan completeSpan(tracing::SpanId::nullId, tracing::SpanId::nullId,
+          kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime, kj::mv(tags));
       tracer->addSpan(kj::mv(completeSpan));
     }
   }
@@ -3618,7 +3619,6 @@ void Server::abortAllActors(kj::Maybe<const kj::Exception&> reason) {
 // workerd config file.
 struct Server::WorkerDef {
   CompatibilityFlags::Reader featureFlags;
-  kj::Rc<Directory> bundleDirectory;
   WorkerSource source;
   kj::Maybe<kj::StringPtr> moduleFallback;
   const kj::HashMap<kj::String, ActorConfig>& localActorConfigs;
@@ -3680,6 +3680,15 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
   class WorkerStubImpl;
   kj::HashMap<kj::String, kj::Rc<WorkerStubImpl>> isolates;
 
+  class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
+   public:
+    kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
+      JSG_FAIL_REQUIRE(Error,
+          "This worker is not permitted to access the internet via global functions like fetch(). "
+          "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
+    }
+  };
+
   class WorkerStubImpl final: public WorkerStubChannel,
                               public kj::Refcounted,
                               public kj::EnableAddRefToThis<WorkerStubImpl> {
@@ -3716,36 +3725,20 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
       WorkerDef def{
         .featureFlags = source.compatibilityFlags,
-        // TODO(worker-loader): Support node FS compat backed by actual source code. For now we use
-        //   an empty bundle directory.
-        .bundleDirectory = getBundleDirectory({}),
         .source = kj::mv(source.source),
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
 
+        // clang-format off
         .globalOutbound{
-          .designator = kj::mv(source.globalOutbound),
+          .designator = kj::mv(source.globalOutbound)
+              .orDefault([]() { return kj::refcounted<NullGlobalOutboundChannel>(); }),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
 
-        // clang-format off
         .compileBindings = [env = kj::mv(source.env)](
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
-          if (!env.empty()) {
-            // Copy properties of the provided `env` object into `target`.
-            js.withinHandleScope([&]() {
-              auto targetObj = jsg::JsObject(target);
-              auto sourceObj = KJ_REQUIRE_NONNULL(
-                  env.toJs(js).tryCast<jsg::JsObject>(), "'env' must be an object");
-              auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
-                  jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
-              auto propCount = props.size();
-              for (auto i: kj::zeroTo(propCount)) {
-                auto prop = props.get(js, i);
-                targetObj.set(js, prop, sourceObj.get(js, prop));
-              }
-            });
-          }
+          env.populateJsObject(js, jsg::JsObject(target));
         },
         // clang-format on
       };
@@ -3919,7 +3912,6 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // Construct `WorkerDef` from `conf`.
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
-    .bundleDirectory = getBundleDirectory(conf),
     .source = WorkerdApi::extractSource(name, conf, errorReporter),
     .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
     .localActorConfigs = localActorConfigs,
@@ -3985,7 +3977,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // TODO(node-fs): This is set up to allow users to configure the "mount"
   // points for known roots but we currently do not expose that in the
   // config. So for now this just uses the defaults.
-  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), kj::mv(def.bundleDirectory));
+  auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (def.featureFlags.getNewModuleRegistry()) {
@@ -4928,7 +4920,7 @@ kj::Promise<void> Server::preloadPython(
       auto version = getPythonBundleName(release);
 
       // Fetch the Pyodide bundle.
-      co_await api::pyodide::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
+      co_await server::fetchPyodideBundle(pythonConfig, kj::mv(version), network, timer);
 
       // Preload Python packages.
       KJ_IF_SOME(modulesSource, workerDef.source.variant.tryGet<Worker::Script::ModulesSource>()) {
@@ -4936,7 +4928,7 @@ kj::Promise<void> Server::preloadPython(
           auto pythonRequirements = getPythonRequirements(modulesSource);
 
           // Store the packages in the package manager that is stored in the pythonConfig
-          co_await fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
+          co_await server::fetchPyodidePackages(pythonConfig, pythonConfig.pyodidePackageManager,
               pythonRequirements, release, network, timer);
         }
       }

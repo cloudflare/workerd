@@ -227,6 +227,10 @@ export const test = {
         assert.strictEqual(
           event.data,
           `MessageEvent {
+  ports: [ [length]: 0 ],
+  source: null,
+  lastEventId: '',
+  origin: null,
   data: 'data',
   type: 'message',
   eventPhase: 2,

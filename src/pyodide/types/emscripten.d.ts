@@ -71,6 +71,7 @@ interface EmscriptenSettings {
     config: API['config'];
   };
   readyPromise: Promise<Module>;
+  rejectReadyPromise: (e: any) => void;
 }
 
 interface Module {

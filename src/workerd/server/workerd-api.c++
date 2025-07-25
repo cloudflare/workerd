@@ -122,6 +122,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
     EW_WORKER_LOADER_ISOLATE_TYPES,
+    EW_MESSAGECHANNEL_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -1421,33 +1422,6 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
 const VirtualFileSystem& WorkerdApi::getVirtualFileSystem() const {
   return *impl->vfs;
-}
-
-void WorkerdApi::writeStdio(
-    VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) const {
-  // Currently this outputs log messages in the typical kj line
-  // format like:
-  //   workerd/server/workerd-api.c++:1476: warning: bytes.asChars() = HELLO WORLD
-  //   workerd/server/workerd-api.c++:1472: error: bytes.asChars() = HELLO WORLD ERR
-  //
-  // Which isn't the most elegant. The handleLog method in worker.c++, alternatively,
-  // outputs just the message itself by writing directly to stderr or stdout, giving
-  // prettier output. We could do that here too if we think it's better.
-  switch (type) {
-    case VirtualFileSystem::Stdio::ERR: {
-      KJ_LOG(ERROR, bytes.asChars());
-      return;
-    }
-    case VirtualFileSystem::Stdio::OUT: {
-      KJ_LOG(WARNING, bytes.asChars());
-      return;
-    }
-    case VirtualFileSystem::Stdio::IN: {
-      // stdin should never be directed to here.
-      break;
-    }
-  }
-  KJ_UNREACHABLE;
 }
 
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {

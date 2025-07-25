@@ -257,6 +257,8 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
@@ -1374,6 +1376,47 @@ export interface ErrorEventErrorEventInit {
   error?: any;
 }
 /**
+ * A message received by a target object.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
+ */
+export declare class MessageEvent extends Event {
+  constructor(type: string, initializer: MessageEventInit);
+  /**
+   * Returns the data of the message.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
+   */
+  readonly data: any;
+  /**
+   * Returns the origin of the message, for server-sent events and cross-document messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
+   */
+  readonly origin: string | null;
+  /**
+   * Returns the last event ID string, for server-sent events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
+   */
+  readonly lastEventId: string;
+  /**
+   * Returns the WindowProxy of the source window, for cross-document messaging, and the MessagePort being attached, in the connect event fired at SharedWorkerGlobalScope objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
+   */
+  readonly source: MessagePort | null;
+  /**
+   * Returns the MessagePort array sent with the message, for cross-document messaging and channel messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
+   */
+  readonly ports: MessagePort[];
+}
+export interface MessageEventInit {
+  data: ArrayBuffer | string;
+}
+/**
  * Provides a way to easily construct a set of key/value pairs representing form fields and their values, which can then be easily sent using the XMLHttpRequest.send() method. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
@@ -1714,7 +1757,7 @@ export interface Request<
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1728,7 +1771,7 @@ export interface RequestInit<Cf = CfProperties> {
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -1736,8 +1779,18 @@ export interface RequestInit<Cf = CfProperties> {
   encodeResponseBody?: "automatic" | "manual";
 }
 export type Service<
-  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
-> = Fetcher<T>;
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? Fetcher<InstanceType<T>>
+  : T extends Rpc.WorkerEntrypointBranded
+    ? Fetcher<T>
+    : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+      ? never
+      : Fetcher<undefined>;
 export type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
@@ -2823,23 +2876,6 @@ export interface CloseEventInit {
   reason?: string;
   wasClean?: boolean;
 }
-/**
- * A message received by a target object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
- */
-export declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
-  /**
-   * Returns the data of the message.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
-   */
-  readonly data: ArrayBuffer | string;
-}
-export interface MessageEventInit {
-  data: ArrayBuffer | string;
-}
 export type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -3032,6 +3068,61 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+}
+/**
+ * This Channel Messaging API interface represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+export declare abstract class MessagePort extends EventTarget {
+  /**
+   * Posts a message through the channel. Objects listed in transfer are transferred, not just cloned, meaning that they are no longer usable on the sending side.
+   *
+   * Throws a "DataCloneError" DOMException if transfer contains duplicate objects or port, or if message could not be cloned.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * Disconnects the port, so that it is no longer active.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * Begins dispatching messages received on the port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * This Channel Messaging API interface allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+export declare class MessageChannel {
+  constructor();
+  /**
+   * Returns the first MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * Returns the second MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+export interface MessagePortPostMessageOptions {
+  transfer?: any[];
 }
 export type AiImageClassificationInput = {
   image: number[];

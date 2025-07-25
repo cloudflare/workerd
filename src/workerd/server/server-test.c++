@@ -4960,6 +4960,11 @@ KJ_TEST("Server: structured logging with console methods") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2024-11-01",
+          compatibilityFlags = [
+            "nodejs_compat",
+            "experimental",
+            "enable_nodejs_process_v2"
+          ],
           modules = [
             ( name = "main.js",
               esModule =
@@ -4971,6 +4976,13 @@ KJ_TEST("Server: structured logging with console methods") {
                 `    console.error("This is an error message");
                 `    console.debug("This is a debug message");
                 `    console.debug({a: 1});
+                `
+                `    process.stdout.write("stdout");
+                `    process.stdout.write("stdout with\nmultiple\nnewlines\nlog");
+                `    process.stdout.write("ged");
+                `    process.stderr.write("stderr");
+                `    await 0;
+                `    process.stderr.write("after await");
                 `
                 `    try {
                 `      throw new Error("Test exception for structured logging");
@@ -5010,6 +5022,7 @@ KJ_TEST("Server: structured logging with console methods") {
     close(originalStderr);
   });
 
+  test.server.allowExperimental();
   test.start();
   auto conn = test.connect("test-addr");
 
@@ -5047,12 +5060,44 @@ KJ_TEST("Server: structured logging with console methods") {
     KJ_ASSERT(logline.contains(R"("message":"{ a: 1 }")"), logline);
   });
 
+  // process.stdout should be logs split by newline
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdoutstdout with")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"multiple")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"newlines")"), logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"logged")"), logline);
+  });
+
+  // process.stderr should be info
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr")"), logline);
+  });
+
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
     KJ_ASSERT(
         logline.contains(
-            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:11:13)")_"),
+            R"_("message":"Error: Test exception for structured logging\n    at Object.fetch (main.js:18:13)")_"),
         logline);
+  });
+
+  expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
+    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"after await")"), logline);
   });
 }
 #endif  // __linux__

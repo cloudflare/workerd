@@ -82,15 +82,6 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
       channel->getActorClass(kj::mv(entrypointName), kj::mv(props))));
 }
 
-class NullGlobalOutboundChannel: public IoChannelFactory::SubrequestChannel {
- public:
-  kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
-    JSG_FAIL_REQUIRE(Error,
-        "This worker is not permitted to access the internet via global functions like fetch(). "
-        "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
-  }
-};
-
 jsg::Ref<WorkerStub> WorkerLoader::get(
     jsg::Lock& js, kj::String name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
   auto& ioctx = IoContext::current();
@@ -109,12 +100,13 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
         env = Frankenvalue::fromJs(js, codeEnv.getHandle(js));
       }
 
-      kj::Own<IoChannelFactory::SubrequestChannel> globalOutbound;
+      kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
       KJ_IF_SOME(maybeOut, code.globalOutbound) {
         KJ_IF_SOME(out, maybeOut) {
           globalOutbound = out->getSubrequestChannel(ioctx);
         } else {
-          globalOutbound = kj::refcounted<NullGlobalOutboundChannel>();
+          // Application passed `null` to disable internet access. Leave `globalOutbound` as
+          // `kj::none`.
         }
       } else {
         // Inherit the calling worker's global outbound channel.

@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -210,6 +211,30 @@ wd_test(
 )
 
 wd_test(
+    src = "process-stdio-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["process-stdio-nodejs-test.js"],
+)
+
+sh_test(
+    name = "process-stdio-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-nodejs-test.wd-test)",
+        "$(location process-stdio-nodejs-test.expected_stdout)",
+        "$(location process-stdio-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-nodejs-test.expected_stderr",
+        "process-stdio-nodejs-test.expected_stdout",
+        "process-stdio-nodejs-test.js",
+        "process-stdio-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
+wd_test(
     src = "querystring-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["querystring-nodejs-test.js"],
@@ -317,6 +342,7 @@ wd_test(
         "JS_STREAM_SERVER_PORT",
         "STREAM_WRAP_SERVER_PORT",
     ],
+    sidecar_randomize_ip = False,
 )
 
 wd_test(

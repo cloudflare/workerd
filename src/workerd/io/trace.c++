@@ -148,7 +148,7 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
 
 TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
   if (isPredictableModeForTest()) {
-    return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+    return TraceId(staticSpanId, staticSpanId);
   }
 
   return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
@@ -1354,9 +1354,6 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return tracing::SpanClose(event.getSpanClose());
     }
-    case rpc::Trace::TailEvent::Event::COMPLETED_SPAN: {
-      return CompleteSpan(event.getCompletedSpan());
-    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<tracing::Attribute> attrs(listReader.size());
@@ -1417,9 +1414,6 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
-    KJ_CASE_ONEOF(span, CompleteSpan) {
-      span.copyTo(eventBuilder.initCompletedSpan());
-    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1463,9 +1457,6 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
       }
-      KJ_CASE_ONEOF(span, CompleteSpan) {
-        return span.clone();
-      }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
       }
@@ -1491,6 +1482,14 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 }
 
 // ======================================================================================
+
+SpanBuilder::SpanBuilder(
+    kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
+  KJ_IF_SOME(obs, observer) {
+    span.emplace(kj::mv(operationName), startTime);
+    this->observer = kj::mv(obs);
+  }
+}
 
 SpanBuilder& SpanBuilder::operator=(SpanBuilder&& other) {
   end();
@@ -1649,14 +1648,12 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
 }
 
 CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(kj::ConstString(kj::str(operationName)), startTime);
-  copy.endTime = endTime;
+  CompleteSpan copy(
+      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
   copy.tags.reserve(tags.size());
   for (auto& tag: tags) {
     copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
   }
-  copy.spanId = spanId;
-  copy.parentSpanId = parentSpanId;
   return copy;
 }
 

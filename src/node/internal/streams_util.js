@@ -45,7 +45,7 @@ import {
   aggregateTwoErrors,
 } from 'node-internal:internal_errors';
 
-import process from 'node:process';
+import { nextTick } from 'node-internal:internal_process';
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
@@ -784,28 +784,28 @@ export function eos(stream, options, callback) {
   }
   stream.on('close', onclose);
   if (closed) {
-    process.nextTick(onclose);
+    nextTick(onclose);
   } else if (
     (wState !== null && wState !== undefined && wState.errorEmitted) ||
     (rState !== null && rState !== undefined && rState.errorEmitted)
   ) {
     if (!_willEmitClose) {
-      process.nextTick(onclose);
+      nextTick(onclose);
     }
   } else if (
     !readable &&
     (!_willEmitClose || isReadable(stream)) &&
     (writableFinished || isWritable(stream) === false)
   ) {
-    process.nextTick(onclose);
+    nextTick(onclose);
   } else if (
     !writable &&
     (!_willEmitClose || isWritable(stream)) &&
     (readableFinished || isReadable(stream) === false)
   ) {
-    process.nextTick(onclose);
+    nextTick(onclose);
   } else if (rState && stream.req && stream.aborted) {
-    process.nextTick(onclose);
+    nextTick(onclose);
   }
   const cleanup = () => {
     callback = nop;
@@ -834,7 +834,7 @@ export function eos(stream, options, callback) {
       );
     };
     if (options.signal.aborted) {
-      process.nextTick(abort);
+      nextTick(abort);
     } else {
       const originalCallback = callback;
       callback = once((...args) => {
@@ -931,9 +931,9 @@ function _destroy(self, err, cb) {
       cb(err);
     }
     if (err) {
-      process.nextTick(emitErrorCloseNT, self, err);
+      nextTick(emitErrorCloseNT, self, err);
     } else {
-      process.nextTick(emitCloseNT, self);
+      nextTick(emitCloseNT, self);
     }
   }
   try {
@@ -1030,7 +1030,7 @@ export function errorOrDestroy(stream, err, sync = false) {
       r.errored = err;
     }
     if (sync) {
-      process.nextTick(emitErrorNT, stream, err);
+      nextTick(emitErrorNT, stream, err);
     } else {
       emitErrorNT(stream, err);
     }
@@ -1054,7 +1054,7 @@ export function construct(stream, cb) {
     // Duplex
     return;
   }
-  process.nextTick(constructNT, stream);
+  nextTick(constructNT, stream);
 }
 
 function constructNT(stream) {
@@ -1082,7 +1082,7 @@ function constructNT(stream) {
     } else if (err) {
       errorOrDestroy(stream, err, true);
     } else {
-      process.nextTick(emitConstructNT, stream);
+      nextTick(emitConstructNT, stream);
     }
   }
   try {
@@ -1102,7 +1102,7 @@ function emitCloseLegacy(stream) {
 
 function emitErrorCloseLegacy(stream, err) {
   stream.emit('error', err);
-  process.nextTick(emitCloseLegacy, stream);
+  nextTick(emitCloseLegacy, stream);
 }
 
 // Normalize destroy for legacy.
@@ -1128,9 +1128,9 @@ export function destroyer(stream, err) {
     // TODO: Don't lose err?
     stream.close();
   } else if (err) {
-    process.nextTick(emitErrorCloseLegacy, stream, err);
+    nextTick(emitErrorCloseLegacy, stream, err);
   } else {
-    process.nextTick(emitCloseLegacy, stream);
+    nextTick(emitCloseLegacy, stream);
   }
   if (!stream.destroyed) {
     stream[kDestroyed] = true;

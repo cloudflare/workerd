@@ -1965,7 +1965,8 @@ jsg::JsValue createUVException(jsg::Lock& js,
 
 namespace {
 constexpr bool isValidFileName(kj::StringPtr name) {
-  return name.size() > 0 && name != "."_kj && name != ".."_kj && name.find("/"_kj) == kj::none;
+  return name.size() > 0 && name != "."_kj && name != ".."_kj && name.find("/"_kj) == kj::none &&
+      name.find("\\"_kj) == kj::none;
 }
 
 jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsError error) {
@@ -1974,7 +1975,7 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
       return js.domException(kj::str("NotSupportedError"), kj::str("Not a directory"));
     }
     case workerd::FsError::NOT_EMPTY: {
-      return js.domException(kj::str("InvalidStateError"), kj::str("Directory not empty"));
+      return js.domException(kj::str("InvalidModificationError"), kj::str("Directory not empty"));
     }
     case workerd::FsError::READ_ONLY: {
       return js.domException(kj::str("InvalidStateError"), kj::str("Read-only file system"));
@@ -2064,7 +2065,14 @@ jsg::Promise<bool> FileSystemHandle::isSameEntry(jsg::Lock& js, jsg::Ref<FileSys
 jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
     jsg::Optional<RemoveOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
-  auto relative = getLocator().getRelative();
+
+  if (!canBeModifiedCurrently(js)) {
+    auto ex = js.domException(kj::str("NoModificationAllowedError"),
+        kj::str("Cannot remove a handle that is not writable or not a directory."));
+    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+  }
+
+  auto relative = getLocator().getRelative(jsg::Url::RelativeOption::STRIP_TAILING_SLASHES);
   auto opts = options.orDefault(RemoveOptions{});
   auto recursive = opts.recursive.orDefault(false);
   KJ_IF_SOME(parent, vfs.resolve(js, relative.base, workerd::VirtualFileSystem::ResolveOptions{})) {
@@ -2109,6 +2117,16 @@ jsg::Promise<void> FileSystemHandle::remove(jsg::Lock& js,
   return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
 }
 
+bool FileSystemHandle::canBeModifiedCurrently(jsg::Lock& js) const {
+  auto pathname = getLocator().getPathname();
+  if (pathname.endsWith("/"_kj)) {
+    auto cloned = getLocator().clone();
+    cloned.setPathname(pathname.slice(0, pathname.size() - 1));
+    return !getVfs().isLocked(js, cloned);
+  }
+  return !getVfs().isLocked(js, getLocator());
+}
+
 jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> StorageManager::getDirectory(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   auto& vfs = workerd::VirtualFileSystem::current(js);
@@ -2125,8 +2143,7 @@ jsg::Promise<jsg::Ref<FileSystemFileHandle>> FileSystemDirectoryHandle::getFileH
     jsg::Optional<FileSystemGetFileOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Invalid file name: ", name));
-    return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<jsg::Ref<FileSystemFileHandle>>(js.typeError("Invalid file name"));
   }
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
@@ -2196,10 +2213,10 @@ jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> FileSystemDirectoryHandle::get
     jsg::Optional<FileSystemGetDirectoryOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex =
-        js.domException(kj::str("TypeMismatchError"), kj::str("Invalid directory name: ", name));
-    return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<jsg::Ref<FileSystemDirectoryHandle>>(
+        js.typeError("Invalid directory name"));
   }
+
   kj::Maybe<FsType> createAs;
   KJ_IF_SOME(opts, options) {
     if (opts.create) createAs = FsType::DIRECTORY;
@@ -2272,8 +2289,7 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
     jsg::Optional<FileSystemRemoveOptions> options,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
   if (!isValidFileName(name)) {
-    auto ex = js.domException(kj::str("TypeMismatchError"), kj::str("Invalid file name: ", name));
-    return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+    return js.rejectedPromise<void>(js.typeError("Invalid name"));
   }
   auto opts = options.orDefault(FileSystemRemoveOptions{});
 
@@ -2283,7 +2299,16 @@ jsg::Promise<void> FileSystemDirectoryHandle::removeEntry(jsg::Lock& js,
         return js.rejectedPromise<void>(exception.wrap(js, fsErrorToDomException(js, err)));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
-        KJ_SWITCH_ONEOF(dir->remove(js, kj::Path({name}),
+        kj::Path item({name});
+        auto fileLocator = KJ_ASSERT_NONNULL(getLocator().tryResolve(name));
+        if (getVfs().isLocked(js, fileLocator)) {
+          // If the file is locked, we cannot remove it.
+          auto ex = js.domException(kj::str("NoModificationAllowedError"),
+              kj::str("Cannot remove an entry that is currently locked."));
+          return js.rejectedPromise<void>(exception.wrap(js, kj::mv(ex)));
+        }
+
+        KJ_SWITCH_ONEOF(dir->remove(js, item,
                             workerd::Directory::RemoveOptions{
                               .recursive = opts.recursive,
                             })) {
@@ -2368,11 +2393,23 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
   }
   return entries.releaseAsArray();
 }
+
+auto resolveDirectoryHandle(jsg::Lock& js, const VirtualFileSystem& vfs, const jsg::Url& locator) {
+  auto pathname = locator.getPathname();
+  if (pathname.endsWith("/"_kj)) {
+    pathname = pathname.first(pathname.size() - 1);
+    auto cloned = locator.clone();
+    cloned.setPathname(pathname);
+    return vfs.resolve(js, cloned, {});
+  }
+  // Otherwise fall-back to the original locator.
+  return vfs.resolve(js, locator, {});
+}
 }  // namespace
 
 jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::entries(
     jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2391,11 +2428,16 @@ jsg::Ref<FileSystemDirectoryHandle::EntryIterator> FileSystemDirectoryHandle::en
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<EntryIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<EntryIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys(jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2414,12 +2456,17 @@ jsg::Ref<FileSystemDirectoryHandle::KeyIterator> FileSystemDirectoryHandle::keys
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<KeyIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<KeyIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::values(
     jsg::Lock& js) {
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         JSG_FAIL_REQUIRE(DOMOperationError, "Failed to read directory: ", static_cast<int>(err));
@@ -2438,7 +2485,12 @@ jsg::Ref<FileSystemDirectoryHandle::ValueIterator> FileSystemDirectoryHandle::va
     KJ_UNREACHABLE;
   }
 
-  return js.alloc<ValueIterator>(IteratorState(JSG_THIS, kj::Array<jsg::Ref<FileSystemHandle>>()));
+  // The directory was not found. However, for some weird reason the spec requires that
+  // we still return an iterator here but it needs to throw a NotFoundError when next
+  // is actually called.
+  auto ex = js.domException(kj::str("NotFoundError"), kj::str("Not found"));
+  auto handle = jsg::JsValue(KJ_ASSERT_NONNULL(ex.tryGetHandle(js)));
+  return js.alloc<ValueIterator>(IteratorState(jsg::JsRef(js, handle)));
 }
 
 void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
@@ -2447,7 +2499,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
     jsg::Optional<jsg::Value> thisArg,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception) {
 
-  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, resolveDirectoryHandle(js, getVfs(), getLocator())) {
     KJ_SWITCH_ONEOF(existing) {
       KJ_CASE_ONEOF(err, workerd::FsError) {
         js.throwException(js.v8Ref(exception.wrap(js, fsErrorToDomException(js, err))));
@@ -2477,7 +2529,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
     KJ_UNREACHABLE;
   }
 
-  JSG_FAIL_REQUIRE(DOMNotFoundError, "Directory not found");
+  JSG_FAIL_REQUIRE(DOMNotFoundError, "Not found");
 }
 
 FileSystemFileHandle::FileSystemFileHandle(
@@ -2533,7 +2585,8 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
 jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::createWritable(
     jsg::Lock& js,
     jsg::Optional<FileSystemCreateWritableOptions> options,
-    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
+    const jsg::TypeHandler<FileSystemWritableData>& dataHandler) {
 
   // Per the spec, the writable stream we create here is expected to write into
   // a temporary space until the stream is closed. When closed, the original file
@@ -2548,8 +2601,8 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
   bool keepExistingData = opts.keepExistingData.orDefault(false);
 
   kj::Maybe<kj::Rc<workerd::File>> fileData;
-  if (keepExistingData) {
-    KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+  KJ_IF_SOME(existing, getVfs().resolve(js, getLocator(), {})) {
+    if (keepExistingData) {
       KJ_SWITCH_ONEOF(existing) {
         KJ_CASE_ONEOF(err, workerd::FsError) {
           return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
@@ -2578,51 +2631,31 @@ jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> FileSystemFileHandle::creat
         }
       }
     } else {
-      auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
-      return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
-          deHandler.wrap(js, kj::mv(ex)));
+      fileData = workerd::File::newWritable(js);
     }
   } else {
-    fileData = workerd::File::newWritable(js);
+    auto ex = js.domException(kj::str("NotFoundError"), kj::str("File not found"));
+    return js.rejectedPromise<jsg::Ref<FileSystemWritableFileStream>>(
+        deHandler.wrap(js, kj::mv(ex)));
   }
 
   auto sharedState = kj::rc<FileSystemWritableFileStream::State>(
-      getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
+      js, getVfs(), JSG_THIS, KJ_ASSERT_NONNULL(kj::mv(fileData)));
   auto stream =
       js.alloc<FileSystemWritableFileStream>(newWritableStreamJsController(), sharedState.addRef());
 
   stream->getController().setup(js,
       UnderlyingSink{.type = kj::str("bytes"),
         .write =
-            [state = sharedState.addRef(), &deHandler](
+            [state = sharedState.addRef(), &deHandler, &dataHandler](
                 jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
-    // TODO(node-fs): The spec allows the write parameter to be a WriteParams struct
-    // as an alternative to a BufferSource. We should implement this before shipping
-    // this feature.
     return js.tryCatch([&] {
-      KJ_IF_SOME(inner, state->temp) {
-        // Make sure what we got can be interpreted as bytes...
-        std::shared_ptr<v8::BackingStore> backing;
-        if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
-          jsg::BufferSource source(js, chunk);
-          if (source.size() == 0) return js.resolvedPromise();
-          KJ_SWITCH_ONEOF(inner->write(js, state->position, source)) {
-            KJ_CASE_ONEOF(written, uint32_t) {
-              state->position += written;
-            }
-            KJ_CASE_ONEOF(err, workerd::FsError) {
-              return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
-            }
-          }
-          return js.resolvedPromise();
-        }
-        return js.rejectedPromise<void>(
-            js.typeError("WritableStream received a value that is not an ArrayBuffer,"
-                         "ArrayBufferView, or string type."));
-      } else {
-        auto ex = js.domException(kj::str("NotFoundError"), kj::str("File handle closed"));
-        return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
+      KJ_IF_SOME(unwrapped, dataHandler.tryUnwrap(js, chunk)) {
+        return FileSystemWritableFileStream::writeImpl(
+            js, kj::mv(unwrapped), *state.get(), deHandler);
       }
+      return js.rejectedPromise<void>(
+          js.typeError("WritableStream received a value that is not writable"));
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
   },
         .abort =
@@ -2689,17 +2722,22 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
   JSG_REQUIRE(!getController().isLockedToWriter(), TypeError,
       "Cannot write to a stream that is locked to a reader");
+  auto writer = getWriter(js);
+  KJ_DEFER(writer->releaseLock(js));
+  return writeImpl(js, kj::mv(data), *sharedState.get(), deHandler);
+}
 
-  KJ_IF_SOME(inner, sharedState->temp) {
-    auto writer = getWriter(js);
-    KJ_DEFER(writer->releaseLock(js));
-
+jsg::Promise<void> FileSystemWritableFileStream::writeImpl(jsg::Lock& js,
+    FileSystemWritableData data,
+    State& state,
+    const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler) {
+  KJ_IF_SOME(inner, state.temp) {
     return js.tryCatch([&] {
       KJ_SWITCH_ONEOF(data) {
         KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          KJ_SWITCH_ONEOF(inner->write(js, sharedState->position, blob->getData())) {
+          KJ_SWITCH_ONEOF(inner->write(js, state.position, blob->getData())) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              sharedState->position += written;
+              state.position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
@@ -2707,9 +2745,9 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
           }
         }
         KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
-          KJ_SWITCH_ONEOF(inner->write(js, sharedState->position, buffer)) {
+          KJ_SWITCH_ONEOF(inner->write(js, state.position, buffer)) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              sharedState->position += written;
+              state.position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
@@ -2717,9 +2755,9 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
           }
         }
         KJ_CASE_ONEOF(str, kj::String) {
-          KJ_SWITCH_ONEOF(inner->write(js, sharedState->position, str)) {
+          KJ_SWITCH_ONEOF(inner->write(js, state.position, str)) {
             KJ_CASE_ONEOF(written, uint32_t) {
-              sharedState->position += written;
+              state.position += written;
             }
             KJ_CASE_ONEOF(err, workerd::FsError) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
@@ -2727,71 +2765,102 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
           }
         }
         KJ_CASE_ONEOF(params, WriteParams) {
-          uint32_t offset = sharedState->position;
-          KJ_IF_SOME(offset, params.position) {
+          uint32_t offset = state.position;
+          KJ_IF_SOME(pos, params.position) {
             auto stat = inner->stat(js);
-            if (offset > stat.size) {
+            if (pos > stat.size) {
               KJ_IF_SOME(err, inner->resize(js, offset)) {
                 return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
               }
             }
+            offset = pos;
           }
 
           if (params.type == "write"_kj) {
-            KJ_IF_SOME(data, params.data) {
-              KJ_SWITCH_ONEOF(data) {
-                KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-                  KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData())) {
-                    KJ_CASE_ONEOF(written, uint32_t) {
-                      sharedState->position = offset + written;
+            KJ_IF_SOME(maybeData, params.data) {
+              KJ_IF_SOME(data, maybeData) {
+                KJ_SWITCH_ONEOF(data) {
+                  KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData())) {
+                      KJ_CASE_ONEOF(written, uint32_t) {
+                        state.position = offset + written;
+                        return js.resolvedPromise();
+                      }
+                      KJ_CASE_ONEOF(err, workerd::FsError) {
+                        return js.rejectedPromise<void>(
+                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                      }
                     }
-                    KJ_CASE_ONEOF(err, workerd::FsError) {
-                      return js.rejectedPromise<void>(
-                          deHandler.wrap(js, fsErrorToDomException(js, err)));
+                    KJ_UNREACHABLE;
+                  }
+                  KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, buffer)) {
+                      KJ_CASE_ONEOF(written, uint32_t) {
+                        state.position = offset + written;
+                        return js.resolvedPromise();
+                      }
+                      KJ_CASE_ONEOF(err, workerd::FsError) {
+                        return js.rejectedPromise<void>(
+                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                      }
+                    }
+                    KJ_UNREACHABLE;
+                  }
+                  KJ_CASE_ONEOF(str, kj::String) {
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, str)) {
+                      KJ_CASE_ONEOF(written, uint32_t) {
+                        state.position = offset + written;
+                        return js.resolvedPromise();
+                      }
+                      KJ_CASE_ONEOF(err, workerd::FsError) {
+                        return js.rejectedPromise<void>(
+                            deHandler.wrap(js, fsErrorToDomException(js, err)));
+                      }
                     }
                   }
+                  KJ_UNREACHABLE;
                 }
-                KJ_CASE_ONEOF(buffer, jsg::BufferSource) {
-                  KJ_SWITCH_ONEOF(inner->write(js, offset, buffer)) {
-                    KJ_CASE_ONEOF(written, uint32_t) {
-                      sharedState->position = offset + written;
-                    }
-                    KJ_CASE_ONEOF(err, workerd::FsError) {
-                      return js.rejectedPromise<void>(
-                          deHandler.wrap(js, fsErrorToDomException(js, err)));
-                    }
-                  }
-                }
-                KJ_CASE_ONEOF(str, kj::String) {
-                  KJ_SWITCH_ONEOF(inner->write(js, offset, str)) {
-                    KJ_CASE_ONEOF(written, uint32_t) {
-                      sharedState->position = offset + written;
-                    }
-                    KJ_CASE_ONEOF(err, workerd::FsError) {
-                      return js.rejectedPromise<void>(
-                          deHandler.wrap(js, fsErrorToDomException(js, err)));
-                    }
-                  }
-                }
+              } else {
+                return js.rejectedPromise<void>(
+                    js.typeError("write() requires a non-null data parameter"));
               }
             }
+
+            return js.rejectedPromise<void>(deHandler.wrap(js,
+                js.domException(kj::str("SyntaxError"),
+                    kj::str("write() requires a non-null data parameter"))));
+
           } else if (params.type == "seek"_kj) {
-            uint32_t pos = params.position.orDefault(0);
-            sharedState->position += pos;
+            uint32_t pos;
+            KJ_IF_SOME(s, params.position) {
+              pos = s;
+            } else {
+              return js.rejectedPromise<void>(deHandler.wrap(js,
+                  js.domException(
+                      kj::str("SyntaxError"), kj::str("seek() requires a position parameter"))));
+            }
+            state.position = pos;
             auto stat = inner->stat(js);
-            if (sharedState->position > stat.size) {
-              KJ_IF_SOME(err, inner->resize(js, sharedState->position)) {
+            if (state.position > stat.size) {
+              KJ_IF_SOME(err, inner->resize(js, state.position)) {
                 return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
               }
             }
           } else if (params.type == "truncate"_kj) {
-            uint32_t size = params.size.orDefault(0);
+            uint32_t size = 0;
+            KJ_IF_SOME(s, params.size) {
+              size = s;
+            } else {
+              return js.rejectedPromise<void>(deHandler.wrap(js,
+                  js.domException(
+                      kj::str("SyntaxError"), kj::str("truncate() requires a size parameter"))));
+            }
             KJ_IF_SOME(err, inner->resize(js, size)) {
               return js.rejectedPromise<void>(deHandler.wrap(js, fsErrorToDomException(js, err)));
             }
             auto stat = inner->stat(js);
-            if (sharedState->position > stat.size) {
-              sharedState->position = stat.size;
+            if (state.position > stat.size) {
+              state.position = stat.size;
             }
           } else {
             return js.rejectedPromise<void>(
@@ -2802,10 +2871,9 @@ jsg::Promise<void> FileSystemWritableFileStream::write(jsg::Lock& js,
 
       return js.resolvedPromise();
     }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  } else {
-    auto ex = js.domException(kj::str("InvalidStateError"), kj::str("File handle closed"));
-    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
   }
+
+  return js.rejectedPromise<void>(js.typeError("write() after closed"));
 }
 
 jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js,
@@ -2820,10 +2888,9 @@ jsg::Promise<void> FileSystemWritableFileStream::seek(jsg::Lock& js,
     }
     sharedState->position = position;
     return js.resolvedPromise();
-  } else {
-    auto ex = js.domException(kj::str("InvalidStateError"), kj::str("File handle closed"));
-    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
   }
+
+  return js.rejectedPromise<void>(js.typeError("seek() after closed"));
 }
 
 jsg::Promise<void> FileSystemWritableFileStream::truncate(
@@ -2837,9 +2904,8 @@ jsg::Promise<void> FileSystemWritableFileStream::truncate(
       sharedState->position = stat.size;
     }
     return js.resolvedPromise();
-  } else {
-    auto ex = js.domException(kj::str("InvalidStateError"), kj::str("File handle closed"));
-    return js.rejectedPromise<void>(deHandler.wrap(js, kj::mv(ex)));
   }
+
+  return js.rejectedPromise<void>(js.typeError("seek() after closed"));
 }
 }  // namespace workerd::api

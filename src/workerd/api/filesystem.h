@@ -327,11 +327,26 @@ class FileSystemHandle: public jsg::Object {
     return vfs;
   }
 
+  bool canBeModifiedCurrently(jsg::Lock&) const;
+
  private:
   const workerd::VirtualFileSystem& vfs;
   const jsg::Url locator;
   jsg::USVString name;
 };
+
+struct FileSystemFileWriteParams {
+  kj::String type;  // one of: write, seek, truncate
+  jsg::Optional<uint32_t> size;
+  jsg::Optional<uint32_t> position;
+  // Yes, wrapping the kj::Maybe with a jsg::Optional is intentional here. We need to
+  // be able to accept null or undefined values and handle them per the spec.
+  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>>> data;
+  JSG_STRUCT(type, size, position, data);
+};
+
+using FileSystemWritableData =
+    kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, FileSystemFileWriteParams>;
 
 class FileSystemFileHandle final: public FileSystemHandle {
  public:
@@ -352,50 +367,69 @@ class FileSystemFileHandle final: public FileSystemHandle {
 
   jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
       jsg::Optional<FileSystemCreateWritableOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
+      const jsg::TypeHandler<FileSystemWritableData>& dataHandler);
 
   JSG_RESOURCE_TYPE(FileSystemFileHandle) {
     JSG_INHERIT(FileSystemHandle);
     JSG_METHOD(getFile);
     JSG_METHOD(createWritable);
   }
+
+ private:
+  mutable size_t writableCount = 0;
+  friend class FileSystemWritableFileStream;
 };
 
 class FileSystemDirectoryHandle final: public FileSystemHandle {
- public:
-  struct EntryType {
-    jsg::USVString key;
-    jsg::Ref<FileSystemHandle> value;
-    JSG_STRUCT(key, value);
-    EntryType(jsg::USVString key, jsg::Ref<FileSystemHandle> value)
-        : key(kj::mv(key)),
-          value(kj::mv(value)) {}
-  };
-
  private:
-  using EntryIteratorType = EntryType;
+  // The actual entry type is an array of two elements, the first being the key,
+  // the second being the value.
+  using EntryType = kj::OneOf<jsg::JsRef<jsg::JsString>, jsg::Ref<FileSystemHandle>>;
+  using EntryIteratorType = kj::Array<EntryType>;
   using KeyIteratorType = jsg::USVString;
   using ValueIteratorType = jsg::Ref<FileSystemHandle>;
 
   struct IteratorState final {
-    jsg::Ref<FileSystemDirectoryHandle> parent;
-    kj::Array<jsg::Ref<FileSystemHandle>> entries;
-    uint index = 0;
+    struct Listing {
+      jsg::Ref<FileSystemDirectoryHandle> parent;
+      kj::Array<jsg::Ref<FileSystemHandle>> entries;
+      uint index = 0;
+    };
+    using Errored = jsg::JsRef<jsg::JsValue>;
+    kj::OneOf<Listing, Errored> state;
 
     IteratorState(
         jsg::Ref<FileSystemDirectoryHandle> parent, kj::Array<jsg::Ref<FileSystemHandle>> entries)
-        : parent(kj::mv(parent)),
-          entries(kj::mv(entries)) {}
+        : state(Listing{
+            .parent = kj::mv(parent),
+            .entries = kj::mv(entries),
+          }) {}
+    IteratorState(jsg::JsRef<jsg::JsValue> exception): state(kj::mv(exception)) {}
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-      visitor.visitAll(entries);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          visitor.visit(listing.parent);
+          visitor.visitAll(listing.entries);
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          visitor.visit(exception);
+        }
+      }
     }
 
     JSG_MEMORY_INFO(IteratorState) {
-      tracker.trackField("parent", parent);
-      for (auto& entry: entries) {
-        tracker.trackField("entry", entry);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          tracker.trackField("parent", listing.parent);
+          for (auto& entry: listing.entries) {
+            tracker.trackField("entry", entry);
+          }
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          tracker.trackField("exception", exception);
+        }
       }
     }
   };
@@ -480,27 +514,41 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
     JSG_METHOD(values);
     JSG_METHOD(forEach);
     JSG_ASYNC_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE({
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+      [Symbol.asyncIterator]() : AsyncIterableIterator<[string, FileSystemHandle]>;
+    });
   }
 
  private:
   template <typename Type>
   static jsg::Promise<kj::Maybe<Type>> iteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.entries.size()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
-    }
+    KJ_SWITCH_ONEOF(state.state) {
+      KJ_CASE_ONEOF(listing, IteratorState::Listing) {
+        if (listing.index >= listing.entries.size()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
+        }
 
-    auto& entry = state.entries[state.index++];
+        auto& entry = listing.entries[listing.index++];
 
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(
-          EntryType(js.accountedUSVString(entry->getName(js)), entry.addRef()));
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
-    } else {
-      static_assert(false, "invalid iterator type");
+        if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
+          EntryIteratorType result = kj::arr(
+              EntryType(jsg::JsRef(js, js.str(entry->getName(js)))), EntryType(entry.addRef()));
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::mv(result));
+        } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
+        } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
+        } else {
+          static_assert(false, "invalid iterator type");
+        }
+      }
+      KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+        return js.rejectedPromise<kj::Maybe<Type>>(exception.getHandle(js));
+      }
     }
+    KJ_UNREACHABLE;
   }
 
   template <typename Type>
@@ -528,6 +576,8 @@ class FileSystemWritableFileStream final: public WritableStream {
     // The file handle we are writing to
     jsg::Ref<FileSystemFileHandle> file;
 
+    kj::Maybe<kj::Own<void>> lock;
+
     // A note on file position and sizes. In the spec, file sizes and positions
     // are defined in terms of unsigned long long, or 64-bits. We are using
     // unsigned long (uint32_t) for these instead. This is largely because
@@ -535,16 +585,19 @@ class FileSystemWritableFileStream final: public WritableStream {
     // is WAY more than our isolate heap limit. A uint32_t is more than enough
     // for our purposes.
     uint32_t position = 0;
-    State(const workerd::VirtualFileSystem& vfs,
+    State(jsg::Lock& js,
+        const workerd::VirtualFileSystem& vfs,
         jsg::Ref<FileSystemFileHandle> file,
         kj::Rc<workerd::File> temp)
         : vfs(vfs),
           temp(kj::mv(temp)),
-          file(kj::mv(file)) {}
+          file(kj::mv(file)),
+          lock(vfs.lock(js, this->file->getLocator())) {}
 
     void clear() {
       temp = kj::none;
       position = 0;
+      lock = kj::none;
     }
   };
 
@@ -553,16 +606,10 @@ class FileSystemWritableFileStream final: public WritableStream {
 
   static jsg::Ref<FileSystemWritableFileStream> constructor() = delete;
 
-  struct WriteParams {
-    kj::String type;  // one of: write, seek, truncate
-    jsg::Optional<uint32_t> size;
-    jsg::Optional<uint32_t> position;
-    jsg::Optional<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>> data;
-    JSG_STRUCT(type, size, position, data);
-  };
+  using WriteParams = FileSystemFileWriteParams;
 
   jsg::Promise<void> write(jsg::Lock& js,
-      kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+      FileSystemWritableData data,
       const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
   jsg::Promise<void> seek(jsg::Lock& js,
       uint32_t position,
@@ -576,6 +623,10 @@ class FileSystemWritableFileStream final: public WritableStream {
     JSG_METHOD(seek);
     JSG_METHOD(truncate);
   }
+
+  static jsg::Promise<void> writeImpl(jsg::Lock& js,
+      FileSystemWritableData data, State& state,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
  private:
   kj::Rc<State> sharedState;
@@ -604,7 +655,6 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemDirectoryHandle::FileSystemGetDirectoryOptions,                      \
       workerd::api::FileSystemDirectoryHandle::FileSystemRemoveOptions,                            \
       workerd::api::FileSystemWritableFileStream::WriteParams,                                     \
-      workerd::api::FileSystemDirectoryHandle::EntryType,                                          \
       workerd::api::FileSystemDirectoryHandle::EntryIterator,                                      \
       workerd::api::FileSystemDirectoryHandle::KeyIterator,                                        \
       workerd::api::FileSystemDirectoryHandle::ValueIterator,                                      \

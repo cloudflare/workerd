@@ -257,6 +257,8 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
   FileSystemHandle: typeof FileSystemHandle;
   FileSystemFileHandle: typeof FileSystemFileHandle;
   FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
@@ -1402,6 +1404,47 @@ interface ErrorEventErrorEventInit {
   error?: any;
 }
 /**
+ * A message received by a target object.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
+ */
+declare class MessageEvent extends Event {
+  constructor(type: string, initializer: MessageEventInit);
+  /**
+   * Returns the data of the message.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
+   */
+  readonly data: any;
+  /**
+   * Returns the origin of the message, for server-sent events and cross-document messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
+   */
+  readonly origin: string | null;
+  /**
+   * Returns the last event ID string, for server-sent events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
+   */
+  readonly lastEventId: string;
+  /**
+   * Returns the WindowProxy of the source window, for cross-document messaging, and the MessagePort being attached, in the connect event fired at SharedWorkerGlobalScope objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
+   */
+  readonly source: MessagePort | null;
+  /**
+   * Returns the MessagePort array sent with the message, for cross-document messaging and channel messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
+   */
+  readonly ports: MessagePort[];
+}
+interface MessageEventInit {
+  data: ArrayBuffer | string;
+}
+/**
  * Provides a way to easily construct a set of key/value pairs representing form fields and their values, which can then be easily sent using the XMLHttpRequest.send() method. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
@@ -1760,8 +1803,19 @@ interface RequestInit<Cf = CfProperties> {
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> =
-  Fetcher<T>;
+type Service<
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? Fetcher<InstanceType<T>>
+  : T extends Rpc.WorkerEntrypointBranded
+    ? Fetcher<T>
+    : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+      ? never
+      : Fetcher<undefined>;
 type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
@@ -2908,23 +2962,6 @@ interface CloseEventInit {
   reason?: string;
   wasClean?: boolean;
 }
-/**
- * A message received by a target object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
- */
-declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
-  /**
-   * Returns the data of the message.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
-   */
-  readonly data: ArrayBuffer | string;
-}
-interface MessageEventInit {
-  data: ArrayBuffer | string;
-}
 type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -3179,7 +3216,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve) */
   resolve(possibleDescendant: FileSystemHandle): Promise<string[]>;
-  entries(): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
   keys(): AsyncIterableIterator<string>;
   values(): AsyncIterableIterator<FileSystemHandle>;
   forEach(
@@ -3190,7 +3227,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
     ) => void,
     thisArg?: any,
   ): void;
-  [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
 }
 /**
  * Available only in secure contexts.
@@ -3204,7 +3241,7 @@ declare abstract class FileSystemWritableFileStream extends WritableStream {
       | Blob
       | (ArrayBuffer | ArrayBufferView)
       | string
-      | FileSystemWritableFileStreamWriteParams,
+      | FileSystemFileWriteParams,
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek) */
   seek(position: number): Promise<void>;
@@ -3232,18 +3269,69 @@ interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
 interface FileSystemDirectoryHandleFileSystemRemoveOptions {
   recursive: boolean;
 }
-interface FileSystemWritableFileStreamWriteParams {
+interface FileSystemFileWriteParams {
   type: string;
   size?: number;
   position?: number;
-  data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
-}
-interface FileSystemDirectoryHandleEntryType {
-  key: string;
-  value: FileSystemHandle;
+  data?: (Blob | (ArrayBuffer | ArrayBufferView) | string) | null;
 }
 interface FileSystemHandleRemoveOptions {
   recursive?: boolean;
+}
+/**
+ * This Channel Messaging API interface represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+declare abstract class MessagePort extends EventTarget {
+  /**
+   * Posts a message through the channel. Objects listed in transfer are transferred, not just cloned, meaning that they are no longer usable on the sending side.
+   *
+   * Throws a "DataCloneError" DOMException if transfer contains duplicate objects or port, or if message could not be cloned.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * Disconnects the port, so that it is no longer active.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * Begins dispatching messages received on the port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * This Channel Messaging API interface allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+declare class MessageChannel {
+  constructor();
+  /**
+   * Returns the first MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * Returns the second MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+interface MessagePortPostMessageOptions {
+  transfer?: any[];
 }
 type AiImageClassificationInput = {
   image: number[];

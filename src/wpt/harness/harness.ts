@@ -96,6 +96,7 @@ export type TestRunnerConfig = {
 
 type Env = {
   unsafe: { eval: (code: string) => void };
+  SIDECAR_HOSTNAME: string | null;
   HTTP_PORT: string | null;
   HTTPS_PORT: string | null;
   [key: string]: unknown;
@@ -415,7 +416,10 @@ async function runTest(
     );
   }
 
-  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
+  const testUrl = new URL(
+    path.join(moduleBase, file),
+    `http://${env.SIDECAR_HOSTNAME ?? 'localhost'}`
+  );
 
   // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
   // Update the URL's port so we can connect to it

@@ -11,6 +11,7 @@ import { get } from 'node:http';
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
     const keys = [
+      'SIDECAR_HOSTNAME',
       'PONG_SERVER_PORT',
       'ASD_SERVER_PORT',
       'DEFAULT_HEADERS_EXIST_PORT',
@@ -47,6 +48,7 @@ export const testHttpClientResDestroyed = {
       const { promise, resolve } = Promise.withResolvers();
       http.get(
         {
+          hostname: env.SIDECAR_HOSTNAME,
           port: env.ASD_SERVER_PORT,
         },
         (res) => {
@@ -63,6 +65,7 @@ export const testHttpClientResDestroyed = {
       const { promise, resolve } = Promise.withResolvers();
       http.get(
         {
+          hostname: env.SIDECAR_HOSTNAME,
           port: env.ASD_SERVER_PORT,
         },
         (res) => {
@@ -144,6 +147,7 @@ export const testHttpClientDefaultHeadersExist = {
         const request = http
           .request({
             method: method,
+            hostname: env.SIDECAR_HOSTNAME,
             port: env.DEFAULT_HEADERS_EXIST_PORT,
           })
           .end();
@@ -183,6 +187,7 @@ export const testHttpClientEncoding = {
     http
       .request(
         {
+          hostname: env.SIDECAR_HOSTNAME,
           port: env.PONG_SERVER_PORT,
           encoding: 'utf8',
         },
@@ -228,7 +233,7 @@ export const testHttpClientInputFunction = {
   async test(_ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();
     const req = new http.ClientRequest(
-      { port: env.PONG_SERVER_PORT },
+      { hostname: env.SIDECAR_HOSTNAME, port: env.PONG_SERVER_PORT },
       (response) => {
         let body = '';
         response.setEncoding('utf8');
@@ -293,7 +298,7 @@ export const testHttpRequestArguments = {
     const { promise, resolve } = Promise.withResolvers();
     http.get(
       'http://example.com/testpath',
-      { hostname: 'localhost', port: env.REQUEST_ARGUMENTS_PORT },
+      { hostname: env.SIDECAR_HOSTNAME, port: env.REQUEST_ARGUMENTS_PORT },
       (res) => {
         res.resume();
         resolve();
@@ -315,7 +320,7 @@ export const testHttpRequestDontOverrideOptions = {
     // be mutable / modified
     const options = {
       host: undefined,
-      hostname: 'localhost',
+      hostname: env.SIDECAR_HOSTNAME,
       port: undefined,
       defaultPort: undefined,
       path: undefined,
@@ -327,7 +332,7 @@ export const testHttpRequestDontOverrideOptions = {
       .request(options, function (res) {
         res.resume();
         strictEqual(options.host, undefined);
-        strictEqual(options.hostname, 'localhost');
+        strictEqual(options.hostname, env.SIDECAR_HOSTNAME);
         strictEqual(options.port, undefined);
         strictEqual(options.defaultPort, undefined);
         strictEqual(options.path, undefined);
@@ -347,7 +352,11 @@ export const testHttpRequestHostHeader = {
     // HTTP/1.1 request message that lacks a Host header field
     const { promise, resolve } = Promise.withResolvers();
     http.get(
-      { port: env.HEADER_VALIDATION_SERVER_PORT, headers: [] },
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.HEADER_VALIDATION_SERVER_PORT,
+        headers: [],
+      },
       (res) => {
         strictEqual(res.statusCode, 400);
         strictEqual(res.headers.connection, 'close');
@@ -375,6 +384,7 @@ export const testHttpRequestJoinAuthorizationHeaders = {
     const { promise, resolve } = Promise.withResolvers();
     http.get(
       {
+        hostname: env.SIDECAR_HOSTNAME,
         port: env.HELLO_WORLD_SERVER_PORT,
         method: 'POST',
         headers: [

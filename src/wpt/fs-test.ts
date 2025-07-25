@@ -62,68 +62,31 @@ export default {
   },
   'FileSystemBaseHandle-remove.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'remove() to remove an empty directory',
-      'remove() on an already removed directory should fail',
-      'remove() on a non-empty directory should fail',
-      'remove() on a directory recursively should delete all sub-items',
-      'remove() while the file has an open writable fails',
-
+    disabledTests: [
       // Intentionally unsupported
       'can remove the root of a sandbox file system',
     ],
   },
   'FileSystemDirectoryHandle-getDirectoryHandle.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'getDirectoryHandle() with empty name',
-      'getDirectoryHandle() with "." name',
-      'getDirectoryHandle() with ".." name',
-      'getDirectoryHandle(create=false) with a path separator when the directory exists',
-      'getDirectoryHandle(create=true) with a path separator',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-getFileHandle.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'getFileHandle() with empty name',
-      'getFileHandle() with "." name',
-      'getFileHandle() with ".." name',
-      'getFileHandle(create=false) with a path separator when the file exists.',
-      'getFileHandle(create=true) with a path separator',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-iteration.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      '@@asyncIterator: full iteration works',
-      'entries: full iteration works',
-      'iteration while iterator gets garbage collected',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-removeEntry.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'removeEntry() on an already removed file should fail',
-      'removeEntry() on a non-empty directory should fail',
-      'removeEntry() with empty name should fail',
-      'removeEntry() with "." name should fail',
-      'removeEntry() with ".." name should fail',
-      'removeEntry() with a path separator should fail.',
-      'removeEntry() while the file has an open writable fails',
-      'removeEntry() of a directory while a containing file has an open writable fails',
-      'removeEntry() on a non-existent directory recursively should throw NotFoundError',
-    ],
+    expectedFailures: [],
   },
   'FileSystemDirectoryHandle-resolve.https.any.js': {
-    comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
+    comment:
+      'We currently do not implement the resolve() method on directories',
+    disabledTests: [
       'Resolve returns empty array for same directory',
       'Resolve returns correct path',
       'Resolve returns correct path with non-ascii characters',
@@ -131,28 +94,29 @@ export default {
     ],
   },
   'FileSystemFileHandle-create-sync-access-handle.https.window.js': {
-    comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'Attempt to create a sync access handle.',
-    ],
+    comment: 'We do not yet implement sync access handles',
+    disabledTests: ['Attempt to create a sync access handle.'],
   },
   'FileSystemFileHandle-cross-primitive-locking.https.tentative.worker.js': {
-    comment: '...',
+    comment:
+      'The importScripts utility is not implemented in our test hardness',
     // TODO(node-fs): Inspect these tests
     disabledTests: true,
   },
   'FileSystemFileHandle-getFile.https.any.js': {
     comment: '...',
     expectedFailures: [
-      // TODO(node-fs): Fix these tests
+      // TODO(node-fs): We currently do not implement time stamp modification
+      // of files via webfs so this test is expected to fail. This is temporary
+      // until we fully implement these bits, so leaving this as "expectedFailures".
       'getFile() returns last modified time',
     ],
   },
   'FileSystemFileHandle-move.https.any.js': {
-    comment: '...',
+    comment:
+      'We do not currently implement the move() method on file system handles',
     expectedFailures: [
-      // TODO(node-fs): Fix these tests
+      // TODO(node-fs): Implement move and enable these tests
       'move(name) to rename a file',
       'get a handle to a moved file',
       'move(name) to rename a file the same name',
@@ -181,107 +145,88 @@ export default {
   },
   'FileSystemFileHandle-sync-access-handle-back-forward-cache.https.tentative.window.js':
     {
-      comment: '...',
-      // TODO(node-fs): Inspect these tests
+      comment: 'We currently do not implement sync access handles',
       disabledTests: true,
     },
   'FileSystemFileHandle-sync-access-handle-lock-modes.https.tentative.worker.js':
     {
-      comment: '...',
-      // TODO(node-fs): Inspect these tests
+      comment: 'We currently do not implement sync access handles',
       disabledTests: true,
     },
   'FileSystemFileHandle-writable-file-stream-back-forward-cache.https.tentative.window.js':
     {
-      comment: '...',
-      // TODO(node-fs): Inspect these tests
+      comment:
+        'The test harness requires a method getCodeAtPath that is not currently implemented in our test harness.',
       disabledTests: true,
     },
   'FileSystemFileHandle-writable-file-stream-lock-modes.https.tentative.worker.js':
     {
-      comment: '...',
-      // TODO(node-fs): Inspect these tests
+      comment: 'We currently do not implement lock modes',
       disabledTests: true,
     },
   'FileSystemObserver.https.tentative.any.js': {
     comment: 'FileSystemObserver is not implemented in workers',
-    // TODO(node-fs): Implement FileSystemObserver?
     disabledTests: true,
   },
   'FileSystemObserver-sync-access-handle.https.tentative.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment:
+      'We currently do not implement sync access handles or FileSystemObserver',
     disabledTests: true,
   },
   'FileSystemObserver-unsupported-global.https.tentative.any.js': {
-    comment: '...',
+    comment: 'We do not implement FileSystemObserver',
+    disabledTests: true,
   },
   'FileSystemObserver-writable-file-stream.https.tentative.any.js': {
-    comment: '...',
-    expectedFailures: [
-      // TODO(node-fs): Fix these tests
-      'Closing a FileSystemWritableFileStream that\'s modified the file produces a "modified" event',
-      "All FileSystemWritableFileStream methods that aren't closed don't produce events",
-    ],
+    comment: 'We do not implement FileSystemObserver',
+    disabledTests: true,
   },
   'FileSystemSyncAccessHandle-close.https.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
   'FileSystemSyncAccessHandle-flush.https.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
   'FileSystemSyncAccessHandle-getSize.https.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
   'FileSystemSyncAccessHandle-read-write.https.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
   'FileSystemSyncAccessHandle-truncate.https.worker.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'We currently do not implement sync access handles',
     disabledTests: true,
   },
   'FileSystemWritableFileStream.https.any.js': {
-    comment: '...',
+    comment:
+      'There is currently a bug in the web platform tests that causes this to fail',
     expectedFailures: [
-      'createWritable() fails when parent directory is removed',
       'createWritable() can be called on two handles representing the same file',
     ],
   },
   'FileSystemWritableFileStream-piped.https.any.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'The test requires streams/resources/recording-streams.js',
+    // TODO(node-fs): These tests require a resource file from the streams wpt
+    // tests...
     disabledTests: true,
   },
   'FileSystemWritableFileStream-write.https.any.js': {
     comment: '...',
-    expectedFailures: [
-      'write() called with a string and a valid offset',
-      'write() called with a string and a valid offset after seek',
-      'write() called with a blob and a valid offset',
-      'write() called with an offset beyond the end of the file',
-      'atomic writes: write() after close() fails',
-      'atomic writes: truncate() after close() fails',
-      'getWriter() can be used',
-      'WriteParams: truncate missing size param',
-      'WriteParams: write missing data param',
-      'WriteParams: write null data param',
-      'WriteParams: seek missing position param',
+    disabledTests: [
+      // We don't support this case. In the test a Blob is created from a
+      // file that is then removed, then that Blob is written to a file.
+      // Because our blob contains a copy of the original file's data
+      // and is not a live-reference, the expected error does not occur.
       'write() with an invalid blob to an empty file should reject',
-      'an errored writable stream releases its lock',
     ],
   },
   'idlharness.https.any.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'The WebIDLParser.js is not found',
+    // TODO(node-fs): Revisit this
     disabledTests: true,
   },
   'opaque-origin.https.window.js': {
@@ -289,125 +234,119 @@ export default {
     disabledTests: true,
   },
   'root-name.https.any.js': {
-    comment: '...',
-    expectedFailures: [
+    comment:
+      'Our test harness does not actually expose the root directory to the tests',
+    disabledTests: [
       'getDirectory returns a directory whose name is the empty string',
     ],
   },
 
   'script-tests/FileSystemFileHandle-getFile.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemFileHandle-move.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemObserver.js': {
-    comment: 'FileSystemObserver is not implemented in workers',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemObserver-writable-file-stream.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemSyncAccessHandle-flush.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemWritableFileStream.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemWritableFileStream-piped.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemWritableFileStream-write.js': {
-    comment: '...',
-    // TODO(node-fs): Inspect these tests
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-buckets.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-getUniqueId.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-IndexedDB.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-isSameEntry.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-BroadcastChannel.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-Error.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-frames.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-MessagePort-frames.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-MessagePort-windows.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-MessagePort-workers.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-windows.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-postMessage-workers.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemBaseHandle-remove.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemDirectoryHandle-getDirectoryHandle.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemDirectoryHandle-getFileHandle.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemDirectoryHandle-iteration.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemDirectoryHandle-removeEntry.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemDirectoryHandle-resolve.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
   'script-tests/FileSystemFileHandle-create-sync-access-handle.js': {
-    comment: '...',
+    comment: 'script-test files are imported and tested above',
     disabledTests: true,
   },
 } satisfies TestRunnerConfig;

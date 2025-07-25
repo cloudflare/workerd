@@ -96,6 +96,26 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "pyodide",
+    srcs = [
+        "pyodide.c++",
+    ],
+    hdrs = [
+        "pyodide.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
     name = "workerd-api",
     srcs = [
         "workerd-api.c++",
@@ -107,6 +127,7 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":fallback-service",
+        ":pyodide",
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/cloudflare",
@@ -138,7 +159,6 @@ wd_cc_library(
     deps = [
         ":actor-id-impl",
         ":alarm-scheduler",
-        ":bundle-fs",
         ":container-client",
         ":facet-tree-index",
         ":fallback-service",
@@ -190,21 +210,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
-    ],
-)
-
-wd_cc_library(
-    name = "bundle-fs",
-    srcs = [
-        "bundle-fs.c++",
-    ],
-    hdrs = [
-        "bundle-fs.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":workerd_capnp",
-        "//src/workerd/io",
     ],
 )
 
@@ -286,14 +291,6 @@ kj_test(
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@ssl",
-    ],
-)
-
-kj_test(
-    src = "bundle-fs-test.c++",
-    deps = [
-        ":bundle-fs",
-        "//src/workerd/tests:test-fixture",
     ],
 )
 

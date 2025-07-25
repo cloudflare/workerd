@@ -240,6 +240,9 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline bool isPython() const {
     return python;
   }
+  inline kj::Maybe<kj::Arc<DynamicEnvBuilder>> getDynamicEnvBuilder() const {
+    return mapAddRef(dynamicEnvBuilder);
+  }
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
@@ -272,6 +275,8 @@ class Worker::Script: public kj::AtomicRefcounted {
 
   struct Impl;
   kj::Own<Impl> impl;
+
+  kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
 
   friend class Worker;
 
@@ -603,27 +608,6 @@ class Worker::Api {
 
   // Return the virtual file system for this worker.
   virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
-
-  // Output virtual stdio to... somewhere.
-  virtual void writeStdio(VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) const {
-    // By default, these go nowhere unless overridden or the verbose option is set, which
-    // it never is in production.
-    switch (type) {
-      case VirtualFileSystem::Stdio::ERR: {
-        KJ_LOG(INFO, "stderr", bytes);
-        return;
-      }
-      case VirtualFileSystem::Stdio::OUT: {
-        KJ_LOG(INFO, "stdout", bytes);
-        return;
-      }
-      case VirtualFileSystem::Stdio::IN: {
-        // stdin should never be directed to here.
-        break;
-      }
-    }
-    KJ_UNREACHABLE;
-  }
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually
