@@ -1,7 +1,7 @@
 load("@aspect_bazel_lib//lib:base64.bzl", "base64")
 load("@aspect_bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
-load("//:build/python/packages_20250724.bzl", "PACKAGES_20250724")
+load("//:build/python/packages_20250725.bzl", "PACKAGES_20250725")
 
 def _chunk(data, length):
     return [data[i:i + length] for i in range(0, len(data), length)]
@@ -32,7 +32,7 @@ PYODIDE_VERSIONS = [
 # first.
 _package_lockfiles = [
     PACKAGES_20240829_4,
-    PACKAGES_20250724,
+    PACKAGES_20250725,
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -105,7 +105,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "name": "0.28.0",
         "pyodide_version": "0.28.0",
         "pyodide_date": "2025-01-16",
-        "packages": PACKAGES_20250724,
+        "packages": PACKAGES_20250725,
         "backport": "1",
         "integrity": "sha256-RAC4eIYTiXTca328EMTCht422ysqErWx/vVnngJ4OQs=",
         "flag": "pythonWorkers20250116",
