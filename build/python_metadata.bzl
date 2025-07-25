@@ -100,6 +100,18 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "numpy_snapshot_hash": "5055deb53f404afacba73642fd10e766b123e661847e8fdf4f1ec92d8ca624dc",
         "fastapi_snapshot": "ew-py-package-snapshot_fastapi-v2.bin",
         "fastapi_snapshot_hash": "d204956a074cd74f7fe72e029e9a82686fcb8a138b509f765e664a03bfdd50fb",
+        "vendored_packages_for_tests": [
+            {
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
+                "name": "beautifulsoup4",
+                "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
+            },
+            {
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip
+                "name": "fastapi",
+                "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
+            },
+        ],
     },
     {
         "name": "0.27.7",
@@ -117,6 +129,18 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "numpy_snapshot_hash": "429b1174f9c0d73f9c845007c60595c0a80141b440c080c862568f9d2351dcbb",
         "fastapi_snapshot": "package_snapshot_fastapi-23337a32b.bin",
         "fastapi_snapshot_hash": "23337a032bb78f8c2d1abb9439a9c16f56c50130b67aff6bf82b78c896d9a1cc",
+        "vendored_packages_for_tests": [
+            {
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
+                "name": "beautifulsoup4",
+                "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
+            },
+            {
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip
+                "name": "fastapi",
+                "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
+            },
+        ],
     },
     {
         "real_pyodide_version": "0.26.0a2",
