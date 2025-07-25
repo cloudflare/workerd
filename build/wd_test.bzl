@@ -151,7 +151,7 @@ def _wd_test_impl(ctx):
         runtest = runtest,
         supervisor = ctx.file.sidecar_supervisor.short_path if ctx.file.sidecar_supervisor else "",
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
-        randomize_ip = str(ctx.attr.sidecar_randomize_ip),
+        randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
     )
 
     ctx.actions.write(
