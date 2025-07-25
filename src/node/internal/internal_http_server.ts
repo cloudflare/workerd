@@ -69,6 +69,16 @@ export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
 );
 
+let serverRegistry: FinalizationRegistry<number> | null = null;
+
+// Since finalization registry is only available under a specific compat flag,
+// let's check if it's enabled to preserve backward compatibility.
+if (flags.jsWeakRef) {
+  serverRegistry = new FinalizationRegistry((port) => {
+    portMapper.delete(port);
+  });
+}
+
 export type StreamController = ReadableStreamDefaultController<Uint8Array>;
 
 export type DataWrittenEvent = {
@@ -138,6 +148,7 @@ export class Server
     httpServerPreClose(this);
     if (this.port != null) {
       portMapper.delete(this.port);
+      serverRegistry?.unregister(this);
       this.port = null;
     }
     this.emit('close');
@@ -233,6 +244,7 @@ export class Server
 
     this.port = this.#findSuitablePort(Number(options.port));
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
+    serverRegistry?.register(this, this.port, this);
     queueMicrotask(() => {
       this.emit('listening');
     });
