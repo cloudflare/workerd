@@ -889,4 +889,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_expose_global_message_channel")
       $compatEnableDate("2025-08-15");
   # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
+
+  pythonWorkersForceNewVendorPath @103 :Bool
+      $compatEnableFlag("python_workers_force_new_vendor_path")
+      $compatEnableDate("2025-08-01");
+  # Disables adding `/session/metadata/vendor` to the Python Worker's sys.path. So Workers using
+  # this flag will have to place their vendored modules in a `python_modules` directory.
 }
