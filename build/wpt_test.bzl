@@ -5,6 +5,19 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//:build/wd_test.bzl", "wd_test")
 
+PORT_BINDINGS = [
+    "HTTP_PORT",
+    "HTTPS_PORT",
+    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway
+    "HTTP_PORT_2",
+    "HTTPS_PORT_2",
+    "HTTP_PUBLIC_PORT",
+    "HTTPS_PUBLIC_PORT",
+    "HTTP_LOCAL_PORT",
+    "WSS_PORT",
+    "WS_PORT",
+]
+
 ### wpt_test macro
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
@@ -69,7 +82,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
-        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT"] if start_server else [],
+        sidecar_port_bindings = PORT_BINDINGS if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
         data = data,
         **kwargs
@@ -387,8 +400,13 @@ cd $(dirname $0)
   "server_host": "$SIDECAR_HOSTNAME",
   "check_subdomains": false,
   "ports": {{
-    "http": [$HTTP_PORT, "auto"],
-    "https": [$HTTPS_PORT, "auto"]
+    "http": [$HTTP_PORT, $HTTP_PORT_2],
+    "https": [$HTTPS_PORT, $HTTPS_PORT_2],
+    "http-public": [$HTTP_PUBLIC_PORT],
+    "https-public": [$HTTPS_PUBLIC_PORT],
+    "http-local": [$HTTP_LOCAL_PORT],
+    "wss": [$WSS_PORT],
+    "ws": [$WS_PORT]
   }}
 }}
 EOF

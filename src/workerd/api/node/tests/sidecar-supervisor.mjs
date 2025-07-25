@@ -122,7 +122,7 @@ function getRandomLoopbackAddress() {
 }
 
 function canUseRandomAddress() {
-  if (process.env.RANDOMIZE_IP !== 'true') {
+  if (process.env.RANDOMIZE_IP === 'false') {
     // Test explicitly disabled randomization
     return false;
   }
@@ -156,7 +156,7 @@ function assignLoopbackAddress() {
     // On macOS, we need to explicitly assign this IP to the loopback interface
     child_process.spawnSync(
       'sudo',
-      ['/sbin/ifconfig', 'lo0', 'alias', randomHost],
+      ['/sbin/ifconfig', 'lo0', 'alias', randomAddress],
       { stdio: 'inherit' }
     );
   }
