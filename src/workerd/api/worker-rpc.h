@@ -20,6 +20,7 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
+#include <mutex>
 
 namespace workerd::api {
 
@@ -555,6 +556,12 @@ class EntrypointsModule: public jsg::Object {
   EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
 
   void waitUntil(kj::Promise<void> promise);
+  
+  // Register a class constructor as an RPC-capable target
+  void registerRpcTargetClass(jsg::Lock& js, jsg::JsValue constructor);
+  
+  // Helper method to check if a class is registered
+  static bool isRegisteredRpcTargetClass(jsg::Lock& js, jsg::JsObject obj);
 
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
@@ -566,7 +573,13 @@ class EntrypointsModule: public jsg::Object {
     JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
 
     JSG_METHOD(waitUntil);
+    JSG_METHOD(registerRpcTargetClass);
   }
+
+ private:
+  // Global registry of RPC-capable class constructor names
+  static kj::Vector<kj::String> registeredRpcClasses;
+  static std::mutex registryMutex;
 };
 
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \

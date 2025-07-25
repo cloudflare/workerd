@@ -91,3 +91,4 @@ export const env = new Proxy(
 );
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+export const registerRpcTargetClass = entrypoints.registerRpcTargetClass.bind(entrypoints);

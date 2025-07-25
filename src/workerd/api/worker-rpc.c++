@@ -11,6 +11,7 @@
 #include <workerd/util/completion-membrane.h>
 
 #include <capnp/membrane.h>
+#include <mutex>
 
 namespace workerd::api {
 
@@ -24,6 +25,58 @@ void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
   // No need to check if IoContext::hasCurrent since current() will throw
   // if there is no active request.
   IoContext::current().addWaitUntil(kj::mv(promise));
+}
+
+// Static member definitions for RPC class registry
+kj::Vector<kj::String> EntrypointsModule::registeredRpcClasses;
+std::mutex EntrypointsModule::registryMutex;
+
+void EntrypointsModule::registerRpcTargetClass(jsg::Lock& js, jsg::JsValue constructor) {
+  v8::Local<v8::Value> handle = constructor;
+  if (!handle->IsFunction()) {
+    JSG_FAIL_REQUIRE(TypeError, "registerRpcTargetClass() requires a constructor function");
+  }
+  
+  auto func = handle.As<v8::Function>();
+  v8::String::Utf8Value name(js.v8Isolate, func->GetName());
+  
+  // Store the constructor name instead of V8 reference to avoid cross-isolate issues
+  kj::String constructorName = kj::str(*name ? *name : "<anonymous>");
+  
+  std::lock_guard<std::mutex> lock(registryMutex);
+  // Avoid duplicate registrations
+  for (const auto& registered : registeredRpcClasses) {
+    if (registered == constructorName) {
+      return; // Already registered
+    }
+  }
+  registeredRpcClasses.add(kj::mv(constructorName));
+}
+
+bool EntrypointsModule::isRegisteredRpcTargetClass(jsg::Lock& js, jsg::JsObject obj) {
+  std::lock_guard<std::mutex> lock(registryMutex);
+  
+  auto context = js.v8Context();
+  v8::Local<v8::Object> objHandle = obj;
+  
+  // Get the constructor property from the object
+  auto constructorKey = jsg::v8StrIntern(js.v8Isolate, "constructor");
+  v8::Local<v8::Value> constructorValue;
+  if (!objHandle->Get(context, constructorKey).ToLocal(&constructorValue) || 
+      !constructorValue->IsFunction()) {
+    return false;
+  }
+  
+  auto ctorFunc = constructorValue.As<v8::Function>();
+  v8::String::Utf8Value ctorName(js.v8Isolate, ctorFunc->GetName());
+  kj::StringPtr ctorNameStr(*ctorName ? *ctorName : "<anonymous>", ctorName.length());
+  
+  for (const auto& registeredName : registeredRpcClasses) {
+    if (registeredName == ctorNameStr) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Implementation of StreamSink RPC interface. The stream sender calls `startStream()` when
@@ -1176,6 +1229,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
       bool allowInstanceProperties) {
+    // Check if object is registered - if so, don't allow instance properties
+    if (EntrypointsModule::isRegisteredRpcTargetClass(js, object)) {
+      allowInstanceProperties = false;
+    }
+    
     auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
 
     // Get the named property of `object`.
@@ -1249,6 +1307,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
               allowInstanceProperties = true;
             } else if (object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
+              allowInstanceProperties = false;
+            } else if (EntrypointsModule::isRegisteredRpcTargetClass(js, object)) {
+              // Yes. It's a registered RPC target class.
               allowInstanceProperties = false;
             } else if (object.isInstanceOf<JsRpcStub>(js) ||
                 (inStub && object.isInstanceOf<JsRpcProperty>(js))) {
@@ -1585,6 +1646,9 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     } else if (obj.isInstanceOf<JsRpcTarget>(js)) {
       // It's an RPC target. It will be serialized as a single stub.
       return MakeCallPipeline::SingleStub();
+    } else if (EntrypointsModule::isRegisteredRpcTargetClass(js, obj)) {
+      // It's a registered RPC target class. It will be serialized as a single stub.
+      return MakeCallPipeline::SingleStub();
     } else if (isFunctionForRpc(js, obj)) {
       // It's a plain function. It will be serialized as a single stub.
       return MakeCallPipeline::SingleStub();
@@ -1675,22 +1739,28 @@ void RpcSerializerExternalHandler::serializeProxy(
       // A regular object. Allow access to instance properties.
       allowInstanceProperties = true;
     } else {
-      // Walk the prototype chain looking for RpcTarget.
-      for (;;) {
-        if (proto == prototypeOfRpcTarget) {
-          // An RpcTarget, don't allow instance properties.
-          allowInstanceProperties = false;
-          break;
-        }
+      // Check if this is a registered RPC target class
+      if (EntrypointsModule::isRegisteredRpcTargetClass(js, handle)) {
+        // A registered RPC target class, don't allow instance properties.
+        allowInstanceProperties = false;
+      } else {
+        // Walk the prototype chain looking for RpcTarget.
+        for (;;) {
+          if (proto == prototypeOfRpcTarget) {
+            // An RpcTarget, don't allow instance properties.
+            allowInstanceProperties = false;
+            break;
+          }
 
-        KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
-          proto = protoObj.getPrototype(js);
-        } else {
-          // End of prototype chain, and didn't find RpcTarget.
-          JSG_FAIL_REQUIRE(DOMDataCloneError,
-              "Proxy could not be serialized because it is not a valid RPC receiver type. The "
-              "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
-              "Proxy's prototype chain.");
+          KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
+            proto = protoObj.getPrototype(js);
+          } else {
+            // End of prototype chain, and didn't find RpcTarget.
+            JSG_FAIL_REQUIRE(DOMDataCloneError,
+                "Proxy could not be serialized because it is not a valid RPC receiver type. The "
+                "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
+                "Proxy's prototype chain.");
+          }
         }
       }
     }
