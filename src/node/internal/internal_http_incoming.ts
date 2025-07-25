@@ -100,7 +100,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this._stream = this.#response.body;
   }
 
-  async #tryRead() {
+  async #tryRead(): Promise<void> {
     if (this._stream == null) return;
 
     this.#reader ??= this._stream.getReader();
@@ -120,7 +120,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
   // As this is an implementation of stream.Readable, we provide a _read()
   // function that pumps the next chunk out of the underlying ReadableStream.
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   override _read(_n: number): void {
     if (!this._consuming) {
       if (this._readableState) {

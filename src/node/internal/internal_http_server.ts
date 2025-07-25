@@ -3,6 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+// This module implements Node.js-compatible HTTP server functionality on top of
+// the fetch API due to workerd limitations. The key challenge is bridging Node.js's
+// stream-based API with the Fetch API's Request/Response model.
+//
+// The ServerResponse class implements a single-buffer strategy to minimize memory
+// usage when converting from Node.js streams to Fetch Response bodies:
+// - Pre-header data is temporarily buffered until headers are sent
+// - Post-header data streams directly without intermediate buffering
+// - Memory is freed immediately after the transition point
+
 import {
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_HTTP_HEADERS_SENT,
@@ -11,7 +21,6 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_OUT_OF_RANGE,
   ERR_OPTION_NOT_IMPLEMENTED,
-  ERR_INVALID_ARG_TYPE,
   ERR_SERVER_ALREADY_LISTEN,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
@@ -59,6 +68,8 @@ import { default as flags } from 'workerd:compatibility-flags';
 export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
 );
+
+export type StreamController = ReadableStreamDefaultController<Uint8Array>;
 
 export type DataWrittenEvent = {
   index: number;
@@ -299,6 +310,17 @@ let getServerResponseFetchResponse: (
   response: ServerResponse
 ) => Promise<Response>;
 
+// Data flow:
+// 1. Before headers are sent: Data is buffered in a chunks array
+//    - MessageBuffer emits '_dataWritten' events with sequential indices (0, 1, 2...)
+//    - Each chunk is stored at its index position
+// 2. When headers are sent: Create Response with ReadableStream
+//    - Flush all buffered chunks to the stream
+//    - Clear the array with chunks.length = 0 to free memory
+//    - Set up listeners for future data
+// 3. After headers: Data streams directly without buffering
+//    - New '_dataWritten' events are immediately enqueued to the stream
+// 4. Completion: 'finish' event closes the ReadableStream
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
   implements _ServerResponse
@@ -336,30 +358,67 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
     const { promise, resolve, reject } = Promise.withResolvers<Response>();
 
-    let finished = false;
-    this.once('finish', () => (finished = true));
+    let streamController: StreamController | null = null;
     const chunks: (Buffer | Uint8Array)[] = [];
-    const handler = (event: DataWrittenEvent): void => {
-      if (finished) return;
-      chunks[event.index] = this.#dataFromDataWrittenEvent(event);
+    const state: { bytesWritten: number; contentLength: number | null } = {
+      bytesWritten: 0,
+      contentLength: null,
     };
+
+    const handleData = (event: DataWrittenEvent): void => {
+      const chunk = this.#dataFromDataWrittenEvent(event);
+      state.bytesWritten += chunk.length;
+
+      if (
+        state.contentLength !== null &&
+        state.bytesWritten > state.contentLength
+      ) {
+        const error = new Error(
+          `Content-Length mismatch: wrote ${state.bytesWritten} bytes but Content-Length header was ${state.contentLength}`
+        );
+        streamController?.error(error);
+        return;
+      }
+
+      if (streamController) {
+        streamController.enqueue(chunk);
+      } else {
+        chunks[event.index] = chunk;
+      }
+    };
+
+    this.on('_dataWritten', handleData);
     this.once('error', reject);
-    this.on('_dataWritten', handler);
-    this.on(
+
+    this.once(
       '_headersSent',
       ({ statusCode, statusMessage, headers }: HeadersSentEvent) => {
-        this.off('_dataWritten', handler);
+        for (const [name, value] of headers) {
+          // Optimization: Avoid unnecessary string comparison by checking length first
+          if (name.length === 14 && name.toLowerCase() === 'content-length') {
+            state.contentLength = parseInt(value, 10);
+            break;
+          }
+        }
+
         resolve(
           this.#toFetchResponse({
             statusCode,
             statusText: statusMessage,
             sentHeaders: headers,
-            chunks,
-            finished,
+            onStreamStart: (controller) => {
+              streamController = controller;
+              for (const chunk of chunks) {
+                controller.enqueue(chunk);
+              }
+              chunks.length = 0;
+            },
+            state,
           })
         );
       }
     );
+
     this.#fetchResponse = promise;
   }
 
@@ -367,59 +426,44 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     statusCode,
     statusText,
     sentHeaders,
-    chunks,
-    finished,
+    onStreamStart,
+    state,
   }: {
     statusCode: number;
     statusText: string;
     sentHeaders: [header: string, value: string][];
-    chunks: (Buffer | Uint8Array)[];
-    finished: boolean;
+    onStreamStart: (controller: StreamController) => void;
+    state: { bytesWritten: number; contentLength: number | null };
   }): Response {
     const headers = new Headers(sentHeaders);
     let body = null;
 
     if (this._hasBody) {
-      const _this = this; // eslint-disable-line @typescript-eslint/no-this-alias
       body = new ReadableStream<Uint8Array>({
-        start(controller): void {
-          for (const chunk of chunks) {
-            controller.enqueue(chunk);
-          }
-
-          if (finished) {
-            controller.close();
-          } else {
-            _this.on('error', (error) => {
-              controller.error(error);
-            });
-            _this.once('finish', () => {
-              finished = true;
+        start: (controller): void => {
+          onStreamStart(controller);
+          this.once('finish', () => {
+            if (
+              state.contentLength !== null &&
+              state.bytesWritten !== state.contentLength
+            ) {
+              controller.error(
+                new Error(
+                  `Content-Length mismatch: wrote ${state.bytesWritten} bytes but Content-Length header was ${state.contentLength}`
+                )
+              );
+            } else {
               controller.close();
-            });
-            _this.on('_dataWritten', (e: DataWrittenEvent) => {
-              if (finished) {
-                return;
-              }
-              controller.enqueue(_this.#dataFromDataWrittenEvent(e));
-            });
-          }
+            }
+          });
+          this.on('error', (error) => {
+            controller.error(error);
+          });
         },
-        cancel(reason: unknown): void {
-          _this.destroy(reason);
+        cancel: (reason: unknown): void => {
+          this.destroy(reason);
         },
       });
-    }
-
-    if (body != null) {
-      const contentLength = parseInt(headers.get('content-length') ?? '', 10); // will be NaN if not set
-
-      if (contentLength >= 0) {
-        // TODO(soon): Investigating the performance of this later would be good.
-        // @ts-expect-error TS2304 Fix this once global types are correct.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-unsafe-call
-        body = body.pipeThrough(new FixedLengthStream(contentLength));
-      }
     }
 
     return new Response(body, {
@@ -433,28 +477,15 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     index,
     entry: { data, encoding },
   }: DataWrittenEvent): Buffer | Uint8Array {
-    if (index === 0) {
-      if (typeof data !== 'string') {
-        throw new ERR_INVALID_ARG_TYPE(
-          'packet.data',
-          ['string', 'Buffer', 'Uint8Array'],
-          data
-        );
-      }
-      // The first X bytes are header material, so we remove it.
-      data = data.slice(this.writtenHeaderBytes);
-    }
-
     if (typeof data === 'string') {
-      if (
-        encoding === undefined ||
-        encoding === 'utf8' ||
-        encoding === 'utf-8'
-      ) {
-        data = this.#encoder.encode(data);
-      } else {
-        data = Buffer.from(data, encoding ?? undefined);
+      // First chunk includes headers - skip them
+      if (index === 0) {
+        data = data.slice(this.writtenHeaderBytes);
       }
+
+      return encoding == null || encoding === 'utf8' || encoding === 'utf-8'
+        ? this.#encoder.encode(data)
+        : Buffer.from(data, encoding);
     }
 
     return data ?? Buffer.alloc(0);

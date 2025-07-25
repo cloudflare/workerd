@@ -392,6 +392,131 @@ export const consumeRequestPayloadData = {
   },
 };
 
+// Test large streaming responses and various data types
+export const testStreamingResponses = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      const path = req.url;
+
+      if (path === '/large') {
+        // Test 1: Large payload streaming
+        const CHUNK_SIZE = 1024 * 64; // 64KB
+        const NUM_CHUNKS = 10; // 640KB total
+        res.writeHead(200, { 'X-Test': 'large' });
+        for (let i = 0; i < NUM_CHUNKS; i++) {
+          res.write(Buffer.alloc(CHUNK_SIZE, i % 256));
+        }
+        res.end();
+      } else if (path === '/echo') {
+        // Test 2: Echo with backpressure
+        res.writeHead(200);
+        req.pipe(res);
+      } else if (path === '/mixed') {
+        // Test 3: Mixed data types and implicit headers
+        res.setHeader('X-Custom', 'mixed');
+        res.write('string|');
+        res.write(Buffer.from('buffer|'));
+        res.write(new Uint8Array([85, 56, 124])); // "U8|"
+        res.write(''); // Empty
+        res.write('utf8-ñ|', 'utf8');
+        setTimeout(() => res.end('async'), 10);
+      } else if (path === '/many') {
+        // Test 4: Many small writes
+        res.writeHead(200);
+        for (let i = 0; i < 100; i++) {
+          res.write(`${i}|`);
+        }
+        res.end('END');
+      }
+    });
+
+    server.listen(8080);
+
+    // Test 1: Large payload
+    const res1 = await env.SERVICE.fetch('https://cloudflare.com/large');
+    strictEqual(res1.status, 200);
+    const data1 = await res1.arrayBuffer();
+    strictEqual(data1.byteLength, 1024 * 64 * 10);
+
+    // Test 2: Echo
+    const testData = Buffer.alloc(1024 * 128, 42);
+    const res2 = await env.SERVICE.fetch('https://cloudflare.com/echo', {
+      method: 'POST',
+      body: testData,
+    });
+    const echo = Buffer.from(await res2.arrayBuffer());
+    ok(echo.equals(testData));
+
+    // Test 3: Mixed data types
+    const res3 = await env.SERVICE.fetch('https://cloudflare.com/mixed');
+    strictEqual(res3.status, 200);
+    strictEqual(res3.headers.get('X-Custom'), 'mixed');
+    strictEqual(await res3.text(), 'string|buffer|U8|utf8-ñ|async');
+
+    // Test 4: Many writes
+    const res4 = await env.SERVICE.fetch('https://cloudflare.com/many');
+    const text4 = await res4.text();
+    ok(text4.endsWith('98|99|END'));
+  },
+};
+
+// Test Content-Length enforcement
+export const testContentLengthEnforcement = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      const path = req.url;
+
+      if (path === '/too-few') {
+        res.writeHead(200, { 'Content-Length': '20' });
+        res.write('0123456789'); // Only 10 bytes
+        res.end();
+      } else if (path === '/too-many') {
+        res.writeHead(200, { 'Content-Length': '10' });
+        res.write('0123456789');
+        res.write('0123456789'); // 20 bytes total
+        res.end();
+      } else if (path === '/exact') {
+        res.writeHead(200, { 'Content-Length': '15' });
+        res.write('Hello ');
+        res.write('World!!!');
+        res.end('!');
+      }
+    });
+
+    server.listen(8080);
+
+    // Test 1: Too few bytes
+    try {
+      const res1 = await env.SERVICE.fetch('https://cloudflare.com/too-few');
+      await res1.text();
+      throw new Error('Expected Content-Length error');
+    } catch (e) {
+      ok(
+        e.message.includes('Content-Length mismatch') ||
+          e.message.includes('FixedLengthStream')
+      );
+    }
+
+    // Test 2: Too many bytes
+    try {
+      const res2 = await env.SERVICE.fetch('https://cloudflare.com/too-many');
+      await res2.text();
+      throw new Error('Expected Content-Length error');
+    } catch (e) {
+      ok(
+        e.message.includes('Content-Length mismatch') ||
+          e.message.includes('FixedLengthStream')
+      );
+    }
+
+    // Test 3: Exact match
+    const res3 = await env.SERVICE.fetch('https://cloudflare.com/exact');
+    const text3 = await res3.text();
+    strictEqual(text3, 'Hello World!!!!');
+    strictEqual(text3.length, 15);
+  },
+};
+
 export default nodeCompatHttpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests

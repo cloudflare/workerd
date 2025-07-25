@@ -7,7 +7,7 @@ export class Server extends HttpServer implements _Server {
     throw new ERR_METHOD_NOT_IMPLEMENTED('addContext');
   }
 
-  getTicketKeys(): Buffer<ArrayBufferLike> {
+  getTicketKeys(): Buffer {
     throw new ERR_METHOD_NOT_IMPLEMENTED('getTicketKeys');
   }
 

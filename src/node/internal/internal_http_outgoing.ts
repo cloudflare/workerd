@@ -103,9 +103,8 @@ export function parseUniqueHeadersOption(
 // Ref: https://github.com/mhart/fetch-to-node/blob/main/src/fetch-to-node/http-outgoing.ts
 class MessageBuffer {
   #corked = 0;
-  #data: WrittenDataBufferEntry[] = [];
-  #onWrite?: (index: number, entry: WrittenDataBufferEntry) => void;
-  #highWaterMark = 64 * 1024;
+  #index = 0;
+  #onWrite: (index: number, entry: WrittenDataBufferEntry) => void;
 
   constructor(onWrite: (index: number, entry: WrittenDataBufferEntry) => void) {
     this.#onWrite = onWrite;
@@ -116,14 +115,24 @@ class MessageBuffer {
     encoding: WrittenDataBufferEntry['encoding'],
     callback: WrittenDataBufferEntry['callback']
   ): boolean {
-    this.#data.push({
+    const entry: WrittenDataBufferEntry = {
       data,
       length: data?.length ?? 0,
       encoding,
       callback,
-      written: false,
-    });
-    this._flush();
+      written: true,
+    };
+
+    if (this.#corked === 0) {
+      this.#onWrite(this.#index++, entry);
+      callback?.();
+    } else {
+      const index = this.#index++;
+      queueMicrotask(() => {
+        this.#onWrite(index, entry);
+        callback?.();
+      });
+    }
 
     return true;
   }
@@ -133,30 +142,18 @@ class MessageBuffer {
   }
 
   uncork(): void {
-    this.#corked--;
-    this._flush();
-  }
-
-  _flush(): void {
-    if (this.#corked <= 0) {
-      for (const [index, entry] of this.#data.entries()) {
-        if (!entry.written) {
-          entry.written = true;
-          this.#onWrite?.(index, entry);
-          entry.callback?.call(undefined);
-        }
-      }
+    if (this.#corked > 0) {
+      this.#corked--;
     }
   }
 
   get writableLength(): number {
-    return this.#data.reduce<number>((acc, entry) => {
-      return acc + (entry.written && entry.length ? entry.length : 0);
-    }, 0);
+    // Since we process writes immediately, length is always 0
+    return 0;
   }
 
   get writableHighWaterMark(): number {
-    return this.#highWaterMark;
+    return 64 * 1024;
   }
 
   get writableCorked(): number {
@@ -426,27 +423,14 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   }
 
   _flushOutput(buffer: MessageBuffer): boolean | undefined {
-    while (this[kCorked]) {
-      this[kCorked]--;
-      buffer.cork();
-    }
-
-    const outputLength = this.outputData.length;
-    if (outputLength <= 0) {
+    const outputData = this.outputData;
+    if (outputData.length === 0) {
       return undefined;
     }
 
-    const outputData = this.outputData;
     buffer.cork();
-    let ret;
-    // Retain for(;;) loop for performance reasons
-    // Refs: https://github.com/nodejs/node/pull/30958
-    for (let i = 0; i < outputLength; i++) {
-      const { data, encoding, callback } = outputData[
-        i
-      ] as WrittenDataBufferEntry; // Avoid any potential ref to Buffer in new generation from old generation
-      (outputData[i] as WrittenDataBufferEntry).data = null;
-      ret = buffer.write(data ?? '', encoding, callback);
+    for (const { data, encoding, callback } of outputData) {
+      buffer.write(data, encoding, callback);
     }
     buffer.uncork();
 
@@ -454,7 +438,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this._onPendingData(-this.outputSize);
     this.outputSize = 0;
 
-    return ret;
+    return true;
   }
 
   _flush(): void {
@@ -472,11 +456,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   // @ts-expect-error TS2611 Required for accessor
   get writableLength(): number {
-    return (
-      this.outputSize +
-      this[kChunkedLength] +
-      (this.#buffer?.writableLength ?? 0)
-    );
+    return this.outputSize + this[kChunkedLength];
   }
 
   // @ts-expect-error TS2611 Required for accessor
@@ -916,15 +896,12 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     // write the current chunk's data directly into the socket. Afterwards, it would return with the
     // value returned from socket.write().
     if (this.#buffer != null) {
-      // There might be pending data in the this.output buffer.
       if (this.outputData.length) {
         this._flushOutput(this.#buffer);
       }
-      // Directly write to the buffer.
       return this.#buffer.write(data, encoding, callback);
     }
 
-    // Buffer, as long as we're not destroyed.
     this.outputData.push({ data, encoding, callback });
     this.outputSize += data.length;
     this._onPendingData(data.length);
