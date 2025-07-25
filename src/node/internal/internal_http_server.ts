@@ -103,6 +103,8 @@ export class Server
       storeHTTPOptions.call(this, options);
     }
 
+    // TODO(soon): Support options.highWaterMark option.
+
     if (typeof options === 'function') {
       requestListener = options;
       options = {};
