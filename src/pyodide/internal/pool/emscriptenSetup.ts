@@ -228,7 +228,6 @@ export async function instantiateEmscriptenModule(
   pythonStdlib: ArrayBuffer,
   wasmModule: WebAssembly.Module,
 ): Promise<Module> {
-  setUnsafeEval(UnsafeEval);
   const emscriptenSettings = getEmscriptenSettings(
     isWorkerd,
     pythonStdlib,
