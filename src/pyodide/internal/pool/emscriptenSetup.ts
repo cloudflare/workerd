@@ -110,7 +110,7 @@ function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
 function getInstantiateWasm(
   pyodideWasmModule: WebAssembly.Module
 ): EmscriptenSettings['instantiateWasm'] {
-  const sentinelImportPromise = getSentinelImport(UnsafeEval);
+  const sentinelImportPromise = getSentinelImport();
   return function instantiateWasm(
     wasmImports: WebAssembly.Imports,
     successCallback: (
@@ -229,9 +229,7 @@ export async function instantiateEmscriptenModule(
   isWorkerd: boolean,
   pythonStdlib: ArrayBuffer,
   wasmModule: WebAssembly.Module,
-  unsafeEval: any
 ): Promise<Module> {
-  UnsafeEval = unsafeEval;
   setUnsafeEval(UnsafeEval);
   const emscriptenSettings = getEmscriptenSettings(
     isWorkerd,
@@ -248,6 +246,7 @@ export async function instantiateEmscriptenModule(
 
   // Wait until we've executed all the preRun hooks before proceeding
   const emscriptenModule = await emscriptenSettings.readyPromise;
+  emscriptenModule.setUnsafeEval = setUnsafeEval;
   emscriptenModule.setGetRandomValues = setGetRandomValues;
   emscriptenModule.setSetTimeout = setSetTimeout;
   finishSetup();

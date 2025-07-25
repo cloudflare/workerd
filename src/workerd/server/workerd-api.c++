@@ -712,13 +712,13 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       auto version = getPythonBundleName(pythonRelease);
       auto bundle = retrievePyodideBundle(impl->pythonConfig, version);
       // Inject SetupEmscripten module
-      // {
-      //   auto emscriptenRuntime =
-      //       api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
-      //   modules->addBuiltinModule("internal:setup-emscripten",
-      //       jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
-      //       workerd::jsg::ModuleRegistry::Type::INTERNAL);
-      // }
+      {
+        auto emscriptenRuntime =
+            api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
+        modules->addBuiltinModule("internal:setup-emscripten",
+            jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
+            workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      }
 
       // Inject Pyodide bundle
       modules->addBuiltinBundle(bundle, kj::none);
