@@ -4087,7 +4087,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       ? ArtifactBundler::makePackagesOnlyBundler(pythonConfig.pyodidePackageManager)
       : ArtifactBundler::makeDisabledBundler();
 
-  auto script = isolate->newScript(name, kj::mv(def.source), IsolateObserver::StartType::COLD,
+  auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), false, errorReporter, kj::mv(artifactBundler));
 
   using Global = WorkerdApi::Global;
