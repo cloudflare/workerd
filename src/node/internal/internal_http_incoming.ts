@@ -100,10 +100,28 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this._stream = this.#response.body;
   }
 
+  async #tryRead() {
+    if (this._stream == null) return;
+
+    this.#reader ??= this._stream.getReader();
+    try {
+      const data = await this.#reader.read();
+      if (data.done) {
+        // Done with stream, tell Readable we have no more data;
+        this.complete = true;
+        this.push(null);
+      } else {
+        this.push(data.value);
+      }
+    } catch (e) {
+      this.destroy(e as Error);
+    }
+  }
+
   // As this is an implementation of stream.Readable, we provide a _read()
   // function that pumps the next chunk out of the underlying ReadableStream.
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
-  override async _read(_n: number): Promise<void> {
+  override _read(_n: number): void {
     if (!this._consuming) {
       if (this._readableState) {
         this._readableState.readingMore = false;
@@ -123,19 +141,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       return;
     }
 
-    this.#reader ??= this._stream.getReader();
-    try {
-      const data = await this.#reader.read();
-      if (data.done) {
-        // Done with stream, tell Readable we have no more data;
-        this.complete = true;
-        this.push(null);
-      } else {
-        this.push(data.value);
-      }
-    } catch (e) {
-      this.destroy(e as Error);
-    }
+    this.#tryRead().catch(() => {
+      /* Ignore errors */
+    });
   }
 
   #onError(error: Error | null, cb: (err?: Error | null) => void): void {
