@@ -24,6 +24,7 @@ export let setIncomingMessageFetchResponse: (
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
   #response?: Response;
+  #reader?: ReadableStreamDefaultReader<Uint8Array>;
 
   aborted = false;
   url: string = '';
@@ -122,9 +123,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       return;
     }
 
-    const reader = this._stream.getReader();
+    this.#reader ??= this._stream.getReader();
     try {
-      const data = await reader.read();
+      const data = await this.#reader.read();
       if (data.done) {
         // Done with stream, tell Readable we have no more data;
         this.complete = true;
@@ -134,8 +135,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       }
     } catch (e) {
       this.destroy(e as Error);
-    } finally {
-      reader.releaseLock();
     }
   }
 

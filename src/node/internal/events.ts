@@ -46,7 +46,7 @@ import {
 } from 'node-internal:validators';
 import { spliceOne } from 'node-internal:internal_utils';
 import { nextTick, emitWarning } from 'node-internal:internal_process';
-
+import { default as flags } from 'workerd:compatibility-flags';
 import { default as async_hooks } from 'node-internal:async_hooks';
 const { AsyncResource } = async_hooks;
 
@@ -520,8 +520,7 @@ function _addListener(
         }
       );
       // Only the newer process version compat adds process.emitWarning support.
-      if (Cloudflare.compatibilityFlags['enable_nodejs_process_v2'])
-        emitWarning(w);
+      if (flags.enableNodejsProcessV2) emitWarning(w);
     }
   }
 

@@ -54,6 +54,7 @@ import type {
   OutgoingHttpHeader,
 } from 'node:http';
 import type { Socket, AddressInfo } from 'node:net';
+import { default as flags } from 'workerd:compatibility-flags';
 
 export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
@@ -92,6 +93,9 @@ export class Server
   port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
+    if (!flags.enableNodejsHttpServerModules) {
+      throw new ERR_METHOD_NOT_IMPLEMENTED('Server');
+    }
     super();
 
     if (options != null) {
@@ -308,6 +312,10 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   }
 
   constructor(req: Req, options: ServerOptions = {}) {
+    if (!flags.enableNodejsHttpServerModules) {
+      throw new ERR_METHOD_NOT_IMPLEMENTED('ServerResponse');
+    }
+
     super(req, options);
 
     if (req.httpVersionMajor < 1 || req.httpVersionMinor < 1) {
@@ -388,6 +396,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             });
           }
         },
+        cancel(reason: unknown): void {
+          _this.destroy(reason);
+        },
       });
     }
 
@@ -395,6 +406,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       const contentLength = parseInt(headers.get('content-length') ?? '', 10); // will be NaN if not set
 
       if (contentLength >= 0) {
+        // TODO(soon): Investigating the performance of this later would be good.
         // @ts-expect-error TS2304 Fix this once global types are correct.
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument,@typescript-eslint/no-unsafe-call
         body = body.pipeThrough(new FixedLengthStream(contentLength));

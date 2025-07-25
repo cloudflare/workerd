@@ -93,20 +93,16 @@ export const env = new Proxy(
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
 
-export function nodeCompatHttpServerHandler({
-  port,
-}: { port?: number } = {}): unknown {
+export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
+  fetch(request: Request): Promise<Response>;
+} {
   if (port == null) {
     throw new Error(
       'Port is required when calling nodeCompatHttpServerHandler()'
     );
   }
   return {
-    async fetch(
-      request: Request,
-      _env: unknown,
-      _ctx: unknown
-    ): Promise<Response> {
+    async fetch(request: Request): Promise<Response> {
       const instance = portMapper.get(port);
       if (!instance) {
         throw new Error(

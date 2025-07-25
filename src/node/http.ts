@@ -15,6 +15,8 @@ import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import { Server, ServerResponse } from 'node-internal:internal_http_server';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions, ServerOptions, RequestListener } from 'node:http';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+import { default as flags } from 'workerd:compatibility-flags';
 
 export function request(
   url: string | URL | RequestOptions,
@@ -38,6 +40,10 @@ export function createServer(
   options: ServerOptions,
   handler: RequestListener
 ): Server {
+  if (!flags.enableNodejsHttpServerModules) {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createServer');
+  }
+
   return new Server(options, handler);
 }
 
