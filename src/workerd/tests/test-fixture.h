@@ -108,6 +108,7 @@ struct TestFixture {
   v8::IsolateGroup isolateGroup;
   kj::Own<Worker::Api> api;
   kj::Own<Worker::Isolate> workerIsolate;
+  WorkerSource workerSource;
   kj::Own<Worker::Script> workerScript;
   kj::Own<Worker> worker;
   kj::Own<kj::TaskSet::ErrorHandler> errorHandler;
