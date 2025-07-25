@@ -251,6 +251,50 @@ kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
   return kj::str(context.getTraceId(), "-", context.getInvocationId(), "-", context.getSpanId());
 }
 
+kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
+  KJ_SWITCH_ONEOF(event) {
+    KJ_CASE_ONEOF(onset, tracing::Onset) {
+      return kj::str("Onset");
+    }
+    KJ_CASE_ONEOF(outcome, tracing::Outcome) {
+      return kj::str("Outcome");
+    }
+    KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
+      return kj::str("Hibernate");
+    }
+    KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
+      return spanOpen.toString();
+    }
+    KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
+      return spanClose.toString();
+    }
+    KJ_CASE_ONEOF(diagnosticChannelEvent, tracing::DiagnosticChannelEvent) {
+      return kj::str("diagnosticChannelEvent");
+    }
+    KJ_CASE_ONEOF(exception, tracing::Exception) {
+      return kj::str("Exception");
+    }
+    KJ_CASE_ONEOF(log, tracing::Log) {
+      return kj::str("Log");
+    }
+    KJ_CASE_ONEOF(ret, tracing::Return) {
+      return kj::str("Return");
+    }
+    KJ_CASE_ONEOF(link, tracing::Link) {
+      return kj::str("Link");
+    }
+    KJ_CASE_ONEOF(customInfo, tracing::CustomInfo) {
+      return kj::str(customInfo);
+    }
+  }
+  KJ_UNREACHABLE
+}
+
+kj::String KJ_STRINGIFY(const CustomInfo& customInfo) {
+  return kj::str(
+      "CustomInfo: ", kj::strArray(KJ_MAP(attr, customInfo) { return kj::str(attr); }, ", "));
+}
+
 }  // namespace tracing
 
 namespace {
@@ -294,6 +338,12 @@ tracing::FetchEventInfo tracing::FetchEventInfo::clone() const {
       method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
 }
 
+kj::String tracing::FetchEventInfo::toString() const {
+  return kj::str("FetchEventInfo: ",
+      kj::delimited(
+          kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+}
+
 tracing::FetchEventInfo::Header::Header(kj::String name, kj::String value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
@@ -312,6 +362,10 @@ tracing::FetchEventInfo::Header tracing::FetchEventInfo::Header::clone() const {
   return Header(kj::str(name), kj::str(value));
 }
 
+kj::String tracing::FetchEventInfo::Header::toString() const {
+  return kj::str("FetchEventInfo::Header: ", name, ", ", value);
+}
+
 tracing::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
 
 tracing::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
@@ -323,6 +377,10 @@ void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder
 
 tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
+}
+
+kj::String tracing::JsRpcEventInfo::toString() const {
+  return kj::str("JsRpcEventInfo: ", methodName);
 }
 
 tracing::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
@@ -882,6 +940,10 @@ tracing::Attribute tracing::Attribute::clone() const {
   return Attribute(kj::ConstString(kj::str(name)), KJ_MAP(v, value) { return spanTagClone(v); });
 }
 
+kj::String tracing::Attribute::toString() const {
+  return kj::str("Attribute: ", name, ", ", kj::str(value));
+}
+
 tracing::Return::Return(kj::Maybe<tracing::FetchResponseInfo> info): info(kj::mv(info)) {}
 
 namespace {
@@ -987,6 +1049,25 @@ tracing::SpanOpen tracing::SpanOpen::clone() const {
   return SpanOpen(parentSpanId, kj::str(operationName), cloneInfo(info));
 }
 
+kj::String KJ_STRINGIFY(const tracing::SpanOpen::Info& info) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+      return fetch.toString();
+    }
+    KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+      return jsrpc.toString();
+    }
+    KJ_CASE_ONEOF(customInfo, tracing::CustomInfo) {
+      return kj::str(customInfo);
+    }
+  }
+  KJ_UNREACHABLE
+}
+
+kj::String tracing::SpanOpen::toString() const {
+  return kj::str("SpanOpen:", operationName, ", ", info);
+}
+
 tracing::SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
 
 tracing::SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
@@ -997,6 +1078,10 @@ void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
 
 tracing::SpanClose tracing::SpanClose::clone() const {
   return SpanClose(outcome);
+}
+
+kj::String tracing::SpanClose::toString() const {
+  return kj::str("SpanClose: ", outcome);
 }
 
 namespace {
