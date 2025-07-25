@@ -42,7 +42,7 @@ export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
 export interface CompatibilityFlags {
   python_workflows?: boolean;
-  [key: string]: boolean | undefined;
+  python_no_global_handlers?: boolean;
 }
 
 export interface CloudflareGlobal {
@@ -54,3 +54,5 @@ export interface CloudflareGlobal {
 const compatibilityFlags: CompatibilityFlags =
   (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
 export const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;
+export const legacyGlobalHandlers: boolean =
+  !compatibilityFlags.python_no_global_handlers;
