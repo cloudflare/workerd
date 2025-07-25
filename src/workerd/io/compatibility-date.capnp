@@ -643,7 +643,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   cacheNoCache @70 :Bool
       $compatEnableFlag("cache_no_cache_enabled")
       $compatDisableFlag("cache_no_cache_disabled")
-      $experimental;
+      $impliedByAfterDate(name = "cacheOptionEnabled", date = "2025-08-07");
   # Enables the use of cache: no-cache in the fetch api.
 
   pythonWorkers20250116 @71 :Bool
