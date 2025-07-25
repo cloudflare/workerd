@@ -206,7 +206,7 @@ function prepareStackTrace(
   try {
     const funcName = stack[2].getFunctionName();
     const fileName = stack[2].getFileName();
-    if (fileName !== 'pyodideRuntime-internal:emscriptenSetup') {
+    if (fileName !== 'pyodide-internal:generated/emscriptenSetup') {
       return [false, funcName];
     }
     return [

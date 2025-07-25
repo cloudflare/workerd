@@ -34,8 +34,8 @@ const sentinelWasm = decodeBase64(
   'AGFzbQEAAAABDANfAGAAAW9gAW8BfwMDAgECByECD2NyZWF0ZV9zZW50aW5lbAAAC2lzX3NlbnRpbmVsAAEKEwIHAPsBAPsbCwkAIAD7GvsUAAs'
 );
 
-export async function getSentinelImport(UnsafeEval: any) {
-  const module: WebAssembly.Module = await UnsafeEval.newWasmModule(sentinelWasm);
+export async function getSentinelImport() {
+  const module: WebAssembly.Module = new WebAssembly.Module(sentinelWasm);
   const instance = await WebAssembly.instantiate(module);
   return instance.exports;
 }
