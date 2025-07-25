@@ -17,7 +17,6 @@
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/abortable.h>
-#include <workerd/util/autogate.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
