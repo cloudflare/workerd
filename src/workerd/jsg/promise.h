@@ -723,8 +723,7 @@ class UnhandledRejectionHandler {
     explicit UnhandledRejection(jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
         jsg::Value value,
-        v8::Local<v8::Message> message,
-        size_t rejectionNumber);
+        v8::Local<v8::Message> message);
 
     ~UnhandledRejection();
 
@@ -749,8 +748,6 @@ class UnhandledRejectionHandler {
     inline bool isAlive() {
       return !promise.IsEmpty() && !value.IsEmpty();
     }
-
-    size_t rejectionNumber;
 
     uint hashCode() const {
       return hash;

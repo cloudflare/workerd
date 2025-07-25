@@ -132,7 +132,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_UNREACHABLE;
       }
     });
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     if (auto desc = e.getDescription();
         !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
       LOG_EXCEPTION("HibernatableWebSocketCustomEventImpl"_kj, e);
