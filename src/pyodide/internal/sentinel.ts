@@ -30,6 +30,9 @@ function decodeBase64(input: string): Uint8Array {
   return output;
 }
 
+// This is this file:
+// https://github.com/pyodide/pyodide/blob/main/src/core/sentinel.wat
+// assembled with wasm-as and then base64 encoded.
 const sentinelWasm = decodeBase64(
   'AGFzbQEAAAABDANfAGAAAW9gAW8BfwMDAgECByECD2NyZWF0ZV9zZW50aW5lbAAAC2lzX3NlbnRpbmVsAAEKEwIHAPsBAPsbCwkAIAD7GvsUAAs'
 );

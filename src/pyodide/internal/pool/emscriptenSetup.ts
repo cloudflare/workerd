@@ -20,8 +20,6 @@ import {
 
 import { getSentinelImport } from 'pyodide-internal:pool/sentinel';
 
-let UnsafeEval: any;
-
 /**
  * A preRun hook. Make sure environment variables are visible at runtime.
  */
