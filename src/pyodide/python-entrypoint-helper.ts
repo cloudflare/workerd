@@ -264,29 +264,25 @@ function makeEntrypointProxyHandler(
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop === 'fetch';
       const isWorkflowHandler = isWorkflow && prop === 'run';
-      if (
-        (isKnownHandler || isKnownDoHandler || isWorkflowHandler) &&
-        legacyGlobalHandlers
-      ) {
+      if ((isKnownHandler || isKnownDoHandler) && legacyGlobalHandlers) {
         prop = 'on_' + prop;
       }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        const targetProp = prop;
 
-        if (typeof pyInstance[targetProp] !== 'function') {
-          throw new TypeError(`Method ${targetProp} does not exist`);
+        if (typeof pyInstance[prop] !== 'function') {
+          throw new TypeError(`Method ${prop} does not exist`);
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[targetProp], args);
+          return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
         if (workflowsEnabled && isWorkflowHandler) {
           // we're hiding this behind a compat flag for now
-          return await doPyCallHelper(true, pyInstance[targetProp], args);
+          return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
         const introspectionMod = await getIntrospectionMod();
@@ -295,7 +291,7 @@ function makeEntrypointProxyHandler(
         return await doPyCall(introspectionMod.wrapper_func, [
           isRelaxed,
           pyInstance,
-          targetProp,
+          prop,
           ...args,
         ]);
       };
