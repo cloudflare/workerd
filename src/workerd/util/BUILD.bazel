@@ -217,6 +217,13 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "duration-exceeded-lambda",
+    hdrs = ["duration-exceeded-lambda.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "duration-exceeded-logger",
     hdrs = ["duration-exceeded-logger.h"],
     visibility = ["//visibility:public"],

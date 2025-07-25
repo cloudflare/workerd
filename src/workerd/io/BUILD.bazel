@@ -230,6 +230,9 @@ wd_cc_library(
     name = "worker-entrypoint",
     srcs = ["worker-entrypoint.c++"],
     hdrs = ["worker-entrypoint.h"],
+    implementation_deps = [
+        "//src/workerd/util:duration-exceeded-lambda",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":io",
