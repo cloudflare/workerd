@@ -226,7 +226,7 @@ function* featureDetectionMonkeyPatchesContextManager(): Generator<void> {
 export async function instantiateEmscriptenModule(
   isWorkerd: boolean,
   pythonStdlib: ArrayBuffer,
-  wasmModule: WebAssembly.Module,
+  wasmModule: WebAssembly.Module
 ): Promise<Module> {
   const emscriptenSettings = getEmscriptenSettings(
     isWorkerd,
