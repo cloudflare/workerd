@@ -684,7 +684,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
       auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
       return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
     });
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
     //   event handler throws an exception; we do not consider waitUntil(). But all async work done
     //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
