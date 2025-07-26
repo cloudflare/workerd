@@ -990,8 +990,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   // finishScheduled() instead.
   // In particular, the drain above is insufficient because we need to finish draining so that the
   // capability is fully cleaned up for the RevokerMembrane below to be fulfilled in time.
-  co_await incomingRequest->finishScheduled();
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+  auto result = co_await incomingRequest->finishScheduled();
+  bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
+  co_return WorkerInterface::CustomEvent::Result{
+    .outcome = completed ? ioContext.waitUntilStatus() : EventOutcome::EXCEEDED_CPU,
+  };
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
@@ -1020,7 +1023,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   this->capFulfiller->fulfill(kj::mv(cap));
 
   try {
-    co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
+    EventOutcome outcome = co_await sent.then([](auto resp) {
+      return resp.getResult();
+    }).exclusiveJoin(kj::mv(completionPaf.promise).then([]() { return EventOutcome::OK; }));
+    co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
@@ -1028,8 +1034,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     }
     kj::throwFatalException(kj::mv(e));
   }
-
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
 void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
