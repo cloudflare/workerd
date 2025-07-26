@@ -1,0 +1,14 @@
+load("@aspect_rules_js//js:defs.bzl", "js_test")
+
+js_test(
+    name = "structured-logging-test",
+    data = [
+        ":structured-logging-json.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    entry_point = "structured-logging-test.mjs",
+    env = {
+        "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",
+        "WD_TEST_CONFIG": "$(rootpath :structured-logging-json.wd-test)",
+    },
+)

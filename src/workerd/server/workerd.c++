@@ -648,7 +648,7 @@ class NetworkWithLoopback final: public kj::Network {
 
 class CliMain final: public SchemaFileImpl::ErrorReporter {
  public:
-  CliMain(kj::ProcessContext& context, char** argv)
+  CliMain(StructuredLoggingProcessContext& context, char** argv)
       : context(context),
         argv(argv),
         server(kj::heap<Server>(*fs,
@@ -1344,10 +1344,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
 
-      // Initialize JSON logger if structured logging is enabled (similar to SyslogFriendlyLogger)
-      kj::Maybe<JsonLogger> jsonLogger;
+      // Configure structured logging in the process context
       if (config.getStructuredLogging()) {
-        jsonLogger.emplace();  // Stack-allocated instance for the entire serve scope
+        context.enableStructuredLogging();
       }
 
       auto platform = jsg::defaultPlatform(0);
@@ -1460,7 +1459,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
 
  private:
-  kj::ProcessContext& context;
+  StructuredLoggingProcessContext& context;
   char** argv;
 
   bool binaryConfig = false;
@@ -1658,7 +1657,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {
-  ::kj::TopLevelProcessContext context(argv[0]);
+  workerd::server::StructuredLoggingProcessContext context(argv[0]);
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
