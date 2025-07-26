@@ -1,5 +1,5 @@
 load("//:build/kj_test.bzl", "kj_test")
-load("//:build/wd_rust_crate.bzl", "rust_cxx_include", "wd_rust_crate")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "python-parser",

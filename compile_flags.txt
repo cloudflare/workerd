@@ -37,6 +37,7 @@
 -isystembazel-bin/external/capnp-cpp/src/kj/compat/_virtual_includes/kj-gzip
 -isystembazel-bin/external/capnp-cpp/src/kj/compat/_virtual_includes/kj-http
 -isystembazel-bin/external/capnp-cpp/src/kj/compat/_virtual_includes/kj-tls
+-isystembazel-bin/external/workerd-cxx/_virtual_includes/core/
 -isystembazel-bin/external/workerd-cxx/kj-rs/_virtual_includes/kj-rs-lib/
 -isystembazel-bin/external/v8
 -isystembazel-bin/external/v8/icu
