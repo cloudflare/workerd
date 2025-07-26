@@ -1,0 +1,100 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    # Embedded tests we get traces from
+    ( name = "http-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "http-test.js" )
+        ],
+        bindings = [
+          ( name = "SERVICE", service = "http-test" ),
+          ( name = "CACHE_ENABLED", json = "false" ),
+        ],
+        compatibilityDate = "2023-08-01",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "cache_option_disabled"],
+        tails = ["proxy"],
+      ),
+    ),
+    ( name = "queue-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "queue-test.js" )
+        ],
+        bindings = [
+          ( name = "QUEUE", queue = "queue-test" ),
+          ( name = "SERVICE", service = "queue-test" ),
+        ],
+        compatibilityDate = "2023-07-24",
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers"],
+        tails = ["proxy"],
+      )
+    ),
+    (name = "alarms", worker = .alarmsWorker),
+    (name = "hiber", worker = .hiberWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+    # All tail events go to this worker which will proxy events via rpc to our main test handler
+    (name = "proxy", worker = .proxyTail, ),
+    (name = "rpcLog", worker = .rpcLog, ),
+  ],
+);
+
+const alarmsWorker :Workerd.Worker = (
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "actor-alarms-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06e"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  tails = ["proxy"],
+);
+
+const hiberWorker :Workerd.Worker = (
+  compatibilityDate = "2023-12-18",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "tests/websocket-hibernation.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "DurableObjectExample", uniqueKey = "210bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "DurableObjectExample"),
+  ],
+  tails = ["proxy"],
+);
+
+const proxyTail :Workerd.Worker = (
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-proxy.js")
+  ],
+  bindings = [
+    (name = "TAIL_SERVICE", service = "rpcLog" ),
+  ],
+);
+
+const rpcLog :Workerd.Worker = (
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+  modules = [
+    (name = "worker", esModule = embed "tail-worker-test-rpc.js")
+  ],
+);

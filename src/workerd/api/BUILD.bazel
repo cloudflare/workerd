@@ -371,6 +371,22 @@ wd_test(
     ],
 )
 
+wd_test(
+    src = "tail-worker-rpc-test.wd-test",
+    args = [
+        "--experimental",
+        "--predictable",
+    ],
+    data = [
+        "actor-alarms-test.js",
+        "http-test.js",
+        "queue-test.js",
+        "tail-worker-proxy.js",
+        "tail-worker-test-rpc.js",
+        "tests/websocket-hibernation.js",
+    ],
+)
+
 # Test for a worker that can log to itself using the isTracer parameter
 wd_test(
     src = "self-logger-test.wd-test",
