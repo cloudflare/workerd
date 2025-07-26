@@ -35,7 +35,10 @@ import type {
   RequestOptions,
   OutgoingHttpHeaders,
 } from 'node:http';
-import { IncomingMessage } from 'node-internal:internal_http_incoming';
+import {
+  IncomingMessage,
+  setIncomingMessageFetchResponse,
+} from 'node-internal:internal_http_incoming';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
@@ -372,17 +375,16 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this._header = Array.from(response.headers.keys())
       .map((key) => `${key}=${response.headers.get(key)}}`)
       .join('\r\n');
-    this.#incomingMessage = new IncomingMessage(
-      response,
-      this.#resetTimers.bind(this)
-    );
-    this.#incomingMessage.on('error', (error) => {
+    const incoming = new IncomingMessage();
+    setIncomingMessageFetchResponse(incoming, response);
+    incoming.on('error', (error) => {
       this.emit('error', error);
     });
 
-    this.emit('response', this.#incomingMessage);
+    this.emit('response', incoming);
     // @ts-expect-error TS2540 This is a read-only property.
     this.req = this.#incomingMessage;
+    this.#incomingMessage = incoming;
   }
 
   #handleFetchError(error: Error): void {
@@ -411,9 +413,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     chunk: Buffer,
     _encoding: BufferEncoding,
     callback: VoidFunction
-  ): void {
+  ): boolean {
     this.#body.push(chunk);
     callback();
+    return true;
   }
 
   setNoDelay(noDelay?: boolean): void {

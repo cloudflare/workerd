@@ -1,7 +1,5 @@
 import http from 'node:http';
 import { throws, strictEqual, ok } from 'node:assert';
-import { mock } from 'node:test';
-import { Writable } from 'node:stream';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {

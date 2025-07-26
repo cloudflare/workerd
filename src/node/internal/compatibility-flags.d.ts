@@ -31,3 +31,6 @@ export const workerdExperimental: boolean;
 export const durableObjectGetExisting: boolean;
 export const vectorizeQueryMetadataOptional: boolean;
 export const nodeJsZlib: boolean;
+export const enableNodejsProcessV2: boolean;
+export const enableNodejsHttpServerModules: boolean;
+export const jsWeakRef: boolean;

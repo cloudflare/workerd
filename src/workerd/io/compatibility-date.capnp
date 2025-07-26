@@ -889,4 +889,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_expose_global_message_channel")
       $compatEnableDate("2025-08-15");
   # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
+
+  enableNodejsHttpServerModules @103 :Bool
+      $compatEnableFlag("enable_nodejs_http_server_modules")
+      $compatDisableFlag("disable_nodejs_http_server_modules");
+  # Enables Node.js http server related modules such as node:_http_server
 }

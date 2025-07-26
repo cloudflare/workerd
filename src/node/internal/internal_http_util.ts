@@ -21,3 +21,6 @@ export function once<RT>(
     return result;
   };
 }
+
+export const kServerResponse = Symbol('ServerResponse');
+export const kIncomingMessage = Symbol('IncomingMessage');

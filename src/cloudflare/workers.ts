@@ -7,6 +7,7 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 import innerEnv from 'cloudflare-internal:env';
+import { portMapper } from 'cloudflare-internal:http';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
@@ -91,3 +92,24 @@ export const env = new Proxy(
 );
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+
+export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
+  fetch(request: Request): Promise<Response>;
+} {
+  if (port == null) {
+    throw new Error(
+      'Port is required when calling nodeCompatHttpServerHandler()'
+    );
+  }
+  return {
+    async fetch(request: Request): Promise<Response> {
+      const instance = portMapper.get(port);
+      if (!instance) {
+        throw new Error(
+          `Http server with port ${port} not found. This is likely a bug with your code.`
+        );
+      }
+      return instance.fetch(request);
+    },
+  };
+}
