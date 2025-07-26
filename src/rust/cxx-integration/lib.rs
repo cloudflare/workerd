@@ -7,9 +7,16 @@ mod ffi {
 
         fn trigger_panic(msg: &str);
     }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/cxx-integration/bridge.h");
+
+        fn install_throw_handler();
+    }
 }
 
 pub fn init() {
+    ffi::install_throw_handler();
     init_tokio(None);
 }
 
