@@ -26,6 +26,8 @@ struct Module {
 
   # Optional compile cache to be used to speed up module loading
   compileCache @7 :Data;
+
+  sourceMap @8 :Text;
 }
 
 
