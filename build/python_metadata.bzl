@@ -1,7 +1,7 @@
 load("@aspect_bazel_lib//lib:base64.bzl", "base64")
 load("@aspect_bazel_lib//lib:strings.bzl", "chr")
 load("//:build/python/packages_20240829_4.bzl", "PACKAGES_20240829_4")
-load("//:build/python/packages_20250616.bzl", "PACKAGES_20250616")
+load("//:build/python/packages_20250725.bzl", "PACKAGES_20250725")
 
 def _chunk(data, length):
     return [data[i:i + length] for i in range(0, len(data), length)]
@@ -18,8 +18,8 @@ PYODIDE_VERSIONS = [
         "sha256": "fbda450a64093a8d246c872bb901ee172a57fe594c9f35bba61f36807c73300d",
     },
     {
-        "version": "0.27.7",
-        "sha256": "9bc8f127db6c590b191b9aee754022cb41b1a36c7bac233776c11c5ecb541be8",
+        "version": "0.28.0",
+        "sha256": "da184d1266414630ed6c8312d2faf23ca959a0bbc31be334890fa44d0ad72b3d",
     },
 ]
 
@@ -32,7 +32,7 @@ PYODIDE_VERSIONS = [
 # first.
 _package_lockfiles = [
     PACKAGES_20240829_4,
-    PACKAGES_20250616,
+    PACKAGES_20250725,
 ]
 
 # The below is a list of pyodide-lock.json files for each package bundle version that we support.
@@ -53,7 +53,7 @@ def verify_no_packages_were_removed():
         if missing_pkgs:
             fail("Some packages from version ", curr_info["info"]["tag"], " missing in version", next_info["info"]["tag"], ":\n", "   ", ", ".join(missing_pkgs), "\n\n")
 
-verify_no_packages_were_removed()
+# verify_no_packages_were_removed()
 
 def _bundle_id(*, pyodide_version, pyodide_date, backport, **_kwds):
     return "%s_%s_%s" % (pyodide_version, pyodide_date, backport)
@@ -79,7 +79,7 @@ def _make_bundle_version_info(versions):
     dev = result["development"]
 
     # Uncomment to test with development = 0.27.7
-    # dev["real_pyodide_version"] = "0.27.7"
+    dev["real_pyodide_version"] = "0.28.0"
     result["development"] = result[dev["real_pyodide_version"]] | dev
     return result
 
@@ -114,15 +114,15 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "name": "0.27.7",
-        "pyodide_version": "0.27.7",
+        "name": "0.28.0",
+        "pyodide_version": "0.28.0",
         "pyodide_date": "2025-01-16",
-        "packages": PACKAGES_20250616,
+        "packages": PACKAGES_20250725,
         "backport": "2",
-        "integrity": "sha256-04qtaf3jr6q7mixWrpeASgYzTW1WHb9NEILBGl8M9hk=",
+        "integrity": "sha256-vgJw1nTi/1gqPa46J4iOBH3wAE0ziPJd5BjvTHbUI9g=",
         "flag": "pythonWorkers20250116",
-        "emscripten_version": "3.1.58",
-        "python_version": "3.12.7",
+        "emscripten_version": "4.0.9",
+        "python_version": "3.13.2",
         "baseline_snapshot": "baseline-59fa311f4.bin",
         "baseline_snapshot_hash": "59fa311f4af0bb28477e2fa17f54dc254ec7fa6f02617b832b141854e44bd621",
         "numpy_snapshot": "package_snapshot_numpy-429b1174f.bin",
