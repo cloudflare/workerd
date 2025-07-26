@@ -889,4 +889,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_expose_global_message_channel")
       $compatEnableDate("2025-08-15");
   # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
+
+  pythonNoGlobalHandlers @103 :Bool
+      $compatEnableFlag("python_no_global_handlers")
+      $compatEnableDate("2025-08-14");
+  # Disables the global handlers for Python workers and enforces their use via default entrypoint
+  # classes.
 }

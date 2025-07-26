@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
 import js
-from workers import Blob, File, FormData, Request, Response, fetch, handler
+from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
 
 import pyodide.http
 from pyodide.ffi import to_js
@@ -22,122 +22,126 @@ async def _mock_fetch(check):
         pyodide.http._jsfetch = original_fetch
 
 
-# Each path in this handler is its own test. The URLs that are being fetched
-# here are defined in server.py.
-@handler
-async def on_fetch(request):
-    assert isinstance(request, Request)
-    if request.url.endswith("/modify"):
-        resp = await fetch("https://example.com/sub")
-        return Response(
-            resp.body,
-            status=201,
-            headers={"Custom-Header-That-Should-Passthrough": "modified"},
-        )
-    elif request.url.endswith("/modify_tuple"):
-        resp = await fetch("https://example.com/sub")
-        return Response(
-            resp.body,
-            headers=[
-                ("Custom-Header-That-Should-Passthrough", "modified"),
-                ("Custom-Header-That-Should-Passthrough", "another"),
-            ],
-        )
-    elif request.url.endswith("/fetch_opts"):
-        resp = await fetch(
-            "https://example.com/sub_headers",
-            method=HTTPMethod.GET,
-            body=None,
-            headers={"Custom-Req-Header": 123},
-        )
-        return resp
-    elif request.url.endswith("/jsism"):
-        # Headers should be specified via a keyword argument, but it's done
-        # differently in JS. So we test what happens when someone does it
-        # that way accidentally to make sure we give them a reasonable error
-        # message.
-        try:
-            resp = await fetch(
-                "https://example.com/sub",
-                {"headers": {"Custom-Req-Header": 123}},
+class Default(WorkerEntrypoint):
+    # Each path in this handler is its own test. The URLs that are being fetched
+    # here are defined in server.py.
+    async def fetch(self, request):
+        assert isinstance(request, Request)
+        if request.url.endswith("/modify"):
+            resp = await fetch("https://example.com/sub")
+            return Response(
+                resp.body,
+                status=201,
+                headers={"Custom-Header-That-Should-Passthrough": "modified"},
             )
-        except TypeError as exc:
-            if str(exc) == "fetch() takes 1 positional argument but 2 were given":
-                return Response("success")
-
-        return Response("fail")
-    elif request.url.endswith("/undefined_opts"):
-        # This tests two things:
-        #   * `Response.redirect` static method
-        #   * that other options can be passed into `fetch` (so that we can support
-        #       new options without updating this code)
-
-        # Mock pyodide.http._jsfetch to ensure `foobarbaz` gets passed in.
-        def fetch_check(url, opts):
-            assert opts.foobarbaz == 42
-
-        async with _mock_fetch(fetch_check):
-            resp = await fetch(
-                "https://example.com/redirect", redirect="manual", foobarbaz=42
+        elif request.url.endswith("/modify_tuple"):
+            resp = await fetch("https://example.com/sub")
+            return Response(
+                resp.body,
+                headers=[
+                    ("Custom-Header-That-Should-Passthrough", "modified"),
+                    ("Custom-Header-That-Should-Passthrough", "another"),
+                ],
             )
+        elif request.url.endswith("/fetch_opts"):
+            resp = await fetch(
+                "https://example.com/sub_headers",
+                method=HTTPMethod.GET,
+                body=None,
+                headers={"Custom-Req-Header": 123},
+            )
+            return resp
+        elif request.url.endswith("/jsism"):
+            # Headers should be specified via a keyword argument, but it's done
+            # differently in JS. So we test what happens when someone does it
+            # that way accidentally to make sure we give them a reasonable error
+            # message.
+            try:
+                resp = await fetch(
+                    "https://example.com/sub",
+                    {"headers": {"Custom-Req-Header": 123}},
+                )
+            except TypeError as exc:
+                if str(exc) == "fetch() takes 1 positional argument but 2 were given":
+                    return Response("success")
 
-        return resp
-    elif request.url.endswith("/response_inherited"):
-        expected = "test123"
-        resp = Response(expected)
-        text = await resp.text()
-        if text == expected:
-            return Response("success")
-        else:
-            return Response("invalid")
-    elif request.url.endswith("/redirect_invalid_input"):
-        try:
-            return Response.redirect("", HTTPStatus.BAD_GATEWAY)
-        except ValueError:
-            return Response("success")
-        return Response("invalid")
-    elif request.url.endswith("/response_json"):
-        return Response.json({"obj": {"field": 123}}, status=HTTPStatus.NOT_FOUND)
-    elif request.url.endswith("/formdata"):
-        # server.py creates a new FormData and verifies that it can be passed
-        # to Response.
-        resp = await fetch("https://example.com/formdata")
-        data = await resp.formData()
-        if data["field"] == "value":
-            return Response("success")
-        else:
             return Response("fail")
-    elif request.url.endswith("/formdatablob"):
-        # server.py creates a new FormData and verifies that it can be passed
-        # to Response.
-        resp = await fetch("https://example.com/formdatablob")
-        data = await resp.formData()
-        assert data["field"] == "value"
-        assert (await data["blob.py"].text()) == "print(42)"
-        assert data["blob.py"].content_type == "text/python"
-        assert data["metadata"].name == "metadata.json"
+        elif request.url.endswith("/undefined_opts"):
+            # This tests two things:
+            #   * `Response.redirect` static method
+            #   * that other options can be passed into `fetch` (so that we can support
+            #       new options without updating this code)
 
-        return Response("success")
-    elif request.url.endswith("/cf_opts"):
-        resp = await fetch(
-            "http://example.com/redirect",
-            redirect="manual",
-            cf={"cacheTtl": 5, "cacheEverything": True, "cacheKey": "someCustomKey"},
-        )
-        assert resp.status == 301
-        return Response("success")
-    elif request.url.endswith("/event_decorator"):
-        # Verify that the `@event`` decorator has transformed the `request` parameter to the correct
-        # type.
-        #
-        # Try to grab headers which should contain a duplicated header.
-        headers = request.headers.get_all("X-Custom-Header")
-        assert "some_value" in headers
-        assert "some_other_value" in headers
-        return Response("success")
-    else:
-        resp = await fetch("https://example.com/sub")
-        return resp
+            # Mock pyodide.http._jsfetch to ensure `foobarbaz` gets passed in.
+            def fetch_check(url, opts):
+                assert opts.foobarbaz == 42
+
+            async with _mock_fetch(fetch_check):
+                resp = await fetch(
+                    "https://example.com/redirect", redirect="manual", foobarbaz=42
+                )
+
+            return resp
+        elif request.url.endswith("/response_inherited"):
+            expected = "test123"
+            resp = Response(expected)
+            text = await resp.text()
+            if text == expected:
+                return Response("success")
+            else:
+                return Response("invalid")
+        elif request.url.endswith("/redirect_invalid_input"):
+            try:
+                return Response.redirect("", HTTPStatus.BAD_GATEWAY)
+            except ValueError:
+                return Response("success")
+            return Response("invalid")
+        elif request.url.endswith("/response_json"):
+            return Response.json({"obj": {"field": 123}}, status=HTTPStatus.NOT_FOUND)
+        elif request.url.endswith("/formdata"):
+            # server.py creates a new FormData and verifies that it can be passed
+            # to Response.
+            resp = await fetch("https://example.com/formdata")
+            data = await resp.formData()
+            if data["field"] == "value":
+                return Response("success")
+            else:
+                return Response("fail")
+        elif request.url.endswith("/formdatablob"):
+            # server.py creates a new FormData and verifies that it can be passed
+            # to Response.
+            resp = await fetch("https://example.com/formdatablob")
+            data = await resp.formData()
+            assert data["field"] == "value"
+            assert (await data["blob.py"].text()) == "print(42)"
+            assert data["blob.py"].content_type == "text/python"
+            assert data["metadata"].name == "metadata.json"
+
+            return Response("success")
+        elif request.url.endswith("/cf_opts"):
+            resp = await fetch(
+                "http://example.com/redirect",
+                redirect="manual",
+                cf={
+                    "cacheTtl": 5,
+                    "cacheEverything": True,
+                    "cacheKey": "someCustomKey",
+                },
+            )
+            assert resp.status == 301
+            return Response("success")
+        elif request.url.endswith("/event_decorator"):
+            # Verify that the `@event`` decorator has transformed the `request` parameter to the correct
+            # type.
+            #
+            # Try to grab headers which should contain a duplicated header.
+            headers = request.headers.get_all("X-Custom-Header")
+            assert "some_value" in headers
+            assert "some_other_value" in headers
+            return Response("success")
+        else:
+            resp = await fetch("https://example.com/sub")
+            return resp
 
 
 # TODO: Right now the `fetch` that's available on a binding is the JS fetch.
