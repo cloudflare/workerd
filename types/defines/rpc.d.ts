@@ -294,5 +294,7 @@ declare module 'cloudflare:workers' {
     ): Promise<unknown>;
   }
 
+  export function waitUntil(promise: Promise<unknown>): void;
+
   export const env: Cloudflare.Env;
 }
