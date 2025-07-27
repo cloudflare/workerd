@@ -1,4 +1,4 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
 
 def wd_test(
         src,
@@ -34,14 +34,10 @@ def wd_test(
         # compilation, see https://github.com/aspect-build/rules_ts/blob/f1b7b83/docs/performance.md#isolated-typecheck.
         # This will require extensive refactoring and we may only want to enable it for some
         # targets, but might be useful if we end up transpiling more code later on.
-        ts_project(
+        wd_ts_project(
             name = name + "@ts_project",
             srcs = ts_srcs,
-            tsconfig = "tsconfig.json",
-            allow_js = True,
-            source_map = True,
-            composite = True,
-            declaration = True,
+            tsconfig_json = "tsconfig.json",
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )
         data += [js_src.removesuffix(".ts") + ".js" for js_src in ts_srcs]

@@ -13,6 +13,9 @@ def _to_js(file_name):
 def _to_d_ts(file_name):
     return file_name.removesuffix(".ts") + ".d.ts"
 
+def _to_js_map(file_name):
+    return file_name.removesuffix(".ts") + ".js.map"
+
 def wd_ts_bundle(
         name,
         import_name,
@@ -57,13 +60,15 @@ def wd_ts_bundle(
     srcs = modules + internal_modules
     ts_srcs = [src for src in srcs if src.endswith(".ts")]
     declarations = [_to_d_ts(src) for src in ts_srcs if not src.endswith(".d.ts")]
+    source_maps = [_to_js_map(src) for src in ts_srcs if not src.endswith(".js.map")]
 
     ts_project(
         name = name + "@tsproject",
         srcs = ts_srcs,
         allow_js = True,
         declaration = True,
-        tsconfig = name + "@tsconfig",
+        source_map = True,
+        tsconfig = ":" + name + "@tsconfig",
         deps = deps,
         out_dir = out_dir.removesuffix("/"),
         visibility = ["//visibility:public"],
@@ -81,6 +86,7 @@ def wd_ts_bundle(
         internal_data_modules = internal_data_modules,
         internal_json_modules = internal_json_modules,
         declarations = declarations,
+        source_maps = source_maps,
         schema_id = schema_id,
         deps = deps + js_deps,
         gen_compile_cache = gen_compile_cache,

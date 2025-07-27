@@ -22,6 +22,7 @@
     "declaration": true,
     "types": ["@types/node"],
     "erasableSyntaxOnly": true,
+    "sourceMap": true,
     "paths": {
       "node:*": ["./*"],
       "node:assert/*": ["./*"],
