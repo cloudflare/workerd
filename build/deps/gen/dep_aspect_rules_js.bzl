@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v2.4.0"
-URL = "https://github.com/aspect-build/rules_js/releases/download/v2.4.0/rules_js-v2.4.0.tar.gz"
-STRIP_PREFIX = "rules_js-2.4.0"
-SHA256 = "961393890a58de989ad7aa36ce147fc9b15a77c8144454889bf068bdd12c5165"
+TAG_NAME = "v2.4.1"
+URL = "https://github.com/aspect-build/rules_js/releases/download/v2.4.1/rules_js-v2.4.1.tar.gz"
+STRIP_PREFIX = "rules_js-2.4.1"
+SHA256 = "ca638e0aa33b087706bc7f5e887ce01cdf6ec82de00660f22409fa8be34a8ce2"
 TYPE = "tgz"
 
 def dep_aspect_rules_js():
