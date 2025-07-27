@@ -54,11 +54,11 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "1.46.1",
+    version = "1.47.0",
     deps = [
         "@crates_vendor__mio-1.0.4//:mio",
         "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
-        "@crates_vendor__socket2-0.5.10//:socket2",
+        "@crates_vendor__socket2-0.6.0//:socket2",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@crates_vendor__libc-0.2.174//:libc",  # aarch64-apple-darwin
@@ -70,7 +70,7 @@ rust_library(
             "@crates_vendor__libc-0.2.174//:libc",  # x86_64-apple-darwin
         ],
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.52.0//:windows_sys",  # x86_64-pc-windows-msvc
+            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # x86_64-pc-windows-msvc
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
             "@crates_vendor__libc-0.2.174//:libc",  # x86_64-unknown-linux-gnu
