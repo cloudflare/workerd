@@ -66,21 +66,28 @@ extern size_t {embed_name}_size;
         srcs = [base_name + ".embed.c"],
         hdrs = [base_name + ".embed.h"],
         additional_compiler_inputs = [src],
-        conlyopts = [
-            # no need to have debug info for the embed
-            "-g0",
-            # C23 is needed for N3017 #embed. Clang also supports it in C++26 mode but it is not
-            # officially part of that standard so far; no harm in using C on a per-file basis.
-            "-std=c23",
-            # Hack: We need to provide the path to the embed file directory here. We can access the
-            # embed file easily by adding it to additional_compiler_inputs but can't easily get its
-            # directory within a macro – provide both the path of the package and its output
-            # directory to support both pre-existing and generated files. To support using the macro
-            # with external repositories in the future, we may need to add the file's workspace_root
-            # too.
-            "--embed-dir=" + embed_package,
-            "--embed-dir=$(GENDIR)/" + embed_package,
-        ],
+        conlyopts = select({
+            "@platforms//os:windows": [
+                "/std:c26",
+                "/clang:--embed-dir=" + embed_package,
+                "/clang:--embed-dir=$(GENDIR)/" + embed_package,
+            ],
+            "//conditions:default": [
+                # no need to have debug info for the embed
+                "-g0",
+                # C23 is needed for N3017 #embed. Clang also supports it in C++26 mode but it is not
+                # officially part of that standard so far; no harm in using C on a per-file basis.
+                "-std=c23",
+                # Hack: We need to provide the path to the embed file directory here. We can access the
+                # embed file easily by adding it to additional_compiler_inputs but can't easily get its
+                # directory within a macro – provide both the path of the package and its output
+                # directory to support both pre-existing and generated files. To support using the macro
+                # with external repositories in the future, we may need to add the file's workspace_root
+                # too.
+                "--embed-dir=" + embed_package,
+                "--embed-dir=$(GENDIR)/" + embed_package,
+            ],
+        }),
         deps = [
             "@capnp-cpp//src/kj",
         ],
