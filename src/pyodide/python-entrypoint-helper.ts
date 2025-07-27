@@ -2,7 +2,7 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide } from 'pyodide-internal:python';
+import { beforeRequest, loadPyodide } from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
@@ -15,7 +15,6 @@ import {
   workflowsEnabled,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
-import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 import { reportError } from 'pyodide-internal:util';
 
 // Function to import JavaScript modules from Python
@@ -164,7 +163,7 @@ async function preparePython(): Promise<PyModule> {
   try {
     const pyodide = await getPyodide();
     const mainModule = await getMainModule();
-    entropyBeforeRequest(pyodide._module);
+    beforeRequest(pyodide._module);
     return mainModule;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
