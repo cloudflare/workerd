@@ -98,7 +98,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     KJ_UNREACHABLE;
   };
 
-  // TODO(streaming-tail-workers): Support Hibernate and Resume events properly.
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     t.setEventInfo(incomingRequest->getContext().getInvocationSpanContext(), context.now(),
         tracing::HibernatableWebSocketEventInfo(getType()));

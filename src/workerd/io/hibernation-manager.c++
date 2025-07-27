@@ -103,6 +103,8 @@ void HibernationManagerImpl::acceptWebSocket(
   JSG_REQUIRE(allWs.size() < ACTIVE_CONNECTION_LIMIT, Error, "only ", ACTIVE_CONNECTION_LIMIT,
       " websockets can be accepted on a single Durable Object instance");
 
+  // TODO(o11y): Setting up hibernatable web socket. Let WorkerTracer know that we're doing this, so
+  // that we can return a Suspend event instead of Outcome.
   auto hib = kj::heap<HibernatableWebSocket>(kj::mv(ws), tags, *this);
   HibernatableWebSocket& refToHibernatable = *hib.get();
   allWs.push_front(kj::mv(hib));

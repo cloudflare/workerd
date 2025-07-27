@@ -822,6 +822,10 @@ struct TailEvent final {
 
   void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
+
+  inline bool isOutcomeLike() {
+    return event.is<Outcome>() || event.is<Hibernate>();
+  };
 };
 }  // namespace tracing
 

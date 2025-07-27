@@ -335,7 +335,24 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
+    if (info.is<tracing::HibernatableWebSocketEventInfo>()) {
+      // auto& eventInfo = info.get<tracing::HibernatableWebSocketEventInfo>();
+      // hibernatable web socket: Report as Resume event.
+      // TODO(o11y): If the socket is not being closed, report the text/data/error message using
+      // attachment? What if it is too large?
+      // TODO(o11y): Resume event should convey message type as contained in eventInfo. This should
+      // be done instead of having it in HibernatableWebSocketEventInfo, which should be used when
+      // creating a hibernatable web socket. That event behaves a lot like fetch, is returning fetch
+      // as we've been doing there so far acceptable?
+      // Yup, we have no way of knowing that a HWS is to be opened at the time of fetch() so keeping
+      // that as-is is acceptable.
+      // Perhaps we don't need to have a distinct "Resume" event at all,
+      // HibernatableWebSocketEventInfo already fits that role well.
+      writer->report(
+          context, tracing::Onset(tracing::Resume(kj::none), kj::mv(workerInfo), kj::none));
+    } else {
+      writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
+    }
   }
   trace->eventInfo = kj::mv(info);
 }
@@ -354,7 +371,15 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-    if (isPredictableModeForTest()) {
+    if (KJ_ASSERT_NONNULL(trace->eventInfo).is<tracing::HibernatableWebSocketEventInfo>() &&
+        !KJ_ASSERT_NONNULL(trace->eventInfo)
+             .get<tracing::HibernatableWebSocketEventInfo>()
+             .type.is<tracing::HibernatableWebSocketEventInfo::Close>()) {
+      // TODO(o11y): Also need to report hibernation for the initial event, but how do we
+      // differentiate that from a regular fetch?
+      // hibernation event: report as suspend if we get a message other than close.
+      writer->report(spanContext, tracing::Hibernate());
+    } else if (isPredictableModeForTest()) {
       writer->report(
           spanContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
     } else {
