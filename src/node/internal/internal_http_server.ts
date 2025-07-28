@@ -218,6 +218,8 @@ export class Server
     return { incoming, response };
   }
 
+  // We only support the listen() variant where a port number is passed or left
+  // unspecified. Such cases are listen(), listen(0, () => {}), listen(() => {}) etc.
   listen(...args: unknown[]): this {
     const [options, callback] = _normalizeArgs(args);
     let port: number | undefined;
@@ -242,6 +244,9 @@ export class Server
     // @ts-expect-error TS2322 Type mismatch. Not needed.
     portMapper.set(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
+      // If any of the listening handlers (here and in any of the other queueMicrotask(...) instances here,
+      // if the listening handlers throw an error, that will end up being reported to
+      // reportError(...) and will cause the globalThis error event to be triggered.
       this.emit('listening');
     });
     return this;
@@ -293,6 +298,7 @@ export class Server
     return this.#port != null;
   }
 
+  // We always return 127.0.0.1 as the address().address.
   address(): string | AddressInfo | null {
     if (this.#port == null) return null;
     return { port: this.#port, family: 'IPv4', address: '127.0.0.1' };
