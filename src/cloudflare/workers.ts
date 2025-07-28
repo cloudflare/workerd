@@ -116,6 +116,7 @@ export function nodeCompatHttpServerHandler(
     // import { env, waitUntil } from 'cloudflare:workers
     async fetch(request: Request): Promise<Response> {
       const instance = portMapper.get(port);
+      // TODO: Investigate supporting automatically assigned ports as being bound without a port configuration.
       if (!instance) {
         const error = new Error(
           `Http server with port ${port} not found. This is likely a bug with your code. You should check if server.listen() was called with the same port (${port})`
