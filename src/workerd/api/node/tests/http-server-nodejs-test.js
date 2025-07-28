@@ -351,20 +351,38 @@ export const testHttpServerWriteEndAfterEnd = {
   },
 };
 
-export const testHandleZeroPortNumber = {
+export const testHandleZeroNullUndefinedPortNumber = {
   async test() {
-    const { promise, resolve } = Promise.withResolvers();
-    const server = http.createServer();
-    const listeningFn = mock.fn();
-    server.on('listening', listeningFn);
-    server.listen(0, () => {
-      ok(server.listening);
-      notStrictEqual(server.address().port, 0);
-      strictEqual(listeningFn.mock.callCount(), 1);
-      server.close();
-      resolve();
-    });
-    await promise;
+    // Test zero port number.
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const server = http.createServer();
+      const listeningFn = mock.fn();
+      server.on('listening', listeningFn);
+      server.listen(0, () => {
+        ok(server.listening);
+        notStrictEqual(server.address().port, 0);
+        strictEqual(listeningFn.mock.callCount(), 1);
+        server.close();
+        resolve();
+      });
+      await promise;
+    }
+    // Test null/undefined port number.
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const server = http.createServer();
+      const listeningFn = mock.fn();
+      server.on('listening', listeningFn);
+      server.listen(() => {
+        ok(server.listening);
+        notStrictEqual(server.address().port, 0);
+        strictEqual(listeningFn.mock.callCount(), 1);
+        server.close();
+        resolve();
+      });
+      await promise;
+    }
   },
 };
 
