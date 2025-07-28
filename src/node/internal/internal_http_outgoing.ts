@@ -21,7 +21,6 @@ import {
   ERR_HTTP_BODY_NOT_ALLOWED,
   ERR_STREAM_NULL_VALUES,
   ERR_STREAM_ALREADY_FINISHED,
-  ERR_HTTP_TRAILER_INVALID,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 import { isUint8Array } from 'node-internal:internal_types';
@@ -147,27 +146,24 @@ class MessageBuffer {
   }
 
   uncork(): void {
-    if (this.#corked > 0) {
-      this.#corked--;
+    this.#corked--;
+    this._flush();
+  }
 
-      // If fully uncorked, flush all buffered writes
-      if (this.#corked === 0) {
-        const writes = this.#bufferedWrites.splice(0);
-        for (const { index, entry } of writes) {
-          this.#onWrite(index, entry);
-        }
+  _flush(): void {
+    // If fully uncorked, flush all buffered writes
+    if (this.#corked <= 0) {
+      const writes = this.#bufferedWrites.splice(0);
+      for (const { index, entry } of writes) {
+        this.#onWrite(index, entry);
       }
     }
   }
 
   get writableLength(): number {
-    // Return the total buffered data length when corked
-    if (this.#corked > 0) {
-      return this.#bufferedWrites.reduce((total, { entry }) => {
-        return total + (entry.length || 0);
-      }, 0);
-    }
-    return 0;
+    return this.#bufferedWrites.reduce((total, { entry }) => {
+      return total + (entry.length || 0);
+    }, 0);
   }
 
   get writableHighWaterMark(): number {
@@ -418,15 +414,6 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
         // is defined as all data until the connection is closed.
         this._last = true;
       }
-    }
-
-    // Test non-chunked message does not have trailer header set,
-    // message will be terminated by the first empty line after the
-    // header fields, regardless of the header fields present in the
-    // message, and thus cannot contain a message body or 'trailers'.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-    if (this.chunkedEncoding !== true && state.trailer) {
-      throw new ERR_HTTP_TRAILER_INVALID();
     }
 
     this._header = header + '\r\n';

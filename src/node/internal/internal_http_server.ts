@@ -583,6 +583,8 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       throw new ERR_INVALID_CHAR('statusMessage');
     }
 
+    // TODO(soon): Unnecessary additional complexity when we could just build
+    // the Headers object up directly and skip the additional string wrangling.
     const statusLine = `HTTP/1.1 ${statusCode} ${this.statusMessage}\r\n`;
 
     if (statusCode === 204 || statusCode === 304) {

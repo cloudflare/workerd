@@ -902,15 +902,6 @@ export class ERR_HTTP_BODY_NOT_ALLOWED extends NodeError {
   }
 }
 
-export class ERR_HTTP_TRAILER_INVALID extends NodeError {
-  constructor() {
-    super(
-      'ERR_HTTP_TRAILER_INVALID',
-      'Trailers are invalid with this transfer encoding'
-    );
-  }
-}
-
 export class ERR_INVALID_PROTOCOL extends NodeTypeError {
   constructor(actual: string, expected: string) {
     super(

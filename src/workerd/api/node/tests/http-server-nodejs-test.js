@@ -28,35 +28,6 @@ export const testHttpServerAsyncDispose = {
   },
 };
 
-// Test is taken from test/parallel/test-http-server-de-chunked-trailer.js
-export const testHttpServerDeChunkedTrailer = {
-  async test(_ctrl, env) {
-    const handlerFn = mock.fn((req, res) => {
-      res.setHeader('Trailer', 'baz');
-      const trailerInvalidErr = {
-        code: 'ERR_HTTP_TRAILER_INVALID',
-        message: 'Trailers are invalid with this transfer encoding',
-        name: 'Error',
-      };
-      throws(
-        () => res.writeHead(200, { 'Content-Length': '2' }),
-        trailerInvalidErr
-      );
-      res.removeHeader('Trailer');
-      res.end('ok');
-    });
-    const server = http.createServer(handlerFn);
-
-    server.listen(8080);
-
-    const res = await env.SERVICE.fetch('https://cloudflare.com');
-    strictEqual(res.status, 200);
-    strictEqual(await res.text(), 'ok');
-    strictEqual(handlerFn.mock.callCount(), 1);
-    server.close();
-  },
-};
-
 // TODO(soon): The following code triggers a Workerd specific error that we need to address.
 // The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.
 //
@@ -547,7 +518,6 @@ export default nodeCompatHttpServerHandler({ port: 8080 });
 // - [ ] test/parallel/test-http-server-close-idle-wait-response.js
 // - [ ] test/parallel/test-http-server-close-idle.js
 // - [ ] test/parallel/test-http-server-consumed-timeout.js
-// - [x] test/parallel/test-http-server-de-chunked-trailer.js
 // - [ ] test/parallel/test-http-server-headers-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-interrupted-headers.js
 // - [ ] test/parallel/test-http-server-headers-timeout-keepalive.js
@@ -578,6 +548,7 @@ export default nodeCompatHttpServerHandler({ port: 8080 });
 // - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-clear-timer.js
 // - [ ] test/parallel/test-http-server-close-all.js
+// - [ ] test/parallel/test-http-server-de-chunked-trailer.js
 // - [ ] test/parallel/test-http-server-delete-parser.js
 // - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
 // - [ ] test/parallel/test-http-server-keep-alive-defaults.js
