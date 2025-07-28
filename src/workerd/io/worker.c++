@@ -1249,7 +1249,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
@@ -1260,7 +1260,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       modular(source.variant.is<ModulesSource>()),
       python(modular && source.variant.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()),
-      dynamicEnvBuilder(kj::mv(source.dynamicEnvBuilder)) {
+      dynamicEnvBuilder(source.dynamicEnvBuilder.map(
+          [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -3982,14 +3983,14 @@ uint Worker::Isolate::getLockSuccessCount() const {
 }
 
 kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
     SpanParent parentSpan,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
   // Script doesn't already exist, so compile it.
-  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, kj::mv(source), startType,
+  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, source, startType,
       logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan));
 }
 
