@@ -108,9 +108,12 @@ export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
     async fetch(request: Request): Promise<Response> {
       const instance = portMapper.get(port);
       if (!instance) {
-        throw new Error(
+        const error = new Error(
           `Http server with port ${port} not found. This is likely a bug with your code. You should check if server.listen() was called with the same port (${port})`
         );
+        // @ts-expect-error TS2339 We're imitating Node.js errors.
+        error.code = 'ERR_INVALID_ARG_VALUE';
+        throw error;
       }
       return instance.fetch(request);
     },

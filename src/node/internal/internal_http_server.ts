@@ -100,7 +100,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
-  port: number | null = null;
+  #port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
     if (!flags.enableNodejsHttpServerModules) {
@@ -135,9 +135,9 @@ export class Server
 
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
-    if (this.port != null) {
-      portMapper.delete(this.port);
-      this.port = null;
+    if (this.#port != null) {
+      portMapper.delete(this.#port);
+      this.#port = null;
     }
     if (typeof callback === 'function') {
       this.once('close', callback);
@@ -222,15 +222,12 @@ export class Server
       port = validatePort(options.port, 'options.port');
     }
 
+    // If port number is not provided, default to 0, just like Node.js
     if (port == null) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'options',
-        options,
-        'must have the property "port"'
-      );
+      port = 0;
     }
 
-    if (this.port != null || portMapper.has(port)) {
+    if (this.#port != null || portMapper.has(port)) {
       throw new ERR_SERVER_ALREADY_LISTEN();
     }
 
@@ -238,8 +235,9 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.port = this.#findSuitablePort(port);
-    portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
+    this.#port = this.#findSuitablePort(port);
+    // @ts-expect-error TS2322 Type mismatch. Not needed.
+    portMapper.set(this.#port, { fetch: this.#onRequest.bind(this) });
     queueMicrotask(() => {
       this.emit('listening');
     });
@@ -289,12 +287,12 @@ export class Server
   }
 
   get listening(): boolean {
-    return this.port != null;
+    return this.#port != null;
   }
 
   address(): string | AddressInfo | null {
-    if (this.port == null) return null;
-    return { port: this.port, family: 'IPv4', address: '127.0.0.1' };
+    if (this.#port == null) return null;
+    return { port: this.#port, family: 'IPv4', address: '127.0.0.1' };
   }
 
   get maxConnections(): number {

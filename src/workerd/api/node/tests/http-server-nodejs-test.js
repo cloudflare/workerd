@@ -13,6 +13,17 @@ export const checkPortsSetCorrectly = {
   },
 };
 
+const globalServer = http.createServer();
+globalServer.listen(9090);
+
+export const testGlobalHttpServe = {
+  async test(_ctrl, env) {
+    strictEqual(globalServer.listening, true);
+    strictEqual(globalServer.address().port, 9090);
+    globalServer.close();
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-async-dispose.js
 export const testHttpServerAsyncDispose = {
   async test() {
@@ -28,22 +39,24 @@ export const testHttpServerAsyncDispose = {
   },
 };
 
-// TODO(soon): The following code triggers a Workerd specific error that we need to address.
-// The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.
-//
-// // Test is taken from test/parallel/test-http-server-incomingmessage-destroy.js
-// export const testHttpServerIncomingMessageDestroy = {
-//   async test(_ctrl, env) {
-//     await using server = http.createServer((req, res) => {
-//       req.destroy(new Error('Destroy test'));
-//     });
+// Test is taken from test/parallel/test-http-server-incomingmessage-destroy.js
+export const testHttpServerIncomingMessageDestroy = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      req.on('error', (err) => {
+        res.statusCode = 400;
+        res.end('Request destroyed: ' + err.message);
+      });
+      req.destroy(new Error('Destroy test'));
+    });
 
-//     server.listen(8080);
+    server.listen(8080);
 
-//     const res = await env.SERVICE.fetch('https://cloudflare.com');
-//     strictEqual(res.status, 400);
-//   }
-// }
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 400);
+    strictEqual(await res.text(), 'Request destroyed: Destroy test');
+  },
+};
 
 // Test is taken from test/parallel/test-http-server-method.query.js
 export const testHttpServerMethodQuery = {
@@ -133,8 +146,7 @@ export const testHttpServerNonUtf8Header = {
     const nonUtf8ToLatin1 = Buffer.from(nonUtf8Header).toString('latin1');
 
     {
-      const { promise, resolve } = Promise.withResolvers();
-      const server = http.createServer((req, res) => {
+      await using server = http.createServer((req, res) => {
         res.writeHead(200, [
           'content-disposition',
           Buffer.from(nonUtf8Header).toString('binary'),
@@ -142,23 +154,18 @@ export const testHttpServerNonUtf8Header = {
         res.end('hello');
       });
 
-      server.listen(8080, async () => {
-        const res = await env.SERVICE.fetch('https://cloudflare.com', {
-          method: 'GET',
-        });
-        strictEqual(res.status, 200);
-        strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
-        server.close();
-        resolve();
+      server.listen(8080);
+      const res = await env.SERVICE.fetch('https://cloudflare.com', {
+        method: 'GET',
       });
-
-      await promise;
+      strictEqual(res.status, 200);
+      strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
     }
 
     {
       const { promise, resolve } = Promise.withResolvers();
       // Test multi-value header
-      const server = http.createServer((req, res) => {
+      await using server = http.createServer((req, res) => {
         res.writeHead(200, [
           'content-disposition',
           [Buffer.from(nonUtf8Header).toString('binary')],
@@ -166,20 +173,18 @@ export const testHttpServerNonUtf8Header = {
         res.end('hello');
       });
 
-      server.listen(8080, async () => {
-        const res = await env.SERVICE.fetch('https://cloudflare.com');
-        strictEqual(res.status, 200);
-        strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
-        server.close();
-        resolve();
-      });
-      await promise;
+      server.listen(8080);
+      const res = await env.SERVICE.fetch('https://cloudflare.com');
+      strictEqual(res.status, 200);
+      strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
     }
 
-    // TODO(soon): Investigate this.
+    // TODO(soon): Investigate this. The test fails with the following assertion error.
+    // It's probably caused by the difference in fetch() API usage.
+    // -   bår
+    // +   bÃ¥r
     // {
-    //   const { promise, resolve } = Promise.withResolvers();
-    //   const server = http.createServer((req, res) => {
+    //   await using server = http.createServer((req, res) => {
     //     res.writeHead(200, [
     //       'Content-Length',
     //       '5',
@@ -188,16 +193,12 @@ export const testHttpServerNonUtf8Header = {
     //     ]);
     //     res.end('hello');
     //   });
-    //
+
     //   server.listen(8080);
-    //
+
     //   const res = await env.SERVICE.fetch('https://cloudflare.com');
     //   strictEqual(res.status, 200);
     //   strictEqual(res.headers.get('content-disposition'), nonUtf8ToLatin1);
-    //   server.close();
-    //   resolve();
-    //
-    //   await promise;
     // }
   },
 };
@@ -314,7 +315,6 @@ export const testHandleZeroPortNumber = {
     server.on('listening', listeningFn);
     server.listen(0, () => {
       ok(server.listening);
-      notStrictEqual(server.port, 0);
       notStrictEqual(server.address().port, 0);
       strictEqual(listeningFn.mock.callCount(), 1);
       server.close();
