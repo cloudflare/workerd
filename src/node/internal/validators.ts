@@ -394,64 +394,6 @@ export const kValidateObjectAllowObjectsAndNull =
   kValidateObjectAllowArray |
   kValidateObjectAllowFunction;
 
-/*
-  The rules for the Link header field are described here:
-  https://www.rfc-editor.org/rfc/rfc8288.html#section-3
-
-  This regex validates any string surrounded by angle brackets
-  (not necessarily a valid URI reference) followed by zero or more
-  link-params separated by semicolons.
-*/
-const linkValueRegExp = /^(?:<[^>]*>)(?:\s*;\s*[^;"\s]+(?:=(")?[^;"\s]*\1)?)*$/;
-
-export function validateLinkHeaderFormat(
-  value: unknown,
-  name: string
-): asserts value is string {
-  if (
-    value == null ||
-    typeof value !== 'string' ||
-    !linkValueRegExp.exec(value)
-  ) {
-    throw new ERR_INVALID_ARG_VALUE(
-      name,
-      value,
-      'must be an array or string of format "</styles.css>; rel=preload; as=style"'
-    );
-  }
-}
-
-export function validateLinkHeaderValue(hints: unknown): string {
-  if (typeof hints === 'string') {
-    validateLinkHeaderFormat(hints, 'hints');
-    return hints;
-  } else if (Array.isArray(hints)) {
-    const hintsLength = hints.length;
-    let result = '';
-
-    if (hintsLength === 0) {
-      return result;
-    }
-
-    for (let i = 0; i < hintsLength; i++) {
-      const link = hints[i] as string;
-      validateLinkHeaderFormat(link, 'hints');
-      result += link;
-      if (i !== hintsLength - 1) {
-        result += ', ';
-      }
-    }
-
-    return result;
-  }
-
-  throw new ERR_INVALID_ARG_VALUE(
-    'hints',
-    hints,
-    'must be an array or string of format "</styles.css>; rel=preload; as=style"'
-  );
-}
-
 export default {
   isInt32,
   isUint32,
@@ -469,8 +411,6 @@ export default {
   validateUint32,
   validatePort,
   validateThisInternalField,
-  validateLinkHeaderFormat,
-  validateLinkHeaderValue,
 
   // Zlib specific
   checkFiniteNumber,

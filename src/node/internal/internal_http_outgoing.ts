@@ -128,7 +128,6 @@ class MessageBuffer {
       queueMicrotask(() => {
         callback?.();
       });
-      callback?.();
     } else {
       const index = this.#index++;
       queueMicrotask(() => {

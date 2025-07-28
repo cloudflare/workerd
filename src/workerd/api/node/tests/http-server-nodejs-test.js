@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { strictEqual, ok, throws, notStrictEqual } from 'node:assert';
+import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
 import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
 import { mock } from 'node:test';
 
@@ -57,7 +57,9 @@ export const testHttpServerDeChunkedTrailer = {
   },
 };
 
-// TODO(soon): Fix this
+// TODO(soon): The following code triggers a Workerd specific error that we need to address.
+// The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.
+//
 // // Test is taken from test/parallel/test-http-server-incomingmessage-destroy.js
 // export const testHttpServerIncomingMessageDestroy = {
 //   async test(_ctrl, env) {
@@ -67,11 +69,8 @@ export const testHttpServerDeChunkedTrailer = {
 
 //     server.listen(8080);
 
-//     await rejects(() => {
-//       return env.SERVICE.fetch('https://cloudflare.com');
-//     }, {
-//       message: '',
-//     })
+//     const res = await env.SERVICE.fetch('https://cloudflare.com');
+//     strictEqual(res.status, 400);
 //   }
 // }
 
@@ -357,7 +356,7 @@ export const testHandleZeroPortNumber = {
 export const testInvalidPorts = {
   async test() {
     const server = http.createServer();
-    for (const value of [NaN, Infinity]) {
+    for (const value of [NaN, Infinity, -1, 1.1, 9999999]) {
       throws(() => server.listen(value), {
         code: 'ERR_SOCKET_BAD_PORT',
       });
@@ -486,34 +485,25 @@ export const testContentLengthEnforcement = {
     server.listen(8080);
 
     // Test 1: Too few bytes
-    try {
-      const res1 = await env.SERVICE.fetch('https://cloudflare.com/too-few');
-      await res1.text();
-      throw new Error('Expected Content-Length error');
-    } catch (e) {
-      ok(
-        e.message.includes('Content-Length mismatch') ||
-          e.message.includes('FixedLengthStream')
-      );
+    {
+      const res = await env.SERVICE.fetch('https://cloudflare.com/too-few');
+      strictEqual(res.status, 200);
+      strictEqual(await res.text(), '0123456789');
     }
 
     // Test 2: Too many bytes
-    try {
-      const res2 = await env.SERVICE.fetch('https://cloudflare.com/too-many');
-      await res2.text();
-      throw new Error('Expected Content-Length error');
-    } catch (e) {
-      ok(
-        e.message.includes('Content-Length mismatch') ||
-          e.message.includes('FixedLengthStream')
-      );
+    {
+      const res = await env.SERVICE.fetch('https://cloudflare.com/too-many');
+      strictEqual(res.status, 200);
+      strictEqual(await res.text(), '0123456789');
     }
 
     // Test 3: Exact match
-    const res3 = await env.SERVICE.fetch('https://cloudflare.com/exact');
-    const text3 = await res3.text();
-    strictEqual(text3, 'Hello World!!!!');
-    strictEqual(text3.length, 15);
+    {
+      const res = await env.SERVICE.fetch('https://cloudflare.com/exact');
+      strictEqual(res.status, 200);
+      strictEqual(await res.text(), 'Hello World!!!!');
+    }
   },
 };
 

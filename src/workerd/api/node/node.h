@@ -118,7 +118,9 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     // We put node:_http_server and related features behind a compat flag
     // for securing backward compatibility.
     if (isNodeHttpServerModule(module.getName())) {
-      return featureFlags.getEnableNodejsHttpServerModules();
+      // TODO(soon): Check for featureFlags.getEnableNodejsHttpServerModules();
+      // once this feature is completed.
+      return featureFlags.getWorkerdExperimental();
     }
 
     return true;

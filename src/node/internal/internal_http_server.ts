@@ -31,6 +31,7 @@ import {
 } from 'node-internal:internal_http_outgoing';
 import {
   validateBoolean,
+  validateFunction,
   validateInteger,
   validateObject,
   validatePort,
@@ -68,15 +69,6 @@ import { default as flags } from 'workerd:compatibility-flags';
 export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
 );
-
-let serverRegistry: FinalizationRegistry<number> | null = null;
-
-// The finalization registry is only available under the `jsWeakRef` flag
-if (flags.jsWeakRef) {
-  serverRegistry = new FinalizationRegistry((port) => {
-    portMapper.delete(port);
-  });
-}
 
 export type DataWrittenEvent = {
   index: number;
@@ -145,11 +137,10 @@ export class Server
     httpServerPreClose(this);
     if (this.port != null) {
       portMapper.delete(this.port);
-      serverRegistry?.unregister(this);
       this.port = null;
     }
     if (typeof callback === 'function') {
-      this.on('close', callback);
+      this.once('close', callback);
     }
     queueMicrotask(() => {
       this.emit('close');
@@ -249,7 +240,6 @@ export class Server
 
     this.port = this.#findSuitablePort(port);
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
-    serverRegistry?.register(this, this.port, this);
     queueMicrotask(() => {
       this.emit('listening');
     });
@@ -278,6 +268,7 @@ export class Server
 
   getConnections(callback?: (err: Error | null, count: number) => void): this {
     if (callback) {
+      validateFunction(callback, 'callback');
       queueMicrotask(() => {
         callback(null, 0);
       });
@@ -382,19 +373,22 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     };
 
     const handleData = (event: DataWrittenEvent): void => {
-      const chunk = this.#dataFromDataWrittenEvent(event);
-      state.bytesWritten += chunk.length;
+      let chunk = this.#dataFromDataWrittenEvent(event);
 
+      // Trim chunk if it would exceed content-length
       if (
         state.contentLength !== null &&
-        state.bytesWritten > state.contentLength
+        state.bytesWritten + chunk.length > state.contentLength
       ) {
-        const error = new Error(
-          `Content-Length mismatch: wrote ${state.bytesWritten} bytes but Content-Length header was ${state.contentLength}`
-        );
-        streamController?.error(error);
-        return;
+        const remainingBytes = state.contentLength - state.bytesWritten;
+        if (remainingBytes > 0) {
+          chunk = chunk.slice(0, remainingBytes);
+        } else {
+          return; // Skip this chunk entirely
+        }
       }
+
+      state.bytesWritten += chunk.length;
 
       if (streamController) {
         if (chunk.length > 0) {
@@ -431,7 +425,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
               }
               chunks.length = 0;
             },
-            state,
           })
         );
       }
@@ -445,13 +438,11 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     statusText,
     sentHeaders,
     onStreamStart,
-    state,
   }: {
     statusCode: number;
     statusText: string;
     sentHeaders: [header: string, value: string][];
     onStreamStart: (controller: ReadableStreamController<Uint8Array>) => void;
-    state: { bytesWritten: number; contentLength: number | null };
   }): Response {
     const headers = new Headers(sentHeaders);
     let body = null;
@@ -462,18 +453,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         start: (controller): void => {
           onStreamStart(controller);
           this.once('finish', () => {
-            if (
-              state.contentLength !== null &&
-              state.bytesWritten !== state.contentLength
-            ) {
-              controller.error(
-                new Error(
-                  `Content-Length mismatch: wrote ${state.bytesWritten} bytes but Content-Length header was ${state.contentLength}`
-                )
-              );
-            } else {
-              controller.close();
-            }
+            controller.close();
           });
           this.on('error', controller.error.bind(controller));
         },
