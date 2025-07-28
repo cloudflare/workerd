@@ -9,6 +9,7 @@
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <kj/debug.h>
+#include <kj/main.h>
 #include <kj/string.h>
 
 #include <cstdio>
@@ -81,6 +82,65 @@ kj::Function<void(kj::Function<void()>)> JsonLogger::getThreadInitializer() {
       ownFunc();
     });
   };
+}
+
+// =======================================================================================
+// StructuredLoggingProcessContext implementation
+
+StructuredLoggingProcessContext::StructuredLoggingProcessContext(kj::StringPtr programName)
+    : topLevelContext(programName) {}
+
+void StructuredLoggingProcessContext::enableStructuredLogging() {
+  useStructuredLogging = true;
+  jsonLogger.emplace();
+}
+
+kj::StringPtr StructuredLoggingProcessContext::getProgramName() {
+  return topLevelContext.getProgramName();
+}
+
+void StructuredLoggingProcessContext::exit() {
+  topLevelContext.exit();
+}
+
+void StructuredLoggingProcessContext::warning(kj::StringPtr message) const {
+  if (useStructuredLogging) {
+    auto json = buildJsonLogMessage(kj::LogSeverity::WARNING, __FILE__, __LINE__, 0, message);
+    topLevelContext.warning(json);
+  } else {
+    topLevelContext.warning(message);
+  }
+}
+
+void StructuredLoggingProcessContext::error(kj::StringPtr message) const {
+  if (useStructuredLogging) {
+    auto json = buildJsonLogMessage(kj::LogSeverity::ERROR, __FILE__, __LINE__, 0, message);
+    topLevelContext.error(json);
+  } else {
+    topLevelContext.error(message);
+  }
+}
+
+void StructuredLoggingProcessContext::exitError(kj::StringPtr message) {
+  if (useStructuredLogging) {
+    auto json = buildJsonLogMessage(kj::LogSeverity::ERROR, __FILE__, __LINE__, 0, message);
+    topLevelContext.exitError(json);
+  } else {
+    topLevelContext.exitError(message);
+  }
+}
+
+void StructuredLoggingProcessContext::exitInfo(kj::StringPtr message) {
+  if (useStructuredLogging) {
+    auto json = buildJsonLogMessage(kj::LogSeverity::INFO, __FILE__, __LINE__, 0, message);
+    topLevelContext.exitInfo(json);
+  } else {
+    topLevelContext.exitInfo(message);
+  }
+}
+
+void StructuredLoggingProcessContext::increaseLoggingVerbosity() {
+  topLevelContext.increaseLoggingVerbosity();
 }
 
 }  // namespace workerd::server
