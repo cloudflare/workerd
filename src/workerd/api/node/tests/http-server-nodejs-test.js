@@ -27,9 +27,10 @@ const globalServer = http.createServer((req, res) => {
   res.end('Hello, World!');
 });
 
+globalServer.listen(9090);
+
 export const testGlobalHttpServe = {
   async test(_ctrl, env) {
-    globalServer.listen(9090);
     strictEqual(globalServer.listening, true);
     strictEqual(globalServer.address().port, 9090);
 
