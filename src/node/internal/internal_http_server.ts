@@ -133,6 +133,9 @@ export class Server
     );
   }
 
+  // Failing to call close() on a http server may result in the server being leaked.
+  // To prevent this, call close() when you're done with the server, or use
+  // explicit resource management. (example: await using s = createServer())
   close(callback?: VoidFunction): this {
     httpServerPreClose(this);
     if (this.#port != null) {

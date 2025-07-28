@@ -1,6 +1,9 @@
 import http from 'node:http';
 import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
-import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
+import {
+  nodeCompatHttpServerHandler,
+  WorkerEntrypoint,
+} from 'cloudflare:workers';
 import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
@@ -13,13 +16,27 @@ export const checkPortsSetCorrectly = {
   },
 };
 
-const globalServer = http.createServer();
-globalServer.listen(9090);
+export class GlobalService extends WorkerEntrypoint {}
+Object.assign(
+  GlobalService.prototype,
+  nodeCompatHttpServerHandler({ port: 9090 })
+);
+
+const globalServer = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Hello, World!');
+});
 
 export const testGlobalHttpServe = {
   async test(_ctrl, env) {
+    globalServer.listen(9090);
     strictEqual(globalServer.listening, true);
     strictEqual(globalServer.address().port, 9090);
+
+    const res = await env.GLOBAL_SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'Hello, World!');
+
     globalServer.close();
   },
 };

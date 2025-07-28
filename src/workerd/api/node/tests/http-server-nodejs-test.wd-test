@@ -12,6 +12,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "SERVICE", service = "http-server-nodejs-test" ),
           ( name = "PONG_SERVER_PORT", fromEnvironment = "PONG_SERVER_PORT" ),
+          ( name = "GLOBAL_SERVICE", service = (name = "http-server-nodejs-test", entrypoint = "GlobalService") ),
         ],
       )
     ),
