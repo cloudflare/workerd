@@ -71,15 +71,12 @@ export const kConnectionsCheckingInterval = Symbol(
 
 let serverRegistry: FinalizationRegistry<number> | null = null;
 
-// Since finalization registry is only available under a specific compat flag,
-// let's check if it's enabled to preserve backward compatibility.
+// The finalization registry is only available under the `jsWeakRef` flag
 if (flags.jsWeakRef) {
   serverRegistry = new FinalizationRegistry((port) => {
     portMapper.delete(port);
   });
 }
-
-export type StreamController = ReadableStreamDefaultController<Uint8Array>;
 
 export type DataWrittenEvent = {
   index: number;
@@ -151,9 +148,11 @@ export class Server
       serverRegistry?.unregister(this);
       this.port = null;
     }
-    this.emit('close');
+    if (typeof callback === 'function') {
+      this.on('close', callback);
+    }
     queueMicrotask(() => {
-      callback?.();
+      this.emit('close');
     });
     return this;
   }
@@ -187,9 +186,14 @@ export class Server
 
   async #onRequest(request: Request): Promise<Response> {
     const { incoming, response } = this.#toReqRes(request);
-    this.emit('connection', this, incoming);
-    this.emit('request', incoming, response);
-    return getServerResponseFetchResponse(response);
+    try {
+      this.emit('connection', this, incoming);
+      this.emit('request', incoming, response);
+      return await getServerResponseFetchResponse(response);
+    } catch (error: unknown) {
+      response.destroy(error);
+      throw error;
+    }
   }
 
   #toReqRes(request: Request): {
@@ -205,7 +209,7 @@ export class Server
       if (key === 'host') {
         // By default fetch implementation will join "host" header values with a comma.
         // But in order to be node.js compatible, we need to select the first if possible.
-        headers.push(key, value.split(', ').at(0) as string);
+        headers.push(key, value.split(', ', 1).at(0) as string);
       } else {
         headers.push(key, value);
       }
@@ -222,11 +226,12 @@ export class Server
 
   listen(...args: unknown[]): this {
     const [options, callback] = _normalizeArgs(args);
+    let port: number | undefined;
     if (typeof options.port === 'number' || typeof options.port === 'string') {
-      validatePort(options.port, 'options.port');
+      port = validatePort(options.port, 'options.port');
     }
 
-    if (!('port' in options)) {
+    if (port == null) {
       throw new ERR_INVALID_ARG_VALUE(
         'options',
         options,
@@ -234,7 +239,7 @@ export class Server
       );
     }
 
-    if (this.port != null || portMapper.has(Number(options.port))) {
+    if (this.port != null || portMapper.has(port)) {
       throw new ERR_SERVER_ALREADY_LISTEN();
     }
 
@@ -242,7 +247,7 @@ export class Server
       this.once('listening', callback as (...args: unknown[]) => unknown);
     }
 
-    this.port = this.#findSuitablePort(Number(options.port));
+    this.port = this.#findSuitablePort(port);
     portMapper.set(this.port, { fetch: this.#onRequest.bind(this) });
     serverRegistry?.register(this, this.port, this);
     queueMicrotask(() => {
@@ -271,10 +276,12 @@ export class Server
     throw new Error('Failed to find a suitable port after 10 attempts');
   }
 
-  getConnections(_cb?: (err: Error | null, count: number) => void): this {
-    // This method is originally implemented in net.Server.
-    // Since we don't implement net.Server yet, we provide this stub implementation for now.
-    // TODO(soon): Revisit this once we implement net.Server
+  getConnections(callback?: (err: Error | null, count: number) => void): this {
+    if (callback) {
+      queueMicrotask(() => {
+        callback(null, 0);
+      });
+    }
     return this;
   }
 
@@ -300,12 +307,10 @@ export class Server
   }
 
   get maxConnections(): number {
-    // TODO(soon): Find a correct value for this.
     return Infinity;
   }
 
   get connections(): number {
-    // TODO(soon): Implement this.
     return 0;
   }
 
@@ -344,7 +349,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   statusMessage = 'unknown';
 
   #fetchResponse: Promise<Response>;
-  #encoder = new TextEncoder();
 
   static {
     getServerResponseFetchResponse = (
@@ -370,7 +374,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
     const { promise, resolve, reject } = Promise.withResolvers<Response>();
 
-    let streamController: StreamController | null = null;
+    let streamController: ReadableStreamController<Uint8Array> | null = null;
     const chunks: (Buffer | Uint8Array)[] = [];
     const state: { bytesWritten: number; contentLength: number | null } = {
       bytesWritten: 0,
@@ -393,7 +397,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       }
 
       if (streamController) {
-        streamController.enqueue(chunk);
+        if (chunk.length > 0) {
+          streamController.enqueue(chunk);
+        }
       } else {
         chunks[event.index] = chunk;
       }
@@ -444,7 +450,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     statusCode: number;
     statusText: string;
     sentHeaders: [header: string, value: string][];
-    onStreamStart: (controller: StreamController) => void;
+    onStreamStart: (controller: ReadableStreamController<Uint8Array>) => void;
     state: { bytesWritten: number; contentLength: number | null };
   }): Response {
     const headers = new Headers(sentHeaders);
@@ -452,6 +458,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
     if (this._hasBody) {
       body = new ReadableStream<Uint8Array>({
+        type: 'bytes',
         start: (controller): void => {
           onStreamStart(controller);
           this.once('finish', () => {
@@ -468,9 +475,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
               controller.close();
             }
           });
-          this.on('error', (error) => {
-            controller.error(error);
-          });
+          this.on('error', controller.error.bind(controller));
         },
         cancel: (reason: unknown): void => {
           this.destroy(reason);
@@ -495,9 +500,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         data = data.slice(this.writtenHeaderBytes);
       }
 
-      return encoding == null || encoding === 'utf8' || encoding === 'utf-8'
-        ? this.#encoder.encode(data)
-        : Buffer.from(data, encoding);
+      return Buffer.from(data, encoding ?? undefined);
     }
 
     return data ?? Buffer.alloc(0);
@@ -566,7 +569,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     let headers;
     if (this[kOutHeaders]) {
       // Slow-case: when progressive API and header fields are passed.
-      let k;
       if (Array.isArray(obj)) {
         if (obj.length % 2 !== 0) {
           throw new ERR_INVALID_ARG_VALUE('headers', obj);
@@ -577,24 +579,16 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         // existing conflicts, then use appendHeader.
 
         for (let n = 0; n < obj.length; n += 2) {
-          k = obj[n + 0];
-          this.removeHeader(String(k));
+          this.removeHeader(`${obj[n]}`);
         }
 
         for (let n = 0; n < obj.length; n += 2) {
-          k = obj[n];
-          if (k) {
-            this.appendHeader(`${k}`, obj[n + 1] as OutgoingHttpHeader);
-          }
+          this.appendHeader(`${obj[n]}`, obj[n + 1] as OutgoingHttpHeader);
         }
       } else if (obj) {
-        const keys = Object.keys(obj);
-        // Retain for(;;) loop for performance reasons
-        // Refs: https://github.com/nodejs/node/pull/30958
-        for (let i = 0; i < keys.length; i++) {
-          k = keys[i];
-          if (k) {
-            this.setHeader(k, obj[k] as OutgoingHttpHeader);
+        for (const key of Object.keys(obj)) {
+          if (obj[key]) {
+            this.setHeader(key, obj[key]);
           }
         }
       }
@@ -611,11 +605,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
     const statusLine = `HTTP/1.1 ${statusCode} ${this.statusMessage}\r\n`;
 
-    if (
-      statusCode === 204 ||
-      statusCode === 304 ||
-      (statusCode >= 100 && statusCode <= 199)
-    ) {
+    if (statusCode === 204 || statusCode === 304) {
       // RFC 2616, 10.2.5:
       // The 204 response MUST NOT include a message-body, and thus is always
       // terminated by the first empty line after the header fields.

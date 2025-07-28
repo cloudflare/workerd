@@ -892,6 +892,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   enableNodejsHttpServerModules @103 :Bool
       $compatEnableFlag("enable_nodejs_http_server_modules")
-      $compatDisableFlag("disable_nodejs_http_server_modules");
+      $compatDisableFlag("disable_nodejs_http_server_modules")
+      $experimental;
   # Enables Node.js http server related modules such as node:_http_server
+  # This flag is experimental and may change or be removed in future versions.
+  # It is required to use this flag with `enable_nodejs_http_modules` since
+  # it enables the usage of http related node.js modules, and this flag enables
+  # the methods exposed by the node.js http modules.
+  # TODO(soon): Add a implifiedByAfter when node.js is enabled as well as
+  # `enable_nodejs_http_modules`
 }

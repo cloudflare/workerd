@@ -103,8 +103,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   async #tryRead(): Promise<void> {
     if (this._stream == null) return;
 
-    this.#reader ??= this._stream.getReader();
     try {
+      this.#reader ??= this._stream.getReader();
       const data = await this.#reader.read();
       if (data.done) {
         // Done with stream, tell Readable we have no more data;
@@ -140,9 +140,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       return;
     }
 
-    this.#tryRead().catch(() => {
-      /* Ignore errors */
-    });
+    this.#tryRead(); // eslint-disable-line @typescript-eslint/no-floating-promises
   }
 
   #onError(error: Error | null, cb: (err?: Error | null) => void): void {

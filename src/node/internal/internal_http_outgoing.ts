@@ -125,6 +125,9 @@ class MessageBuffer {
 
     if (this.#corked === 0) {
       this.#onWrite(this.#index++, entry);
+      queueMicrotask(() => {
+        callback?.();
+      });
       callback?.();
     } else {
       const index = this.#index++;
@@ -153,6 +156,7 @@ class MessageBuffer {
   }
 
   get writableHighWaterMark(): number {
+    // TODO(soon): Make this configurable.
     return 64 * 1024;
   }
 
