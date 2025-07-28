@@ -154,6 +154,14 @@ class MessageBuffer {
     // If fully uncorked, flush all buffered writes
     if (this.#corked <= 0) {
       const writes = this.#bufferedWrites.splice(0);
+      // TODO(soon): As a later optimization, reduce the unique calls to onWrite,
+      //
+      // In Node.js, when the writable is uncorked
+      // and the Writable provides an implementation of writev, then calling uncork will
+      // trigger a single call to writev rather than multiple calls to write, which is
+      // going to be far more efficient overall as it requires less scheduling. For instance,
+      // here, if I write 100 small chunks while corked, then uncork, we're going to end up
+      // with 100 separate calls to #onWrite.
       for (const { index, entry } of writes) {
         this.#onWrite(index, entry);
       }
