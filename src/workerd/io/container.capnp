@@ -34,6 +34,9 @@ interface Container @0x9aaceefc06523bca {
     # If null, the container will start with the environment variables defined in its image.
     # The format is defined as a list of `NAME=VALUE`.
     # The container runtime should validate the environment variables input.
+
+    name @3 :Text;
+    # The user-specified name of the container.
   }
 
   monitor @2 () -> (exitCode: Int32);

@@ -14,8 +14,11 @@ export class DurableObjectExample extends DurableObject {
 
     // Start container with valid configuration
     await container.start({
+      name: 'test-container-exit-code',
       entrypoint: ['node', 'nonexistant.js'],
     });
+
+    assert.strictEqual(container.name, 'test-container-exit-code');
 
     let exitCode = undefined;
     await container.monitor().catch((err) => {
@@ -37,10 +40,13 @@ export class DurableObjectExample extends DurableObject {
 
     // Start container with valid configuration
     await container.start({
+      name: 'test-container-basic',
       entrypoint: ['node', 'app.js'],
       env: { A: 'B', C: 'D', L: 'F' },
       enableInternet: true,
     });
+
+    assert.strictEqual(container.name, 'test-container-basic');
 
     const monitor = container.monitor().catch((_err) => {});
 

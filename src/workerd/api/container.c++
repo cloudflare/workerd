@@ -14,7 +14,8 @@ namespace workerd::api {
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
-      running(running) {}
+      running(running),
+      name() {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
@@ -45,6 +46,11 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
       list.set(i, str(field->name, "=", field->value));
     }
+  }
+
+  KJ_IF_SOME(name_, options.name) {
+    req.setName(name_);
+    name = kj::mv(name_);
   }
 
   IoContext::current().addTask(req.sendIgnoringResult());

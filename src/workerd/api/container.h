@@ -27,14 +27,19 @@ class Container: public jsg::Object {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
+    jsg::Optional<kj::String> name;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
-    JSG_STRUCT(entrypoint, enableInternet, env);
+    JSG_STRUCT(entrypoint, enableInternet, env, name);
   };
 
   bool getRunning() {
     return running;
+  }
+
+  jsg::Optional<kj::StringPtr> getName() {
+    return name;
   }
 
   // Methods correspond closely to the RPC interface in `container.capnp`.
@@ -48,6 +53,7 @@ class Container: public jsg::Object {
 
   JSG_RESOURCE_TYPE(Container) {
     JSG_READONLY_PROTOTYPE_PROPERTY(running, getRunning);
+    JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
     JSG_METHOD(start);
     JSG_METHOD(monitor);
     JSG_METHOD(destroy);
@@ -62,6 +68,7 @@ class Container: public jsg::Object {
  private:
   IoOwn<rpc::Container::Client> rpcClient;
   bool running;
+  kj::Maybe<kj::String> name;
 
   kj::Maybe<jsg::Value> destroyReason;
 
