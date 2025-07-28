@@ -105,6 +105,7 @@ class MessageBuffer {
   #corked = 0;
   #index = 0;
   #onWrite: (index: number, entry: WrittenDataBufferEntry) => void;
+  #bufferedWrites: { index: number; entry: WrittenDataBufferEntry }[] = [];
 
   constructor(onWrite: (index: number, entry: WrittenDataBufferEntry) => void) {
     this.#onWrite = onWrite;
@@ -123,15 +124,17 @@ class MessageBuffer {
       written: true,
     };
 
+    const index = this.#index++;
+
     if (this.#corked === 0) {
-      this.#onWrite(this.#index++, entry);
+      this.#onWrite(index, entry);
       queueMicrotask(() => {
         callback?.();
       });
     } else {
-      const index = this.#index++;
+      // Buffer the write when corked
+      this.#bufferedWrites.push({ index, entry });
       queueMicrotask(() => {
-        this.#onWrite(index, entry);
         callback?.();
       });
     }
@@ -146,11 +149,24 @@ class MessageBuffer {
   uncork(): void {
     if (this.#corked > 0) {
       this.#corked--;
+
+      // If fully uncorked, flush all buffered writes
+      if (this.#corked === 0) {
+        const writes = this.#bufferedWrites.splice(0);
+        for (const { index, entry } of writes) {
+          this.#onWrite(index, entry);
+        }
+      }
     }
   }
 
   get writableLength(): number {
-    // Since we process writes immediately, length is always 0
+    // Return the total buffered data length when corked
+    if (this.#corked > 0) {
+      return this.#bufferedWrites.reduce((total, { entry }) => {
+        return total + (entry.length || 0);
+      }, 0);
+    }
     return 0;
   }
 

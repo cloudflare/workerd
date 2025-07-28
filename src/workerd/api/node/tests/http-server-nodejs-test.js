@@ -507,6 +507,36 @@ export const testContentLengthEnforcement = {
   },
 };
 
+// Test cork/uncork mechanisms
+export const testCorkUncorkBasic = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+
+      // Cork the response
+      res.cork();
+
+      // Multiple writes while corked - should buffer
+      res.write('chunk1');
+      res.write('chunk2');
+      res.write('chunk3');
+      strictEqual(res.writableLength, 12);
+
+      // Uncork to flush all writes
+      res.uncork();
+      strictEqual(res.writableLength, 0);
+
+      res.end('final');
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'chunk1chunk2chunk3final');
+  },
+};
+
 export default nodeCompatHttpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
