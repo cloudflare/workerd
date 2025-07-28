@@ -383,26 +383,87 @@ export const testInvalidPorts = {
 export const consumeRequestPayloadData = {
   async test(_ctrl, env) {
     await using server = http.createServer((req, res) => {
-      strictEqual(req.method, 'POST');
-      let data = '';
-      req.setEncoding('utf8');
-      req.on('data', (d) => (data += d));
-      req.on('end', () => {
-        strictEqual(data, 'hello world');
-        res.setHeaders(new Headers({ hello: 'world' }));
-        res.end(data + ' x2');
-      });
+      const path = req.url;
+
+      if (path === '/small') {
+        strictEqual(req.method, 'POST');
+        let data = '';
+        req.setEncoding('utf8');
+        req.on('data', (d) => (data += d));
+        req.on('end', () => {
+          strictEqual(data, 'hello world');
+          res.setHeaders(new Headers({ hello: 'world' }));
+          res.end(data + ' x2');
+        });
+      } else if (path === '/large-streaming') {
+        strictEqual(req.method, 'POST');
+        const dataEvents = [];
+        let totalBytes = 0;
+
+        req.on('data', (chunk) => {
+          dataEvents.push({
+            size: chunk.length,
+            firstByte: chunk[0],
+            lastByte: chunk[chunk.length - 1],
+          });
+          totalBytes += chunk.length;
+        });
+
+        req.on('end', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              totalEvents: dataEvents.length,
+              totalBytes,
+              firstEventSize: dataEvents[0]?.size,
+              lastEventSize: dataEvents[dataEvents.length - 1]?.size,
+              allSamePattern: dataEvents.every(
+                (e) => e.firstByte === e.lastByte
+              ),
+            })
+          );
+        });
+      }
     });
 
     server.listen(8080);
 
-    const res = await env.SERVICE.fetch('https://cloudflare.com', {
-      body: 'hello world',
-      method: 'POST',
-    });
-    strictEqual(res.status, 200);
-    strictEqual(await res.text(), 'hello world x2');
-    strictEqual(res.headers.get('hello'), 'world');
+    {
+      const res = await env.SERVICE.fetch('https://cloudflare.com/small', {
+        body: 'hello world',
+        method: 'POST',
+      });
+      strictEqual(res.status, 200);
+      strictEqual(await res.text(), 'hello world x2');
+      strictEqual(res.headers.get('hello'), 'world');
+    }
+
+    {
+      const largeData = Buffer.alloc(256 * 1024, 123); // 256KB of byte value 123
+      const res = await env.SERVICE.fetch(
+        'https://cloudflare.com/large-streaming',
+        {
+          body: largeData,
+          method: 'POST',
+        }
+      );
+      strictEqual(res.status, 200);
+
+      const result = JSON.parse(await res.text());
+      ok(
+        result.totalEvents > 1,
+        `Should have multiple data events, got ${result.totalEvents}`
+      );
+      strictEqual(result.totalBytes, 256 * 1024);
+      ok(
+        result.allSamePattern,
+        'All chunks should contain the same byte pattern'
+      );
+      ok(
+        result.firstEventSize > 0 && result.lastEventSize > 0,
+        'Events should have positive sizes'
+      );
+    }
   },
 };
 
