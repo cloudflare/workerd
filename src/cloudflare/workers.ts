@@ -95,7 +95,7 @@ export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
 
 export function nodeCompatHttpServerHandler(
   { port }: { port?: number } = {},
-  handlers: {} = {}
+  handlers: Record<string, unknown> = {}
 ): {
   fetch(request: Request): Promise<Response>;
 } {
@@ -104,6 +104,7 @@ export function nodeCompatHttpServerHandler(
       'Port is required when calling nodeCompatHttpServerHandler()'
     );
   }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (handlers == null || typeof handlers !== 'object') {
     throw new Error(
       'Handlers parameter passed to nodeCompatHttpServerHandler method must be an object'
