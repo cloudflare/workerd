@@ -1,4 +1,4 @@
 export interface Fetcher {
-  fetch: (request: Request) => Promise<Response>;
+  fetch: typeof fetch;
 }
 export const portMapper = new Map<number, Fetcher>();

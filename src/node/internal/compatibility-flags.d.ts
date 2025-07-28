@@ -2,8 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Keep this in sync with compatibility-date.capnp
-// TODO(soon): See if we can automatically generate this from the capnp file
+// TODO(soon): Use globalThis.Cloudflare rather than this module.
 export const formDataParserSupportsFiles: boolean;
 export const fetchRefusesUnknownProtocols: boolean;
 export const esiIncludeIsVoidTag: boolean;

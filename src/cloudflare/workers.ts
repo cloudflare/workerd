@@ -102,11 +102,14 @@ export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
     );
   }
   return {
+    // We intentionally omitted ctx and env variables. Users should use
+    // importable equivalents to access those values. For example, using
+    // import { env, waitUntil } from 'cloudflare:workers
     async fetch(request: Request): Promise<Response> {
       const instance = portMapper.get(port);
       if (!instance) {
         throw new Error(
-          `Http server with port ${port} not found. This is likely a bug with your code.`
+          `Http server with port ${port} not found. This is likely a bug with your code. You should check if server.listen() was called with the same port (${port})`
         );
       }
       return instance.fetch(request);

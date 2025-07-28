@@ -478,22 +478,17 @@ export const testContentLengthEnforcement = {
   },
 };
 
-// Test cork/uncork mechanisms
 export const testCorkUncorkBasic = {
   async test(_ctrl, env) {
     await using server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
 
-      // Cork the response
       res.cork();
-
-      // Multiple writes while corked - should buffer
       res.write('chunk1');
       res.write('chunk2');
       res.write('chunk3');
       strictEqual(res.writableLength, 12);
 
-      // Uncork to flush all writes
       res.uncork();
       strictEqual(res.writableLength, 0);
 
@@ -505,6 +500,83 @@ export const testCorkUncorkBasic = {
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
     strictEqual(await res.text(), 'chunk1chunk2chunk3final');
+  },
+};
+
+export const testBackpressureSignaling = {
+  async test(_ctrl, env) {
+    const events = [];
+
+    await using server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+
+      let writeCount = 0;
+      let drainCount = 0;
+
+      res.on('drain', () => {
+        drainCount++;
+        events.push({ type: 'drain', count: drainCount });
+        continueWriting();
+      });
+
+      const continueWriting = () => {
+        while (writeCount < 50) {
+          const chunk = Buffer.alloc(1024 * 32, writeCount % 256);
+          const canContinue = res.write(chunk);
+
+          strictEqual(typeof canContinue, 'boolean');
+          events.push({
+            type: 'write',
+            canContinue,
+            writeCount,
+            writableLength: res.writableLength,
+          });
+
+          writeCount++;
+
+          if (!canContinue) {
+            events.push({ type: 'backpressure', writeCount });
+            return;
+          }
+        }
+
+        res.end();
+      };
+
+      continueWriting();
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual((await res.arrayBuffer()).byteLength, 1638400);
+
+    const writeEvents = events.filter((e) => e.type === 'write');
+    const backpressureEvents = events.filter((e) => e.type === 'backpressure');
+    const drainEvents = events.filter((e) => e.type === 'drain');
+
+    strictEqual(writeEvents.length, 50);
+
+    writeEvents.forEach((e) => {
+      strictEqual(typeof e.canContinue, 'boolean');
+      strictEqual(typeof e.writableLength, 'number');
+      ok(e.writableLength >= 0);
+    });
+
+    if (backpressureEvents.length > 0) {
+      ok(
+        drainEvents.length > 0,
+        'Should emit drain events when backpressure occurs'
+      );
+
+      for (let i = 0; i < backpressureEvents.length; i++) {
+        ok(
+          drainEvents[i],
+          `Should have corresponding drain event for backpressure ${i}`
+        );
+      }
+    }
   },
 };
 
