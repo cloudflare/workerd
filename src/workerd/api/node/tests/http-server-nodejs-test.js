@@ -702,7 +702,32 @@ export const testBackpressureSignaling = {
   },
 };
 
-export default nodeCompatHttpServerHandler({ port: 8080 });
+export const testScheduled = {
+  async test(_ctrl, env) {
+    strictEqual(typeof env.SERVICE.scheduled, 'function');
+
+    await env.SERVICE.scheduled({
+      scheduledTime: Date.now(),
+      cron: '0 0 * * *',
+    });
+
+    strictEqual(scheduledCallCount, 1);
+  },
+};
+
+let scheduledCallCount = 0;
+
+export default nodeCompatHttpServerHandler(
+  { port: 8080 },
+  {
+    async scheduled(event) {
+      scheduledCallCount++;
+
+      strictEqual(typeof event.scheduledTime, 'number');
+      strictEqual(typeof event.cron, 'string');
+    },
+  }
+);
 
 // Relevant Node.js tests
 // - [x] test/parallel/test-http-server-async-dispose.js

@@ -93,7 +93,10 @@ export const env = new Proxy(
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
 
-export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
+export function nodeCompatHttpServerHandler(
+  { port }: { port?: number } = {},
+  handlers: {} = {}
+): {
   fetch(request: Request): Promise<Response>;
 } {
   if (port == null) {
@@ -101,7 +104,13 @@ export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
       'Port is required when calling nodeCompatHttpServerHandler()'
     );
   }
-  return {
+  if (handlers == null || typeof handlers !== 'object') {
+    throw new Error(
+      'Handlers parameter passed to nodeCompatHttpServerHandler method must be an object'
+    );
+  }
+
+  return Object.assign(handlers, {
     // We intentionally omitted ctx and env variables. Users should use
     // importable equivalents to access those values. For example, using
     // import { env, waitUntil } from 'cloudflare:workers
@@ -117,5 +126,5 @@ export function nodeCompatHttpServerHandler({ port }: { port?: number } = {}): {
       }
       return instance.fetch(request);
     },
-  };
+  });
 }
