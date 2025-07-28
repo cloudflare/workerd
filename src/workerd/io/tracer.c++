@@ -196,7 +196,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     // TODO(o11y): Provide correct nested spans
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
-    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span);
     tracing::InvocationSpanContext context = [&]() {
       if (topLevelContext.isTrigger()) {
         return topLevelContext.clone();
