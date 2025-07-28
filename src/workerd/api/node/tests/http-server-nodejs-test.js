@@ -59,19 +59,46 @@ export const testHttpServerAsyncDispose = {
 // Test is taken from test/parallel/test-http-server-incomingmessage-destroy.js
 export const testHttpServerIncomingMessageDestroy = {
   async test(_ctrl, env) {
+    const onErrorFn = mock.fn();
     await using server = http.createServer((req, res) => {
-      req.on('error', (err) => {
-        res.statusCode = 400;
-        res.end('Request destroyed: ' + err.message);
-      });
-      req.destroy(new Error('Destroy test'));
+      const path = req.url;
+
+      if (path === '/destroy-with-error') {
+        req.on('error', (err) => {
+          res.statusCode = 400;
+          res.end('Request destroyed: ' + err.message);
+        });
+        req.destroy(new Error('Destroy test'));
+      } else if (path === '/destroy-without-error') {
+        req.once('error', onErrorFn);
+        req.on('close', () => {
+          res.statusCode = 200;
+          res.end('Request destroyed without error');
+        });
+        req.destroy();
+      } else if (path === '/response-destroy-with-error') {
+        res.destroy(new Error('Response destroy test'));
+      }
     });
 
     server.listen(8080);
 
-    const res = await env.SERVICE.fetch('https://cloudflare.com');
-    strictEqual(res.status, 400);
-    strictEqual(await res.text(), 'Request destroyed: Destroy test');
+    {
+      const res = await env.SERVICE.fetch(
+        'https://cloudflare.com/destroy-with-error'
+      );
+      strictEqual(res.status, 400);
+      strictEqual(await res.text(), 'Request destroyed: Destroy test');
+    }
+
+    {
+      const res = await env.SERVICE.fetch(
+        'https://cloudflare.com/destroy-without-error'
+      );
+      strictEqual(res.status, 200);
+      strictEqual(await res.text(), 'Request destroyed without error');
+      strictEqual(onErrorFn.mock.callCount(), 0);
+    }
   },
 };
 
