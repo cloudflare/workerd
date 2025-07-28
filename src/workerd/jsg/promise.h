@@ -618,6 +618,7 @@ class PromiseWrapper {
     if (handle->IsPromise()) {
       auto promise = handle.As<v8::Promise>();
       if constexpr (!isVoid<T>() && !isV8Ref<T>()) {
+        js.v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
         // Add a .then() to unwrap the promise's resolution (i.e. convert it from JS to C++).
         // Note that we don't need to handle the rejection case here as there is no wrapping
         // applied to exception values, so we just let it propagate through.

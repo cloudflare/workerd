@@ -282,6 +282,7 @@ wd_cc_library(
     src = f,
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [":jsg"],
+    size = "enormous",
 ) for f in glob(
     ["*-test.c++"],
     exclude = [

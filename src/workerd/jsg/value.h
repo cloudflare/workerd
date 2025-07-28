@@ -516,6 +516,8 @@ class StringWrapper {
   template <StringLike T>
   kj::Maybe<T> tryUnwrap(
       Lock& js, v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
+        KJ_DBG("Converting FAST ONE BYTE STRING");
+    // js.v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
     size_t utf8_length = simdutf::utf8_length_from_latin1(handle.data, handle.length);
     kj::Array<char> buf = kj::heapArray<char>(utf8_length + 1);
     buf[utf8_length] = '\0';

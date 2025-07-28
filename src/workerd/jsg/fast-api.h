@@ -63,8 +63,7 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
 
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename T>
-concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>> &&
-    !isKjPromise<kj::RemoveConst<kj::Decay<T>>> && !isJsgPromise<kj::RemoveConst<kj::Decay<T>>>;
+concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>
@@ -106,6 +105,8 @@ struct FastApiJSGToV8 {
   using value = v8::Local<v8::Value>;
 };
 
+// TODO(soon): Address this.
+// Removing v8::FastOneByteString will fix GC related issues.
 template <typename T>
   requires StringLike<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiJSGToV8<T> {
