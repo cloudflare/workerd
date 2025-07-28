@@ -6,7 +6,7 @@
     "strict": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "types": ["@types/node", "@types/debug"],
+    "types": ["@types/node"],
     "sourceMap": true,
     "baseUrl": ".",
     "rootDir": ".",
