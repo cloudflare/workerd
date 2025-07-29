@@ -1,5 +1,12 @@
 import http from 'node:http';
-import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
+import {
+  strictEqual,
+  ok,
+  throws,
+  notStrictEqual,
+  rejects,
+  match,
+} from 'node:assert';
 import {
   nodeCompatHttpServerHandler,
   WorkerEntrypoint,
@@ -181,6 +188,91 @@ export const testHttpServerMultiHeaders = {
     });
 
     await promise;
+  },
+};
+
+// Test is taken from test/parallel/test-http-server-multiheaders2.js
+export const testHttpServerMultiHeaders2 = {
+  async test(_ctrl, env) {
+    // One difference between Node.js and Cloudflare workers is that Cookie is allowed
+    // to have multiple values but in Workers it is not supported.
+    const multipleAllowed = [
+      'Accept',
+      'Accept-Charset',
+      'Accept-Encoding',
+      'Accept-Language',
+      'Connection',
+      'DAV', // GH-2750
+      'Pragma', // GH-715
+      'Link', // GH-1187
+      'WWW-Authenticate', // GH-1083
+      'Proxy-Authenticate', // GH-4052
+      'Sec-Websocket-Extensions', // GH-2764
+      'Sec-Websocket-Protocol', // GH-2764
+      'Via', // GH-6660
+
+      // not a special case, just making sure it's parsed correctly
+      'X-Forwarded-For',
+
+      // Make sure that unspecified headers is treated as multiple
+      'Some-Random-Header',
+      'X-Some-Random-Header',
+    ];
+
+    const multipleForbidden = [
+      'Content-Type',
+      'User-Agent',
+      'Referer',
+      'Host',
+      'Authorization',
+      'Proxy-Authorization',
+      'If-Modified-Since',
+      'If-Unmodified-Since',
+      'From',
+      'Location',
+      'Max-Forwards',
+    ];
+
+    await using server = http.createServer(function (req, res) {
+      for (const header of multipleForbidden) {
+        const value = req.headers[header.toLowerCase()];
+        strictEqual(
+          value,
+          'foo',
+          `multiple forbidden header parsed incorrectly: ${header} with value: "${value}"`
+        );
+      }
+      for (const header of multipleAllowed) {
+        const sep = header.toLowerCase() === 'cookie' ? '; ' : ', ';
+        strictEqual(
+          req.headers[header.toLowerCase()],
+          `foo${sep}bar`,
+          `multiple allowed header parsed incorrectly: ${header}`
+        );
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('EOF');
+    });
+
+    function makeHeader(value) {
+      return function (header) {
+        return [header, value];
+      };
+    }
+
+    const headers = []
+      .concat(multipleAllowed.map(makeHeader('foo')))
+      .concat(multipleForbidden.map(makeHeader('foo')))
+      .concat(multipleAllowed.map(makeHeader('bar')))
+      .concat(multipleForbidden.map(makeHeader('bar')));
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com/', {
+      headers,
+    });
+    strictEqual(res.status, 200);
   },
 };
 
@@ -732,8 +824,6 @@ export default nodeCompatHttpServerHandler(
 // Relevant Node.js tests
 // - [x] test/parallel/test-http-server-async-dispose.js
 // - [ ] test/parallel/test-http-server-capture-rejections.js
-// - [ ] test/parallel/test-http-server-client-error.js
-// - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-close-idle-wait-response.js
 // - [ ] test/parallel/test-http-server-close-idle.js
 // - [ ] test/parallel/test-http-server-consumed-timeout.js
@@ -744,12 +834,10 @@ export default nodeCompatHttpServerHandler(
 // - [x] test/parallel/test-http-server-incomingmessage-destroy.js
 // - [x] test/parallel/test-http-server-method.query.js
 // - [x] test/parallel/test-http-server-multiheaders.js
-// - [ ] test/parallel/test-http-server-multiheaders2.js
-// - [ ] test/parallel/test-http-server-multiple-client-error.js
+// - [x] test/parallel/test-http-server-multiheaders2.js
 // - [x] test/parallel/test-http-server-non-utf8-header.js
 // - [x] test/parallel/test-http-server-options-incoming-message.js
 // - [x] test/parallel/test-http-server-options-server-response.js
-// - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-body.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-request-timeout-interrupted-body.js
@@ -766,7 +854,9 @@ export default nodeCompatHttpServerHandler(
 // - [ ] test/parallel/test-http-server-connection-list-when-close.js
 // - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-clear-timer.js
+// - [ ] test/parallel/test-http-server-client-error.js
 // - [ ] test/parallel/test-http-server-close-all.js
+// - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-de-chunked-trailer.js
 // - [ ] test/parallel/test-http-server-delete-parser.js
 // - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
@@ -776,6 +866,8 @@ export default nodeCompatHttpServerHandler(
 // - [ ] test/parallel/test-http-server-keepalive-end.js
 // - [ ] test/parallel/test-http-server-keepalive-req-gc.js
 // - [ ] test/parallel/test-http-server-options-highwatermark.js
+// - [ ] test/parallel/test-http-server-multiple-client-error.js
+// - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
 // - [ ] test/parallel/test-http-server-reject-cr-no-lf.js
 // - [ ] test/parallel/test-http-server-response-standalone.js
 // - [ ] test/parallel/test-http-server-stale-close.js

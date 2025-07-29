@@ -77,6 +77,27 @@ export type DataWrittenEvent = {
   entry: WrittenDataBufferEntry;
 };
 
+// By default Node.js forbids the following headers to be joined by comma.
+// Cloudflare workers implementation of Server, uses Fetch and by default
+// fetch joins them. Therefore, we need to maintain this list of headers
+// to filter and only return the first match to be Node.js compatible.
+//
+// For more reference, here is a Node.js test that validates this behavior:
+// https://github.com/nodejs/node/blob/af77e4bf2f8bee0bc23f6ee129d6ca97511d34b9/test/parallel/test-http-server-multiheaders2.js
+const multipleForbiddenHeaders = [
+  'host',
+  'content-type',
+  'user-agent',
+  'referer',
+  'authorization',
+  'proxy-authorization',
+  'if-modified-since',
+  'if-unmodified-since',
+  'from',
+  'location',
+  'max-forwards',
+];
+
 export class Server
   extends EventEmitter
   implements _Server, BaseWithHttpOptions
@@ -202,8 +223,8 @@ export class Server
 
     const headers = [];
     for (const [key, value] of request.headers) {
-      if (key === 'host') {
-        // By default fetch implementation will join "host" header values with a comma.
+      if (multipleForbiddenHeaders.includes(key)) {
+        // By default fetch implementation will join the following header values with a comma.
         // But in order to be node.js compatible, we need to select the first if possible.
         headers.push(key, value.split(', ', 1).at(0) as string);
       } else {
