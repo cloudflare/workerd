@@ -873,6 +873,11 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this.uncork();
 
     this.finished = true;
+    // Synchronize with base Writable class state
+    if (this._writableState) {
+      // @ts-expect-error Accessing internal writable state property
+      this._writableState.finished = true;
+    }
 
     // Difference from Node.js -
     // In Node.js, if a socket exists, and there is no pending output data,
@@ -928,6 +933,12 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     }
     this.destroyed = true;
     this[kErrored] = err as Error;
+
+    // Emit 'close' event when destroyed
+    queueMicrotask(() => {
+      this._closed = true;
+      this.emit('close');
+    });
 
     return this;
   }

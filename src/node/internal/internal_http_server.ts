@@ -207,7 +207,15 @@ export class Server
     try {
       this.emit('connection', this, incoming);
       this.emit('request', incoming, response);
-      return await getServerResponseFetchResponse(response);
+      const fetchResponse = await getServerResponseFetchResponse(response);
+
+      // Emit 'close' event when the response is complete
+      queueMicrotask(() => {
+        response._closed = true;
+        response.emit('close');
+      });
+
+      return fetchResponse;
     } catch (error: unknown) {
       response.destroy(error);
       throw error;
