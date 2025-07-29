@@ -6,12 +6,14 @@
 import { urlToHttpOptions, isURL } from 'node-internal:internal_url';
 import { ClientRequest } from 'node-internal:internal_http_client';
 import { Agent, globalAgent } from 'node-internal:internal_https_agent';
-import { default as flags } from 'workerd:compatibility-flags';
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import { Server } from 'node-internal:internal_https_server';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions, RequestListener } from 'node:http';
 import type { ServerOptions } from 'node:https';
+
+const enableNodejsHttpServerModules =
+  !!Cloudflare.compatibilityFlags['enable_nodejs_http_server_modules'];
 
 export function request(
   url: string | URL | RequestOptions,
@@ -53,7 +55,7 @@ export function createServer(
   options: ServerOptions,
   handler: RequestListener
 ): Server {
-  if (!flags.enableNodejsHttpServerModules) {
+  if (!enableNodejsHttpServerModules) {
     throw new ERR_METHOD_NOT_IMPLEMENTED('createServer');
   }
 

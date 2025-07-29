@@ -21,7 +21,6 @@ import { parseEnv } from 'node-internal:internal_utils';
 import { Writable } from 'node-internal:streams_writable';
 import { writeSync } from 'node-internal:internal_fs_sync';
 import { ReadStream } from 'node-internal:internal_fs_streams';
-import { default as flags } from 'workerd:compatibility-flags';
 import type * as NodeFS from 'node:fs';
 import {
   platform,
@@ -35,6 +34,9 @@ import { validateString } from 'node-internal:validators';
 import type { Readable } from 'node-internal:streams_readable';
 
 export { platform, nextTick, emitWarning, env, features };
+
+const workerdExperimental = !!Cloudflare.compatibilityFlags['experimental'];
+const nodeJsCompat = !!Cloudflare.compatibilityFlags['nodejs_compat'];
 
 // For stdin, we emulate `node foo.js < /dev/null`
 export const stdin = new ReadStream(null, {
@@ -249,7 +251,7 @@ export function uptime(): number {
 }
 
 export function loadEnvFile(path: string | URL | Buffer = '.env'): void {
-  if (!flags.workerdExperimental || !flags.nodeJsCompat) {
+  if (!workerdExperimental || !nodeJsCompat) {
     throw new ERR_UNSUPPORTED_OPERATION();
   }
   const { readFileSync } = process.getBuiltinModule('fs') as typeof NodeFS;

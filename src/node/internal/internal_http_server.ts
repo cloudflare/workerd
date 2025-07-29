@@ -64,7 +64,9 @@ import type {
   OutgoingHttpHeader,
 } from 'node:http';
 import type { Socket, AddressInfo } from 'node:net';
-import { default as flags } from 'workerd:compatibility-flags';
+
+const enableNodejsHttpServerModules =
+  !!Cloudflare.compatibilityFlags['enable_nodejs_http_server_modules'];
 
 export const kConnectionsCheckingInterval = Symbol(
   'http.server.connectionsCheckingInterval'
@@ -103,7 +105,7 @@ export class Server
   #port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
-    if (!flags.enableNodejsHttpServerModules) {
+    if (!enableNodejsHttpServerModules) {
       throw new ERR_METHOD_NOT_IMPLEMENTED('Server');
     }
     super();
@@ -357,7 +359,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   }
 
   constructor(req: Req, options: ServerOptions = {}) {
-    if (!flags.enableNodejsHttpServerModules) {
+    if (!enableNodejsHttpServerModules) {
       throw new ERR_METHOD_NOT_IMPLEMENTED('ServerResponse');
     }
 
