@@ -6,6 +6,12 @@ export function setCwd(path: string): void;
 export const versions: Record<string, string>;
 export const platform: string;
 
+declare global {
+  const Cloudflare: {
+    readonly compatibilityFlags: Record<string, boolean>;
+  };
+}
+
 interface ErrorWithDetail extends Error {
   detail?: unknown;
 }
