@@ -254,7 +254,7 @@ kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
 kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
   KJ_SWITCH_ONEOF(event) {
     KJ_CASE_ONEOF(onset, tracing::Onset) {
-      return kj::str("Onset");
+      return onset.toString();
     }
     KJ_CASE_ONEOF(outcome, tracing::Outcome) {
       return kj::str("Outcome");
@@ -400,6 +400,10 @@ tracing::ScheduledEventInfo tracing::ScheduledEventInfo::clone() const {
   return ScheduledEventInfo(scheduledTime, kj::str(cron));
 }
 
+kj::String tracing::ScheduledEventInfo::toString() const {
+  return kj::str("ScheduledEventInfo");
+}
+
 tracing::AlarmEventInfo::AlarmEventInfo(kj::Date scheduledTime): scheduledTime(scheduledTime) {}
 
 tracing::AlarmEventInfo::AlarmEventInfo(rpc::Trace::AlarmEventInfo::Reader reader)
@@ -411,6 +415,10 @@ void tracing::AlarmEventInfo::copyTo(rpc::Trace::AlarmEventInfo::Builder builder
 
 tracing::AlarmEventInfo tracing::AlarmEventInfo::clone() const {
   return AlarmEventInfo(scheduledTime);
+}
+
+kj::String tracing::AlarmEventInfo::toString() const {
+  return kj::str("AlarmEventInfo");
 }
 
 tracing::QueueEventInfo::QueueEventInfo(kj::String queueName, uint32_t batchSize)
@@ -428,6 +436,10 @@ void tracing::QueueEventInfo::copyTo(rpc::Trace::QueueEventInfo::Builder builder
 
 tracing::QueueEventInfo tracing::QueueEventInfo::clone() const {
   return QueueEventInfo(kj::str(queueName), batchSize);
+}
+
+kj::String tracing::QueueEventInfo::toString() const {
+  return kj::str("QueueEventInfo");
 }
 
 tracing::EmailEventInfo::EmailEventInfo(kj::String mailFrom, kj::String rcptTo, uint32_t rawSize)
@@ -448,6 +460,10 @@ void tracing::EmailEventInfo::copyTo(rpc::Trace::EmailEventInfo::Builder builder
 
 tracing::EmailEventInfo tracing::EmailEventInfo::clone() const {
   return EmailEventInfo(kj::str(mailFrom), kj::str(rcptTo), rawSize);
+}
+
+kj::String tracing::EmailEventInfo::toString() const {
+  return kj::str("EmailEventInfo");
 }
 
 namespace {
@@ -481,6 +497,10 @@ void tracing::TraceEventInfo::copyTo(rpc::Trace::TraceEventInfo::Builder builder
 
 tracing::TraceEventInfo tracing::TraceEventInfo::clone() const {
   return TraceEventInfo(KJ_MAP(item, traces) { return item.clone(); });
+}
+
+kj::String tracing::TraceEventInfo::toString() const {
+  return kj::str("TraceEventInfo");
 }
 
 tracing::TraceEventInfo::TraceItem::TraceItem(kj::Maybe<kj::String> scriptName)
@@ -583,6 +603,14 @@ tracing::HibernatableWebSocketEventInfo::Type tracing::HibernatableWebSocketEven
       return Error{};
     }
   }
+}
+
+kj::String tracing::HibernatableWebSocketEventInfo::toString() const {
+  return kj::str("HibernatableWebSocketEventInfo");
+}
+
+kj::String tracing::CustomEventInfo::toString() const {
+  return kj::str("CustomEventInfo");
 }
 
 tracing::FetchResponseInfo::FetchResponseInfo(uint16_t statusCode): statusCode(statusCode) {}
@@ -895,6 +923,10 @@ void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) const {
 
 tracing::Resume tracing::Resume::clone() const {
   return Resume(attachment.map([](auto& attach) { return kj::heapArray<kj::byte>(attach); }));
+}
+
+kj::String tracing::Resume::toString() const {
+  return kj::str("Resume");
 }
 
 tracing::Hibernate::Hibernate() {}
@@ -1334,6 +1366,11 @@ tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
   };
 }
 
+kj::String tracing::Onset::WorkerInfo::toString() const {
+  return kj::str("WorkerInfo: ", scriptName, scriptVersion, dispatchNamespace, scriptId,
+      scriptTags /*kj::strArray(scriptTags, ", ")*/, entrypoint);
+}
+
 tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, FetchEventInfo) {
@@ -1374,6 +1411,10 @@ tracing::Onset tracing::Onset::clone() const {
   return Onset(cloneEventInfo(info), workerInfo.clone(), trigger.map([](const TriggerContext& ctx) {
     return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
   }));
+}
+
+kj::String tracing::Onset::toString() const {
+  return kj::str("Onset: ", info, ", ", workerInfo);
 }
 
 tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)

@@ -345,6 +345,7 @@ struct ScheduledEventInfo final {
 
   void copyTo(rpc::Trace::ScheduledEventInfo::Builder builder) const;
   ScheduledEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a Durable Object alarm request
@@ -359,6 +360,7 @@ struct AlarmEventInfo final {
 
   void copyTo(rpc::Trace::AlarmEventInfo::Builder builder) const;
   AlarmEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a queue worker request
@@ -374,6 +376,7 @@ struct QueueEventInfo final {
 
   void copyTo(rpc::Trace::QueueEventInfo::Builder builder) const;
   QueueEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes an email request
@@ -390,6 +393,7 @@ struct EmailEventInfo final {
 
   void copyTo(rpc::Trace::EmailEventInfo::Builder builder) const;
   EmailEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a legacy tail worker request
@@ -420,6 +424,7 @@ struct TraceEventInfo final {
 
   void copyTo(rpc::Trace::TraceEventInfo::Builder builder) const;
   TraceEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a hibernatable web socket event
@@ -444,12 +449,14 @@ struct HibernatableWebSocketEventInfo final {
   void copyTo(rpc::Trace::HibernatableWebSocketEventInfo::Builder builder) const;
   HibernatableWebSocketEventInfo clone() const;
   static Type readFrom(rpc::Trace::HibernatableWebSocketEventInfo::Reader reader);
+  kj::String toString() const;
 };
 
 // Describes a custom event
 struct CustomEventInfo final {
   explicit CustomEventInfo() {};
   CustomEventInfo(rpc::Trace::CustomEventInfo::Reader reader) {};
+  kj::String toString() const;
 };
 
 // Describes a fetch response
@@ -534,6 +541,7 @@ struct Resume final {
 
   void copyTo(rpc::Trace::Resume::Builder builder) const;
   Resume clone() const;
+  kj::String toString() const;
 };
 
 // Used to indicate that a tail stream is being hibernated.
@@ -734,6 +742,7 @@ struct Onset final {
     kj::Maybe<kj::String> entrypoint;
 
     WorkerInfo clone() const;
+    kj::String toString() const;
   };
 
   struct TriggerContext final {
@@ -764,6 +773,7 @@ struct Onset final {
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
+  kj::String toString() const;
 };
 
 // Helper functions to copy onset info to/from rpc reader
