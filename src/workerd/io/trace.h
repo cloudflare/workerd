@@ -634,6 +634,7 @@ struct CompleteSpan {
         startTime(startTime),
         endTime(endTime),
         tags(kj::mv(tags)) {}
+  kj::String toString() const;
 };
 
 namespace tracing {
