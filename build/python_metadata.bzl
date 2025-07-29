@@ -72,6 +72,7 @@ def _make_bundle_version_info(versions):
         if name != "development":
             entry["id"] = _bundle_id(**entry)
         entry["feature_flags"] = [entry["flag"]]
+        entry["feature_string_flags"] = [entry["enable_flag_name"]]
         if "packages" in entry:
             entry["packages"] = entry["packages"]["info"]["tag"]
         _add_integrity(entry)
@@ -92,6 +93,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "backport": "63",
         "integrity": "sha256-xrG65VJvao9GYH07C73Uq2jA9DW7O1DP16fiZo36Xq0=",
         "flag": "pythonWorkers",
+        "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
         "python_version": "3.12.1",
         "baseline_snapshot": "baseline-d13ce2f4a.bin",
@@ -121,6 +123,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "backport": "2",
         "integrity": "sha256-04qtaf3jr6q7mixWrpeASgYzTW1WHb9NEILBGl8M9hk=",
         "flag": "pythonWorkers20250116",
+        "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "3.1.58",
         "python_version": "3.12.7",
         "baseline_snapshot": "baseline-59fa311f4.bin",
@@ -149,5 +152,6 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_date": "dev",
         "id": "dev",
         "flag": "pythonWorkersDevPyodide",
+        "enable_flag_name": "python_workers_development",
     },
 ])

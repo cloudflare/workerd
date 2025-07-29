@@ -135,16 +135,30 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
   auto modules = KJ_MAP(entry, code.modules.fields) -> Worker::Script::Module {
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(text, kj::String) {
-        return {
-          .name = entry.name,
-          .content = Worker::Script::EsModule{.body = text},
-        };
+        if (entry.name.endsWith(".py"_kj)) {
+          return {
+            .name = entry.name,
+            .content = Worker::Script::PythonModule{.body = text},
+          };
+        }
+
+        if (entry.name.endsWith(".js"_kj)) {
+          return {
+            .name = entry.name,
+            .content = Worker::Script::EsModule{.body = text},
+          };
+        }
+
+        JSG_FAIL_REQUIRE(TypeError,
+            "Module name must end with '.js' or '.py' (or the content must be an object ",
+            "indicating the type explicitly). Got: ", entry.name);
       }
       KJ_CASE_ONEOF(module, Module) {
         uint fieldCount = (module.js != kj::none) + (module.cjs != kj::none) +
-            (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none);
+            (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none) +
+            (module.py != kj::none);
         JSG_REQUIRE(fieldCount == 1, TypeError,
-            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', or 'json'. "
+            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', 'json', or 'py'. "
             "Module '",
             entry.name, "' contained ", fieldCount, " properties.");
 
@@ -161,6 +175,8 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
             kj::StringPtr serialized =
                 module.serializedJson.emplace(js.serializeJson(kj::mv(json)));
             return Worker::Script::JsonModule{.body = serialized};
+          } else KJ_IF_SOME(py, module.py) {
+            return Worker::Script::PythonModule{.body = py};
           } else {
             KJ_UNREACHABLE;
           }
@@ -170,11 +186,26 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
     KJ_UNREACHABLE;
   };
 
+  bool isPython = code.mainModule.endsWith(".py"_kj);
+  // Disallow Python modules when the main module is a JS module, and vice versa.
+  for (auto& module: modules) {
+    auto isJsModule = module.content.is<Worker::Script::EsModule>() ||
+        module.content.is<Worker::Script::CommonJsModule>();
+    if (isPython && isJsModule) {
+      JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,
+          "\" is a JS module, but the main module is a Python module.");
+    }
+    auto isPythonModule = module.content.is<Worker::Script::PythonModule>();
+    if (!isPython && isPythonModule) {
+      JSG_FAIL_REQUIRE(TypeError, "Module \"", module.name,
+          "\" is a Python module, but the main module isn't a Python module.");
+    }
+  }
+
   return Worker::Script::ModulesSource{
     .mainModule = code.mainModule,
     .modules = kj::mv(modules),
-
-    .isPython = false,  // TODO(someday): Support Python.
+    .isPython = isPython,
   };
 }
 

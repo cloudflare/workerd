@@ -59,8 +59,9 @@ class WorkerLoader: public jsg::Object {
     jsg::Optional<kj::Array<const byte>> data;  // byte blob, imports as ArrayBuffer
     jsg::Optional<jsg::Value> json;             // arbitrary JS value, will be serialized to JSON
                                                 // and then parsed again when imported
+    jsg::Optional<kj::String> py;               // Python module
 
-    JSG_STRUCT(js, cjs, text, data, json);
+    JSG_STRUCT(js, cjs, text, data, json, py);
 
     // HACK: When we serialize the JSON in extractSource() we need to place the owned kj::String
     //   somewhere since Worker::Script::Source only gets a kj::StringPtr.
