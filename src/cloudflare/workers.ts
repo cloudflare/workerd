@@ -7,6 +7,7 @@
 
 import entrypoints from 'cloudflare-internal:workers';
 import innerEnv from 'cloudflare-internal:env';
+import { portMapper } from 'cloudflare-internal:http';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
@@ -91,3 +92,41 @@ export const env = new Proxy(
 );
 
 export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
+
+export function nodeCompatHttpServerHandler(
+  { port }: { port?: number } = {},
+  handlers: Record<string, unknown> = {}
+): {
+  fetch(request: Request): Promise<Response>;
+} {
+  if (port == null) {
+    throw new Error(
+      'Port is required when calling nodeCompatHttpServerHandler()'
+    );
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (handlers == null || typeof handlers !== 'object') {
+    throw new Error(
+      'Handlers parameter passed to nodeCompatHttpServerHandler method must be an object'
+    );
+  }
+
+  return Object.assign(handlers, {
+    // We intentionally omitted ctx and env variables. Users should use
+    // importable equivalents to access those values. For example, using
+    // import { env, waitUntil } from 'cloudflare:workers
+    async fetch(request: Request): Promise<Response> {
+      const instance = portMapper.get(port);
+      // TODO: Investigate supporting automatically assigned ports as being bound without a port configuration.
+      if (!instance) {
+        const error = new Error(
+          `Http server with port ${port} not found. This is likely a bug with your code. You should check if server.listen() was called with the same port (${port})`
+        );
+        // @ts-expect-error TS2339 We're imitating Node.js errors.
+        error.code = 'ERR_INVALID_ARG_VALUE';
+        throw error;
+      }
+      return instance.fetch(request);
+    },
+  });
+}

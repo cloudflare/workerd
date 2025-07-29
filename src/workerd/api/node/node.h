@@ -77,6 +77,10 @@ constexpr bool isNodeHttpModule(kj::StringPtr name) {
       name == "node:_http_incoming"_kj || name == "node:_http_agent"_kj || name == "node:https"_kj;
 }
 
+constexpr bool isNodeHttpServerModule(kj::StringPtr name) {
+  return name == "node:_http_server"_kj;
+}
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -109,6 +113,14 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     // for securing backward compatibility.
     if (isNodeHttpModule(module.getName())) {
       return featureFlags.getEnableNodejsHttpModules();
+    }
+
+    // We put node:_http_server and related features behind a compat flag
+    // for securing backward compatibility.
+    if (isNodeHttpServerModule(module.getName())) {
+      // TODO(soon): Check for featureFlags.getEnableNodejsHttpServerModules();
+      // once this feature is completed.
+      return featureFlags.getWorkerdExperimental();
     }
 
     return true;
