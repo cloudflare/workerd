@@ -298,6 +298,7 @@ struct FetchEventInfo final {
 
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
     Header clone() const;
+    kj::String toString() const;
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);
@@ -313,6 +314,7 @@ struct FetchEventInfo final {
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a jsrpc request
@@ -327,6 +329,7 @@ struct JsRpcEventInfo final {
 
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const;
   JsRpcEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a scheduled request
@@ -598,8 +601,10 @@ struct Attribute final {
 
   void copyTo(rpc::Trace::Attribute::Builder builder) const;
   Attribute clone() const;
+  kj::String toString() const;
 };
 using CustomInfo = kj::Array<Attribute>;
+kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 }  // namespace tracing
 
 struct CompleteSpan {
@@ -691,6 +696,7 @@ struct SpanOpen final {
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
+  kj::String toString() const;
 };
 
 // Marks the closing of a child span within the streaming tail session.
@@ -707,6 +713,7 @@ struct SpanClose final {
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
+  kj::String toString() const;
 };
 
 // The Onset and Outcome event types are special forms of SpanOpen and
@@ -776,6 +783,7 @@ struct Outcome final {
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
+  kj::String toString() const;
 };
 
 // A streaming tail worker receives a series of Tail Events. Tail events always
@@ -823,6 +831,9 @@ struct TailEvent final {
   void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
 };
+
+kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event);
+
 }  // namespace tracing
 
 enum class PipelineLogLevel {
