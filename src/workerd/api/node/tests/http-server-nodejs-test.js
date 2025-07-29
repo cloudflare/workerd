@@ -12,6 +12,8 @@ import {
   WorkerEntrypoint,
 } from 'cloudflare:workers';
 import { mock } from 'node:test';
+import url from 'node:url';
+import qs from 'node:querystring';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -851,6 +853,95 @@ export const testBackpressureSignaling = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server.js
+export const testHttpServer = {
+  async test(_ctrl, env) {
+    const invalid_options = ['foo', 42, true, []];
+
+    for (const option of invalid_options) {
+      throws(
+        () => {
+          new http.Server(option);
+        },
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
+    }
+
+    let request_number = 0;
+
+    await using server = http.createServer(function (req, res) {
+      res.id = request_number;
+      req.id = request_number++;
+
+      strictEqual(res.req, req);
+
+      if (req.id === 0) {
+        strictEqual(req.method, 'GET');
+        strictEqual(url.parse(req.url).pathname, '/hello');
+        strictEqual(qs.parse(url.parse(req.url).query).hello, 'world');
+        strictEqual(qs.parse(url.parse(req.url).query).foo, 'b==ar');
+      }
+
+      if (req.id === 1) {
+        strictEqual(req.method, 'POST');
+        strictEqual(url.parse(req.url).pathname, '/quit');
+      }
+
+      if (req.id === 2) {
+        strictEqual(req.headers['x-x'], 'foo');
+      }
+
+      if (req.id === 3) {
+        strictEqual(req.headers['x-x'], 'bar');
+        this.close();
+      }
+
+      setTimeout(function () {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.write(url.parse(req.url).pathname);
+        res.end();
+      }, 1);
+    });
+    server.listen(8080);
+
+    server.httpAllowHalfOpen = true;
+
+    const hello = await env.SERVICE.fetch(
+      'https://example.com/hello?hello=world&foo=b==ar'
+    );
+    strictEqual(hello.status, 200);
+    strictEqual(await hello.text(), '/hello');
+
+    const quit = await env.SERVICE.fetch('https://example.com/quit', {
+      method: 'POST',
+    });
+    strictEqual(quit.status, 200);
+    strictEqual(await quit.text(), '/quit');
+
+    const xxFoo = await env.SERVICE.fetch('https://example.com/', {
+      method: 'POST',
+      headers: {
+        'x-x': 'foo',
+      },
+    });
+    strictEqual(xxFoo.status, 200);
+    strictEqual(await xxFoo.text(), '/');
+
+    const xxBar = await env.SERVICE.fetch('https://example.com/', {
+      method: 'POST',
+      headers: {
+        'x-x': 'bar',
+      },
+    });
+    strictEqual(xxBar.status, 200);
+    strictEqual(await xxBar.text(), '/');
+
+    strictEqual(request_number, 4);
+  },
+};
+
 export const testScheduled = {
   async test(_ctrl, env) {
     strictEqual(typeof env.SERVICE.scheduled, 'function');
@@ -905,7 +996,7 @@ export default nodeCompatHttpServerHandler(
 // - [x] test/parallel/test-http-server-timeouts-validation.js
 // - [x] test/parallel/test-http-server-write-after-end.js
 // - [x] test/parallel/test-http-server-write-end-after-end.js
-// - [ ] test/parallel/test-http-server.js
+// - [x] test/parallel/test-http-server.js
 
 // Tests that does not apply to workerd.
 // - [ ] test/parallel/test-http-server-connection-list-when-close.js
