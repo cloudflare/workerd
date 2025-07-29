@@ -8119,6 +8119,22 @@ declare namespace Rpc {
 declare namespace Cloudflare {
   interface Env {}
 }
+declare module "cloudflare:node" {
+  export interface DefaultHandler {
+    fetch?(request: Request): Response | Promise<Response>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    test?(controller: TestController): void | Promise<void>;
+  }
+  export function httpServerHandler(
+    options: {
+      port: number;
+    },
+    handlers?: Omit<DefaultHandler, "fetch">,
+  ): DefaultHandler;
+}
 declare module "cloudflare:workers" {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {

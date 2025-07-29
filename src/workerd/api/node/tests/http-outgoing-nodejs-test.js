@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { throws, strictEqual, ok, rejects } from 'node:assert';
-import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
+import { httpServerHandler } from 'cloudflare:node';
 import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
@@ -286,7 +286,7 @@ export const testHttpOutgoingWriteTypes = {
   },
 };
 
-export default nodeCompatHttpServerHandler({ port: 8080 });
+export default httpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
 //
