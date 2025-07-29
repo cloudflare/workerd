@@ -34,8 +34,7 @@
       "cloudflare-internal:http": ["./internal/http.d.ts"],
       "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
-      "cloudflare-internal:filesystem": ["./internal/filesystem.d.ts"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "cloudflare-internal:filesystem": ["./internal/filesystem.d.ts"]
     }
   },
   "exclude": []

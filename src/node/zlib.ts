@@ -1,9 +1,8 @@
 import * as zlib from 'node-internal:internal_zlib';
 import { crc32 } from 'node-internal:internal_zlib';
 import { constants, codes } from 'node-internal:internal_zlib_constants';
-import { default as compatFlags } from 'workerd:compatibility-flags';
 
-const { nodeJsZlib } = compatFlags;
+const nodeJsZlib = !!Cloudflare.compatibilityFlags['nodejs_zlib'];
 const {
   Z_NO_FLUSH,
   Z_PARTIAL_FLUSH,

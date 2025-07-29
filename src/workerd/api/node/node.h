@@ -23,29 +23,7 @@
 
 namespace workerd::api::node {
 
-// To be exposed only as an internal module for use by other built-ins.
-// TODO(later): Consider moving out of node.h when needed for other
-// built-ins
-class CompatibilityFlags: public jsg::Object {
- public:
-  CompatibilityFlags() = default;
-  CompatibilityFlags(jsg::Lock&, const jsg::Url&) {}
-
-  JSG_RESOURCE_TYPE(CompatibilityFlags, workerd::CompatibilityFlags::Reader flags) {
-    // Not your typical JSG_RESOURCE_TYPE definition.. here we are iterating
-    // through all of the compatibility flags and registering each as read-only
-    // literal values on the instance...
-    auto dynamic = capnp::toDynamic(flags);
-    auto schema = dynamic.getSchema();
-    for (auto field: schema.getFields()) {
-      registry.template registerReadonlyInstanceProperty<bool>(
-          field.getProto().getName(), dynamic.get(field).as<bool>());
-    }
-  }
-};
-
 #define NODEJS_MODULES(V)                                                                          \
-  V(CompatibilityFlags, "workerd:compatibility-flags")                                             \
   V(AsyncHooksModule, "node-internal:async_hooks")                                                 \
   V(BufferUtil, "node-internal:buffer")                                                            \
   V(CryptoImpl, "node-internal:crypto")                                                            \
@@ -182,7 +160,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
 }  // namespace workerd::api::node
 
 #define EW_NODE_ISOLATE_TYPES                                                                      \
-  api::node::CompatibilityFlags, EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,       \
+  EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
       EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
