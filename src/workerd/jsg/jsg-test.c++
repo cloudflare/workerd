@@ -442,7 +442,10 @@ KJ_TEST("External memory adjustment") {
       adjuster.set(100);
       auto adjuster2 = kj::mv(adjuster);
       KJ_ASSERT(adjuster2.getAmount() == 100);
-      KJ_ASSERT(adjuster.getAmount() == 0);
+
+      // Checking that the amount is zero after the adjuster is moved away would be nice to have,
+      // but we should aim to avoid use-after-move entirely.
+      // KJ_ASSERT(adjuster.getAmount() == 0);
     }
     // Note that we are not testing the actual effect on the isolate itself here.
     // While we have added a getExternalMemory() API to the isolate via a patch in

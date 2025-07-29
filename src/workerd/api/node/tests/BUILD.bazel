@@ -408,6 +408,21 @@ wd_test(
 )
 
 js_binary(
+    name = "http-server-nodejs-server",
+    entry_point = "http-server-nodejs-server.js",
+)
+
+wd_test(
+    src = "http-server-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["http-server-nodejs-test.js"],
+    sidecar = "http-server-nodejs-server",
+    sidecar_port_bindings = [
+        "PONG_SERVER_PORT",
+    ],
+)
+
+js_binary(
     name = "http-agent-nodejs-server",
     entry_point = "http-agent-nodejs-server.js",
 )

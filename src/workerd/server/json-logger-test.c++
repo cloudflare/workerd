@@ -39,50 +39,134 @@ auto makePipeFds() {
   };
 }
 
-KJ_TEST("JsonLogger stdout validation") {
-  JsonLogger logger;
+class OutputCapture {
+ public:
+  OutputCapture(int fd): targetFd(fd), originalFd(dup(fd)) {
+    auto pipe = makePipeFds();
+    KJ_SYSCALL(dup2(pipe.input.get(), targetFd));
+    readFd = kj::mv(pipe.output);
+  }
 
-  // Set up pipes to intercept stdout
-  auto interceptorPipe = makePipeFds();
-  int originalStdout = dup(STDOUT_FILENO);
-  KJ_SYSCALL(dup2(interceptorPipe.input.get(), STDOUT_FILENO));
-  interceptorPipe.input = nullptr;
-  KJ_DEFER({
-    // Restore stdout
-    KJ_SYSCALL(dup2(originalStdout, STDOUT_FILENO));
-    close(originalStdout);
-  });
+  ~OutputCapture() {
+    KJ_SYSCALL(dup2(originalFd, targetFd));
+    close(originalFd);
+  }
 
-  // Log a test message
-  KJ_LOG(ERROR, "Test JSON message");
+  kj::String readOutput() {
+    fflush(targetFd == STDOUT_FILENO ? stdout : stderr);
 
-  fflush(stdout);
-  // Read the JSON output
-  char buffer[4096];
-  ssize_t n;
-  KJ_SYSCALL(n = read(interceptorPipe.output.get(), buffer, sizeof(buffer) - 1));
+    char buffer[4096];
+    ssize_t n;
+    KJ_SYSCALL(n = read(readFd.get(), buffer, sizeof(buffer) - 1));
+    buffer[n] = '\0';
 
-  // Should end with newline
-  KJ_ASSERT(buffer[--n] == '\n');
-  buffer[n] = '\0';
+    return kj::str(buffer, n);
+  }
 
-  kj::StringPtr jsonOutput(buffer, n);
+ private:
+  int targetFd;
+  int originalFd;
+  kj::AutoCloseFd readFd;
+};
 
-  // Parse and validate the JSON using Cap'n Proto codec
+kj::Maybe<kj::String> findJsonEntryContaining(kj::StringPtr output, kj::StringPtr searchText) {
+  size_t start = 0;
+
+  while (start < output.size()) {
+    KJ_IF_SOME(nlPos, output.slice(start).findFirst('\n')) {
+      auto line = output.slice(start, start + nlPos);
+      kj::String lineStr = kj::str(line);
+      if (lineStr.contains(searchText)) {
+        return kj::mv(lineStr);
+      }
+      start = start + nlPos + 1;
+    } else {
+      auto line = output.slice(start);
+      kj::String lineStr = kj::str(line);
+      if (lineStr.contains(searchText)) {
+        return kj::mv(lineStr);
+      }
+      break;
+    }
+  }
+
+  return kj::none;
+}
+
+void validateJsonLogEntry(kj::StringPtr jsonString,
+    log_schema::LogEntry::LogLevel expectedLevel,
+    kj::StringPtr expectedMessage) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<log_schema::LogEntry>();
 
   capnp::MallocMessageBuilder message;
   auto logEntry = message.initRoot<log_schema::LogEntry>();
-  codec.decode(jsonOutput, logEntry);
+  codec.decode(jsonString, logEntry);
 
-  // Validate the parsed JSON structure
-  KJ_EXPECT(logEntry.getLevel() == log_schema::LogEntry::LogLevel::ERROR);
-  KJ_EXPECT(logEntry.getMessage() == "Test JSON message");
+  KJ_EXPECT(logEntry.getLevel() == expectedLevel);
+  KJ_EXPECT(logEntry.getMessage() == expectedMessage);
   KJ_EXPECT(logEntry.getTimestamp() > 0);
-  auto source = logEntry.getSource();
-  KJ_EXPECT(kj::StringPtr(source.begin(), source.size()).endsWith("json-logger-test.c++:49"));
 }
+
+KJ_TEST("JsonLogger stdout validation") {
+  JsonLogger logger;
+  OutputCapture capture(STDOUT_FILENO);
+
+  KJ_LOG(ERROR, "Test JSON message");
+
+  auto output = capture.readOutput();
+  auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test JSON message"));
+  validateJsonLogEntry(jsonEntry, log_schema::LogEntry::LogLevel::ERROR, "Test JSON message");
+
+  capnp::JsonCodec codec;
+  codec.handleByAnnotation<log_schema::LogEntry>();
+  capnp::MallocMessageBuilder message;
+  auto logEntry = message.initRoot<log_schema::LogEntry>();
+  codec.decode(jsonEntry, logEntry);
+
+  auto source = logEntry.getSource();
+  KJ_EXPECT(kj::StringPtr(source.begin(), source.size()).contains("json-logger-test.c++"));
+}
+
+KJ_TEST("StructuredLoggingProcessContext - plain text mode by default") {
+  StructuredLoggingProcessContext context("test-program");
+
+  KJ_EXPECT(context.getProgramName() == "test-program");
+
+  OutputCapture capture(STDERR_FILENO);
+  context.warning("Test warning message");
+
+  auto output = capture.readOutput();
+
+  KJ_EXPECT(output.contains("Test warning message"));
+  KJ_EXPECT(!output.contains("{"));
+}
+
+KJ_TEST("StructuredLoggingProcessContext - structured logging mode") {
+  StructuredLoggingProcessContext context("test-program");
+  context.enableStructuredLogging();
+
+  OutputCapture capture(STDERR_FILENO);
+  context.warning("Test structured warning");
+
+  auto output = capture.readOutput();
+  auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test structured warning"));
+  validateJsonLogEntry(
+      jsonEntry, log_schema::LogEntry::LogLevel::WARNING, "Test structured warning");
+}
+
+KJ_TEST("StructuredLoggingProcessContext - error handling in structured mode") {
+  StructuredLoggingProcessContext context("test-program");
+  context.enableStructuredLogging();
+
+  OutputCapture capture(STDERR_FILENO);
+  context.error("Test structured error");
+
+  auto output = capture.readOutput();
+  auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test structured error"));
+  validateJsonLogEntry(jsonEntry, log_schema::LogEntry::LogLevel::ERROR, "Test structured error");
+}
+
 #endif  // __linux__
 
 KJ_TEST("Blank test because KJ fails when 0 tests are enabled") {}

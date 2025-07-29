@@ -283,7 +283,7 @@ class Worker::Script: public kj::AtomicRefcounted {
  public:  // pretend this is private (needs to be public because allocated through template)
   explicit Script(kj::Own<const Isolate> isolate,
       kj::StringPtr id,
-      Source source,
+      const Source& source,
       IsolateObserver::StartType startType,
       bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
@@ -351,7 +351,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Note that the `source` is fully consumed before this method returns, so the underlying buffers
   // it points into can be freed immediately after the call.
   kj::Own<const Worker::Script> newScript(kj::StringPtr id,
-      Script::Source source,
+      const Script::Source& source,
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
       bool logNewScript = false,
