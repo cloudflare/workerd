@@ -117,8 +117,8 @@ export class Server
   maxHeadersCount: number | null = null;
   maxRequestsPerSocket = 0;
   connectionsCheckingInterval = 30_000;
-  requestTimeout: number = 0;
-  headersTimeout: number = 0;
+  requestTimeout: number = 300_000;
+  headersTimeout: number = 60_000;
   requireHostHeader: boolean = false;
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;

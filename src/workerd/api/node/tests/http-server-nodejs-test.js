@@ -392,6 +392,63 @@ export const testHttpServerOptionsServerResponse = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server-timeouts-validation.js
+export const testHttpServerTimeoutsValidation = {
+  async test() {
+    // This test validates that the HTTP server timeouts are properly validated and set.
+
+    {
+      const server = http.createServer();
+      strictEqual(server.headersTimeout, 60000);
+      strictEqual(server.requestTimeout, 300000);
+    }
+
+    {
+      const server = http.createServer({
+        headersTimeout: 10000,
+        requestTimeout: 20000,
+      });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 20000);
+    }
+
+    {
+      const server = http.createServer({
+        headersTimeout: 10000,
+        requestTimeout: 10000,
+      });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 10000);
+    }
+
+    {
+      const server = http.createServer({ headersTimeout: 10000 });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 300000);
+    }
+
+    {
+      const server = http.createServer({ requestTimeout: 20000 });
+      strictEqual(server.headersTimeout, 20000);
+      strictEqual(server.requestTimeout, 20000);
+    }
+
+    {
+      const server = http.createServer({ requestTimeout: 100000 });
+      strictEqual(server.headersTimeout, 60000);
+      strictEqual(server.requestTimeout, 100000);
+    }
+
+    {
+      throws(
+        () =>
+          http.createServer({ headersTimeout: 10000, requestTimeout: 1000 }),
+        { code: 'ERR_OUT_OF_RANGE' }
+      );
+    }
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-write-after-end.js
 export const testHttpServerWriteAfterEnd = {
   async test(_ctrl, env) {
@@ -845,7 +902,7 @@ export default nodeCompatHttpServerHandler(
 // - [ ] test/parallel/test-http-server-request-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-request-timeout-pipelining.js
 // - [ ] test/parallel/test-http-server-request-timeout-upgrade.js
-// - [ ] test/parallel/test-http-server-timeouts-validation.js
+// - [x] test/parallel/test-http-server-timeouts-validation.js
 // - [x] test/parallel/test-http-server-write-after-end.js
 // - [x] test/parallel/test-http-server-write-end-after-end.js
 // - [ ] test/parallel/test-http-server.js
