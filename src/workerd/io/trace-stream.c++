@@ -761,7 +761,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-    auto maybeCtx = KJ_ASSERT_NONNULL(handler->getCtx()).tryGetHandle(js);
+    kj::Maybe<v8::Local<v8::Object>> maybeCtx;
+    KJ_IF_SOME(hCtx, handler->getCtx()) {
+      maybeCtx = hCtx.tryGetHandle(js);
+    }
     v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);
     handlerArgs[1] = handler->env.getHandle(js);
