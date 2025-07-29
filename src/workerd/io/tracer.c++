@@ -27,7 +27,7 @@ TailStreamWriter::TailStreamWriter(Reporter reporter, TimeSource timeSource)
     : state(State(kj::mv(reporter), kj::mv(timeSource))) {}
 
 void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::Event&& event) {
-  // Becomes a non-op if a terminal event (close or hibernate) has been reported, of if the stream
+  // Becomes a no-op if a terminal event (close or hibernate) has been reported, of if the stream
   // closed due to not receiving a well-formed event handler. We need to disambiguate these cases as
   // the former indicates an implementation error resulting in trailing events whereas the latter
   // case is caused by a user error and events being reported after the stream being closed are
@@ -347,6 +347,11 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // All spans must have wrapped up before the outcome is reported. Report the top-level "worker"
   // span by deallocating its span builder.
   userRequestSpan = nullptr;
+
+  // Do not attempt to report an outcome event if logging is disabled, as with other event types.
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
   // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
   // wd_test), we never set up a tail stream and accordingly should not report an outcome
   // event. Worker events that should be traced need to set the event info at the start of the
