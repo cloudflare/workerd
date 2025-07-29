@@ -8230,6 +8230,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
 }
 interface SecretsStoreSecret {
