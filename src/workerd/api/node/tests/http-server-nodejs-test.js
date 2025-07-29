@@ -278,6 +278,39 @@ export const testHttpServerMultiHeaders2 = {
   },
 };
 
+// Test for RFC 7230 compliant header splitting with quoted strings
+export const testHttpServerQuotedStringHeaders = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req.headers['content-type'], 'text/plain; f="a, b, c"');
+      strictEqual(req.headers['authorization'], 'Bearer token="abc, def"');
+      strictEqual(
+        req.headers['proxy-authorization'],
+        'Basic realm="test, realm"'
+      );
+
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('ok');
+    });
+
+    server.listen(8080);
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'GET',
+      headers: [
+        ['content-type', 'text/plain; f="a, b, c"'],
+        ['content-type', 'text/foo; a="1, 2, 3"'],
+        ['authorization', 'Bearer token="abc, def"'],
+        ['authorization', 'Bearer token="ghi, jkl"'],
+        ['proxy-authorization', 'Basic realm="test, realm"'],
+        ['proxy-authorization', 'Basic realm="another, realm"'],
+      ],
+    });
+
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'ok');
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-non-utf8-header.js
 export const testHttpServerNonUtf8Header = {
   async test(_ctrl, env) {

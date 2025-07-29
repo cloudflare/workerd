@@ -42,6 +42,7 @@ import { STATUS_CODES } from 'node-internal:internal_http_constants';
 import {
   kServerResponse,
   kIncomingMessage,
+  splitHeaderValue,
 } from 'node-internal:internal_http_util';
 import {
   kOutHeaders,
@@ -226,7 +227,8 @@ export class Server
       if (multipleForbiddenHeaders.includes(key)) {
         // By default fetch implementation will join the following header values with a comma.
         // But in order to be node.js compatible, we need to select the first if possible.
-        headers.push(key, value.split(', ', 1).at(0) as string);
+        // Use RFC 7230 compliant splitting that respects quoted-string constructions.
+        headers.push(key, splitHeaderValue(value));
       } else {
         headers.push(key, value);
       }
