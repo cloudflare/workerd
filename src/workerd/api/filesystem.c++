@@ -28,16 +28,24 @@ constexpr kj::StringPtr nameForFsType(FsType type) {
 // A file path is passed to the C++ layer as a URL object. However, we have two different
 // implementations of URL in the system. This class wraps and abstracts over both of them.
 struct NormalizedFilePath {
-  kj::OneOf<jsg::Ref<url::URL>, jsg::Url> url;
+  const jsg::Url url;
 
-  static kj::OneOf<jsg::Ref<url::URL>, jsg::Url> normalize(FileSystemModule::FilePath path) {
+  static jsg::Url normalize(FileSystemModule::FilePath path) {
     KJ_SWITCH_ONEOF(path) {
       KJ_CASE_ONEOF(legacy, jsg::Ref<URL>) {
-        return JSG_REQUIRE_NONNULL(
+        auto parsed = JSG_REQUIRE_NONNULL(
             jsg::Url::tryParse(legacy->getHref(), "file:///"_kj), Error, "Invalid URL"_kj);
+        // The cloning here is necessary to de-percent-encode characters in the
+        // path that don't need to be percent-encoded, allowing us to treat equivalent
+        // encodings of the same path as equal. For instance, '/foo' and '/%66oo' should
+        // be considered the same path since 'f' and '%66' are equivalent. Importantly,
+        // this retains percent-encoding on characters that do need to be percent-encoded
+        // to be valid in URLs, such as non-ASCII characters.
+        return parsed.clone(jsg::Url::EquivalenceOption::NORMALIZE_PATH);
       }
       KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
-        return kj::mv(standard);
+        jsg::Url url = *standard;
+        return url.clone(jsg::Url::EquivalenceOption::NORMALIZE_PATH);
       }
     }
     KJ_UNREACHABLE;
@@ -48,32 +56,15 @@ struct NormalizedFilePath {
   }
 
   void validate() {
-    KJ_SWITCH_ONEOF(url) {
-      KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
-        JSG_REQUIRE(standard->getProtocol() == "file:"_kj, Error, "File path must be a file: URL");
-        JSG_REQUIRE(standard->getHost().size() == 0, Error, "File path must not have a host");
-      }
-      KJ_CASE_ONEOF(legacy, jsg::Url) {
-        JSG_REQUIRE(legacy.getProtocol() == "file:"_kj, TypeError, "File path must be a file: URL");
-        JSG_REQUIRE(legacy.getHost().size() == 0, Error, "File path must not have a host");
-      }
-    }
+    JSG_REQUIRE(url.getProtocol() == "file:"_kj, TypeError, "File path must be a file: URL");
+    JSG_REQUIRE(url.getHost().size() == 0, Error, "File path must not have a host");
   }
 
   operator const jsg::Url&() const {
-    KJ_SWITCH_ONEOF(url) {
-      KJ_CASE_ONEOF(legacy, jsg::Url) {
-        return legacy;
-      }
-      KJ_CASE_ONEOF(standard, jsg::Ref<url::URL>) {
-        return *standard;
-      }
-    }
-    KJ_UNREACHABLE;
+    return url;
   }
 
   operator const kj::Path() const {
-    const jsg::Url& url = *this;
     auto path = kj::str(url.getPathname().slice(1));
     kj::Path root{};
     return root.eval(path);
