@@ -25,6 +25,7 @@ export let setIncomingMessageFetchResponse: (
 export class IncomingMessage extends Readable implements _IncomingMessage {
   #response?: Response;
   #reader?: ReadableStreamDefaultReader<Uint8Array>;
+  #reading = false;
 
   aborted = false;
   url: string = '';
@@ -101,20 +102,30 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   }
 
   async #tryRead(): Promise<void> {
-    if (this._stream == null) return;
+    if (this._stream == null || this.#reading) return;
+
+    this.#reading = true;
 
     try {
       this.#reader ??= this._stream.getReader();
-      const data = await this.#reader.read();
-      if (data.done) {
-        // Done with stream, tell Readable we have no more data;
-        this.complete = true;
-        this.push(null);
-      } else {
-        this.push(data.value);
+
+      while (!this.destroyed) {
+        const data = await this.#reader.read();
+        if (data.done) {
+          this.complete = true;
+          this.push(null);
+          break;
+        }
+
+        // Backpressure - stop reading until _read() is called again
+        if (!this.push(data.value)) {
+          break;
+        }
       }
     } catch (e) {
       this.destroy(e as Error);
+    } finally {
+      this.#reading = false;
     }
   }
 
@@ -319,6 +330,33 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this.on('timeout', callback);
     }
     return this;
+  }
+
+  override pipe<T extends NodeJS.WritableStream>(
+    destination: T,
+    options?: { end?: boolean }
+  ): T {
+    const shouldEnd = options?.end !== false;
+
+    // Handle the piping manually for better control
+    this.on('data', (chunk: string | Uint8Array) => {
+      destination.write(chunk);
+    });
+
+    this.once('end', () => {
+      if (shouldEnd) {
+        destination.end();
+      }
+    });
+
+    this.on('error', (err: unknown) => {
+      destination.emit('error', err);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this.#tryRead();
+
+    return destination;
   }
 }
 

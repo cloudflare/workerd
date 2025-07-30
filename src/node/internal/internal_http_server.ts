@@ -210,10 +210,8 @@ export class Server
       const fetchResponse = await getServerResponseFetchResponse(response);
 
       // Emit 'close' event when the response is complete
-      queueMicrotask(() => {
-        response._closed = true;
-        response.emit('close');
-      });
+      response._closed = true;
+      response.emit('close');
 
       return fetchResponse;
     } catch (error: unknown) {

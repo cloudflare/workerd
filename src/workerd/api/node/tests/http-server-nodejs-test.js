@@ -278,15 +278,22 @@ export const testHttpServerMultiHeaders2 = {
   },
 };
 
-// Test for RFC 7230 compliant header splitting with quoted strings
+// Test for RFC 7230 compliant header splitting with quoted strings and escaped characters
 export const testHttpServerQuotedStringHeaders = {
   async test(_ctrl, env) {
     await using server = http.createServer((req, res) => {
+      // Basic quoted strings with commas
       strictEqual(req.headers['content-type'], 'text/plain; f="a, b, c"');
       strictEqual(req.headers['authorization'], 'Bearer token="abc, def"');
       strictEqual(
         req.headers['proxy-authorization'],
         'Basic realm="test, realm"'
+      );
+
+      // Escaped characters in quoted strings
+      strictEqual(
+        req.headers['user-agent'],
+        'Mozilla/5.0; comment="has \\"quotes\\" and, commas"'
       );
 
       res.writeHead(200, { 'content-type': 'text/plain' });
@@ -297,12 +304,16 @@ export const testHttpServerQuotedStringHeaders = {
     const res = await env.SERVICE.fetch('https://cloudflare.com', {
       method: 'GET',
       headers: [
+        // Basic quoted string tests
         ['content-type', 'text/plain; f="a, b, c"'],
         ['content-type', 'text/foo; a="1, 2, 3"'],
         ['authorization', 'Bearer token="abc, def"'],
         ['authorization', 'Bearer token="ghi, jkl"'],
         ['proxy-authorization', 'Basic realm="test, realm"'],
         ['proxy-authorization', 'Basic realm="another, realm"'],
+        // Escaped character tests
+        ['user-agent', 'Mozilla/5.0; comment="has \\"quotes\\" and, commas"'],
+        ['user-agent', 'Chrome/100.0; info="version \\"100\\""'],
       ],
     });
 

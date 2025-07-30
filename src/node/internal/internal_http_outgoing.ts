@@ -933,12 +933,8 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     }
     this.destroyed = true;
     this[kErrored] = err as Error;
-
-    // Emit 'close' event when destroyed
-    queueMicrotask(() => {
-      this._closed = true;
-      this.emit('close');
-    });
+    this._closed = true;
+    this.emit('close');
 
     return this;
   }

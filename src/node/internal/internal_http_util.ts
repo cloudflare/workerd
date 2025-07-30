@@ -26,6 +26,7 @@ export const kServerResponse = Symbol('ServerResponse');
 export const kIncomingMessage = Symbol('IncomingMessage');
 
 // RFC 7230 compliant header value splitting that respects quoted-string constructions
+// Returns only the first value up to the first comma (outside of quoted strings)
 // Spec: https://www.rfc-editor.org/rfc/rfc7230.html#appendix-B
 // Edge cases handled:
 // - Quoted strings with commas: 'text/plain; param="a, b"' -> 'text/plain; param="a, b"'
