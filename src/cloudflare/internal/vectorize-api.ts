@@ -10,12 +10,12 @@ interface Fetcher {
 }
 
 const Operation = {
-  INDEX_GET: 'INDEX_GET' as const,
-  VECTOR_QUERY: 'VECTOR_QUERY' as const,
-  VECTOR_INSERT: 'VECTOR_INSERT' as const,
-  VECTOR_UPSERT: 'VECTOR_UPSERT' as const,
-  VECTOR_GET: 'VECTOR_GET' as const,
-  VECTOR_DELETE: 'VECTOR_DELETE' as const,
+  INDEX_GET: 'INDEX_GET',
+  VECTOR_QUERY: 'VECTOR_QUERY',
+  VECTOR_INSERT: 'VECTOR_INSERT',
+  VECTOR_UPSERT: 'VECTOR_UPSERT',
+  VECTOR_GET: 'VECTOR_GET',
+  VECTOR_DELETE: 'VECTOR_DELETE',
 } as const;
 type OperationKey = keyof typeof Operation;
 
