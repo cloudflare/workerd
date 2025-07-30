@@ -13,7 +13,7 @@ export default [
         'error',
         { argsIgnorePattern: '^_' },
       ],
-      // TODO(soon: Enable following eslint rules.
+      // TODO(soon): Enable the following eslint rules.
       // The following rules require Typescript changes
       '@typescript-eslint/no-unnecessary-condition': 'off',
       '@typescript-eslint/no-unnecessary-boolean-literal-compare': 'off',
