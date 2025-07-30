@@ -20,6 +20,7 @@
     "esModuleInterop": true,
     "moduleResolution": "node",
     "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
     "types": []
   },
   "exclude": ["node_modules", "**/*.mjs"]
