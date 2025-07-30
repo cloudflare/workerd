@@ -908,4 +908,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-08-14");
   # Disables the global handlers for Python workers and enforces their use via default entrypoint
   # classes.
+
+  enableNodeJsFsModule @105 :Bool
+    $compatEnableFlag("enable_nodejs_fs_module")
+    $compatDisableFlag("disable_nodejs_fs_module")
+    $experimental;
+  # Enables the Node.js fs module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+  # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
+  # when ready to ship in production.
 }

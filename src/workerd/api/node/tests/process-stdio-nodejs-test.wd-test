@@ -11,7 +11,8 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = [
           "nodejs_compat",
           "experimental",
-          "enable_nodejs_process_v2"
+          "enable_nodejs_process_v2",
+          "enable_nodejs_fs_module",
         ],
       )
     ),
