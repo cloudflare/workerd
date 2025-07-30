@@ -343,7 +343,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       }
     });
 
-    this.on('error', (err: unknown) => {
+    this.once('error', (err: unknown) => {
       destination.emit('error', err);
     });
 
