@@ -255,6 +255,15 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this[kHighWaterMark] = options?.highWaterMark ?? 64 * 1024;
     this[kRejectNonStandardBodyWrites] =
       options?.rejectNonStandardBodyWrites ?? false;
+
+    this.once('end', () => {
+      // We need to emit close in a queueMicrotask because
+      // this is the only way we can ensure that the close event is emitted after destroy.
+      queueMicrotask(() => {
+        this._closed = true;
+        this.emit('close');
+      });
+    });
   }
 
   #onDataWritten(index: number, entry: WrittenDataBufferEntry): void {
@@ -929,10 +938,11 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     if (this.destroyed) {
       return this;
     }
+    if (err != null) {
+      this.emit('error', err);
+    }
     this.destroyed = true;
     this[kErrored] = err as Error;
-    this._closed = true;
-    this.emit('close');
 
     return this;
   }

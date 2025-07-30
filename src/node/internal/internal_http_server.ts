@@ -207,13 +207,7 @@ export class Server
     try {
       this.emit('connection', this, incoming);
       this.emit('request', incoming, response);
-      const fetchResponse = await getServerResponseFetchResponse(response);
-
-      // Emit 'close' event when the response is complete
-      response._closed = true;
-      response.emit('close');
-
-      return fetchResponse;
+      return await getServerResponseFetchResponse(response);
     } catch (error: unknown) {
       response.destroy(error);
       throw error;
@@ -465,6 +459,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             },
           })
         );
+
+        this._closed = true;
+        this.emit('close');
       }
     );
 

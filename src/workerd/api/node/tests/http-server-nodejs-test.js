@@ -986,6 +986,118 @@ export const testHttpServer = {
   },
 };
 
+// Test multiple pipe destinations (Node.js feature that web streams don't support)
+export const testMultiplePipeDestinations = {
+  async test(_ctrl, env) {
+    const { Writable } = await import('node:stream');
+
+    await using server = http.createServer((req, res) => {
+      const path = req.url;
+
+      if (path === '/multipipe') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+
+        // Create multiple writable destinations
+        const dest1Data = [];
+        const dest2Data = [];
+        const dest3Data = [];
+
+        const dest1 = new Writable({
+          write(chunk, encoding, callback) {
+            dest1Data.push(chunk);
+            callback();
+          },
+        });
+
+        const dest2 = new Writable({
+          write(chunk, encoding, callback) {
+            dest2Data.push(chunk);
+            callback();
+          },
+        });
+
+        const dest3 = new Writable({
+          write(chunk, encoding, callback) {
+            dest3Data.push(chunk);
+            callback();
+          },
+        });
+
+        // Set up finish handlers to track completion
+        let finishedCount = 0;
+        const onFinish = () => {
+          finishedCount++;
+          if (finishedCount === 3) {
+            // All destinations finished, send response
+            const result = {
+              dest1: Buffer.concat(dest1Data).toString(),
+              dest2: Buffer.concat(dest2Data).toString(),
+              dest3: Buffer.concat(dest3Data).toString(),
+              allSame:
+                Buffer.concat(dest1Data).equals(Buffer.concat(dest2Data)) &&
+                Buffer.concat(dest2Data).equals(Buffer.concat(dest3Data)),
+            };
+            res.end(JSON.stringify(result));
+          }
+        };
+
+        dest1.on('finish', onFinish);
+        dest2.on('finish', onFinish);
+        dest3.on('finish', onFinish);
+
+        // Pipe to multiple destinations - this is the key test!
+        req.pipe(dest1);
+        req.pipe(dest2);
+        req.pipe(dest3);
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+
+    server.listen(8080);
+
+    // Send test data
+    const testData =
+      'Hello from multiple pipes! This data should reach all destinations.';
+    const response = await env.SERVICE.fetch(
+      'https://cloudflare.com/multipipe',
+      {
+        method: 'POST',
+        body: testData,
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+      }
+    );
+
+    strictEqual(response.status, 200);
+    const result = await response.json();
+
+    // Verify all destinations received the same data
+    strictEqual(
+      result.dest1,
+      testData,
+      'Destination 1 should receive correct data'
+    );
+    strictEqual(
+      result.dest2,
+      testData,
+      'Destination 2 should receive correct data'
+    );
+    strictEqual(
+      result.dest3,
+      testData,
+      'Destination 3 should receive correct data'
+    );
+    strictEqual(
+      result.allSame,
+      true,
+      'All destinations should receive identical data'
+    );
+  },
+};
+
 export const testScheduled = {
   async test(_ctrl, env) {
     strictEqual(typeof env.SERVICE.scheduled, 'function');

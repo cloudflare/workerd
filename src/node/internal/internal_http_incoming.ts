@@ -64,10 +64,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
   constructor() {
     super({});
-
-    if (this._readableState) {
-      this._readableState.readingMore = true;
-    }
+    this._readableState.readingMore = true;
   }
 
   #setFetchResponse(response: Response): void {
@@ -81,16 +78,15 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     }
 
     this.#response = response;
-
-    if (this._readableState) {
-      this._readableState.readingMore = true;
-    }
+    this._readableState.readingMore = true;
 
     this.url = response.url;
     this.statusCode = response.status;
     this.statusMessage = response.statusText;
 
     this.once('end', () => {
+      // We need to emit close in a queueMicrotask because
+      // this is the only way we can ensure that the close event is emitted after destroy.
       queueMicrotask(() => this.emit('close'));
     });
 
@@ -133,9 +129,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   // function that pumps the next chunk out of the underlying ReadableStream.
   override _read(_n: number): void {
     if (!this._consuming) {
-      if (this._readableState) {
-        this._readableState.readingMore = false;
-      }
+      this._readableState.readingMore = false;
       this._consuming = true;
     }
 
@@ -353,8 +347,8 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       destination.emit('error', err);
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    this.#tryRead();
+    // Always ensure reading starts - call resume to trigger the stream
+    this.resume();
 
     return destination;
   }
