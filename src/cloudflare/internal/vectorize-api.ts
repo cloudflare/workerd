@@ -1,7 +1,9 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { default as flags } from 'workerd:compatibility-flags';
+
+const queryMetadataOptional =
+  !!Cloudflare.compatibilityFlags['vectorize_query_metadata_optional'];
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -77,7 +79,7 @@ class VectorizeIndexImpl implements Vectorize {
         );
       }
       const compat = {
-        queryMetadataOptional: flags.vectorizeQueryMetadataOptional,
+        queryMetadataOptional,
       };
       const res = await this._send(
         Operation.VECTOR_QUERY,
