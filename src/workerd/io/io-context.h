@@ -42,6 +42,9 @@ class HttpOverCapnpFactory;
 
 namespace workerd {
 
+// This wishes it were IoContext::Runnable::Exceptional.
+WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
+
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
 class IoContext;
@@ -1023,13 +1026,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   class Runnable {
    public:
+    using Exceptional = IoContext_Runnable_Exceptional;
     virtual void run(Worker::Lock& lock) = 0;
   };
   void runImpl(Runnable& runnable,
-      bool takePendingEvent,
       Worker::LockType lockType,
       kj::Maybe<InputGate::Lock> inputLock,
-      bool allowPermanentException);
+      Runnable::Exceptional exceptional);
 
   void abortFromHang(Worker::AsyncLock& asyncLock);
 
@@ -1166,7 +1169,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       };
 
       RunnableImpl runnable(kj::fwd<Func>(func));
-      runImpl(runnable, true, lock, kj::mv(inputLock), false);
+      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
     } else {
       struct RunnableImpl: public Runnable {
         Func func;
@@ -1179,7 +1182,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       };
 
       RunnableImpl runnable{kj::fwd<Func>(func)};
-      runImpl(runnable, true, lock, kj::mv(inputLock), false);
+      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
       KJ_IF_SOME(r, runnable.result) {
         return kj::mv(r);
       } else {
