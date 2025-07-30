@@ -45,7 +45,7 @@ export function splitHeaderValue(value: string): string {
     } else if (char === '\\' && inQuotes) {
       i++; // Skip next character (it's escaped)
     } else if (!inQuotes && char === ',') {
-      // Found unquoted comma, trim whitespace and return
+      // Found unquoted comma, return
       return value.slice(0, i);
     }
   }
