@@ -455,7 +455,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
           this.#toFetchResponse({
             statusCode,
             statusText: statusMessage,
-            sentHeaders: headers,
+            headers,
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
@@ -474,15 +474,14 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   #toFetchResponse({
     statusCode,
     statusText,
-    sentHeaders,
+    headers,
     onStreamStart,
   }: {
     statusCode: number;
     statusText: string;
-    sentHeaders: [header: string, value: string][];
+    headers: Headers;
     onStreamStart: (controller: ReadableStreamController<Uint8Array>) => void;
   }): Response {
-    const headers = new Headers(sentHeaders);
     let body = null;
 
     if (this._hasBody) {

@@ -52,7 +52,7 @@ export type WrittenDataBufferEntry = OutputData & {
 export type HeadersSentEvent = {
   statusCode: number;
   statusMessage: string;
-  headers: [string, string][];
+  headers: Headers;
 };
 
 export const kUniqueHeaders = Symbol('kUniqueHeaders');
@@ -697,7 +697,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       const keys = Object.keys(headersMap);
       // Retain for(;;) loop for performance reasons
       // Refs: https://github.com/nodejs/node/pull/30958
-      for (let i = 0, l = keys.length; i < l; i++) {
+      for (let i = 0; i < keys.length; i++) {
         const key = keys[i] as keyof typeof headersMap;
         headers[(headersMap[key] as [string, string])[0]] = (
           headersMap[key] as [string, string]
@@ -742,11 +742,14 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       this.writtenHeaderBytes = header.length;
 
       // Save written headers as object
-      const [statusLine, ...headerLines] = this._header.split('\r\n');
+      const [statusLine, ...headerLines] = this._header.split('\r\n') as [
+        string,
+        ...string[],
+      ];
 
       const STATUS_LINE_REGEXP =
         /^HTTP\/1\.1 (?<statusCode>\d+) (?<statusMessage>.*)$/;
-      const statusLineResult = STATUS_LINE_REGEXP.exec(statusLine as string);
+      const statusLineResult = STATUS_LINE_REGEXP.exec(statusLine);
 
       if (statusLineResult == null) {
         throw new Error(`Unexpected! Status line was ${statusLine}`);
@@ -754,19 +757,17 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
       const { statusCode: statusCodeText, statusMessage } =
         statusLineResult.groups ?? {};
-      const statusCode = parseInt(statusCodeText as string, 10);
-      const headers: [header: string, value: string][] = [];
+      const headers = new Headers();
 
       for (const headerLine of headerLines) {
         if (headerLine !== '') {
           const pos = headerLine.indexOf(': ');
-          const k = headerLine.slice(0, pos);
-          const v = headerLine.slice(pos + 2); // Skip the colon and the space
-          headers.push([k, v]);
+          // Skip the colon and the space on value
+          headers.append(headerLine.slice(0, pos), headerLine.slice(pos + 2));
         }
       }
       this.emit('_headersSent', {
-        statusCode,
+        statusCode: Number(statusCodeText as string),
         statusMessage,
         headers,
       } as HeadersSentEvent);
@@ -873,11 +874,8 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this.uncork();
 
     this.finished = true;
-    // Synchronize with base Writable class state
-    if (this._writableState) {
-      // @ts-expect-error Accessing internal writable state property
-      this._writableState.finished = true;
-    }
+    this._writableState.finished = true;
+    this._writableState.corked = 1;
 
     // Difference from Node.js -
     // In Node.js, if a socket exists, and there is no pending output data,
