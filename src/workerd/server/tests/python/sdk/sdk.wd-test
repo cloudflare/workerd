@@ -8,7 +8,7 @@ const python :Workerd.Worker = (
     ( name = "SELF", service = "python-sdk" ),
   ],
   compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 );
 
 const server :Workerd.Worker = (
@@ -16,7 +16,7 @@ const server :Workerd.Worker = (
     (name = "server.py", pythonModule = embed "server.py")
   ],
   compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
 );
 
 # We need this proxy so that internal requests made to fetch packages for Python Workers are sent

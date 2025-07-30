@@ -901,4 +901,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the methods exposed by the node.js http modules.
   # TODO(soon): Add a implifiedByAfter when node.js is enabled as well as
   # `enable_nodejs_http_modules`
+
+  pythonNoGlobalHandlers @104 :Bool
+      $compatEnableFlag("python_no_global_handlers")
+      $compatDisableFlag("disable_python_no_global_handlers")
+      $compatEnableDate("2025-08-14");
+  # Disables the global handlers for Python workers and enforces their use via default entrypoint
+  # classes.
 }

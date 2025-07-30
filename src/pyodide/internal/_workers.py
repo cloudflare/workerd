@@ -808,6 +808,11 @@ def python_from_rpc(obj: "JsProxy"):
     if not hasattr(obj, "constructor"):
         return obj
 
+    if obj.constructor.name == "TestController":
+        # This object currently has no methods defined on it. If this changes we should
+        # implement a Python wrapper for it, but for now we'll just pass in None.
+        return None
+
     result = obj.to_py(default_converter=_python_from_rpc_default_converter)
 
     return result
