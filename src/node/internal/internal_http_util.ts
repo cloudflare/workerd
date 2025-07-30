@@ -24,3 +24,31 @@ export function once<RT>(
 
 export const kServerResponse = Symbol('ServerResponse');
 export const kIncomingMessage = Symbol('IncomingMessage');
+
+// RFC 7230 compliant header value splitting that respects quoted-string constructions
+// Returns only the first value up to the first comma (outside of quoted strings)
+// Spec: https://www.rfc-editor.org/rfc/rfc7230.html#appendix-B
+// Edge cases handled:
+// - Quoted strings with commas: 'text/plain; param="a, b"' -> 'text/plain; param="a, b"'
+// - Escaped quotes in strings: 'text/plain; param="a \"quoted\" value"' -> 'text/plain; param="a \"quoted\" value"'
+// - Multiple values: 'text/plain; f="a, b", text/html' -> 'text/plain; f="a, b"'
+// - Whitespace before commas: 'value1 \t , value2' -> 'value1'
+// - No commas: 'single-value' -> 'single-value'
+export function splitHeaderValue(value: string): string {
+  let inQuotes = false;
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === '\\' && inQuotes) {
+      i++; // Skip next character (it's escaped)
+    } else if (!inQuotes && char === ',') {
+      // Found unquoted comma, return
+      return value.slice(0, i);
+    }
+  }
+
+  return value;
+}

@@ -1,10 +1,19 @@
 import http from 'node:http';
-import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
+import {
+  strictEqual,
+  ok,
+  throws,
+  notStrictEqual,
+  rejects,
+  match,
+} from 'node:assert';
 import {
   nodeCompatHttpServerHandler,
   WorkerEntrypoint,
 } from 'cloudflare:workers';
 import { mock } from 'node:test';
+import url from 'node:url';
+import qs from 'node:querystring';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -184,6 +193,135 @@ export const testHttpServerMultiHeaders = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server-multiheaders2.js
+export const testHttpServerMultiHeaders2 = {
+  async test(_ctrl, env) {
+    // One difference between Node.js and Cloudflare workers is that Cookie is allowed
+    // to have multiple values but in Workers it is not supported.
+    const multipleAllowed = [
+      'Accept',
+      'Accept-Charset',
+      'Accept-Encoding',
+      'Accept-Language',
+      'Connection',
+      'DAV', // GH-2750
+      'Pragma', // GH-715
+      'Link', // GH-1187
+      'WWW-Authenticate', // GH-1083
+      'Proxy-Authenticate', // GH-4052
+      'Sec-Websocket-Extensions', // GH-2764
+      'Sec-Websocket-Protocol', // GH-2764
+      'Via', // GH-6660
+
+      // not a special case, just making sure it's parsed correctly
+      'X-Forwarded-For',
+
+      // Make sure that unspecified headers is treated as multiple
+      'Some-Random-Header',
+      'X-Some-Random-Header',
+    ];
+
+    const multipleForbidden = [
+      'Content-Type',
+      'User-Agent',
+      'Referer',
+      'Host',
+      'Authorization',
+      'Proxy-Authorization',
+      'If-Modified-Since',
+      'If-Unmodified-Since',
+      'From',
+      'Location',
+      'Max-Forwards',
+    ];
+
+    await using server = http.createServer(function (req, res) {
+      for (const header of multipleForbidden) {
+        const value = req.headers[header.toLowerCase()];
+        strictEqual(
+          value,
+          'foo',
+          `multiple forbidden header parsed incorrectly: ${header} with value: "${value}"`
+        );
+      }
+      for (const header of multipleAllowed) {
+        const sep = header.toLowerCase() === 'cookie' ? '; ' : ', ';
+        strictEqual(
+          req.headers[header.toLowerCase()],
+          `foo${sep}bar`,
+          `multiple allowed header parsed incorrectly: ${header}`
+        );
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('EOF');
+    });
+
+    function makeHeader(value) {
+      return function (header) {
+        return [header, value];
+      };
+    }
+
+    const headers = []
+      .concat(multipleAllowed.map(makeHeader('foo')))
+      .concat(multipleForbidden.map(makeHeader('foo')))
+      .concat(multipleAllowed.map(makeHeader('bar')))
+      .concat(multipleForbidden.map(makeHeader('bar')));
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com/', {
+      headers,
+    });
+    strictEqual(res.status, 200);
+  },
+};
+
+// Test for RFC 7230 compliant header splitting with quoted strings and escaped characters
+export const testHttpServerQuotedStringHeaders = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      // Basic quoted strings with commas
+      strictEqual(req.headers['content-type'], 'text/plain; f="a, b, c"');
+      strictEqual(req.headers['authorization'], 'Bearer token="abc, def"');
+      strictEqual(
+        req.headers['proxy-authorization'],
+        'Basic realm="test, realm"'
+      );
+
+      // Escaped characters in quoted strings
+      strictEqual(
+        req.headers['user-agent'],
+        'Mozilla/5.0; comment="has \\"quotes\\" and, commas"'
+      );
+
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('ok');
+    });
+
+    server.listen(8080);
+    const res = await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'GET',
+      headers: [
+        // Basic quoted string tests
+        ['content-type', 'text/plain; f="a, b, c"'],
+        ['content-type', 'text/foo; a="1, 2, 3"'],
+        ['authorization', 'Bearer token="abc, def"'],
+        ['authorization', 'Bearer token="ghi, jkl"'],
+        ['proxy-authorization', 'Basic realm="test, realm"'],
+        ['proxy-authorization', 'Basic realm="another, realm"'],
+        // Escaped character tests
+        ['user-agent', 'Mozilla/5.0; comment="has \\"quotes\\" and, commas"'],
+        ['user-agent', 'Chrome/100.0; info="version \\"100\\""'],
+      ],
+    });
+
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'ok');
+  },
+};
+
 // Test is taken from test/parallel/test-http-server-non-utf8-header.js
 export const testHttpServerNonUtf8Header = {
   async test(_ctrl, env) {
@@ -297,6 +435,63 @@ export const testHttpServerOptionsServerResponse = {
     const res = await env.SERVICE.fetch('https://cloudflare.com');
     strictEqual(res.status, 200);
     strictEqual(res.headers.get('content-type'), 'text/plain');
+  },
+};
+
+// Test is taken from test/parallel/test-http-server-timeouts-validation.js
+export const testHttpServerTimeoutsValidation = {
+  async test() {
+    // This test validates that the HTTP server timeouts are properly validated and set.
+
+    {
+      const server = http.createServer();
+      strictEqual(server.headersTimeout, 60000);
+      strictEqual(server.requestTimeout, 300000);
+    }
+
+    {
+      const server = http.createServer({
+        headersTimeout: 10000,
+        requestTimeout: 20000,
+      });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 20000);
+    }
+
+    {
+      const server = http.createServer({
+        headersTimeout: 10000,
+        requestTimeout: 10000,
+      });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 10000);
+    }
+
+    {
+      const server = http.createServer({ headersTimeout: 10000 });
+      strictEqual(server.headersTimeout, 10000);
+      strictEqual(server.requestTimeout, 300000);
+    }
+
+    {
+      const server = http.createServer({ requestTimeout: 20000 });
+      strictEqual(server.headersTimeout, 20000);
+      strictEqual(server.requestTimeout, 20000);
+    }
+
+    {
+      const server = http.createServer({ requestTimeout: 100000 });
+      strictEqual(server.headersTimeout, 60000);
+      strictEqual(server.requestTimeout, 100000);
+    }
+
+    {
+      throws(
+        () =>
+          http.createServer({ headersTimeout: 10000, requestTimeout: 1000 }),
+        { code: 'ERR_OUT_OF_RANGE' }
+      );
+    }
   },
 };
 
@@ -702,6 +897,207 @@ export const testBackpressureSignaling = {
   },
 };
 
+// Test is taken from test/parallel/test-http-server.js
+export const testHttpServer = {
+  async test(_ctrl, env) {
+    const invalid_options = ['foo', 42, true, []];
+
+    for (const option of invalid_options) {
+      throws(
+        () => {
+          new http.Server(option);
+        },
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
+    }
+
+    let request_number = 0;
+
+    await using server = http.createServer(function (req, res) {
+      res.id = request_number;
+      req.id = request_number++;
+
+      strictEqual(res.req, req);
+
+      if (req.id === 0) {
+        strictEqual(req.method, 'GET');
+        strictEqual(url.parse(req.url).pathname, '/hello');
+        strictEqual(qs.parse(url.parse(req.url).query).hello, 'world');
+        strictEqual(qs.parse(url.parse(req.url).query).foo, 'b==ar');
+      }
+
+      if (req.id === 1) {
+        strictEqual(req.method, 'POST');
+        strictEqual(url.parse(req.url).pathname, '/quit');
+      }
+
+      if (req.id === 2) {
+        strictEqual(req.headers['x-x'], 'foo');
+      }
+
+      if (req.id === 3) {
+        strictEqual(req.headers['x-x'], 'bar');
+        this.close();
+      }
+
+      setTimeout(function () {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.write(url.parse(req.url).pathname);
+        res.end();
+      }, 1);
+    });
+    server.listen(8080);
+
+    server.httpAllowHalfOpen = true;
+
+    const hello = await env.SERVICE.fetch(
+      'https://example.com/hello?hello=world&foo=b==ar'
+    );
+    strictEqual(hello.status, 200);
+    strictEqual(await hello.text(), '/hello');
+
+    const quit = await env.SERVICE.fetch('https://example.com/quit', {
+      method: 'POST',
+    });
+    strictEqual(quit.status, 200);
+    strictEqual(await quit.text(), '/quit');
+
+    const xxFoo = await env.SERVICE.fetch('https://example.com/', {
+      method: 'POST',
+      headers: {
+        'x-x': 'foo',
+      },
+    });
+    strictEqual(xxFoo.status, 200);
+    strictEqual(await xxFoo.text(), '/');
+
+    const xxBar = await env.SERVICE.fetch('https://example.com/', {
+      method: 'POST',
+      headers: {
+        'x-x': 'bar',
+      },
+    });
+    strictEqual(xxBar.status, 200);
+    strictEqual(await xxBar.text(), '/');
+
+    strictEqual(request_number, 4);
+  },
+};
+
+// Test multiple pipe destinations (Node.js feature that web streams don't support)
+export const testMultiplePipeDestinations = {
+  async test(_ctrl, env) {
+    const { Writable } = await import('node:stream');
+
+    await using server = http.createServer((req, res) => {
+      const path = req.url;
+
+      if (path === '/multipipe') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+
+        // Create multiple writable destinations
+        const dest1Data = [];
+        const dest2Data = [];
+        const dest3Data = [];
+
+        const dest1 = new Writable({
+          write(chunk, encoding, callback) {
+            dest1Data.push(chunk);
+            callback();
+          },
+        });
+
+        const dest2 = new Writable({
+          write(chunk, encoding, callback) {
+            dest2Data.push(chunk);
+            callback();
+          },
+        });
+
+        const dest3 = new Writable({
+          write(chunk, encoding, callback) {
+            dest3Data.push(chunk);
+            callback();
+          },
+        });
+
+        // Set up finish handlers to track completion
+        let finishedCount = 0;
+        const onFinish = () => {
+          finishedCount++;
+          if (finishedCount === 3) {
+            // All destinations finished, send response
+            const result = {
+              dest1: Buffer.concat(dest1Data).toString(),
+              dest2: Buffer.concat(dest2Data).toString(),
+              dest3: Buffer.concat(dest3Data).toString(),
+              allSame:
+                Buffer.concat(dest1Data).equals(Buffer.concat(dest2Data)) &&
+                Buffer.concat(dest2Data).equals(Buffer.concat(dest3Data)),
+            };
+            res.end(JSON.stringify(result));
+          }
+        };
+
+        dest1.on('finish', onFinish);
+        dest2.on('finish', onFinish);
+        dest3.on('finish', onFinish);
+
+        // Pipe to multiple destinations - this is the key test!
+        req.pipe(dest1);
+        req.pipe(dest2);
+        req.pipe(dest3);
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+
+    server.listen(8080);
+
+    // Send test data
+    const testData =
+      'Hello from multiple pipes! This data should reach all destinations.';
+    const response = await env.SERVICE.fetch(
+      'https://cloudflare.com/multipipe',
+      {
+        method: 'POST',
+        body: testData,
+        headers: {
+          'Content-Type': 'text/plain',
+        },
+      }
+    );
+
+    strictEqual(response.status, 200);
+    const result = await response.json();
+
+    // Verify all destinations received the same data
+    strictEqual(
+      result.dest1,
+      testData,
+      'Destination 1 should receive correct data'
+    );
+    strictEqual(
+      result.dest2,
+      testData,
+      'Destination 2 should receive correct data'
+    );
+    strictEqual(
+      result.dest3,
+      testData,
+      'Destination 3 should receive correct data'
+    );
+    strictEqual(
+      result.allSame,
+      true,
+      'All destinations should receive identical data'
+    );
+  },
+};
+
 export const testScheduled = {
   async test(_ctrl, env) {
     strictEqual(typeof env.SERVICE.scheduled, 'function');
@@ -732,8 +1128,6 @@ export default nodeCompatHttpServerHandler(
 // Relevant Node.js tests
 // - [x] test/parallel/test-http-server-async-dispose.js
 // - [ ] test/parallel/test-http-server-capture-rejections.js
-// - [ ] test/parallel/test-http-server-client-error.js
-// - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-close-idle-wait-response.js
 // - [ ] test/parallel/test-http-server-close-idle.js
 // - [ ] test/parallel/test-http-server-consumed-timeout.js
@@ -744,12 +1138,10 @@ export default nodeCompatHttpServerHandler(
 // - [x] test/parallel/test-http-server-incomingmessage-destroy.js
 // - [x] test/parallel/test-http-server-method.query.js
 // - [x] test/parallel/test-http-server-multiheaders.js
-// - [ ] test/parallel/test-http-server-multiheaders2.js
-// - [ ] test/parallel/test-http-server-multiple-client-error.js
+// - [x] test/parallel/test-http-server-multiheaders2.js
 // - [x] test/parallel/test-http-server-non-utf8-header.js
 // - [x] test/parallel/test-http-server-options-incoming-message.js
 // - [x] test/parallel/test-http-server-options-server-response.js
-// - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-body.js
 // - [ ] test/parallel/test-http-server-request-timeout-delayed-headers.js
 // - [ ] test/parallel/test-http-server-request-timeout-interrupted-body.js
@@ -757,16 +1149,18 @@ export default nodeCompatHttpServerHandler(
 // - [ ] test/parallel/test-http-server-request-timeout-keepalive.js
 // - [ ] test/parallel/test-http-server-request-timeout-pipelining.js
 // - [ ] test/parallel/test-http-server-request-timeout-upgrade.js
-// - [ ] test/parallel/test-http-server-timeouts-validation.js
+// - [x] test/parallel/test-http-server-timeouts-validation.js
 // - [x] test/parallel/test-http-server-write-after-end.js
 // - [x] test/parallel/test-http-server-write-end-after-end.js
-// - [ ] test/parallel/test-http-server.js
+// - [x] test/parallel/test-http-server.js
 
 // Tests that does not apply to workerd.
 // - [ ] test/parallel/test-http-server-connection-list-when-close.js
 // - [ ] test/parallel/test-http-server-connections-checking-leak.js
 // - [ ] test/parallel/test-http-server-clear-timer.js
+// - [ ] test/parallel/test-http-server-client-error.js
 // - [ ] test/parallel/test-http-server-close-all.js
+// - [ ] test/parallel/test-http-server-close-destroy-timeout.js
 // - [ ] test/parallel/test-http-server-de-chunked-trailer.js
 // - [ ] test/parallel/test-http-server-delete-parser.js
 // - [ ] test/parallel/test-http-server-destroy-socket-on-client-error.js
@@ -776,6 +1170,8 @@ export default nodeCompatHttpServerHandler(
 // - [ ] test/parallel/test-http-server-keepalive-end.js
 // - [ ] test/parallel/test-http-server-keepalive-req-gc.js
 // - [ ] test/parallel/test-http-server-options-highwatermark.js
+// - [ ] test/parallel/test-http-server-multiple-client-error.js
+// - [ ] test/parallel/test-http-server-reject-chunked-with-content-length.js
 // - [ ] test/parallel/test-http-server-reject-cr-no-lf.js
 // - [ ] test/parallel/test-http-server-response-standalone.js
 // - [ ] test/parallel/test-http-server-stale-close.js

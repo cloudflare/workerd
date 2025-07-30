@@ -42,6 +42,7 @@ import { STATUS_CODES } from 'node-internal:internal_http_constants';
 import {
   kServerResponse,
   kIncomingMessage,
+  splitHeaderValue,
 } from 'node-internal:internal_http_util';
 import {
   kOutHeaders,
@@ -77,6 +78,27 @@ export type DataWrittenEvent = {
   entry: WrittenDataBufferEntry;
 };
 
+// By default Node.js forbids the following headers to be joined by comma.
+// Cloudflare workers implementation of Server, uses Fetch and by default
+// fetch joins them. Therefore, we need to maintain this list of headers
+// to filter and only return the first match to be Node.js compatible.
+//
+// For more reference, here is a Node.js test that validates this behavior:
+// https://github.com/nodejs/node/blob/af77e4bf2f8bee0bc23f6ee129d6ca97511d34b9/test/parallel/test-http-server-multiheaders2.js
+const multipleForbiddenHeaders = [
+  'host',
+  'content-type',
+  'user-agent',
+  'referer',
+  'authorization',
+  'proxy-authorization',
+  'if-modified-since',
+  'if-unmodified-since',
+  'from',
+  'location',
+  'max-forwards',
+];
+
 export class Server
   extends EventEmitter
   implements _Server, BaseWithHttpOptions
@@ -96,8 +118,8 @@ export class Server
   maxHeadersCount: number | null = null;
   maxRequestsPerSocket = 0;
   connectionsCheckingInterval = 30_000;
-  requestTimeout: number = 0;
-  headersTimeout: number = 0;
+  requestTimeout: number = 300_000;
+  headersTimeout: number = 60_000;
   requireHostHeader: boolean = false;
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
@@ -202,10 +224,11 @@ export class Server
 
     const headers = [];
     for (const [key, value] of request.headers) {
-      if (key === 'host') {
-        // By default fetch implementation will join "host" header values with a comma.
+      if (multipleForbiddenHeaders.includes(key)) {
+        // By default fetch implementation will join the following header values with a comma.
         // But in order to be node.js compatible, we need to select the first if possible.
-        headers.push(key, value.split(', ', 1).at(0) as string);
+        // Use RFC 7230 compliant splitting that respects quoted-string constructions.
+        headers.push(key, splitHeaderValue(value));
       } else {
         headers.push(key, value);
       }
@@ -426,7 +449,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
           this.#toFetchResponse({
             statusCode,
             statusText: statusMessage,
-            sentHeaders: headers,
+            headers,
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
@@ -436,6 +459,9 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             },
           })
         );
+
+        this._closed = true;
+        this.emit('close');
       }
     );
 
@@ -445,15 +471,14 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   #toFetchResponse({
     statusCode,
     statusText,
-    sentHeaders,
+    headers,
     onStreamStart,
   }: {
     statusCode: number;
     statusText: string;
-    sentHeaders: [header: string, value: string][];
+    headers: Headers;
     onStreamStart: (controller: ReadableStreamController<Uint8Array>) => void;
   }): Response {
-    const headers = new Headers(sentHeaders);
     let body = null;
 
     if (this._hasBody) {

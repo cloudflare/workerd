@@ -1,5 +1,7 @@
 import http from 'node:http';
-import { throws, strictEqual, ok } from 'node:assert';
+import { throws, strictEqual, ok, rejects } from 'node:assert';
+import { nodeCompatHttpServerHandler } from 'cloudflare:workers';
+import { mock } from 'node:test';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -179,21 +181,129 @@ export const testHttpOutgoingWritableFinished = {
   },
 };
 
+// Test is taken from test/parallel/test-http-outgoing-destroyed.js
+export const testHttpOutgoingDestroyed = {
+  async test(_ctrl, env) {
+    {
+      const { promise, resolve } = Promise.withResolvers();
+      const errorFn = mock.fn();
+      await using server = http.createServer((req, res) => {
+        strictEqual(res.closed, false);
+        req.pipe(res);
+        res.on('error', errorFn);
+        res.on('close', () => {
+          strictEqual(res.closed, true);
+          res.end('asd');
+          process.nextTick(resolve);
+        });
+      });
+
+      server.listen(8080);
+
+      await env.SERVICE.fetch('https://cloudflare.com', {
+        method: 'PUT',
+        body: 'asd',
+      });
+      await promise;
+      strictEqual(errorFn.mock.callCount(), 0);
+    }
+
+    {
+      await using server = http.createServer((req, res) => {
+        strictEqual(res.closed, false);
+        res.end();
+        res.destroy();
+        // Make sure not to emit 'error' after .destroy().
+        res.end('asd');
+        strictEqual(res.errored, undefined);
+      });
+
+      server.listen(8080);
+
+      await env.SERVICE.fetch('https://cloudflare.com');
+    }
+  },
+};
+
+// Test is taken from test/parallel/test-http-outgoing-end-multiple.js
+export const testHttpOutgoingEndMultiple = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    const onWriteAfterEndError = mock.fn((err) => {
+      strictEqual(err.code, 'ERR_STREAM_WRITE_AFTER_END');
+    });
+    const resEndFn = mock.fn();
+    await using server = http.createServer(function (req, res) {
+      res.end('testing ended state', resEndFn);
+      strictEqual(res.writableCorked, 0);
+      res.end((err) => {
+        strictEqual(err.code, 'ERR_STREAM_ALREADY_FINISHED');
+      });
+      strictEqual(res.writableCorked, 0);
+      res.end('end', onWriteAfterEndError);
+      strictEqual(res.writableCorked, 0);
+      res.on('error', onWriteAfterEndError);
+      res.on('finish', () => {
+        res.end((err) => {
+          strictEqual(err.code, 'ERR_STREAM_ALREADY_FINISHED');
+          resolve();
+        });
+      });
+    });
+
+    server.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com/');
+    await promise;
+
+    strictEqual(onWriteAfterEndError.mock.callCount(), 2);
+    strictEqual(resEndFn.mock.callCount(), 1);
+  },
+};
+
+// Test is taken from test/parallel/test-http-outgoing-write-types.js
+export const testHttpOutgoingWriteTypes = {
+  async test(_ctrl, env) {
+    await using httpServer = http.createServer(function (req, res) {
+      throws(
+        () => {
+          res.write(['Throws.']);
+        },
+        { code: 'ERR_INVALID_ARG_TYPE' }
+      );
+      // should not throw
+      res.write('1a2b3c');
+      // should not throw
+      res.write(new Uint8Array(1024));
+      // should not throw
+      res.write(Buffer.from('1'.repeat(1024)));
+      res.end();
+    });
+
+    httpServer.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com');
+  },
+};
+
+export default nodeCompatHttpServerHandler({ port: 8080 });
+
 // Relevant Node.js tests
 //
 // - [x] test/parallel/test-http-outgoing-destroy.js
-// - [ ] test/parallel/test-http-outgoing-destroyed.js
-// - [ ] test/parallel/test-http-outgoing-end-cork.js
-// - [ ] test/parallel/test-http-outgoing-end-multiple.js
+// - [x] test/parallel/test-http-outgoing-destroyed.js
+// - [x] test/parallel/test-http-outgoing-end-multiple.js
 // - [x] test/parallel/test-http-outgoing-finish-writable.js
 // - [x] test/parallel/test-http-outgoing-properties.js
 // - [x] test/parallel/test-http-outgoing-proto.js
 // - [x] test/parallel/test-http-outgoing-renderHeaders.js
 // - [x] test/parallel/test-http-outgoing-writableFinished.js
+// - [x] test/parallel/test-http-outgoing-write-types.js
 
 // The following tests is not relevant to us:
 //
 // - [ ] test/parallel/test-http-outgoing-buffer.js
+// - [ ] test/parallel/test-http-outgoing-end-cork.js
 // - [ ] test/parallel/test-http-outgoing-end-types.js
 // - [ ] test/parallel/test-http-outgoing-finish.js
 // - [ ] test/parallel/test-http-outgoing-finished.js
@@ -202,4 +312,3 @@ export const testHttpOutgoingWritableFinished = {
 // - [ ] test/parallel/test-http-outgoing-message-inheritance.js
 // - [ ] test/parallel/test-http-outgoing-message-write-callback.js
 // - [ ] test/parallel/test-http-outgoing-settimeout.js
-// - [ ] test/parallel/test-http-outgoing-write-types.js
