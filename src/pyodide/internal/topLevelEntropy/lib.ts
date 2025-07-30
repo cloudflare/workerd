@@ -34,7 +34,7 @@ function setupShouldAllowBadEntropy(Module: Module): void {
 function shouldAllowBadEntropy(Module: Module): boolean {
   const val = Module.HEAP8[allowed_entropy_calls_addr];
   if (val) {
-    Module.HEAP8[allowed_entropy_calls_addr]--;
+    (Module.HEAP8[allowed_entropy_calls_addr] as number)--;
     return true;
   }
   return false;

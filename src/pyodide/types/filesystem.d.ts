@@ -94,7 +94,7 @@ interface FSNode<Info> {
   node_ops: FSNodeOps<Info>;
   stream_ops: FSStreamOps<Info>;
   info: Info;
-  contentsOffset?: number;
+  contentsOffset?: number | undefined;
   tree?: MetadataDirInfo;
   index?: number;
 }

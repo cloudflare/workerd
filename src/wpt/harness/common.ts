@@ -31,25 +31,17 @@ export type PromiseTestFn = () => Promise<unknown>;
 
 export class FilterList {
   // Matches any input
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private matchesAll: boolean = false;
+  #matchesAll: boolean = false;
 
   // List of strings to match exactly
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private strings: Set<string> = new Set();
+  #strings: Set<string> = new Set();
 
   // List of regexps to match against
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private regexps: RegExp[] = [];
+  #regexps: RegExp[] = [];
 
   // Regexes which never matched any of the inputs
   // We keep this set so we can warn the user about this.
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private unmatchedRegexps: Set<RegExp> = new Set();
+  #unmatchedRegexps: Set<RegExp> = new Set();
 
   constructor(filters: (string | RegExp)[] | true | undefined) {
     if (filters === undefined) {
@@ -57,46 +49,46 @@ export class FilterList {
     }
 
     if (filters === true) {
-      this.matchesAll = true;
+      this.#matchesAll = true;
       return;
     }
 
     for (const filter of filters) {
       if (typeof filter === 'string') {
-        this.strings.add(filter);
+        this.#strings.add(filter);
       } else {
-        this.regexps.push(filter);
+        this.#regexps.push(filter);
       }
     }
 
-    this.unmatchedRegexps = new Set(this.regexps);
+    this.#unmatchedRegexps = new Set(this.#regexps);
   }
 
   has(input: string): boolean {
-    if (this.matchesAll) {
+    if (this.#matchesAll) {
       return true;
     }
 
-    if (this.strings.has(input)) {
+    if (this.#strings.has(input)) {
       return true;
     }
 
-    return this.regexps.some((r) => r.test(input));
+    return this.#regexps.some((r) => r.test(input));
   }
 
   delete(input: string): boolean {
-    if (this.matchesAll) {
+    if (this.#matchesAll) {
       return true;
     }
 
-    if (this.strings.delete(input)) {
+    if (this.#strings.delete(input)) {
       return true;
     }
 
-    const maybeMatch = this.regexps.find((r) => r.test(input));
+    const maybeMatch = this.#regexps.find((r) => r.test(input));
 
     if (maybeMatch !== undefined) {
-      this.unmatchedRegexps.delete(maybeMatch);
+      this.#unmatchedRegexps.delete(maybeMatch);
       return true;
     }
 
@@ -104,7 +96,7 @@ export class FilterList {
   }
 
   getUnmatched(): Set<string | RegExp> {
-    return this.strings.union(this.unmatchedRegexps);
+    return this.#strings.union(this.#unmatchedRegexps);
   }
 }
 

@@ -1,12 +1,7 @@
 {
+  "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "dom"],
-    "alwaysStrict": true,
-    "strict": true,
-    "allowJs": true,
-    "moduleResolution": "node",
+    "declaration": true,
     "paths": {
       "pyodide:*": ["./*"],
       "pyodide-internal:*": ["./internal/*", "./types/*"],
@@ -18,12 +13,10 @@
       "internal:*": ["./types/*"]
     },
     "typeRoots": ["./types"],
-    "types": [],
-    "declaration": true,
     "noEmit": false,
     "noEmitOnError": false,
     "allowArbitraryExtensions": true
   },
   "include": ["./**/*"],
-  "exclude": ["./**/generated/**/*"]
+  "exclude": ["./**/generated/**/*", "node_modules", "**/*.mjs"]
 }

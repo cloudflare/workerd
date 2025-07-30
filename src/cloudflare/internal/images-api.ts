@@ -69,10 +69,12 @@ class TransformationResultImpl implements ImageTransformationResult {
 }
 
 class DrawTransformer {
-  constructor(
-    readonly child: ImageTransformerImpl,
-    readonly options: ImageDrawOptions
-  ) {}
+  readonly child: ImageTransformerImpl;
+  readonly options: ImageDrawOptions;
+  constructor(child: ImageTransformerImpl, options: ImageDrawOptions) {
+    this.child = child;
+    this.options = options;
+  }
 }
 
 class ImageTransformerImpl implements ImageTransformer {
@@ -277,11 +279,10 @@ class ImagesBindingImpl implements ImagesBinding {
 }
 
 class ImagesErrorImpl extends Error implements ImagesError {
-  constructor(
-    message: string,
-    readonly code: number
-  ) {
+  readonly code: number;
+  constructor(message: string, code: number) {
     super(message);
+    this.code = code;
   }
 }
 

@@ -9,14 +9,15 @@ interface Fetcher {
   fetch: typeof fetch;
 }
 
-enum Operation {
-  INDEX_GET = 0,
-  VECTOR_QUERY = 1,
-  VECTOR_INSERT = 2,
-  VECTOR_UPSERT = 3,
-  VECTOR_GET = 4,
-  VECTOR_DELETE = 5,
-}
+const Operation = {
+  INDEX_GET: 'INDEX_GET' as const,
+  VECTOR_QUERY: 'VECTOR_QUERY' as const,
+  VECTOR_INSERT: 'VECTOR_INSERT' as const,
+  VECTOR_UPSERT: 'VECTOR_UPSERT' as const,
+  VECTOR_GET: 'VECTOR_GET' as const,
+  VECTOR_DELETE: 'VECTOR_DELETE' as const,
+} as const;
+type OperationKey = keyof typeof Operation;
 
 type VectorizeVersion = 'v1' | 'v2';
 
@@ -34,20 +35,26 @@ function toNdJson(arr: object[]): string {
  * and not visible to end users.
  */
 class VectorizeIndexImpl implements Vectorize {
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly fetcher: Fetcher;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly indexId: string;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly indexVersion: VectorizeVersion;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly useNdJson: boolean;
+
   constructor(
-    // TODO(soon): Can we use the # syntax here?
-    // eslint-disable-next-line no-restricted-syntax
-    private readonly fetcher: Fetcher,
-    // TODO(soon): Can we use the # syntax here?
-    // eslint-disable-next-line no-restricted-syntax
-    private readonly indexId: string,
-    // TODO(soon): Can we use the # syntax here?
-    // eslint-disable-next-line no-restricted-syntax
-    private readonly indexVersion: VectorizeVersion,
-    // TODO(soon): Can we use the # syntax here?
-    // eslint-disable-next-line no-restricted-syntax
-    private readonly useNdJson: boolean
-  ) {}
+    fetcher: Fetcher,
+    indexId: string,
+    indexVersion: VectorizeVersion,
+    useNdJson: boolean
+  ) {
+    this.fetcher = fetcher;
+    this.indexId = indexId;
+    this.indexVersion = indexVersion;
+    this.useNdJson = useNdJson;
+  }
 
   async describe(): Promise<VectorizeIndexInfo> {
     const endpoint =
@@ -218,10 +225,9 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeAsyncMutation>(res);
   }
 
-  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private async _send(
-    operation: Operation,
+    operation: OperationKey,
     endpoint: string,
     init: RequestInit
   ): Promise<Response> {
@@ -263,7 +269,6 @@ class VectorizeIndexImpl implements Vectorize {
     return res;
   }
 
-  // TODO(soon): Can we use the # syntax here?
   // eslint-disable-next-line no-restricted-syntax
   private async queryImplV2(
     vectorParams: QueryImplV2Params,

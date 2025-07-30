@@ -78,7 +78,7 @@ function checkDiagnostics(sources: SourcesMap): void {
     if (diagnostic.file) {
       const { line, character } = ts.getLineAndCharacterOfPosition(
         diagnostic.file,
-        diagnostic.start!
+        diagnostic.start
       );
       const message = ts.flattenDiagnosticMessageText(
         diagnostic.messageText,

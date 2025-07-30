@@ -6,8 +6,7 @@ import assert from 'node:assert';
 import util from 'node:util';
 
 export default {
-  async fetch(request: any, env: any, ctx: any) {
-    const { pathname } = new URL(request.url);
+  async fetch() {
     return new Response(null, { status: 404 });
   },
 };
@@ -49,7 +48,7 @@ async function assertFetchCacheRejectsError(
 }
 
 export const cacheMode = {
-  async test(ctrl: any, env: any, ctx: any) {
+  async test(_ctrl: any, env: any, _ctx: any) {
     const allowedCacheModes: Set<RequestCache> = new Set([
       'default',
       'force-cache',
