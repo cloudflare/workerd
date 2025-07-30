@@ -402,7 +402,8 @@ void IoContext::logUncaughtExceptionAsync(
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
   kj::Maybe<RequestObserver&> metrics;
   if (!incomingRequests.empty()) metrics = getMetrics();
-  runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
+  runImpl(
+      runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
 
 void IoContext::abort(kj::Exception&& e) {
@@ -1130,10 +1131,9 @@ void IoContext::runInContextScope(Worker::LockType lockType,
 }
 
 void IoContext::runImpl(Runnable& runnable,
-    bool takePendingEvent,
     Worker::LockType lockType,
     kj::Maybe<InputGate::Lock> inputLock,
-    bool allowPermanentException) {
+    Runnable::Exceptional exceptional) {
   KJ_IF_SOME(l, inputLock) {
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
@@ -1141,12 +1141,9 @@ void IoContext::runImpl(Runnable& runnable,
   getIoChannelFactory().getTimer().syncTime();
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
-    if (!allowPermanentException) {
-      workerLock.requireNoPermanentException();
-    }
-
     kj::Own<void> event;
-    if (takePendingEvent) {
+    if (!exceptional) {
+      workerLock.requireNoPermanentException();
       // Prevent prematurely detecting a hang while we're still executing JavaScript.
       // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
       //   not be necessary.
