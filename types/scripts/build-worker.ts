@@ -89,9 +89,8 @@ export function readComments(): CommentsData {
     comments[name] ??= {};
     for (const [member, comment] of Object.entries(members)) {
       const apiEntry = comments[name];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       assert(apiEntry !== undefined);
-      apiEntry[member] = comment;
+      apiEntry[member] = comment as string;
     }
   }
   return comments;

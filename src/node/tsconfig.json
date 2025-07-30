@@ -1,27 +1,8 @@
 {
+  "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "dom", "Webworker.Iterable"],
-    "alwaysStrict": true,
-    "strict": true,
-    "allowJs": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noPropertyAccessFromIndexSignature": false,
-    "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "strictNullChecks": true,
-    "esModuleInterop": true,
-    "moduleResolution": "node",
     "declaration": true,
     "types": ["@types/node"],
-    "erasableSyntaxOnly": true,
     "paths": {
       "node:*": ["./*"],
       "node:assert/*": ["./*"],
@@ -36,6 +17,5 @@
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
       "cloudflare-internal:filesystem": ["./internal/filesystem.d.ts"]
     }
-  },
-  "exclude": []
+  }
 }

@@ -121,7 +121,7 @@ class VirtualizedDir {
     // add all the .so files we will need to preload from the big bundle
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
-      const [pkg, ...rest] = soFile.split('/');
+      const [pkg, ...rest] = soFile.split('/') as [string, ...string[]];
       if (requirements.has(pkg)) {
         this.soFiles.push(rest);
       }
