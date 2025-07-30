@@ -138,6 +138,15 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   } else {
     throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
   }
+  // In this case, we have a string path. Any ? or # characters in the
+  // path should be percent-encoded to ensure they are not treated as
+  // special characters in the URL.
+  path = path.replace(/[#?]/g, encodeURIComponent);
+
+  // Node.js will also ignore empty path segments (e.g. `//` in the path).
+  // Let's normalize those out here as well.
+  path = path.replace(/\/\//g, '/');
+
   return new URL(
     path,
     path.startsWith('/') ? 'file://' : `file://${processImpl.getCwd()}/`
