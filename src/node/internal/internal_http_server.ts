@@ -416,30 +416,32 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       contentLength: null,
     };
 
-    const handleData = (event: DataWrittenEvent): void => {
-      let chunk = this.#dataFromDataWrittenEvent(event);
+    const handleData = (events: DataWrittenEvent[]): void => {
+      for (const event of events) {
+        let chunk = this.#dataFromDataWrittenEvent(event);
 
-      // Trim chunk if it would exceed content-length
-      if (
-        state.contentLength !== null &&
-        state.bytesWritten + chunk.length > state.contentLength
-      ) {
-        const remainingBytes = state.contentLength - state.bytesWritten;
-        if (remainingBytes > 0) {
-          chunk = chunk.slice(0, remainingBytes);
+        // Trim chunk if it would exceed content-length
+        if (
+          state.contentLength !== null &&
+          state.bytesWritten + chunk.length > state.contentLength
+        ) {
+          const remainingBytes = state.contentLength - state.bytesWritten;
+          if (remainingBytes > 0) {
+            chunk = chunk.slice(0, remainingBytes);
+          } else {
+            continue; // Skip this chunk entirely
+          }
+        }
+
+        state.bytesWritten += chunk.length;
+
+        if (streamController) {
+          if (chunk.length > 0) {
+            streamController.enqueue(chunk);
+          }
         } else {
-          return; // Skip this chunk entirely
+          chunks[event.index] = chunk;
         }
-      }
-
-      state.bytesWritten += chunk.length;
-
-      if (streamController) {
-        if (chunk.length > 0) {
-          streamController.enqueue(chunk);
-        }
-      } else {
-        chunks[event.index] = chunk;
       }
     };
 

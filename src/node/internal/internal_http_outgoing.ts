@@ -10,6 +10,7 @@ import { validateString } from 'node-internal:validators';
 import { Writable } from 'node-internal:streams_writable';
 import { ok } from 'node-internal:internal_assert';
 import { getDefaultHighWaterMark } from 'node-internal:streams_util';
+import type { DataWrittenEvent } from 'node-internal:internal_http_server';
 import {
   ERR_HTTP_HEADERS_SENT,
   ERR_INVALID_ARG_TYPE,
@@ -103,12 +104,12 @@ export function parseUniqueHeadersOption(
 class MessageBuffer {
   #corked = 0;
   #index = 0;
-  #onWrite: (index: number, entry: WrittenDataBufferEntry) => void;
+  #onWrite: (data: DataWrittenEvent[]) => void;
   #bufferedWrites: { index: number; entry: WrittenDataBufferEntry }[] = [];
   #highWaterMark: number;
 
   constructor(
-    onWrite: (index: number, entry: WrittenDataBufferEntry) => void,
+    onWrite: (data: DataWrittenEvent[]) => void,
     options: { highWaterMark: number }
   ) {
     this.#onWrite = onWrite;
@@ -131,7 +132,7 @@ class MessageBuffer {
     const index = this.#index++;
 
     if (this.#corked === 0) {
-      this.#onWrite(index, entry);
+      this.#onWrite([{ index, entry }]);
       queueMicrotask(() => {
         callback?.();
       });
@@ -158,18 +159,7 @@ class MessageBuffer {
   _flush(): void {
     // If fully uncorked, flush all buffered writes
     if (this.#corked <= 0) {
-      const writes = this.#bufferedWrites.splice(0);
-      // TODO(soon): As a later optimization, reduce the unique calls to onWrite,
-      //
-      // In Node.js, when the writable is uncorked
-      // and the Writable provides an implementation of writev, then calling uncork will
-      // trigger a single call to writev rather than multiple calls to write, which is
-      // going to be far more efficient overall as it requires less scheduling. For instance,
-      // here, if I write 100 small chunks while corked, then uncork, we're going to end up
-      // with 100 separate calls to #onWrite.
-      for (const { index, entry } of writes) {
-        this.#onWrite(index, entry);
-      }
+      this.#onWrite(this.#bufferedWrites.splice(0));
     }
   }
 
@@ -271,8 +261,8 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     });
   }
 
-  #onDataWritten(index: number, entry: WrittenDataBufferEntry): void {
-    this.emit('_dataWritten', { index, entry });
+  #onDataWritten(data: DataWrittenEvent[]): void {
+    this.emit('_dataWritten', data);
   }
 
   override cork(): void {
