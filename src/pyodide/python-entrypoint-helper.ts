@@ -277,12 +277,20 @@ function makeEntrypointProxyHandler(
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(
+            true,
+            pyInstance[prop] as PyCallable,
+            args
+          );
         }
 
         if (workflowsEnabled && isWorkflowHandler) {
           // we're hiding this behind a compat flag for now
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(
+            true,
+            pyInstance[prop] as PyCallable,
+            args
+          );
         }
 
         const introspectionMod = await getIntrospectionMod();
