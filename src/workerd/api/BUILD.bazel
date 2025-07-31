@@ -758,6 +758,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "worker-loader-test.wd-test",
     args = ["--experimental"],
     data = ["worker-loader-test.js"],
