@@ -985,10 +985,14 @@ class _WorkflowStepWrapper:
         return decorator
 
     def sleep(self, *args, **kwargs):
+        # all types should be primitives - no need for explicit translation
         return self._js_step.sleep(*args, **kwargs)
 
-    def sleep_until(self, *args, **kwargs):
-        return self._js_step.sleepUntil(*args, **kwargs)
+    def sleep_until(self, name, timestamp):
+        if not isinstance(timestamp, str):
+            timestamp = python_to_rpc(timestamp)
+
+        return self._js_step.sleepUntil(name, timestamp)
 
     def wait_for_event(self, name, event_type, /, timeout="24 hours"):
         return self._js_step.waitForEvent(
@@ -1021,7 +1025,9 @@ async def _do_call(entrypoint, name, config, callback, *results):
             if config is None:
                 coroutine = await entrypoint._js_step.do(name, _callback)
             else:
-                coroutine = await entrypoint._js_step.do(name, to_js(config), _callback)
+                coroutine = await entrypoint._js_step.do(
+                    name, to_js(config, dict_converter=Object.fromEntries), _callback
+                )
 
             return python_from_rpc(coroutine)
         except Exception as exc:
@@ -1053,7 +1059,7 @@ def _wrap_subclass(cls):
 
 
 def _wrap_workflow_step(cls):
-    run_fn = getattr(cls, "on_run", None)
+    run_fn = getattr(cls, "run", None)
     if run_fn is None:
         return
 
@@ -1076,7 +1082,7 @@ def _wrap_workflow_step(cls):
 
         return result
 
-    cls.on_run = wrapped_run
+    cls.run = wrapped_run
 
 
 class DurableObject:
