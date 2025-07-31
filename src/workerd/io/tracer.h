@@ -175,6 +175,10 @@ class WorkerTracer: public BaseTracer {
   // The root span for the new tracing format.
   SpanBuilder userRequestSpan;
 
+  // Allow up
+  // TODO: Decide on a different limit here?
+  kj::uint tail_events = 0;
+
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
   // InvocationSpanContext interfaces.
