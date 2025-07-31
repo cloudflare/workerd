@@ -80,7 +80,7 @@ build:ci-macOS --copt=-UDEBUG
 build:ci-macOS-debug --config=debug
 
 # Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
-build:ci-macOS --spawn_strategy=local
+test:ci-macOS --spawn_strategy=local
 
 build:ci-windows --config=windows_no_dbg
 build:ci-windows-debug --config=debug
