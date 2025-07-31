@@ -929,6 +929,7 @@ export function readFile(
   } else {
     options = optionsOrCallback;
   }
+  // TODO(node-fs): Validate options more. Specifically the encoding option
   callWithSingleArgCallback(() => fssync.readFileSync(path, options), callback);
 }
 
