@@ -124,6 +124,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
+  highWaterMark: number = 65536;
   #port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
@@ -137,7 +138,10 @@ export class Server
       storeHTTPOptions.call(this, options);
     }
 
-    // TODO(soon): Support options.highWaterMark option.
+    if (options?.highWaterMark !== undefined) {
+      validateInteger(options.highWaterMark, 'options.highWaterMark', 0);
+      this.highWaterMark = options.highWaterMark;
+    }
 
     if (typeof options === 'function') {
       requestListener = options;
@@ -239,7 +243,9 @@ export class Server
     incoming.method = request.method;
     incoming._stream = request.body;
 
-    const response = new this[kServerResponse](incoming);
+    const response = new this[kServerResponse](incoming, {
+      highWaterMark: this.highWaterMark,
+    });
     return { incoming, response };
   }
 
