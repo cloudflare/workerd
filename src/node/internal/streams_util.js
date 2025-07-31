@@ -874,7 +874,7 @@ eos.finished = finished;
 function checkError(err, w, r) {
   if (err) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
-    err.stack; // eslint-disable-line no-unused-expressions
+    err.stack;
 
     if (w && !w.errored) {
       w.errored = err;
@@ -1028,7 +1028,7 @@ export function errorOrDestroy(stream, err, sync = false) {
   if ((r && r.autoDestroy) || (w && w.autoDestroy)) stream.destroy(err);
   else if (err) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
-    err.stack; // eslint-disable-line no-unused-expressions
+    err.stack;
 
     if (w && !w.errored) {
       w.errored = err;

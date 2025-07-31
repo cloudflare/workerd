@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { EventEmitter } from 'node-internal:events';
 
 import { Stream } from 'node-internal:streams_legacy';
@@ -419,7 +416,7 @@ function onwrite(stream, er) {
   state.writelen = 0;
   if (er) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
-    er.stack; // eslint-disable-line no-unused-expressions
+    er.stack; // eslint-disable-line @typescript-eslint/no-unused-expressions
 
     if (!state.errored) {
       state.errored = er;

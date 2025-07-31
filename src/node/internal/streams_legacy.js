@@ -35,7 +35,7 @@ Object.setPrototypeOf(Stream.prototype, EventEmitter.prototype);
 Object.setPrototypeOf(Stream, EventEmitter);
 
 Stream.prototype.pipe = function (dest, options) {
-  const source = this;
+  const source = this; // eslint-disable-line @typescript-eslint/no-this-alias
   function ondata(chunk) {
     if (dest.writable && dest.write(chunk) === false && source.pause) {
       source.pause();
