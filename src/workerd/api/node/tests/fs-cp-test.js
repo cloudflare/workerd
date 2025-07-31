@@ -11,7 +11,7 @@ import {
   promises as fsPromises,
 } from 'node:fs';
 
-import { ok, deepStrictEqual, throws, rejects } from 'node:assert';
+import { ok, deepStrictEqual, strictEqual, throws, rejects } from 'node:assert';
 
 const pathA = new URL('file:///tmp/a'); // File
 const pathB = new URL('file:///tmp/b'); // Directory
@@ -48,17 +48,17 @@ export const simpleFileCopy = {
     // Copying a file when the destination already exists and force is false and
     // errorOnExist is true, should throw an error.
     throws(() => cpSync(pathA, pathF, { force: false, errorOnExist: true }), {
-      code: 'EEXIST',
+      code: 'ERR_FS_CP_EEXIST',
     });
 
     // Copying a file to a directory should throw an error.
     throws(() => cpSync(pathA, pathB), {
-      code: 'EISDIR',
+      code: 'ERR_FS_CP_NON_DIR_TO_DIR',
     });
 
     // Copy a file to a symlink to a directory should throw by default
     throws(() => cpSync(pathA, pathD, { dereference: true }), {
-      code: 'EISDIR',
+      code: 'ERR_FS_CP_NON_DIR_TO_DIR',
     });
 
     ok(statSync(pathD).isDirectory());
@@ -111,7 +111,7 @@ export const copyFileToExistingDirectory = {
   test() {
     setupPaths();
     throws(() => cpSync(pathA, pathB), {
-      code: 'EISDIR',
+      code: 'ERR_FS_CP_NON_DIR_TO_DIR',
     });
   },
 };
@@ -122,7 +122,7 @@ export const copyFileToExistingSymlinkToDirectory = {
     setupPaths();
     // With dereference: true, should throw EISDIR
     throws(() => cpSync(pathA, pathD, { dereference: true }), {
-      code: 'EISDIR',
+      code: 'ERR_FS_CP_NON_DIR_TO_DIR',
     });
 
     // Without dereference (default), should replace the symlink
@@ -160,7 +160,7 @@ export const copyDirectoryToExistingFile = {
   test() {
     setupPaths();
     throws(() => cpSync(pathB, pathA, { recursive: true }), {
-      code: 'ENOTDIR',
+      code: 'ERR_FS_CP_DIR_TO_NON_DIR',
     });
   },
 };
@@ -170,7 +170,7 @@ export const copyDirectoryToExistingSymlinkToFile = {
   test() {
     setupPaths();
     throws(() => cpSync(pathB, pathC, { recursive: true, dereference: true }), {
-      code: 'ENOTDIR',
+      code: 'ERR_FS_CP_DIR_TO_NON_DIR',
     });
   },
 };
@@ -264,7 +264,7 @@ export const copySymlinkWithDereferenceOptions = {
     // Test with force: false, errorOnExist: true
     symlinkSync(pathA, pathG);
     throws(() => cpSync(pathC, pathG, { force: false, errorOnExist: true }), {
-      code: 'EEXIST',
+      code: 'ERR_FS_CP_EEXIST',
     });
 
     // Test with force: false, errorOnExist: false
@@ -281,7 +281,7 @@ export const copySymlinkWithDereferenceOptions = {
           errorOnExist: true,
         }),
       {
-        code: 'EEXIST',
+        code: 'ERR_FS_CP_EEXIST',
       }
     );
 
@@ -350,12 +350,12 @@ export const recursiveOptionTests = {
 
     // Test copying directory without recursive option should fail
     throws(() => cpSync(pathB, pathG), {
-      code: 'EISDIR',
+      code: 'ERR_FS_EISDIR',
     });
 
     // Test with recursive: false explicitly
     throws(() => cpSync(pathB, pathG, { recursive: false }), {
-      code: 'EISDIR',
+      code: 'ERR_FS_EISDIR',
     });
 
     // Test copying directory with recursive: true should work
@@ -528,7 +528,7 @@ export const simpleFileCopyCallback = {
     await new Promise((resolve) => {
       cp(pathA, pathF, { force: false, errorOnExist: true }, (err) => {
         ok(err);
-        ok(err.code === 'EEXIST');
+        strictEqual(err.code, 'ERR_FS_CP_EEXIST');
         resolve();
       });
     });
@@ -537,7 +537,7 @@ export const simpleFileCopyCallback = {
     await new Promise((resolve) => {
       cp(pathA, pathB, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_CP_NON_DIR_TO_DIR');
         resolve();
       });
     });
@@ -546,7 +546,7 @@ export const simpleFileCopyCallback = {
     await new Promise((resolve) => {
       cp(pathA, pathD, { dereference: true }, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_CP_NON_DIR_TO_DIR');
         resolve();
       });
     });
@@ -629,7 +629,7 @@ export const copyFileToExistingDirectoryCallback = {
     await new Promise((resolve) => {
       cp(pathA, pathB, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_CP_NON_DIR_TO_DIR');
         resolve();
       });
     });
@@ -645,7 +645,7 @@ export const copyFileToExistingSymlinkToDirectoryCallback = {
     await new Promise((resolve) => {
       cp(pathA, pathD, { dereference: true }, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_CP_NON_DIR_TO_DIR');
         resolve();
       });
     });
@@ -709,7 +709,7 @@ export const copyDirectoryToExistingFileCallback = {
     await new Promise((resolve) => {
       cp(pathB, pathA, { recursive: true }, (err) => {
         ok(err);
-        ok(err.code === 'ENOTDIR');
+        strictEqual(err.code, 'ERR_FS_CP_DIR_TO_NON_DIR');
         resolve();
       });
     });
@@ -724,7 +724,7 @@ export const copyDirectoryToExistingSymlinkToFileCallback = {
     await new Promise((resolve) => {
       cp(pathB, pathC, { recursive: true, dereference: true }, (err) => {
         ok(err);
-        ok(err.code === 'ENOTDIR');
+        strictEqual(err.code, 'ERR_FS_CP_DIR_TO_NON_DIR');
         resolve();
       });
     });
@@ -821,7 +821,7 @@ export const copySymlinkToExistingDirectoryCallback = {
     await new Promise((resolve) => {
       cp(pathC, pathE, (err) => {
         ok(err);
-        ok(err.code === 'ENOTDIR');
+        strictEqual(err.code, 'ENOTDIR');
         resolve();
       });
     });
@@ -863,7 +863,7 @@ export const copySymlinkWithDereferenceOptionsCallback = {
     await new Promise((resolve) => {
       cp(pathC, pathG, { force: false, errorOnExist: true }, (err) => {
         ok(err);
-        ok(err.code === 'EEXIST');
+        strictEqual(err.code, 'ERR_FS_CP_EEXIST');
         resolve();
       });
     });
@@ -886,7 +886,7 @@ export const copySymlinkWithDereferenceOptionsCallback = {
         { dereference: true, force: false, errorOnExist: true },
         (err) => {
           ok(err);
-          ok(err.code === 'EEXIST');
+          strictEqual(err.code, 'ERR_FS_CP_EEXIST');
           resolve();
         }
       );
@@ -966,7 +966,7 @@ export const recursiveOptionTestsCallback = {
     await new Promise((resolve) => {
       cp(pathB, pathG, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_EISDIR');
         resolve();
       });
     });
@@ -975,7 +975,7 @@ export const recursiveOptionTestsCallback = {
     await new Promise((resolve) => {
       cp(pathB, pathG, { recursive: false }, (err) => {
         ok(err);
-        ok(err.code === 'EISDIR');
+        strictEqual(err.code, 'ERR_FS_EISDIR');
         resolve();
       });
     });
@@ -1059,7 +1059,7 @@ export const errorHandlingTestsCallback = {
     await new Promise((resolve) => {
       cp(nonExistent, pathG, (err) => {
         ok(err);
-        ok(err.code === 'ENOENT');
+        strictEqual(err.code, 'ENOENT');
         resolve();
       });
     });
@@ -1092,7 +1092,7 @@ export const symlinkEdgeCasesCallback = {
     await new Promise((resolve) => {
       cp(pathG, pathI, { dereference: true }, (err) => {
         ok(err);
-        ok(err.code === 'ENOENT');
+        strictEqual(err.code, 'ENOENT');
         resolve();
       });
     });
@@ -1192,7 +1192,7 @@ export const simpleFileCopyPromises = {
       async () => {
         await fsPromises.cp(pathA, pathF, { force: false, errorOnExist: true });
       },
-      { code: 'EEXIST' }
+      { code: 'ERR_FS_CP_EEXIST' }
     );
 
     // Test error case: copying file to directory
@@ -1200,7 +1200,7 @@ export const simpleFileCopyPromises = {
       async () => {
         await fsPromises.cp(pathA, pathB);
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_CP_NON_DIR_TO_DIR' }
     );
 
     // Test copying to symlink to directory
@@ -1208,7 +1208,7 @@ export const simpleFileCopyPromises = {
       async () => {
         await fsPromises.cp(pathA, pathD, { dereference: true });
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_CP_NON_DIR_TO_DIR' }
     );
 
     // Test copying to symlink without dereference
@@ -1265,7 +1265,7 @@ export const copyFileToExistingDirectoryPromises = {
       async () => {
         await fsPromises.cp(pathA, pathB);
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_CP_NON_DIR_TO_DIR' }
     );
   },
 };
@@ -1280,7 +1280,7 @@ export const copyFileToExistingSymlinkToDirectoryPromises = {
       async () => {
         await fsPromises.cp(pathA, pathD, { dereference: true });
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_CP_NON_DIR_TO_DIR' }
     );
 
     // Without dereference (default), should replace the symlink
@@ -1324,7 +1324,7 @@ export const copyDirectoryToExistingFilePromises = {
       async () => {
         await fsPromises.cp(pathB, pathA, { recursive: true });
       },
-      { code: 'ENOTDIR' }
+      { code: 'ERR_FS_CP_DIR_TO_NON_DIR' }
     );
   },
 };
@@ -1341,7 +1341,7 @@ export const copyDirectoryToExistingSymlinkToFilePromises = {
           dereference: true,
         });
       },
-      { code: 'ENOTDIR' }
+      { code: 'ERR_FS_CP_DIR_TO_NON_DIR' }
     );
   },
 };
@@ -1442,7 +1442,7 @@ export const copySymlinkWithDereferenceOptionsPromises = {
       async () => {
         await fsPromises.cp(pathC, pathG, { force: false, errorOnExist: true });
       },
-      { code: 'EEXIST' }
+      { code: 'ERR_FS_CP_EEXIST' }
     );
 
     // Test with force: false, errorOnExist: false
@@ -1459,7 +1459,7 @@ export const copySymlinkWithDereferenceOptionsPromises = {
           errorOnExist: true,
         });
       },
-      { code: 'EEXIST' }
+      { code: 'ERR_FS_CP_EEXIST' }
     );
 
     // Test copying to non-existent path
@@ -1556,7 +1556,7 @@ export const recursiveOptionTestsPromises = {
       async () => {
         await fsPromises.cp(pathB, pathG);
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_EISDIR' }
     );
 
     // Test with recursive: false explicitly
@@ -1564,7 +1564,7 @@ export const recursiveOptionTestsPromises = {
       async () => {
         await fsPromises.cp(pathB, pathG, { recursive: false });
       },
-      { code: 'EISDIR' }
+      { code: 'ERR_FS_EISDIR' }
     );
 
     // Test copying directory with recursive: true should work

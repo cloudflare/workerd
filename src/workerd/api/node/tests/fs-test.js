@@ -30,11 +30,23 @@ import {
   writeFile,
   appendFile,
   read,
+  // TODO(node-fs): Uncomment when relevant tests are provided.
+  // readdir,
+  // readlink,
+  // realpath,
+  // mkdtemp,
+  ReadStream,
+  WriteStream,
+  readdirSync,
+  readlinkSync,
   readv,
   readFile,
   rename,
   copyFile,
+  realpathSync,
+  mkdtempSync,
   constants,
+  promises,
 } from 'node:fs';
 
 const { COPYFILE_EXCL } = constants;
@@ -178,10 +190,10 @@ export const ftruncateTest = {
 
     {
       throws(() => ftruncateSync(fd, 0xffffffff), {
-        message: /file size limit exceeded/,
+        message: /File size limit exceeded/,
       });
       throws(() => ftruncateSync(fd, 0x08000000 + 1), {
-        message: /file size limit exceeded/,
+        message: /File size limit exceeded/,
       });
       // 0x08000000 is the maximum allowed file size.
       ftruncateSync(fd, 0x08000000);
@@ -625,6 +637,28 @@ export const writeFileSyncTest = {
   },
 };
 
+export const appendFileSyncFlush = {
+  test() {
+    ok(!existsSync('/tmp/test.txt'));
+
+    // The flush option really is not supported in any particular way in
+    // our implementation but let's verify it.
+    appendFileSync('/tmp/test.txt', 'hello world', { flush: true });
+
+    ['no', {}, null, -1].forEach((i) => {
+      throws(
+        () => appendFileSync('/tmp/test.txt', 'hello world', { flush: 'no' }),
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
+    });
+
+    ok(existsSync('/tmp/test.txt'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'hello world');
+  },
+};
+
 export const writeFileAsyncCallbackTest = {
   async test() {
     ok(!existsSync('/tmp/test.txt'));
@@ -648,6 +682,10 @@ export const writeFileAsyncCallbackTest = {
 
     await new Promise((resolve, reject) => {
       appendFile('/tmp/test.txt', '!!!!', (err) => {
+        strictEqual(
+          readFileSync('/tmp/test.txt').toString(),
+          'Hello World!!!!'
+        );
         if (err) return reject(err);
         resolve();
       });
@@ -667,6 +705,43 @@ export const writeFileAsyncCallbackTest = {
     });
     strictEqual(readFileSync(fd).toString(), 'Hello World!!!!##');
     closeSync(fd);
+
+    // We can use the promise API as well.
+    await promises.appendFile('/tmp/test.txt', '!!!');
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      'Hello World!!!!##!!!'
+    );
+  },
+};
+
+export const appendFileCases = {
+  async test() {
+    ok(!existsSync('/tmp/test.txt'));
+    // It accepts bufers
+    appendFileSync('/tmp/test.txt', Buffer.from('Hello World'));
+    ok(existsSync('/tmp/test.txt'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World');
+
+    // With the callback API also
+    const { promise, resolve, reject } = Promise.withResolvers();
+    appendFile('/tmp/test.txt', Buffer.from('!!!!'), (err) => {
+      if (err) return reject(err);
+      strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World!!!!');
+      resolve();
+    });
+    await promise;
+
+    // And the promises API
+    await promises.appendFile('/tmp/test.txt', Buffer.from('!!!'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World!!!!!!!');
+
+    // But invalid types throw errors
+    [123, {}, null, []].forEach((data) => {
+      throws(() => appendFileSync('/tmp/test.txt', data), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
   },
 };
 
@@ -907,5 +982,52 @@ export const fsCwdTest = {
     );
 
     unlinkSync('/tmp/test-cwd.txt');
+  },
+};
+
+export const readBadEncoding = {
+  test() {
+    const kErrorObj = {
+      code: 'ERR_INVALID_ARG_VALUE',
+    };
+    throws(() => readFileSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(
+      () => appendFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(() => readdirSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => readlinkSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(
+      () => writeFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(
+      () => appendFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(() => realpathSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => mkdtempSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => ReadStream('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => WriteStream('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+
+    throws(
+      () => writeFile('/tmp/test.txt', 'data', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => appendFile('/tmp/test.txt', 'data', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+
+    function mustNotCall() {
+      throw new Error('This function must not be called');
+    }
+
+    // TODO(node-fs): Enable these tests once encoding is verified correctly
+    // throws(() => readFile('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+    // throws(() => readdir('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+    // throws(() => readlink('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+    // throws(() => realpath('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+    // throws(() => mkdtemp('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
   },
 };
