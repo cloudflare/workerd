@@ -4,6 +4,7 @@
 #include "process.h"
 
 #include <workerd/api/filesystem.h>
+#include <workerd/api/node/exceptions.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
@@ -149,11 +150,11 @@ kj::String ProcessModule::getCwd(jsg::Lock& js) {
 void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   static constexpr size_t MAX_PATH_LENGTH = 4096;
   if (path.size() > MAX_PATH_LENGTH) {
-    throwUVException(js, UV_ENAMETOOLONG, "chdir"_kj);
+    node::THROW_ERR_UV_ENAMETOOLONG(js, "chdir"_kj);
   }
 
   if (path.size() == 0) {
-    throwUVException(js, UV_ENOENT, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
   }
 
   auto& vfs = VirtualFileSystem::current(js);
@@ -175,19 +176,19 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   KJ_IF_SOME(stat, vfs.getRoot(js)->stat(js, resolvedPath)) {
     KJ_SWITCH_ONEOF(stat) {
       KJ_CASE_ONEOF(fsError, FsError) {
-        throwUVException(js, UV_ENOENT, "chdir"_kj);
+        node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
       }
       KJ_CASE_ONEOF(statInfo, workerd::Stat) {
         if (statInfo.type != FsType::DIRECTORY) {
-          throwUVException(js, UV_ENOTDIR, "chdir"_kj);
+          node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj);
         }
         if (!setCurrentWorkingDirectory(kj::mv(resolvedPath))) {
-          throwUVException(js, UV_EPERM, "chdir"_kj);
+          node::THROW_ERR_UV_EPERM(js, "chdir"_kj);
         }
       }
     }
   } else {
-    throwUVException(js, UV_ENOENT, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
   }
 }
 

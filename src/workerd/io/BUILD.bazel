@@ -111,6 +111,7 @@ wd_cc_library(
         "//src/workerd/api:url",
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
+        "//src/workerd/api/node:exceptions",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",

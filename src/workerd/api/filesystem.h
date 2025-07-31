@@ -201,57 +201,6 @@ class FileSystemModule final: public jsg::Object {
   uint32_t tmpFileCounter = 0;
 };
 
-// Create a Node.js-style "UVException". The UVException is an
-// ordinary Error object with additional properties like code,
-// syscall, path, and destination properties. It is primarily
-// used to represent file system API errors.
-jsg::JsValue createUVException(jsg::Lock& js,
-    int errorno,
-    kj::StringPtr syscall,
-    kj::StringPtr message = nullptr,
-    kj::StringPtr path = nullptr,
-    kj::StringPtr dest = nullptr);
-
-// Throw a Node.js-style "UVException". The UVException is an
-// ordinary Error object with additional properties like code,
-// syscall, path, and destination properties. It is primarily
-// used to represent file system API errors.
-[[noreturn]] void throwUVException(jsg::Lock& js,
-    int errorno,
-    kj::StringPtr syscall,
-    kj::StringPtr message = nullptr,
-    kj::StringPtr path = nullptr,
-    kj::StringPtr dest = nullptr);
-
-// This is an intentionally truncated list of the error codes that Node.js/libuv
-// uses. We won't need all of the error codes that libuv uses.
-#define UV_ERRNO_MAP(XX)                                                                           \
-  XX(EACCES, "permission denied")                                                                  \
-  XX(EBADF, "bad file descriptor")                                                                 \
-  XX(EEXIST, "file already exists")                                                                \
-  XX(EFBIG, "file too large")                                                                      \
-  XX(EINVAL, "invalid argument")                                                                   \
-  XX(EISDIR, "illegal operation on a directory")                                                   \
-  XX(ELOOP, "too many symbolic links encountered")                                                 \
-  XX(EMFILE, "too many open files")                                                                \
-  XX(ENAMETOOLONG, "name too long")                                                                \
-  XX(ENFILE, "file table overflow")                                                                \
-  XX(ENOBUFS, "no buffer space available")                                                         \
-  XX(ENODEV, "no such device")                                                                     \
-  XX(ENOENT, "no such file or directory")                                                          \
-  XX(ENOMEM, "not enough memory")                                                                  \
-  XX(ENOSPC, "no space left on device")                                                            \
-  XX(ENOSYS, "function not implemented")                                                           \
-  XX(ENOTDIR, "not a directory")                                                                   \
-  XX(ENOTEMPTY, "directory not empty")                                                             \
-  XX(EPERM, "operation not permitted")                                                             \
-  XX(EMLINK, "too many links")                                                                     \
-  XX(EIO, "input/output error")
-
-#define XX(code, _) constexpr int UV_##code = -code;
-UV_ERRNO_MAP(XX)
-#undef XX
-
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
 // All of the classes in this part of the impl are defined by the spec.
