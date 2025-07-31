@@ -459,8 +459,15 @@ export function highWaterMarkFrom(options, isDuplex, duplexKey) {
       : null;
 }
 
+// By default Node.js uses:
+//   - Object mode: 16
+//   - Non-object mode:
+//     - Windows: 16 * 1024
+//     - Non-windows: 64 * 1024
+// Ref: https://github.com/nodejs/node/blob/d9fe28bd6b7836accff5a174ef76f7340bf5e600/lib/internal/streams/state.js#L12
+// We always return 64 * 1024 to be in par with production.
 export function getDefaultHighWaterMark(objectMode = false) {
-  return objectMode ? 16 : 16 * 1024;
+  return objectMode ? 16 : 64 * 1024;
 }
 
 export function setDefaultHighWaterMark() {

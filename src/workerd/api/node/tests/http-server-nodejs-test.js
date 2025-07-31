@@ -61,6 +61,9 @@ export const testHttpServerIncomingMessageDestroy = {
     await using server = http.createServer((req, res) => {
       const path = req.url;
 
+      ok('cloudflare' in req);
+      ok('cf' in req.cloudflare);
+
       if (path === '/destroy-with-error') {
         req.on('error', (err) => {
           res.statusCode = 400;
@@ -1096,6 +1099,33 @@ export const testScheduled = {
     });
 
     strictEqual(scheduledCallCount, 1);
+  },
+};
+
+export const testConfigurableHighWaterMark = {
+  async test(_ctrl, env) {
+    {
+      await using server = http.createServer({ highWaterMark: 9999 });
+      strictEqual(server.highWaterMark, 9999);
+    }
+
+    {
+      // Node.js supports 1.1 as a value for highWaterMark
+      await using server = http.createServer({ highWaterMark: 1.11 });
+      strictEqual(server.highWaterMark, 1.11);
+    }
+
+    {
+      // Node.js omits negative values
+      await using server = http.createServer({ highWaterMark: -1 });
+      strictEqual(server.highWaterMark, 65536);
+    }
+
+    for (const highWaterMark of [null, 'hello world', ['merhaba dunya']]) {
+      throws(() => http.createServer({ highWaterMark }), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    }
   },
 };
 

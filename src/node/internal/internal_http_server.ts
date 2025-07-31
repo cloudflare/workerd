@@ -24,6 +24,7 @@ import {
   ERR_SERVER_ALREADY_LISTEN,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
+import { getDefaultHighWaterMark } from 'node-internal:streams_util';
 import {
   kUniqueHeaders,
   OutgoingMessage,
@@ -35,6 +36,7 @@ import {
   validateInteger,
   validateObject,
   validatePort,
+  validateNumber,
 } from 'node-internal:validators';
 import { portMapper } from 'cloudflare-internal:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
@@ -124,6 +126,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
+  highWaterMark: number = getDefaultHighWaterMark();
   #port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
@@ -137,7 +140,12 @@ export class Server
       storeHTTPOptions.call(this, options);
     }
 
-    // TODO(soon): Support options.highWaterMark option.
+    if (options?.highWaterMark !== undefined) {
+      validateNumber(options.highWaterMark, 'options.highWaterMark');
+      if (options.highWaterMark > 0) {
+        this.highWaterMark = options.highWaterMark;
+      }
+    }
 
     if (typeof options === 'function') {
       requestListener = options;
@@ -235,11 +243,18 @@ export class Server
     }
     incoming._addHeaderLines(headers, headers.length);
 
-    // TODO(soon): It would be useful if there was a way to expose request.cf properties.
     incoming.method = request.method;
     incoming._stream = request.body;
 
-    const response = new this[kServerResponse](incoming);
+    // We provide a way for users to access to the Cloudflare-specific
+    // request properties, such as `cf` for accessing Cloudflare-specific request metadata.
+    if ('cf' in request) {
+      incoming.cloudflare.cf = request.cf as Record<string, unknown>;
+    }
+
+    const response = new this[kServerResponse](incoming, {
+      highWaterMark: this.highWaterMark,
+    });
     return { incoming, response };
   }
 
@@ -404,30 +419,32 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
       contentLength: null,
     };
 
-    const handleData = (event: DataWrittenEvent): void => {
-      let chunk = this.#dataFromDataWrittenEvent(event);
+    const handleData = (events: DataWrittenEvent[]): void => {
+      for (const event of events) {
+        let chunk = this.#dataFromDataWrittenEvent(event);
 
-      // Trim chunk if it would exceed content-length
-      if (
-        state.contentLength !== null &&
-        state.bytesWritten + chunk.length > state.contentLength
-      ) {
-        const remainingBytes = state.contentLength - state.bytesWritten;
-        if (remainingBytes > 0) {
-          chunk = chunk.slice(0, remainingBytes);
+        // Trim chunk if it would exceed content-length
+        if (
+          state.contentLength !== null &&
+          state.bytesWritten + chunk.length > state.contentLength
+        ) {
+          const remainingBytes = state.contentLength - state.bytesWritten;
+          if (remainingBytes > 0) {
+            chunk = chunk.slice(0, remainingBytes);
+          } else {
+            continue; // Skip this chunk entirely
+          }
+        }
+
+        state.bytesWritten += chunk.length;
+
+        if (streamController) {
+          if (chunk.length > 0) {
+            streamController.enqueue(chunk);
+          }
         } else {
-          return; // Skip this chunk entirely
+          chunks[event.index] = chunk;
         }
-      }
-
-      state.bytesWritten += chunk.length;
-
-      if (streamController) {
-        if (chunk.length > 0) {
-          streamController.enqueue(chunk);
-        }
-      } else {
-        chunks[event.index] = chunk;
       }
     };
 

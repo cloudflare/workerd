@@ -1319,7 +1319,7 @@ export const duplexReadableEnd = {
 
     const src = new Readable({
       read() {
-        if (loops--) this.push(Buffer.alloc(20000));
+        if (loops--) this.push(Buffer.alloc(80000));
       },
     });
 
@@ -7275,7 +7275,7 @@ export const transform_split_objectmode = {
     ok(parser._readableState.objectMode);
     ok(!parser._writableState.objectMode);
     strictEqual(parser.readableHighWaterMark, 16);
-    strictEqual(parser.writableHighWaterMark, 16 * 1024);
+    strictEqual(parser.writableHighWaterMark, 64 * 1024);
     strictEqual(
       parser.readableHighWaterMark,
       parser._readableState.highWaterMark
@@ -7300,7 +7300,7 @@ export const transform_split_objectmode = {
     });
     ok(!serializer._readableState.objectMode);
     ok(serializer._writableState.objectMode);
-    strictEqual(serializer.readableHighWaterMark, 16 * 1024);
+    strictEqual(serializer.readableHighWaterMark, 64 * 1024);
     strictEqual(serializer.writableHighWaterMark, 16);
     strictEqual(
       parser.readableHighWaterMark,
@@ -7328,7 +7328,7 @@ export const transform_split_objectmode = {
 
 export const transform_split_highwatermark = {
   async test(ctrl, env, ctx) {
-    const DEFAULT = 16 * 1024;
+    const DEFAULT = 64 * 1024;
     function testTransform(expectedReadableHwm, expectedWritableHwm, options) {
       const t = new Transform(options);
       strictEqual(t._readableState.highWaterMark, expectedReadableHwm);
