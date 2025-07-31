@@ -85,7 +85,7 @@ clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
 prepare-ubuntu:
-  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov genhtml fd-find
+  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
   cargo install watchexec-cli
 
 generate-types:
