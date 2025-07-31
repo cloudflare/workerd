@@ -23,6 +23,8 @@ export function httpServerHandler(
     // We intentionally omitted ctx and env variables. Users should use
     // importable equivalents to access those values. For example, using
     // import { env, waitUntil } from 'cloudflare:workers
+    // `disallow_importable_env` compat flag should not be set if you are using this
+    // and need access to the env since that will prevent access.
     async fetch(request: Request): Promise<Response> {
       const instance = portMapper.get(port);
       // TODO: Investigate supporting automatically assigned ports as being bound without a port configuration.
