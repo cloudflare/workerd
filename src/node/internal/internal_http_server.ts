@@ -239,9 +239,14 @@ export class Server
     }
     incoming._addHeaderLines(headers, headers.length);
 
-    // TODO(soon): It would be useful if there was a way to expose request.cf properties.
     incoming.method = request.method;
     incoming._stream = request.body;
+
+    // We provide a way for users to access to the Cloudflare-specific
+    // request properties, such as `cf` for accessing Cloudflare-specific request metadata.
+    if ('cf' in request) {
+      incoming.cf = request.cf as Record<string, unknown>;
+    }
 
     const response = new this[kServerResponse](incoming, {
       highWaterMark: this.highWaterMark,
