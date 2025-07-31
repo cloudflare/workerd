@@ -168,6 +168,9 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   }
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
+  kj::Duration consumeTimeElapsedForPeriodicLogging() override {
+    return 0 * kj::SECONDS;
+  }
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {

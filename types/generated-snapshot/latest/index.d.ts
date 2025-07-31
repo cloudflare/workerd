@@ -1749,7 +1749,7 @@ interface Request<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>>
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
 }
 interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1763,7 +1763,7 @@ interface RequestInit<Cf = CfProperties> {
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -6564,13 +6564,13 @@ interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
    *
    * @example 395747
    */
-  asn: number;
+  asn?: number;
   /**
    * The organization which owns the ASN of the incoming request.
    *
    * @example "Google Cloud"
    */
-  asOrganization: string;
+  asOrganization?: string;
   /**
    * The original value of the `Accept-Encoding` header if Cloudflare modified it.
    *
@@ -6695,7 +6695,7 @@ interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> {
    * This field is only present if you have Cloudflare for SaaS enabled on your account
    * and you have followed the [required steps to enable it]((https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/custom-metadata/)).
    */
-  hostMetadata: HostMetadata;
+  hostMetadata?: HostMetadata;
 }
 interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
@@ -8010,6 +8010,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
 }
 interface SecretsStoreSecret {

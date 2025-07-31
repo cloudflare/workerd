@@ -47,9 +47,7 @@ py_wd_test("seek-metadatafs")
     for python_version, info in BUNDLE_VERSION_INFO.items()
 ]
 
-py_wd_test(
-    "undefined-handler",
-)
+py_wd_test("undefined-handler")
 
 py_wd_test("vendor_dir")
 

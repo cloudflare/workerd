@@ -21,7 +21,6 @@ import {
   ERR_HTTP_BODY_NOT_ALLOWED,
   ERR_STREAM_NULL_VALUES,
   ERR_STREAM_ALREADY_FINISHED,
-  ERR_HTTP_TRAILER_INVALID,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
 import { isUint8Array } from 'node-internal:internal_types';
@@ -41,14 +40,19 @@ import type {
 } from 'node:http';
 
 type WriteCallback = (err?: Error) => void;
-type OutputData = {
+export type OutputData = {
   data: string | Buffer | Uint8Array | null;
   encoding?: BufferEncoding | null | undefined;
   callback?: WriteCallback | null | undefined;
 };
-type WrittenDataBufferEntry = OutputData & {
+export type WrittenDataBufferEntry = OutputData & {
   length: number;
   written: boolean;
+};
+export type HeadersSentEvent = {
+  statusCode: number;
+  statusMessage: string;
+  headers: Headers;
 };
 
 export const kUniqueHeaders = Symbol('kUniqueHeaders');
@@ -98,9 +102,9 @@ export function parseUniqueHeadersOption(
 // Ref: https://github.com/mhart/fetch-to-node/blob/main/src/fetch-to-node/http-outgoing.ts
 class MessageBuffer {
   #corked = 0;
-  #data: WrittenDataBufferEntry[] = [];
-  #onWrite?: (index: number, entry: WrittenDataBufferEntry) => void;
-  #highWaterMark = 64 * 1024;
+  #index = 0;
+  #onWrite: (index: number, entry: WrittenDataBufferEntry) => void;
+  #bufferedWrites: { index: number; entry: WrittenDataBufferEntry }[] = [];
 
   constructor(onWrite: (index: number, entry: WrittenDataBufferEntry) => void) {
     this.#onWrite = onWrite;
@@ -111,14 +115,28 @@ class MessageBuffer {
     encoding: WrittenDataBufferEntry['encoding'],
     callback: WrittenDataBufferEntry['callback']
   ): boolean {
-    this.#data.push({
+    const entry: WrittenDataBufferEntry = {
       data,
       length: data?.length ?? 0,
       encoding,
       callback,
-      written: false,
-    });
-    this._flush();
+      written: true,
+    };
+
+    const index = this.#index++;
+
+    if (this.#corked === 0) {
+      this.#onWrite(index, entry);
+      queueMicrotask(() => {
+        callback?.();
+      });
+    } else {
+      // Buffer the write when corked
+      this.#bufferedWrites.push({ index, entry });
+      queueMicrotask(() => {
+        callback?.();
+      });
+    }
 
     return true;
   }
@@ -133,25 +151,32 @@ class MessageBuffer {
   }
 
   _flush(): void {
+    // If fully uncorked, flush all buffered writes
     if (this.#corked <= 0) {
-      for (const [index, entry] of this.#data.entries()) {
-        if (!entry.written) {
-          entry.written = true;
-          this.#onWrite?.(index, entry);
-          entry.callback?.call(undefined);
-        }
+      const writes = this.#bufferedWrites.splice(0);
+      // TODO(soon): As a later optimization, reduce the unique calls to onWrite,
+      //
+      // In Node.js, when the writable is uncorked
+      // and the Writable provides an implementation of writev, then calling uncork will
+      // trigger a single call to writev rather than multiple calls to write, which is
+      // going to be far more efficient overall as it requires less scheduling. For instance,
+      // here, if I write 100 small chunks while corked, then uncork, we're going to end up
+      // with 100 separate calls to #onWrite.
+      for (const { index, entry } of writes) {
+        this.#onWrite(index, entry);
       }
     }
   }
 
   get writableLength(): number {
-    return this.#data.reduce<number>((acc, entry) => {
-      return acc + (entry.written && entry.length ? entry.length : 0);
+    return this.#bufferedWrites.reduce((total, { entry }) => {
+      return total + (entry.length || 0);
     }, 0);
   }
 
   get writableHighWaterMark(): number {
-    return this.#highWaterMark;
+    // TODO(soon): Make this configurable.
+    return 64 * 1024;
   }
 
   get writableCorked(): number {
@@ -230,6 +255,15 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this[kHighWaterMark] = options?.highWaterMark ?? 64 * 1024;
     this[kRejectNonStandardBodyWrites] =
       options?.rejectNonStandardBodyWrites ?? false;
+
+    this.once('end', () => {
+      // We need to emit close in a queueMicrotask because
+      // this is the only way we can ensure that the close event is emitted after destroy.
+      queueMicrotask(() => {
+        this._closed = true;
+        this.emit('close');
+      });
+    });
   }
 
   #onDataWritten(index: number, entry: WrittenDataBufferEntry): void {
@@ -259,7 +293,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   _storeHeader(
     firstLine: string,
-    headers: OutgoingHttpHeaders | [string, string] | null
+    headers: OutgoingHttpHeaders | OutgoingHttpHeader[] | null
   ): void {
     // firstLine in the case of request is: 'GET /index.html HTTP/1.1\r\n'
     // in the case of response it is: 'HTTP/1.1 200 OK\r\n'
@@ -273,14 +307,13 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       header: firstLine,
     };
 
-    if (headers) {
+    if (headers != null) {
       if (headers === this[kOutHeaders]) {
         for (const key in headers) {
           const entry = headers[key] as [string, string];
           processHeader(this, state, entry[0], entry[1], false);
         }
       } else if (Array.isArray(headers)) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         if (headers.length && Array.isArray(headers[0])) {
           for (let i = 0; i < headers.length; i++) {
             const entry = headers[i] as unknown as [string, string];
@@ -400,15 +433,6 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       }
     }
 
-    // Test non-chunked message does not have trailer header set,
-    // message will be terminated by the first empty line after the
-    // header fields, regardless of the header fields present in the
-    // message, and thus cannot contain a message body or 'trailers'.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-    if (this.chunkedEncoding !== true && state.trailer) {
-      throw new ERR_HTTP_TRAILER_INVALID();
-    }
-
     this._header = header + '\r\n';
     this._headerSent = false;
 
@@ -422,27 +446,14 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   }
 
   _flushOutput(buffer: MessageBuffer): boolean | undefined {
-    while (this[kCorked]) {
-      this[kCorked]--;
-      buffer.cork();
-    }
-
-    const outputLength = this.outputData.length;
-    if (outputLength <= 0) {
+    const outputData = this.outputData;
+    if (outputData.length === 0) {
       return undefined;
     }
 
-    const outputData = this.outputData;
     buffer.cork();
-    let ret;
-    // Retain for(;;) loop for performance reasons
-    // Refs: https://github.com/nodejs/node/pull/30958
-    for (let i = 0; i < outputLength; i++) {
-      const { data, encoding, callback } = outputData[
-        i
-      ] as WrittenDataBufferEntry; // Avoid any potential ref to Buffer in new generation from old generation
-      (outputData[i] as WrittenDataBufferEntry).data = null;
-      ret = buffer.write(data ?? '', encoding, callback);
+    for (const { data, encoding, callback } of outputData) {
+      buffer.write(data, encoding, callback);
     }
     buffer.uncork();
 
@@ -450,7 +461,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this._onPendingData(-this.outputSize);
     this.outputSize = 0;
 
-    return ret;
+    return true;
   }
 
   _flush(): void {
@@ -468,11 +479,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   // @ts-expect-error TS2611 Required for accessor
   get writableLength(): number {
-    return (
-      this.outputSize +
-      this[kChunkedLength] +
-      (this.#buffer?.writableLength ?? 0)
-    );
+    return this.outputSize + this[kChunkedLength];
   }
 
   // @ts-expect-error TS2611 Required for accessor
@@ -546,7 +553,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   appendHeader(
     name: string,
-    value: number | string | ReadonlyArray<string>
+    value: number | string | ReadonlyArray<string> | OutgoingHttpHeader
   ): this {
     if (this._header) {
       throw new ERR_HTTP_HEADERS_SENT('append');
@@ -699,7 +706,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       const keys = Object.keys(headersMap);
       // Retain for(;;) loop for performance reasons
       // Refs: https://github.com/nodejs/node/pull/30958
-      for (let i = 0, l = keys.length; i < l; i++) {
+      for (let i = 0; i < keys.length; i++) {
         const key = keys[i] as keyof typeof headersMap;
         headers[(headersMap[key] as [string, string])[0]] = (
           headersMap[key] as [string, string]
@@ -744,11 +751,14 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       this.writtenHeaderBytes = header.length;
 
       // Save written headers as object
-      const [statusLine, ...headerLines] = this._header.split('\r\n');
+      const [statusLine, ...headerLines] = this._header.split('\r\n') as [
+        string,
+        ...string[],
+      ];
 
       const STATUS_LINE_REGEXP =
         /^HTTP\/1\.1 (?<statusCode>\d+) (?<statusMessage>.*)$/;
-      const statusLineResult = STATUS_LINE_REGEXP.exec(statusLine as string);
+      const statusLineResult = STATUS_LINE_REGEXP.exec(statusLine);
 
       if (statusLineResult == null) {
         throw new Error(`Unexpected! Status line was ${statusLine}`);
@@ -756,39 +766,39 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
       const { statusCode: statusCodeText, statusMessage } =
         statusLineResult.groups ?? {};
-      const statusCode = parseInt(statusCodeText as string, 10);
-      const headers: [header: string, value: string][] = [];
+      const headers = new Headers();
 
       for (const headerLine of headerLines) {
         if (headerLine !== '') {
           const pos = headerLine.indexOf(': ');
-          const k = headerLine.slice(0, pos);
-          const v = headerLine.slice(pos + 2); // Skip the colon and the space
-          headers.push([k, v]);
+          // Skip the colon and the space on value
+          headers.append(headerLine.slice(0, pos), headerLine.slice(pos + 2));
         }
       }
       this.emit('_headersSent', {
-        statusCode,
+        statusCode: Number(statusCodeText as string),
         statusMessage,
         headers,
-      });
+      } as HeadersSentEvent);
     }
     return this._writeRaw(data, encoding, callback, byteLength);
   }
 
-  override _write(
-    _chunk: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-    _encoding: BufferEncoding,
-    cb: (error?: Error | null) => void
-  ): void {
-    // The only reason for us to override this method is to increase the Node.js test coverage.
-    // Otherwise, we don't implement _write yet.
-    if (this.destroyed) {
-      cb(new ERR_STREAM_DESTROYED('_write'));
-      return;
+  override write(
+    chunk: string | Buffer | Uint8Array,
+    encoding?: BufferEncoding | WriteCallback | null,
+    callback?: WriteCallback
+  ): boolean {
+    if (typeof encoding === 'function') {
+      callback = encoding;
+      encoding = null;
     }
 
-    throw new ERR_METHOD_NOT_IMPLEMENTED('_write');
+    const ret = this.#write(chunk, encoding, callback, false);
+    if (!ret) {
+      this[kNeedDrain] = true;
+    }
+    return ret;
   }
 
   override end(
@@ -862,7 +872,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     } else if (!this._headerSent || this.writableLength || chunk) {
       this._send('', 'latin1', finish);
     } else {
-      setTimeout(finish, 0);
+      queueMicrotask(finish);
     }
 
     // Difference from Node.js -
@@ -873,6 +883,8 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this.uncork();
 
     this.finished = true;
+    this._writableState.finished = true;
+    this._writableState.corked = 1;
 
     // Difference from Node.js -
     // In Node.js, if a socket exists, and there is no pending output data,
@@ -910,15 +922,12 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     // write the current chunk's data directly into the socket. Afterwards, it would return with the
     // value returned from socket.write().
     if (this.#buffer != null) {
-      // There might be pending data in the this.output buffer.
       if (this.outputData.length) {
         this._flushOutput(this.#buffer);
       }
-      // Directly write to the buffer.
       return this.#buffer.write(data, encoding, callback);
     }
 
-    // Buffer, as long as we're not destroyed.
     this.outputData.push({ data, encoding, callback });
     this.outputSize += data.length;
     this._onPendingData(data.length);
@@ -928,6 +937,9 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
     if (this.destroyed) {
       return this;
+    }
+    if (err != null) {
+      this.emit('error', err);
     }
     this.destroyed = true;
     this[kErrored] = err as Error;
@@ -981,7 +993,9 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       return;
     }
 
-    setTimeout(emitErrorNt, 0, this, err, callback);
+    queueMicrotask(() => {
+      emitErrorNt(this, err, callback);
+    });
   }
 
   #write(
@@ -1016,7 +1030,9 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       if (!this.destroyed) {
         this.#onError(err, callback);
       } else {
-        setTimeout(callback, 0, err);
+        queueMicrotask(() => {
+          callback(err);
+        });
       }
       return false;
     }
@@ -1059,14 +1075,16 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       if (this[kRejectNonStandardBodyWrites]) {
         throw new ERR_HTTP_BODY_NOT_ALLOWED();
       } else {
-        setTimeout(callback, 0);
+        queueMicrotask(callback);
         return true;
       }
     }
 
     if (!fromEnd && this.#buffer != null && !this.#buffer.writableCorked) {
       this.#buffer.cork();
-      setTimeout(connectionCorkNT, 0, this.#buffer);
+      queueMicrotask(() => {
+        connectionCorkNT(this.#buffer as MessageBuffer);
+      });
     }
 
     let ret;

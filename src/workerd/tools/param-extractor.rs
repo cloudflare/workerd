@@ -38,13 +38,13 @@ impl Clang {
 
     fn name(&self) -> Option<&str> {
         match self {
-            Clang::NamespaceDecl { name }
-            | Clang::FunctionDecl { name }
-            | Clang::CXXMethodDecl { name }
-            | Clang::CXXRecordDecl { name }
-            | Clang::ParmVarDecl { name }
-            | Clang::Other { name } => name.as_ref().map(AsRef::as_ref),
-            Clang::CXXConstructorDecl => Some("constructor"),
+            Self::NamespaceDecl { name }
+            | Self::FunctionDecl { name }
+            | Self::CXXMethodDecl { name }
+            | Self::CXXRecordDecl { name }
+            | Self::ParmVarDecl { name }
+            | Self::Other { name } => name.as_ref().map(AsRef::as_ref),
+            Self::CXXConstructorDecl => Some("constructor"),
         }
     }
 }
@@ -110,13 +110,11 @@ fn traverse_disambiguous(
         .inner
         .into_iter()
         .flat_map(|node| {
+            let mut qualified: Vec<_> = fully_qualified_parent_name.to_vec();
+            qualified.push(disambiguous_name.clone());
             if node.kind.is_function_like() {
-                let mut qualified: Vec<_> = fully_qualified_parent_name.to_vec();
-                qualified.push(disambiguous_name.clone());
                 traverse_function_like(node, &qualified)
             } else {
-                let mut qualified: Vec<_> = fully_qualified_parent_name.to_vec();
-                qualified.push(disambiguous_name.clone());
                 traverse_disambiguous(node, &qualified)
             }
         })
@@ -127,7 +125,7 @@ fn traverse_function_like(
     node: ClangNode,
     fully_qualified_parent_name: &[String],
 ) -> Vec<Parameter> {
-    let function_like_name = node.kind.name().unwrap().to_owned();
+    let function_like_name = node.kind.name().expect("missing name").to_owned();
 
     node.inner
         .into_iter()

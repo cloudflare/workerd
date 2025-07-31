@@ -3241,7 +3241,7 @@ declare abstract class FileSystemWritableFileStream extends WritableStream {
       | Blob
       | (ArrayBuffer | ArrayBufferView)
       | string
-      | FileSystemWritableFileStreamWriteParams,
+      | FileSystemFileWriteParams,
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek) */
   seek(position: number): Promise<void>;
@@ -3269,11 +3269,11 @@ interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
 interface FileSystemDirectoryHandleFileSystemRemoveOptions {
   recursive: boolean;
 }
-interface FileSystemWritableFileStreamWriteParams {
+interface FileSystemFileWriteParams {
   type: string;
   size?: number;
   position?: number;
-  data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
+  data?: (Blob | (ArrayBuffer | ArrayBufferView) | string) | null;
 }
 interface FileSystemHandleRemoveOptions {
   recursive?: boolean;
@@ -6784,13 +6784,13 @@ interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
    *
    * @example 395747
    */
-  asn: number;
+  asn?: number;
   /**
    * The organization which owns the ASN of the incoming request.
    *
    * @example "Google Cloud"
    */
-  asOrganization: string;
+  asOrganization?: string;
   /**
    * The original value of the `Accept-Encoding` header if Cloudflare modified it.
    *
@@ -6915,7 +6915,7 @@ interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> {
    * This field is only present if you have Cloudflare for SaaS enabled on your account
    * and you have followed the [required steps to enable it]((https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/custom-metadata/)).
    */
-  hostMetadata: HostMetadata;
+  hostMetadata?: HostMetadata;
 }
 interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
@@ -8230,6 +8230,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
 }
 interface SecretsStoreSecret {

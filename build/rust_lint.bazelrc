@@ -1,0 +1,40 @@
+## rust lint configuration
+
+# turn rust warnings into errors
+build:lint --@rules_rust//:extra_rustc_flag=-Dwarnings
+
+
+# enable clippy checks during build
+build:rust-enable-clippy-checks --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:rust-enable-clippy-checks --output_groups=+clippy_checks
+
+# configure clippy
+
+# rationale for disabling checks:
+# - clippy::missing_const_for_fn - too annoying in practice
+# - clippy::option_if_let_else - arguably if else is easier to read
+# - clippy::trait_duplication_in_bounds - ffi trips this
+# - clippy::non_send_fields_in_send_ty - ffi trips this
+# - clippy::cognitive_complexity - even tests trigger this
+# - clippy::future_not_send - todo
+# - clippy::trivial_regex - there's nothing wrong with having trivial regex
+# - clippy::literal_string_with_formatting_args – somehow triggers on
+#   external/rules_rust/rust/settings/.clippy.toml
+# - clippy::non_std_lazy_statics – triggers on lazy_static, non-trivial to replace
+# - clippy::format_push_string – avoids single memory allocation, but makes code less readable
+# - clippy::cast_possible_truncation - usize/u64 conversion warning is unbelievably noisy
+build:rust-enable-clippy-checks --@rules_rust//:clippy_flags=-Wclippy::pedantic,-Wclippy::redundant_clone,-Wclippy::str_to_string,-Wclippy::string_to_string,-Wclippy::to_string_in_format_args,-Wclippy::unnecessary_to_owned,-Wclippy::implicit_clone,-Wclippy::suspicious_to_owned,-Wclippy::unnecessary_to_owned,-Wclippy::nursery,-Wclippy::dbg_macro,-Wclippy::unwrap_used,-Wclippy::allow_attributes,-Aclippy::missing_const_for_fn,-Aclippy::cognitive_complexity,-Aclippy::trait_duplication_in_bounds,-Aclippy::non_send_fields_in_send_ty,-Aclippy::option_if_let_else,-Aclippy::missing_errors_doc,-Aclippy::must_use_candidate,-Aclippy::future_not_send,-Aclippy::trivial_regex,-Aclippy::literal_string_with_formatting_args,-Aclippy::non_std_lazy_statics,-Aclippy::format_push_string,-Aclippy::cast_possible_truncation,-Dwarnings
+build --@rules_rust//rust/settings:clippy.toml=//src/rust:clippy.toml
+
+# enable rustfmt checks
+build:rust-enable-rustfmt-checks --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:rust-enable-rustfmt-checks --output_groups=+rustfmt_checks
+# configure rustfmt
+build --@rules_rust//:rustfmt.toml=//src/rust:rustfmt.toml
+
+# enable clippy & rustfmt checks in lint configuration
+build:lint --config=rust-enable-clippy-checks --config=rust-enable-rustfmt-checks
+
+# convenience shortcuts
+build:clippy --config=rust-enable-clippy-checks
+build:rustfmt --config=rust-enable-rustfmt-checks

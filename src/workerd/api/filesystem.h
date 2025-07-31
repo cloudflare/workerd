@@ -335,6 +335,19 @@ class FileSystemHandle: public jsg::Object {
   jsg::USVString name;
 };
 
+struct FileSystemFileWriteParams {
+  kj::String type;  // one of: write, seek, truncate
+  jsg::Optional<uint32_t> size;
+  jsg::Optional<uint32_t> position;
+  // Yes, wrapping the kj::Maybe with a jsg::Optional is intentional here. We need to
+  // be able to accept null or undefined values and handle them per the spec.
+  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>>> data;
+  JSG_STRUCT(type, size, position, data);
+};
+
+using FileSystemWritableData =
+    kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, FileSystemFileWriteParams>;
+
 class FileSystemFileHandle final: public FileSystemHandle {
  public:
   FileSystemFileHandle(
@@ -354,7 +367,8 @@ class FileSystemFileHandle final: public FileSystemHandle {
 
   jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
       jsg::Optional<FileSystemCreateWritableOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
+      const jsg::TypeHandler<FileSystemWritableData>& dataHandler);
 
   JSG_RESOURCE_TYPE(FileSystemFileHandle) {
     JSG_INHERIT(FileSystemHandle);
@@ -592,16 +606,10 @@ class FileSystemWritableFileStream final: public WritableStream {
 
   static jsg::Ref<FileSystemWritableFileStream> constructor() = delete;
 
-  struct WriteParams {
-    kj::String type;  // one of: write, seek, truncate
-    jsg::Optional<uint32_t> size;
-    jsg::Optional<uint32_t> position;
-    jsg::Optional<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>> data;
-    JSG_STRUCT(type, size, position, data);
-  };
+  using WriteParams = FileSystemFileWriteParams;
 
   jsg::Promise<void> write(jsg::Lock& js,
-      kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+      FileSystemWritableData data,
       const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
   jsg::Promise<void> seek(jsg::Lock& js,
       uint32_t position,
@@ -615,6 +623,10 @@ class FileSystemWritableFileStream final: public WritableStream {
     JSG_METHOD(seek);
     JSG_METHOD(truncate);
   }
+
+  static jsg::Promise<void> writeImpl(jsg::Lock& js,
+      FileSystemWritableData data, State& state,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
  private:
   kj::Rc<State> sharedState;

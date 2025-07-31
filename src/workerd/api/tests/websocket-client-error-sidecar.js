@@ -68,8 +68,14 @@ function sendMessage(socket, message) {
   socket.write(frame);
 }
 
-// Get the port from environment variable
-const port = process.env.BIG_MESSAGE_SERVER_PORT || 9000;
+// Get the port and host from environment variables
+const port = process.env.BIG_MESSAGE_SERVER_PORT;
+const host = process.env.SIDECAR_HOSTNAME;
+
+function reportAddress(server) {
+  const address = server.address();
+  console.info(`Listening on ${address.address}:${address.port}`);
+}
 
 // Create HTTP server to handle the WebSocket handshake
 const server = http.createServer((req, res) => {
@@ -81,8 +87,8 @@ server.on('error', (event) => {
   console.log(event);
   console.log(event.message);
 });
-// Start the server on port 8080
-server.listen(port);
+// Start the server
+server.listen(port, host, () => reportAddress(server));
 
 // Function to handle WebSocket connections
 function handleWebSocketConnection(socket) {

@@ -902,15 +902,6 @@ export class ERR_HTTP_BODY_NOT_ALLOWED extends NodeError {
   }
 }
 
-export class ERR_HTTP_TRAILER_INVALID extends NodeError {
-  constructor() {
-    super(
-      'ERR_HTTP_TRAILER_INVALID',
-      'Trailers are invalid with this transfer encoding'
-    );
-  }
-}
-
 export class ERR_INVALID_PROTOCOL extends NodeTypeError {
   constructor(actual: string, expected: string) {
     super(
@@ -929,5 +920,20 @@ export class ERR_UNESCAPED_CHARACTERS extends NodeTypeError {
 export class ERR_SYSTEM_ERROR extends NodeError {
   constructor(message: string) {
     super('ERR_SYSTEM_ERROR', message);
+  }
+}
+
+export class ERR_HTTP_INVALID_STATUS_CODE extends NodeRangeError {
+  constructor(statusCode: string | number) {
+    super('ERR_HTTP_INVALID_STATUS_CODE', `Invalid status code: ${statusCode}`);
+  }
+}
+
+export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
+  constructor() {
+    super(
+      'ERR_SERVER_ALREADY_LISTEN',
+      'Listen method has been called more than once without closing.'
+    );
   }
 }

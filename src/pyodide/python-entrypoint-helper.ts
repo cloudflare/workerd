@@ -2,7 +2,7 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide } from 'pyodide-internal:python';
+import { beforeRequest, loadPyodide } from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
@@ -13,9 +13,9 @@ import {
   WORKERD_INDEX_URL,
   SHOULD_SNAPSHOT_TO_DISK,
   workflowsEnabled,
+  legacyGlobalHandlers,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
-import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
 import { reportError } from 'pyodide-internal:util';
 
 // Function to import JavaScript modules from Python
@@ -164,7 +164,7 @@ async function preparePython(): Promise<PyModule> {
   try {
     const pyodide = await getPyodide();
     const mainModule = await getMainModule();
-    entropyBeforeRequest(pyodide._module);
+    beforeRequest(pyodide._module);
     return mainModule;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
@@ -264,34 +264,34 @@ function makeEntrypointProxyHandler(
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop === 'fetch';
       const isWorkflowHandler = isWorkflow && prop === 'run';
-      if (isKnownHandler || isKnownDoHandler || isWorkflowHandler) {
+      if ((isKnownHandler || isKnownDoHandler) && legacyGlobalHandlers) {
         prop = 'on_' + prop;
       }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
-        const targetProp = prop;
 
-        if (typeof pyInstance[targetProp] !== 'function') {
-          throw new TypeError(`Method ${targetProp} does not exist`);
+        if (typeof pyInstance[prop] !== 'function') {
+          throw new TypeError(`Method ${prop} does not exist`);
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[targetProp], args);
+          return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
         if (workflowsEnabled && isWorkflowHandler) {
           // we're hiding this behind a compat flag for now
-          return await doPyCallHelper(true, pyInstance[targetProp], args);
+          return await doPyCallHelper(true, pyInstance[prop], args);
         }
 
         const introspectionMod = await getIntrospectionMod();
 
+        const isRelaxed = isFetch || prop === 'test';
         return await doPyCall(introspectionMod.wrapper_func, [
-          isFetch,
+          isRelaxed,
           pyInstance,
-          targetProp,
+          prop,
           ...args,
         ]);
       };
@@ -321,7 +321,10 @@ function makeEntrypointClass(
   // Add dummy functions to the class so that the validator can detect them. These will never get
   // accessed because of the proxy at runtime.
   for (let method of methods) {
-    if (SUPPORTED_HANDLER_NAMES.includes(method.slice(3))) {
+    if (
+      SUPPORTED_HANDLER_NAMES.includes(method.slice(3)) &&
+      legacyGlobalHandlers
+    ) {
       // Remove the "on_" prefix.
       method = method.slice(3);
     }
@@ -399,18 +402,21 @@ export async function initPython(): Promise<PythonInitResult> {
   };
 
   const mainModule = await getMainModule();
-  for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-    const pyHandlerName = 'on_' + handlerName;
-    // We add all handlers when running in workerd, so that we can handle the case where the
-    // handler is not defined in our own code and throw a more helpful error. See
-    // undefined-handler.wd-test.
-    if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
-      handlers[handlerName] = makeHandler(pyHandlerName);
-    }
-  }
 
-  if (typeof mainModule.test === 'function') {
-    handlers.test = makeHandler('test');
+  if (legacyGlobalHandlers) {
+    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+      const pyHandlerName = 'on_' + handlerName;
+      // We add all handlers when running in workerd, so that we can handle the case where the
+      // handler is not defined in our own code and throw a more helpful error. See
+      // undefined-handler.wd-test.
+      if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
+        handlers[handlerName] = makeHandler(pyHandlerName);
+      }
+    }
+
+    if (typeof mainModule.test === 'function') {
+      handlers.test = makeHandler('test');
+    }
   }
 
   // In order to get the entrypoint classes exported by the worker, we use a Python module
@@ -425,13 +431,13 @@ export async function initPython(): Promise<PythonInitResult> {
     index,
     cls,
   ] of pythonEntrypointClasses.workerEntrypoints.entries()) {
-    if (cls.className == 'default') {
-      // Disallow defining a `default` WorkerEntrypoint and other "default" top-level handlers.
+    if (cls.className == 'Default') {
+      // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
       if (Object.keys(handlers).length > 0) {
         throw new TypeError('Cannot define multiple default entrypoints');
       }
       handlers['default'] = makeEntrypointClass(
-        'default',
+        'Default',
         pyodide_entrypoint_helper.workerEntrypoint,
         cls.methodNames
       );

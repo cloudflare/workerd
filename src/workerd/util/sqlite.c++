@@ -1904,7 +1904,7 @@ const sqlite3_io_methods SqliteDatabase::Vfs::FileImpl::FILE_METHOD_TABLE = {
   .iVersion = 3,
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<FileImpl*>(file);                                            \
-  try block catch (kj::Exception & e) {                                                            \
+  try block catch (kj::Exception& e) {                                                             \
     reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
   }
@@ -2121,7 +2121,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 
 #define WRAP_METHOD(errorCode, block)                                                              \
   auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
-  try block catch (kj::Exception & e) {                                                            \
+  try block catch (kj::Exception& e) {                                                             \
     KJ_LOG(ERROR, "SQLite VFS I/O error", e);                                                      \
     return errorCode;                                                                              \
   }

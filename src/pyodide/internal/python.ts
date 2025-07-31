@@ -15,6 +15,7 @@ import {
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
   getRandomValues,
+  entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
 
 /**
@@ -65,12 +66,16 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      VENDOR_PATH = "/session/metadata/python_modules"
+      VENDOR_PATH = "/session/metadata/vendor"
+      PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
       if VENDOR_PATH in sys.path:
         sys.path.remove(VENDOR_PATH)
+
+      if PYTHON_MODULES_PATH in sys.path:
+        sys.path.remove(PYTHON_MODULES_PATH)
 
       # Insert vendor path after system paths but before site-packages
       # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
@@ -82,6 +87,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       for i, path in enumerate(sys.path):
         if 'site-packages' in path:
           sys.path.insert(i, VENDOR_PATH)
+          sys.path.insert(i, PYTHON_MODULES_PATH)
           break
       else:
         # If no site-packages found, fail
@@ -109,6 +115,23 @@ function validatePyodideVersion(pyodide: Pyodide): void {
   }
 }
 
+const origSetTimeout = globalThis.setTimeout.bind(this);
+function setTimeoutTopLevelPatch(
+  handler: () => void,
+  timeout: number | undefined
+): number {
+  // Redirect top level setTimeout(cb, 0) to queueMicrotask().
+  // If we don't know how to handle it, call normal setTimeout() to force failure.
+  if (typeof handler === 'string') {
+    return origSetTimeout(handler, timeout);
+  }
+  if (timeout) {
+    return origSetTimeout(handler, timeout);
+  }
+  queueMicrotask(handler);
+  return 0;
+}
+
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
@@ -125,7 +148,12 @@ export function loadPyodide(
     }
     Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
-    Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
+    Module.setSetTimeout(
+      setTimeoutTopLevelPatch as typeof setTimeout,
+      clearTimeout,
+      setInterval,
+      clearInterval
+    );
 
     entropyMountFiles(Module);
     enterJaegerSpan('load_packages', () => {
@@ -170,4 +198,9 @@ export function loadPyodide(
     // but no traceback. This gives us a full traceback.
     reportError(e as Error);
   }
+}
+
+export function beforeRequest(Module: Module): void {
+  entropyBeforeRequest(Module);
+  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 }

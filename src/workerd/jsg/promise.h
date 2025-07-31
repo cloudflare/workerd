@@ -34,13 +34,13 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override {
+  kj::StringPtr jsgGetMemoryName() const override final {
     return "OpaqueWrappable"_kjc;
   }
-  size_t jsgGetMemorySelfSize() const override {
+  size_t jsgGetMemorySelfSize() const override final {
     return sizeof(OpaqueWrappable);
   }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
     Wrappable::jsgGetMemoryInfo(tracker);
   }
 };
@@ -50,16 +50,6 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
   // When T is GC-visitable, make sure to implement visitation.
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
-
-  kj::StringPtr jsgGetMemoryName() const override {
-    return "OpaqueWrappable"_kjc;
-  }
-  size_t jsgGetMemorySelfSize() const override {
-    return sizeof(OpaqueWrappable);
-  }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
-    Wrappable::jsgGetMemoryInfo(tracker);
-  }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
@@ -723,8 +713,7 @@ class UnhandledRejectionHandler {
     explicit UnhandledRejection(jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
         jsg::Value value,
-        v8::Local<v8::Message> message,
-        size_t rejectionNumber);
+        v8::Local<v8::Message> message);
 
     ~UnhandledRejection();
 
@@ -749,8 +738,6 @@ class UnhandledRejectionHandler {
     inline bool isAlive() {
       return !promise.IsEmpty() && !value.IsEmpty();
     }
-
-    size_t rejectionNumber;
 
     uint hashCode() const {
       return hash;
@@ -799,7 +786,6 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
-  size_t rejectionCount = 0;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;

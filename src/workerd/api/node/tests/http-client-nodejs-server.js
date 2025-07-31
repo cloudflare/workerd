@@ -7,8 +7,11 @@
 const http = require('node:http');
 const assert = require('node:assert/strict');
 
-function reportPort(server) {
-  console.info(`Listening on port ${server.address().port}`);
+function listenTo(server, port) {
+  server.listen(port, process.env.SIDECAR_HOSTNAME, () => {
+    const address = server.address();
+    console.info(`Listening on ${address.address}:${address.port}`);
+  });
 }
 
 const pongServer = http.createServer((req, res) => {
@@ -18,12 +21,14 @@ const pongServer = http.createServer((req, res) => {
     res.end('pong');
   });
 });
-pongServer.listen(process.env.PONG_SERVER_PORT, () => reportPort(pongServer));
+
+listenTo(pongServer, process.env.PONG_SERVER_PORT);
 
 const asdServer = http.createServer((_req, res) => {
   res.end('asd');
 });
-asdServer.listen(process.env.ASD_SERVER_PORT, () => reportPort(asdServer));
+
+listenTo(asdServer, process.env.ASD_SERVER_PORT);
 
 {
   const expectedHeaders = {
@@ -58,18 +63,16 @@ asdServer.listen(process.env.ASD_SERVER_PORT, () => reportPort(asdServer));
       `Unexpected headers for method ${req.method}`
     );
   });
-  defaultHeadersExistServer.listen(process.env.DEFAULT_HEADERS_EXIST_PORT, () =>
-    reportPort(defaultHeadersExistServer)
-  );
+
+  listenTo(defaultHeadersExistServer, process.env.DEFAULT_HEADERS_EXIST_PORT);
 }
 
 const requestArgumentsServer = http.createServer((req, res) => {
   assert.strictEqual(req.url, '/testpath');
   res.end();
 });
-requestArgumentsServer.listen(process.env.REQUEST_ARGUMENTS_PORT, () =>
-  reportPort(requestArgumentsServer)
-);
+
+listenTo(requestArgumentsServer, process.env.REQUEST_ARGUMENTS_PORT);
 
 const helloWorldServer = http.createServer((req, res) => {
   res.removeHeader('Date');
@@ -93,6 +96,5 @@ const helloWorldServer = http.createServer((req, res) => {
       res.end();
   }
 });
-helloWorldServer.listen(process.env.HELLO_WORLD_SERVER_PORT, () =>
-  reportPort(helloWorldServer)
-);
+
+listenTo(helloWorldServer, process.env.HELLO_WORLD_SERVER_PORT);

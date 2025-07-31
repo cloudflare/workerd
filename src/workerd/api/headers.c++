@@ -550,7 +550,7 @@ Headers::Header::Header(jsg::Lock& js,
       values(kj::mv(values)),
       memoryAdjustment(js.getExternalMemoryAdjustment(0)) {
   size_t totalSize = 0;
-  KJ_IF_SOME(str, nameOrIndex.tryGet<kj::String>()) {
+  KJ_IF_SOME(str, this->nameOrIndex.tryGet<kj::String>()) {
     totalSize = str.size();
   }
   for (const auto& value: this->values) {

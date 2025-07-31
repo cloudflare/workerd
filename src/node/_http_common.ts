@@ -9,10 +9,15 @@ import {
   chunkExpression,
 } from 'node-internal:internal_http';
 import { METHODS } from 'node-internal:internal_http_constants';
-export { _checkIsHttpToken, _checkInvalidHeaderChar, chunkExpression };
+import { kIncomingMessage } from 'node-internal:internal_http_util';
+export {
+  _checkIsHttpToken,
+  _checkInvalidHeaderChar,
+  chunkExpression,
+  kIncomingMessage,
+};
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
 export const methods = METHODS;
-export const kIncomingMessage = Symbol('IncomingMessage');
 
 export default {
   _checkIsHttpToken,

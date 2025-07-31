@@ -153,6 +153,9 @@ class LimitEnforcer {
 
   // Report resource usage metrics to the given request metrics object.
   virtual void reportMetrics(RequestObserver& requestMetrics) = 0;
+
+  // Only used downstream for internal metrics.
+  virtual kj::Duration consumeTimeElapsedForPeriodicLogging() = 0;
 };
 
 }  // namespace workerd

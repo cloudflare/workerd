@@ -19,6 +19,7 @@ import {
   closeSync,
   openSync,
   writeSync,
+  writeFileSync,
   readSync,
 } from 'node:fs';
 
@@ -336,3 +337,18 @@ export const stdioFds = {
   },
 };
 // There is no promise version of exists in Node.js, so no test for it here.
+
+export const fsPercentEncodingTest = {
+  test() {
+    // The ? and # in the string path will be percent-encoded as part of the
+    // normalization, and the empty // in the path will be replaced as /.
+    // the %FF is left as is.
+    const path = '/tmp//?#a%FF';
+    ok(!existsSync('/tmp/%3F%23a%FF'));
+    writeFileSync(path, 'test');
+
+    // The casing of the percent-encoded characters is not significant.
+    ok(existsSync('/tmp/%3f%23a%FF'));
+    ok(existsSync('/tmp/%3F%23a%ff'));
+  },
+};

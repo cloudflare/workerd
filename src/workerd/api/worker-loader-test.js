@@ -32,6 +32,39 @@ export let basics = {
   },
 };
 
+export let pythonBasics = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('pythonBasics', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.py',
+        compatibilityFlags: ['python_workers', 'python_no_global_handlers'],
+        modules: {
+          'foo.py': `
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+  async def greet(self, name):
+    return "Hello, " + name
+class alternate(WorkerEntrypoint):
+  async def greet(self, name):
+    return "Welcome, " + name
+          `,
+        },
+      };
+    });
+
+    {
+      let result = await worker.getEntrypoint().greet('Stacey');
+      assert.strictEqual(result, 'Hello, Stacey');
+    }
+
+    {
+      let result = await worker.getEntrypoint('alternate').greet('Anthony');
+      assert.strictEqual(result, 'Welcome, Anthony');
+    }
+  },
+};
+
 // Test supplying a basic `env` object.
 export let passEnv = {
   async test(ctrl, env, ctx) {
@@ -468,5 +501,56 @@ export let ctxExports = {
 
     let result = await worker.getEntrypoint().greet('Alice');
     assert.strictEqual(result, 'Hello, Alice!');
+  },
+};
+
+const mixedModules = {
+  compatibilityDate: '2025-01-01',
+  modules: {
+    'foo.py': `
+from workers import WorkerEntrypoint
+class Default(WorkerEntrypoint):
+async def greet(self, name):
+return "Hello, " + name
+    `,
+    'foo.js': `
+      export default {
+        greet(name) { return "Hello, " + name; }
+      }
+    `,
+  },
+};
+
+export let noMixedJsPythonModules = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('noMixedJsPythonModules', () => {
+      return {
+        ...mixedModules,
+        mainModule: 'foo.py',
+      };
+    });
+
+    await assert.rejects(worker.getEntrypoint().greet('Alice'), {
+      name: 'TypeError',
+      message:
+        'Module "foo.js" is a JS module, but the main module is a Python module.',
+    });
+  },
+};
+
+export let noMixedJsPythonModules2 = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('noMixedJsPythonModules2', () => {
+      return {
+        ...mixedModules,
+        mainModule: 'foo.js',
+      };
+    });
+
+    await assert.rejects(worker.getEntrypoint().greet('Alice'), {
+      name: 'TypeError',
+      message:
+        'Module "foo.py" is a Python module, but the main module isn\'t a Python module.',
+    });
   },
 };

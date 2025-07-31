@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (
+      name = "main",
+      worker = (
+        modules = [
+          (
+            name = "worker.js",
+            esModule = "invalid javascript syntax {{{"
+          )
+        ],
+        compatibilityDate = "2023-05-18",
+      )
+    )
+  ],
+  sockets = [
+    (
+      name = "http",
+      address = "*:8080",
+      http = (),
+      service = "main"
+    )
+  ],
+  structuredLogging = true
+);

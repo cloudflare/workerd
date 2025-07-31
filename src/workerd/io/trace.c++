@@ -148,7 +148,7 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
 
 TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
   if (isPredictableModeForTest()) {
-    return TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+    return TraceId(staticSpanId, staticSpanId);
   }
 
   return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
@@ -251,6 +251,50 @@ kj::String KJ_STRINGIFY(const InvocationSpanContext& context) {
   return kj::str(context.getTraceId(), "-", context.getInvocationId(), "-", context.getSpanId());
 }
 
+kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
+  KJ_SWITCH_ONEOF(event) {
+    KJ_CASE_ONEOF(onset, tracing::Onset) {
+      return kj::str("Onset");
+    }
+    KJ_CASE_ONEOF(outcome, tracing::Outcome) {
+      return kj::str("Outcome");
+    }
+    KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
+      return kj::str("Hibernate");
+    }
+    KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
+      return spanOpen.toString();
+    }
+    KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
+      return spanClose.toString();
+    }
+    KJ_CASE_ONEOF(diagnosticChannelEvent, tracing::DiagnosticChannelEvent) {
+      return kj::str("diagnosticChannelEvent");
+    }
+    KJ_CASE_ONEOF(exception, tracing::Exception) {
+      return kj::str("Exception");
+    }
+    KJ_CASE_ONEOF(log, tracing::Log) {
+      return kj::str("Log");
+    }
+    KJ_CASE_ONEOF(ret, tracing::Return) {
+      return kj::str("Return");
+    }
+    KJ_CASE_ONEOF(link, tracing::Link) {
+      return kj::str("Link");
+    }
+    KJ_CASE_ONEOF(customInfo, tracing::CustomInfo) {
+      return kj::str(customInfo);
+    }
+  }
+  KJ_UNREACHABLE
+}
+
+kj::String KJ_STRINGIFY(const CustomInfo& customInfo) {
+  return kj::str(
+      "CustomInfo: ", kj::strArray(KJ_MAP(attr, customInfo) { return kj::str(attr); }, ", "));
+}
+
 }  // namespace tracing
 
 namespace {
@@ -294,6 +338,12 @@ tracing::FetchEventInfo tracing::FetchEventInfo::clone() const {
       method, kj::str(url), kj::str(cfJson), KJ_MAP(h, headers) { return h.clone(); });
 }
 
+kj::String tracing::FetchEventInfo::toString() const {
+  return kj::str("FetchEventInfo: ",
+      kj::delimited(
+          kj::arr(kj::str(method), kj::str(url), kj::str(cfJson), kj::str(headers)), ", "_kjc));
+}
+
 tracing::FetchEventInfo::Header::Header(kj::String name, kj::String value)
     : name(kj::mv(name)),
       value(kj::mv(value)) {}
@@ -312,6 +362,10 @@ tracing::FetchEventInfo::Header tracing::FetchEventInfo::Header::clone() const {
   return Header(kj::str(name), kj::str(value));
 }
 
+kj::String tracing::FetchEventInfo::Header::toString() const {
+  return kj::str("FetchEventInfo::Header: ", name, ", ", value);
+}
+
 tracing::JsRpcEventInfo::JsRpcEventInfo(kj::String methodName): methodName(kj::mv(methodName)) {}
 
 tracing::JsRpcEventInfo::JsRpcEventInfo(rpc::Trace::JsRpcEventInfo::Reader reader)
@@ -323,6 +377,10 @@ void tracing::JsRpcEventInfo::copyTo(rpc::Trace::JsRpcEventInfo::Builder builder
 
 tracing::JsRpcEventInfo tracing::JsRpcEventInfo::clone() const {
   return JsRpcEventInfo(kj::str(methodName));
+}
+
+kj::String tracing::JsRpcEventInfo::toString() const {
+  return kj::str("JsRpcEventInfo: ", methodName);
 }
 
 tracing::ScheduledEventInfo::ScheduledEventInfo(double scheduledTime, kj::String cron)
@@ -882,6 +940,10 @@ tracing::Attribute tracing::Attribute::clone() const {
   return Attribute(kj::ConstString(kj::str(name)), KJ_MAP(v, value) { return spanTagClone(v); });
 }
 
+kj::String tracing::Attribute::toString() const {
+  return kj::str("Attribute: ", name, ", ", kj::str(value));
+}
+
 tracing::Return::Return(kj::Maybe<tracing::FetchResponseInfo> info): info(kj::mv(info)) {}
 
 namespace {
@@ -987,6 +1049,25 @@ tracing::SpanOpen tracing::SpanOpen::clone() const {
   return SpanOpen(parentSpanId, kj::str(operationName), cloneInfo(info));
 }
 
+kj::String KJ_STRINGIFY(const tracing::SpanOpen::Info& info) {
+  KJ_SWITCH_ONEOF(info) {
+    KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+      return fetch.toString();
+    }
+    KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+      return jsrpc.toString();
+    }
+    KJ_CASE_ONEOF(customInfo, tracing::CustomInfo) {
+      return kj::str(customInfo);
+    }
+  }
+  KJ_UNREACHABLE
+}
+
+kj::String tracing::SpanOpen::toString() const {
+  return kj::str("SpanOpen:", operationName, ", ", info);
+}
+
 tracing::SpanClose::SpanClose(EventOutcome outcome): outcome(outcome) {}
 
 tracing::SpanClose::SpanClose(rpc::Trace::SpanClose::Reader reader): outcome(reader.getOutcome()) {}
@@ -997,6 +1078,10 @@ void tracing::SpanClose::copyTo(rpc::Trace::SpanClose::Builder builder) const {
 
 tracing::SpanClose tracing::SpanClose::clone() const {
   return SpanClose(outcome);
+}
+
+kj::String tracing::SpanClose::toString() const {
+  return kj::str("SpanClose: ", outcome);
 }
 
 namespace {
@@ -1354,9 +1439,6 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::SPAN_CLOSE: {
       return tracing::SpanClose(event.getSpanClose());
     }
-    case rpc::Trace::TailEvent::Event::COMPLETED_SPAN: {
-      return CompleteSpan(event.getCompletedSpan());
-    }
     case rpc::Trace::TailEvent::Event::ATTRIBUTE: {
       auto listReader = event.getAttribute();
       kj::Vector<tracing::Attribute> attrs(listReader.size());
@@ -1417,9 +1499,6 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(close, SpanClose) {
       close.copyTo(eventBuilder.initSpanClose());
     }
-    KJ_CASE_ONEOF(span, CompleteSpan) {
-      span.copyTo(eventBuilder.initCompletedSpan());
-    }
     KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
       diag.copyTo(eventBuilder.initDiagnosticChannelEvent());
     }
@@ -1463,9 +1542,6 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       KJ_CASE_ONEOF(close, SpanClose) {
         return close.clone();
       }
-      KJ_CASE_ONEOF(span, CompleteSpan) {
-        return span.clone();
-      }
       KJ_CASE_ONEOF(diag, DiagnosticChannelEvent) {
         return diag.clone();
       }
@@ -1491,6 +1567,14 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 }
 
 // ======================================================================================
+
+SpanBuilder::SpanBuilder(
+    kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
+  KJ_IF_SOME(obs, observer) {
+    span.emplace(kj::mv(operationName), startTime);
+    this->observer = kj::mv(obs);
+  }
+}
 
 SpanBuilder& SpanBuilder::operator=(SpanBuilder&& other) {
   end();
@@ -1649,15 +1733,19 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
 }
 
 CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(kj::ConstString(kj::str(operationName)), startTime);
-  copy.endTime = endTime;
+  CompleteSpan copy(
+      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
   copy.tags.reserve(tags.size());
   for (auto& tag: tags) {
     copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
   }
-  copy.spanId = spanId;
-  copy.parentSpanId = parentSpanId;
   return copy;
+}
+
+kj::String CompleteSpan::toString() const {
+  return kj::str("CompleteSpan: ", operationName,
+      kj::strArray(
+          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
 }
 
 ScopedDurationTagger::ScopedDurationTagger(

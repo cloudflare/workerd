@@ -1249,7 +1249,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
 
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
@@ -1260,7 +1260,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       modular(source.variant.is<ModulesSource>()),
       python(modular && source.variant.get<ModulesSource>().isPython),
       impl(kj::heap<Impl>()),
-      dynamicEnvBuilder(kj::mv(source.dynamicEnvBuilder)) {
+      dynamicEnvBuilder(source.dynamicEnvBuilder.map(
+          [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -2677,8 +2678,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       }
       case cdp::Command::TAKE_HEAP_SNAPSHOT: {
         auto& lock = recordedLock.lock;
-        auto params = cmd.getTakeHeapSnapshot().getParams();
-        takeHeapSnapshot(*lock, params.getExposeInternals(), params.getCaptureNumericValue());
+        takeHeapSnapshot(*lock, cmd.getTakeHeapSnapshot().getParams());
         break;
       }
     }
@@ -3012,7 +3012,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
 
   WebSocketIoHandler ioHandler;
 
-  void takeHeapSnapshot(jsg::Lock& js, bool exposeInternals, bool captureNumericValue) {
+  void takeHeapSnapshot(
+      jsg::Lock& js, cdp::HeapProfiler::Command::TakeHeapSnapshot::Params::Reader params) {
     struct Activity: public v8::ActivityControl {
       InspectorChannelImpl& channel;
       Activity(InspectorChannelImpl& channel): channel(channel) {}
@@ -3020,11 +3021,11 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       ControlOption ReportProgressValue(uint32_t done, uint32_t total) {
         capnp::MallocMessageBuilder message;
         auto event = message.initRoot<cdp::Event>();
-        auto params = event.initReportHeapSnapshotProgress();
-        params.setDone(done);
-        params.setTotal(total);
+        auto progressParams = event.initReportHeapSnapshotProgress();
+        progressParams.setDone(done);
+        progressParams.setTotal(total);
         if (done == total) {
-          params.setFinished(true);
+          progressParams.setFinished(true);
         }
         auto notification = getCdpJsonCodec().encode(event);
         channel.sendNotification(kj::mv(notification));
@@ -3063,10 +3064,20 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
     Activity activity(*this);
     Writer writer(*this);
 
+    v8::HeapProfiler::HeapSnapshotOptions options{};
+    if (params.getReportProgress()) {
+      options.control = &activity;
+    }
+    if (params.getExposeInternals()) {
+      options.snapshot_mode = v8::HeapProfiler::HeapSnapshotMode::kExposeInternals;
+    }
+    if (params.getCaptureNumericValue()) {
+      options.numerics_mode = v8::HeapProfiler::NumericsMode::kExposeNumericValues;
+    }
+
     auto profiler = js.v8Isolate->GetHeapProfiler();
     auto snapshot = kj::Own<const v8::HeapSnapshot>(
-        profiler->TakeHeapSnapshot(&activity, nullptr, exposeInternals, captureNumericValue),
-        HeapSnapshotDeleter::INSTANCE);
+        profiler->TakeHeapSnapshot(options), HeapSnapshotDeleter::INSTANCE);
     snapshot->Serialize(&writer);
   }
 
@@ -3982,14 +3993,14 @@ uint Worker::Isolate::getLockSuccessCount() const {
 }
 
 kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
-    Script::Source source,
+    const Script::Source& source,
     IsolateObserver::StartType startType,
     SpanParent parentSpan,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
   // Script doesn't already exist, so compile it.
-  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, kj::mv(source), startType,
+  return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, source, startType,
       logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan));
 }
 

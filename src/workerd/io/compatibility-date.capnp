@@ -643,7 +643,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   cacheNoCache @70 :Bool
       $compatEnableFlag("cache_no_cache_enabled")
       $compatDisableFlag("cache_no_cache_disabled")
-      $experimental;
+      $impliedByAfterDate(name = "cacheOptionEnabled", date = "2025-08-07");
   # Enables the use of cache: no-cache in the fetch api.
 
   pythonWorkers20250116 @71 :Bool
@@ -889,4 +889,32 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("no_expose_global_message_channel")
       $compatEnableDate("2025-08-15");
   # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
+
+  enableNodejsHttpServerModules @103 :Bool
+      $compatEnableFlag("enable_nodejs_http_server_modules")
+      $compatDisableFlag("disable_nodejs_http_server_modules")
+      $experimental;
+  # Enables Node.js http server related modules such as node:_http_server
+  # This flag is experimental and may change or be removed in future versions.
+  # It is required to use this flag with `enable_nodejs_http_modules` since
+  # it enables the usage of http related node.js modules, and this flag enables
+  # the methods exposed by the node.js http modules.
+  # TODO(soon): Add a implifiedByAfter when node.js is enabled as well as
+  # `enable_nodejs_http_modules`
+
+  pythonNoGlobalHandlers @104 :Bool
+      $compatEnableFlag("python_no_global_handlers")
+      $compatDisableFlag("disable_python_no_global_handlers")
+      $compatEnableDate("2025-08-14");
+  # Disables the global handlers for Python workers and enforces their use via default entrypoint
+  # classes.
+
+  enableNodeJsFsModule @105 :Bool
+    $compatEnableFlag("enable_nodejs_fs_module")
+    $compatDisableFlag("disable_nodejs_fs_module")
+    $experimental;
+  # Enables the Node.js fs module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+  # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
+  # when ready to ship in production.
 }

@@ -607,7 +607,7 @@ export const processHrtime = {
       // Ideally, this should be closer to 1000, or we could test
       // a smaller interval, but this is to work around the
       // test runner time accuracy.
-      assert(end - start >= 10_000_000n);
+      assert(end - start >= 1_000_000n);
     }
   },
 };
