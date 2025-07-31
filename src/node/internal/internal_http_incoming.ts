@@ -44,7 +44,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
 
   // Technically, the type should be IncomingRequestCfProperties but
   // we don't have that type in the workerd runtime at the moment.
-  cf: Record<string, unknown> | undefined;
+  cloudflare: {
+    cf: Record<string, unknown> | undefined;
+  } = { cf: undefined };
 
   [kHeaders]: IncomingHttpHeaders | null = null;
   [kHeadersDistinct]: Record<string, string[]> | null = null;

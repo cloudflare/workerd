@@ -61,6 +61,9 @@ export const testHttpServerIncomingMessageDestroy = {
     await using server = http.createServer((req, res) => {
       const path = req.url;
 
+      ok('cloudflare' in req);
+      ok('cf' in req.cloudflare);
+
       if (path === '/destroy-with-error') {
         req.on('error', (err) => {
           res.statusCode = 400;

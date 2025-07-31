@@ -246,7 +246,7 @@ export class Server
     // We provide a way for users to access to the Cloudflare-specific
     // request properties, such as `cf` for accessing Cloudflare-specific request metadata.
     if ('cf' in request) {
-      incoming.cf = request.cf as Record<string, unknown>;
+      incoming.cloudflare.cf = request.cf as Record<string, unknown>;
     }
 
     const response = new this[kServerResponse](incoming, {
