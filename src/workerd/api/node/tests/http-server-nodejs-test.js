@@ -1,16 +1,7 @@
 import http from 'node:http';
-import {
-  strictEqual,
-  ok,
-  throws,
-  notStrictEqual,
-  rejects,
-  match,
-} from 'node:assert';
-import {
-  nodeCompatHttpServerHandler,
-  WorkerEntrypoint,
-} from 'cloudflare:workers';
+import { WorkerEntrypoint } from 'cloudflare:workers';
+import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
+import { httpServerHandler } from 'cloudflare:node';
 import { mock } from 'node:test';
 import url from 'node:url';
 import qs from 'node:querystring';
@@ -26,10 +17,7 @@ export const checkPortsSetCorrectly = {
 };
 
 export class GlobalService extends WorkerEntrypoint {}
-Object.assign(
-  GlobalService.prototype,
-  nodeCompatHttpServerHandler({ port: 9090 })
-);
+Object.assign(GlobalService.prototype, httpServerHandler({ port: 9090 }));
 
 const globalServer = http.createServer((req, res) => {
   res.writeHead(200);
@@ -1113,7 +1101,7 @@ export const testScheduled = {
 
 let scheduledCallCount = 0;
 
-export default nodeCompatHttpServerHandler(
+export default httpServerHandler(
   { port: 8080 },
   {
     async scheduled(event) {
