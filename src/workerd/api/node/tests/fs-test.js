@@ -38,11 +38,10 @@ import {
   writeFile,
   appendFile,
   read,
-  // TODO(node-fs): Uncomment when relevant tests are provided.
-  // readdir,
-  // readlink,
-  // realpath,
-  // mkdtemp,
+  readdir,
+  readlink,
+  realpath,
+  mkdtemp,
   ReadStream,
   WriteStream,
   readdirSync,
@@ -1098,12 +1097,26 @@ export const readBadEncoding = {
       throw new Error('This function must not be called');
     }
 
-    // TODO(node-fs): Enable these tests once encoding is verified correctly
-    // throws(() => readFile('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
-    // throws(() => readdir('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
-    // throws(() => readlink('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
-    // throws(() => realpath('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
-    // throws(() => mkdtemp('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+    throws(
+      () => readFile('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => readdir('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => readlink('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => realpath('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => mkdtemp('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
   },
 };
 

@@ -38,6 +38,7 @@ import {
   type SymlinkType,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
   validatePosition,
   validateAccessArgs,
   validateChownArgs,
@@ -134,10 +135,10 @@ export function accessSync(path: FilePath, mode: number = F_OK): void {
 export function appendFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): number {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options as BufferEncoding | null };
+    options = { encoding: options as BufferEncoding };
   }
   const {
     encoding = 'utf8',
@@ -441,12 +442,12 @@ export function mkdirSync(
 }
 
 export type MkdirTempSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: ValidEncoding | undefined;
 };
 
 export function mkdtempSync(
   prefix: FilePath,
-  options: BufferEncoding | null | MkdirTempSyncOptions = {}
+  options: ValidEncoding | MkdirTempSyncOptions = {}
 ): string {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -509,7 +510,7 @@ export type ReadDirResult = string[] | Buffer[] | Dirent[];
 
 export function readdirSync(
   path: FilePath,
-  options: BufferEncoding | 'buffer' | null | ReadDirOptions = {}
+  options: ValidEncoding | ReadDirOptions = {}
 ): ReadDirResult {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -545,18 +546,18 @@ export function readdirSync(
   }
 
   return handles.map((handle) => {
-    return Buffer.from(handle.name).toString(encoding);
+    return Buffer.from(handle.name).toString(encoding as string);
   });
 }
 
 export type ReadFileSyncOptions = {
-  encoding?: BufferEncoding | 'buffer' | null | undefined;
+  encoding?: ValidEncoding | undefined;
   flag?: string | number | undefined;
 };
 
 export function readFileSync(
   pathOrFd: number | FilePath,
-  options: BufferEncoding | 'buffer' | null | ReadFileSyncOptions = {}
+  options: ValidEncoding | ReadFileSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -589,12 +590,12 @@ export function readFileSync(
 }
 
 export type ReadLinkSyncOptions = {
-  encoding?: BufferEncoding | 'buffer' | null | undefined;
+  encoding?: ValidEncoding | undefined;
 };
 
 export function readlinkSync(
   path: FilePath,
-  options: BufferEncoding | 'buffer' | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -657,7 +658,7 @@ export function readvSync(
 
 export function realpathSync(
   p: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -786,7 +787,7 @@ export function utimesSync(
 export function writeFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): number {
   const {
     path: validatedPath,
@@ -802,7 +803,7 @@ export function writeSync(
   fd: number,
   buffer: NodeJS.ArrayBufferView | string,
   offsetOrOptions: WriteSyncOptions | Position = null,
-  length?: number | BufferEncoding | null,
+  length?: number | ValidEncoding,
   position?: Position
 ): number {
   const {

@@ -7,7 +7,10 @@ import {
   UV_DIRENT_FIFO,
   UV_DIRENT_SOCKET,
 } from 'node-internal:internal_fs_constants';
-import { type FilePath } from 'node-internal:internal_fs_utils';
+import {
+  type FilePath,
+  type ValidEncoding,
+} from 'node-internal:internal_fs_utils';
 import {
   default as cffs,
   type DirEntryHandle,
@@ -65,7 +68,7 @@ export class Dirent {
 }
 
 export interface DirOptions {
-  encoding?: BufferEncoding | null | undefined | 'buffer';
+  encoding?: ValidEncoding | undefined;
 }
 
 export type DirentReadCallback = (
@@ -79,7 +82,7 @@ export class Dir {
   // of DirEntryHandle objects just like the one used in the readdir
   // API.
   #handle: DirEntryHandle[] | undefined;
-  #encoding: BufferEncoding | null | undefined | 'buffer';
+  #encoding: ValidEncoding | undefined;
   #path: FilePath;
 
   constructor(
