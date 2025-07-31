@@ -886,6 +886,20 @@ export const readStreamTest34 = {
   },
 };
 
+export const emptyReadStreamTest = {
+  async test() {
+    writeFileSync('/tmp/empty.txt', '');
+    const stream = createReadStream('/tmp/empty.txt');
+    const { promise, resolve, reject } = Promise.withResolvers();
+    stream.once('data', () => {
+      reject(new Error('should not emit data'));
+    });
+    stream.once('end', resolve);
+    await promise;
+    strictEqual(stream.bytesRead, 0);
+  },
+};
+
 /**
  * Temporarily comment out. These are larger tests causing timeouts
  * In CI. Will move them out to separate tests in a follow on PR
