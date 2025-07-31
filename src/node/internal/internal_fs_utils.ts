@@ -138,6 +138,15 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   } else {
     throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
   }
+
+  if (path.indexOf('\0') !== -1) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'path',
+      path,
+      'must not contain null bytes'
+    );
+  }
+
   // In this case, we have a string path. Any ? or # characters in the
   // path should be percent-encoded to ensure they are not treated as
   // special characters in the URL.

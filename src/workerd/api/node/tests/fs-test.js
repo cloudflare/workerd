@@ -1,7 +1,15 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { ifError, ok, rejects, strictEqual, throws } from 'node:assert';
+import {
+  ifError,
+  ok,
+  rejects,
+  deepStrictEqual,
+  strictEqual,
+  notStrictEqual,
+  throws,
+} from 'node:assert';
 
 import {
   existsSync,
@@ -48,6 +56,8 @@ import {
   constants,
   promises,
 } from 'node:fs';
+
+import { join } from 'node:path';
 
 const { COPYFILE_EXCL } = constants;
 
@@ -130,6 +140,18 @@ export const openCloseTest = {
     closeSync(fd);
     // Can close non-existent file descriptors
     closeSync(123);
+
+    ['a', {}, null].forEach((i) => {
+      throws(() => closeSync(i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => close(i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => close(0, i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
 
     {
       const { promise, resolve, reject } = Promise.withResolvers();
@@ -860,6 +882,59 @@ export const copyAndRenameSyncTest = {
       readFileSync('/tmp/test2.txt').toString()
     );
 
+    copyFileSync('/tmp/test.txt', '/tmp/test4.txt', 0);
+    // Both files exist
+    ok(existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test4.txt'));
+
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      readFileSync('/tmp/test4.txt').toString()
+    );
+
+    throws(
+      () => copyFileSync('/tmp/test.txt', '/tmp/test4.txt', COPYFILE_EXCL),
+      {
+        code: 'EEXIST',
+      }
+    );
+
+    throws(
+      () =>
+        copyFileSync(
+          '/tmp/test.txt',
+          '/tmp/nope.txt',
+          constants.COPYFILE_FICLONE_FORCE
+        ),
+      {
+        message: /unsupported/,
+      }
+    );
+
+    copyFileSync('/tmp/test.txt', '/tmp/test5.txt', constants.COPYFILE_FICLONE);
+    // Both files exist
+    ok(existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test5.txt'));
+
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      readFileSync('/tmp/test5.txt').toString()
+    );
+
+    [false, 1, {}, [], null, undefined].forEach((i) => {
+      throws(() => copyFileSync(i, '/tmp/nope.txt'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => copyFileSync('/tmp/test.txt', i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
+    [false, {}, [], null].forEach((i) => {
+      throws(() => copyFileSync('/tmp/test.txt', '/tmp/test2.txt', i), {
+        code: 'ERR_INVALID_ARG_VALUE',
+      });
+    });
+
     // We can modify one of the files and the other remains unchanged
     writeFileSync('/tmp/test.txt', 'Hello World 2');
     strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World 2');
@@ -1029,5 +1104,141 @@ export const readBadEncoding = {
     // throws(() => readlink('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
     // throws(() => realpath('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
     // throws(() => mkdtemp('/tmp/test.txt', 'bad-encoding', mustNotCall), kErrorObj);
+  },
+};
+
+export const fsConstantsTest = {
+  test() {
+    // Check if the two constants accepted by chmod() on Windows are defined.
+    notStrictEqual(constants.S_IRUSR, undefined);
+    notStrictEqual(constants.S_IWUSR, undefined);
+
+    // Check null prototype.
+    strictEqual(Object.getPrototypeOf(constants), null);
+
+    const knownFsConstantNames = [
+      'UV_FS_SYMLINK_DIR',
+      'UV_FS_SYMLINK_JUNCTION',
+      'O_RDONLY',
+      'O_WRONLY',
+      'O_RDWR',
+      'UV_DIRENT_UNKNOWN',
+      'UV_DIRENT_FILE',
+      'UV_DIRENT_DIR',
+      'UV_DIRENT_LINK',
+      'UV_DIRENT_FIFO',
+      'UV_DIRENT_SOCKET',
+      'UV_DIRENT_CHAR',
+      'UV_DIRENT_BLOCK',
+      'S_IFMT',
+      'S_IFREG',
+      'S_IFDIR',
+      'S_IFCHR',
+      'S_IFBLK',
+      'S_IFIFO',
+      'S_IFLNK',
+      'S_IFSOCK',
+      'O_CREAT',
+      'O_EXCL',
+      'UV_FS_O_FILEMAP',
+      'O_NOCTTY',
+      'O_TRUNC',
+      'O_APPEND',
+      'O_DIRECTORY',
+      'O_EXCL',
+      'O_NOATIME',
+      'O_NOFOLLOW',
+      'O_SYNC',
+      'O_DSYNC',
+      'O_SYMLINK',
+      'O_DIRECT',
+      'O_NONBLOCK',
+      'S_IRWXU',
+      'S_IRUSR',
+      'S_IWUSR',
+      'S_IXUSR',
+      'S_IRWXG',
+      'S_IRGRP',
+      'S_IWGRP',
+      'S_IXGRP',
+      'S_IRWXO',
+      'S_IROTH',
+      'S_IWOTH',
+      'S_IXOTH',
+      'F_OK',
+      'R_OK',
+      'W_OK',
+      'X_OK',
+      'UV_FS_COPYFILE_EXCL',
+      'COPYFILE_EXCL',
+      'UV_FS_COPYFILE_FICLONE',
+      'COPYFILE_FICLONE',
+      'UV_FS_COPYFILE_FICLONE_FORCE',
+      'COPYFILE_FICLONE_FORCE',
+      'EXTENSIONLESS_FORMAT_JAVASCRIPT',
+      'EXTENSIONLESS_FORMAT_WASM',
+    ];
+
+    const fsConstantNames = Object.keys(constants);
+    const unknownFsConstantNames = fsConstantNames.filter((constant) => {
+      return !knownFsConstantNames.includes(constant);
+    });
+    deepStrictEqual(
+      unknownFsConstantNames,
+      [],
+      `Unknown fs.constants: ${unknownFsConstantNames.join(', ')}`
+    );
+
+    strictEqual(typeof constants.COPYFILE_EXCL, 'number');
+    strictEqual(typeof constants.COPYFILE_FICLONE, 'number');
+    strictEqual(typeof constants.COPYFILE_FICLONE_FORCE, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_EXCL, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_FICLONE, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_FICLONE_FORCE, 'number');
+    strictEqual(constants.COPYFILE_EXCL, constants.UV_FS_COPYFILE_EXCL);
+    strictEqual(constants.COPYFILE_FICLONE, constants.UV_FS_COPYFILE_FICLONE);
+    strictEqual(
+      constants.COPYFILE_FICLONE_FORCE,
+      constants.UV_FS_COPYFILE_FICLONE_FORCE
+    );
+  },
+};
+
+export const fmapIgnoredTest = {
+  test() {
+    const filename = '/tmp/foo';
+    const text = 'Memory File Mapping Test';
+
+    const mw =
+      constants.UV_FS_O_FILEMAP |
+      constants.O_TRUNC |
+      constants.O_CREAT |
+      constants.O_WRONLY;
+    const mr = constants.UV_FS_O_FILEMAP | constants.O_RDONLY;
+
+    writeFileSync(filename, text, { flag: mw });
+    const r1 = readFileSync(filename, { encoding: 'utf8', flag: mr });
+    strictEqual(r1, text);
+  },
+};
+
+export const fileNamesWithNullBytesTest = {
+  test() {
+    const filename = '/tmp/test\0.txt';
+    throws(() => writeFileSync(filename, 'Hello World'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+  },
+};
+
+export const fileNamesWithSurrogatePairsTest = {
+  test() {
+    const tempdir = mkdtempSync('/tmp/emoji-fruit-🍇 🍈 🍉 🍊 🍋');
+    ok(existsSync(tempdir));
+    const filename = '🚀🔥🛸.txt';
+    const content = 'Test content';
+    writeFileSync(join(tempdir, filename), content);
+    const readContent = readFileSync(join(tempdir, filename), 'utf8');
+    strictEqual(readContent, content);
   },
 };

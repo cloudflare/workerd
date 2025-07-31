@@ -131,6 +131,8 @@ namespace workerd {
 // TODO(node-fs): Currently, all files and directories use a fixed last
 // modified time set to the Unix epoch. This is temporary.
 
+// TODO(node-fs): Enforce overall path length limits.
+
 enum class FsType {
   FILE,
   DIRECTORY,
