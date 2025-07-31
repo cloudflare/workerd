@@ -100,7 +100,6 @@ export default {
   'FileSystemFileHandle-cross-primitive-locking.https.tentative.worker.js': {
     comment:
       'The importScripts utility is not implemented in our test hardness',
-    // TODO(node-fs): Inspect these tests
     disabledTests: true,
   },
   'FileSystemFileHandle-getFile.https.any.js': {

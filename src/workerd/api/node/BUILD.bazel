@@ -2,6 +2,20 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 wd_cc_library(
+    name = "exceptions",
+    srcs = [
+        "exceptions.c++",
+    ],
+    hdrs = [
+        "exceptions.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+    ],
+)
+
+wd_cc_library(
     name = "node",
     srcs = [
         "crypto.c++",
@@ -71,6 +85,7 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/io",
         "//src/workerd/util:mimetype",
+        ":exceptions",
     ],
 )
 

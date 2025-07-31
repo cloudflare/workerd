@@ -178,10 +178,10 @@ export const ftruncateTest = {
 
     {
       throws(() => ftruncateSync(fd, 0xffffffff), {
-        message: /file size limit exceeded/,
+        message: /File size limit exceeded/,
       });
       throws(() => ftruncateSync(fd, 0x08000000 + 1), {
-        message: /file size limit exceeded/,
+        message: /File size limit exceeded/,
       });
       // 0x08000000 is the maximum allowed file size.
       ftruncateSync(fd, 0x08000000);
