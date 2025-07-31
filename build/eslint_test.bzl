@@ -6,16 +6,15 @@ def eslint_test(
         tsconfig_json,
         srcs,
         data = []):
-    ts_srcs = [src for src in srcs if src.endswith(".ts")]
+    js_srcs = [src for src in srcs if src.endswith(".ts") or src.endswith(".mts") or src.endswith(".js") or src.endswith(".mjs")]
 
-    # TODO: lint js_srcs too, not just ts_srcs
     eslint_bin.eslint_test(
         size = "large",
         name = name + "@eslint",
         args = [
             "--config $(location {})".format(eslintrc_json),
             "--report-unused-disable-directives",
-        ] + ["$(location " + src + ")" for src in ts_srcs],
+        ] + ["$(location " + src + ")" for src in js_srcs],
         data = srcs + data + [
             eslintrc_json,
             tsconfig_json,

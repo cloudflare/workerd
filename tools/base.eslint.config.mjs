@@ -58,5 +58,11 @@ export function baseConfig() {
       files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
       ...tseslint.configs.disableTypeChecked,
     },
+    {
+      files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+      rules: {
+        '@typescript-eslint/explicit-function-return-type': 'off',
+      }
+    }
   )
 }

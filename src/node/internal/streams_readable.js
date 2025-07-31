@@ -1604,7 +1604,6 @@ async function forEach(fn, options) {
     await fn(value, options);
     return kEmpty;
   }
-  // eslint-disable-next-line no-unused-vars
   for await (const _ of map.call(this, forEachFn, options));
 }
 
