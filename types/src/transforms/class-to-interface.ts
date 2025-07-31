@@ -78,7 +78,7 @@ function createInterfaceDeclaration(
   const interfaceMembers = transformClassMembers(node.members, context, false);
   return context.factory.createInterfaceDeclaration(
     getAccessModifiers(ts.getModifiers(node)),
-    node.name!,
+    node.name,
     node.typeParameters,
     node.heritageClauses,
     interfaceMembers
@@ -271,7 +271,7 @@ function createVariableDeclaration(
     context.factory.createVariableDeclarationList(
       [
         context.factory.createVariableDeclaration(
-          node.name!,
+          node.name,
           undefined,
           createClassType(node, context)
         ),
@@ -336,7 +336,7 @@ function createConstructSignature(
   const typeParameters = node.typeParameters;
 
   const returnType = context.factory.createTypeReferenceNode(
-    node.name!,
+    node.name,
     typeParameters?.map((param) =>
       context.factory.createTypeReferenceNode(param.name, undefined)
     )
@@ -370,7 +370,7 @@ function createPrototypeProperty(
     undefined,
     "prototype",
     undefined,
-    context.factory.createTypeReferenceNode(node.name!, undefined)
+    context.factory.createTypeReferenceNode(node.name, undefined)
   );
 }
 

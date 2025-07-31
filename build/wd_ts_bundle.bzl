@@ -52,6 +52,7 @@ def wd_ts_bundle(
     ts_config(
         name = name + "@tsconfig",
         src = tsconfig_json,
+        deps = ["//tools:base-tsconfig"],
     )
 
     srcs = modules + internal_modules
@@ -63,7 +64,7 @@ def wd_ts_bundle(
         srcs = ts_srcs,
         allow_js = True,
         declaration = True,
-        tsconfig = name + "@tsconfig",
+        tsconfig = ":" + name + "@tsconfig",
         deps = deps,
         out_dir = out_dir.removesuffix("/"),
         visibility = ["//visibility:public"],

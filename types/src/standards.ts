@@ -60,7 +60,6 @@ export function collateStandardComments(
 
       // Because we load multiple lib files, some types are included multiple times.
       // This simple check makes sure that we don't add a doc comment twice
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!nodeResult[key]?.includes?.(text)) {
         nodeResult[key] += text;
       }

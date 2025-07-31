@@ -1,11 +1,8 @@
 {
+  "extends": "../tools/base.tsconfig.json",
   "compilerOptions": {
     "module": "commonjs",
-    "target": "ESNext",
     "lib": ["ESNext", "dom", "dom.iterable"],
-    "strict": true,
-    "moduleResolution": "node",
-    "esModuleInterop": true,
     "types": ["@types/node"],
     "sourceMap": true,
     "baseUrl": ".",
@@ -14,10 +11,14 @@
       "@workerd/*": ["../bazel-bin/src/workerd/*"]
     },
     "checkJs": true,
-    "allowJs": true,
     "composite": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+
+    "exactOptionalPropertyTypes": false,
+    "strictNullChecks": false,
+    "noImplicitReturns": false,
+    "noImplicitOverride": false
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "eslint.config.mjs"],
-  "exclude": ["test/types/**/*.ts", "src/worker/**"]
+  "exclude": ["test/types/**/*.ts", "src/worker/**", "node_modules", "**/*.mjs"]
 }

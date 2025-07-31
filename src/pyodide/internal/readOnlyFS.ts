@@ -50,7 +50,7 @@ export function createReadonlyFS<Info>(
       lookup(parent, name) {
         const child = FSOps.lookup(parent, name);
         if (child === undefined) {
-          throw FS.genericErrors[44]; // ENOENT
+          throw FS.genericErrors[44] as Error; // ENOENT
         }
         return ReadOnlyFS.createNode(parent, name, child);
       },
