@@ -36,6 +36,7 @@ import {
   validateInteger,
   validateObject,
   validatePort,
+  validateNumber,
 } from 'node-internal:validators';
 import { portMapper } from 'cloudflare-internal:http';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
@@ -140,8 +141,10 @@ export class Server
     }
 
     if (options?.highWaterMark !== undefined) {
-      validateInteger(options.highWaterMark, 'options.highWaterMark', 0);
-      this.highWaterMark = options.highWaterMark;
+      validateNumber(options.highWaterMark, 'options.highWaterMark');
+      if (options.highWaterMark > 0) {
+        this.highWaterMark = options.highWaterMark;
+      }
     }
 
     if (typeof options === 'function') {
