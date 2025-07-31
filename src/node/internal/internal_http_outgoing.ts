@@ -105,9 +105,14 @@ class MessageBuffer {
   #index = 0;
   #onWrite: (index: number, entry: WrittenDataBufferEntry) => void;
   #bufferedWrites: { index: number; entry: WrittenDataBufferEntry }[] = [];
+  #highWaterMark: number;
 
-  constructor(onWrite: (index: number, entry: WrittenDataBufferEntry) => void) {
+  constructor(
+    onWrite: (index: number, entry: WrittenDataBufferEntry) => void,
+    options: { highWaterMark: number }
+  ) {
     this.#onWrite = onWrite;
+    this.#highWaterMark = options.highWaterMark;
   }
 
   write(
@@ -175,8 +180,7 @@ class MessageBuffer {
   }
 
   get writableHighWaterMark(): number {
-    // TODO(soon): Make this configurable.
-    return 64 * 1024;
+    return this.#highWaterMark;
   }
 
   get writableCorked(): number {
@@ -204,9 +208,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   // @ts-expect-error TS2416 IncomingMessage is not feature complete yet.
   readonly req?: IncomingMessage | undefined;
-  #buffer: MessageBuffer | undefined | null = new MessageBuffer(
-    this.#onDataWritten.bind(this)
-  );
+  #buffer: MessageBuffer | undefined | null;
 
   // Queue that holds all currently pending data, until the response will be
   // assigned to the socket (until it will its turn in the HTTP pipeline).
@@ -252,9 +254,12 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   constructor(req?: IncomingMessage, options?: OutgoingMessageOptions) {
     super();
     this.req = req;
-    this[kHighWaterMark] = options?.highWaterMark ?? 64 * 1024;
+    this[kHighWaterMark] = options?.highWaterMark ?? getDefaultHighWaterMark();
     this[kRejectNonStandardBodyWrites] =
       options?.rejectNonStandardBodyWrites ?? false;
+    this.#buffer = new MessageBuffer(this.#onDataWritten.bind(this), {
+      highWaterMark: this[kHighWaterMark],
+    });
 
     this.once('end', () => {
       // We need to emit close in a queueMicrotask because
@@ -969,7 +974,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   // @ts-expect-error TS2611 Property accessor.
   get writableHighWaterMark(): number {
-    return this.#buffer?.writableHighWaterMark ?? getDefaultHighWaterMark();
+    return this.#buffer?.writableHighWaterMark ?? this[kHighWaterMark];
   }
 
   // @ts-expect-error TS2611 Property accessor.

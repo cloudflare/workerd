@@ -24,6 +24,7 @@ import {
   ERR_SERVER_ALREADY_LISTEN,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
+import { getDefaultHighWaterMark } from 'node-internal:streams_util';
 import {
   kUniqueHeaders,
   OutgoingMessage,
@@ -124,7 +125,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
-  highWaterMark: number = 65536;
+  highWaterMark: number = getDefaultHighWaterMark();
   #port: number | null = null;
 
   constructor(options?: ServerOptions, requestListener?: RequestListener) {
