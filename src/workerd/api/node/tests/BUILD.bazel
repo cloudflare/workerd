@@ -521,6 +521,12 @@ wd_test(
     data = ["fs-writestream-test.js"],
 )
 
+wd_test(
+    src = "os-test.wd-test",
+    args = ["--experimental"],
+    data = ["os-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",

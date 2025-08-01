@@ -920,4 +920,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # nodejs_compat (or nodejs_compat_v2).
   # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
   # when ready to ship in production.
+
+  enableNodeJsOsModule @106 :Bool
+    $compatEnableFlag("enable_nodejs_os_module")
+    $compatDisableFlag("disable_nodejs_os_module")
+    $experimental;
+  # Enables the Node.js os module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+  # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
+  # when ready to ship in production.
 }
