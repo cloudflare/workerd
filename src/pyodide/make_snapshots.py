@@ -2,7 +2,7 @@ import shutil
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from textwrap import indent
+from textwrap import dedent, indent
 
 from tool_utils import hexdigest, run, timing
 
@@ -20,8 +20,8 @@ const mainWorker :Workerd.Worker = (
     (name = "worker.py", pythonModule = embed "./worker.py"),
     {requirements}
   ],
-  compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers", {compat_flags}],
+  compatibilityDate = "2025-08-05",
+  compatibilityFlags = ["python_workers", "python_no_global_handlers", {compat_flags}],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );
@@ -46,6 +46,12 @@ def make_worker(imports: list[str]) -> str:
     contents = ""
     for i in imports:
         contents += f"import {i}\n"
+    contents += dedent("""\
+    from workers import WorkerEntrypoint
+    class Default(WorkerEntrypoint):
+        def test(self):
+            pass
+    """)
     return contents
 
 
@@ -61,6 +67,10 @@ def make_snapshot(  # noqa: PLR0913
     config_path.write_text(make_config(compat_flags, requirements))
     worker_path = d / "worker.py"
     worker_path.write_text(make_worker(imports))
+    if imports:
+        snapshot_flag = "--python-save-snapshot"
+    else:
+        snapshot_flag = "--python-save-baseline-snapshot"
     run(
         [
             "bazel",
@@ -69,7 +79,7 @@ def make_snapshot(  # noqa: PLR0913
             "--",
             "test",
             config_path,
-            "--python-save-snapshot",
+            snapshot_flag,
             "--pyodide-bundle-disk-cache-dir",
             d,
             "--pyodide-package-disk-cache-dir",
@@ -141,7 +151,7 @@ def main() -> int:
     print()
     print("Update python_metadata.bzl:\n")
     for key, val in res:
-        print(indent(f'"{key}": "{val}"', " " * 8))
+        print(indent(f'"{key}": "{val}",', " " * 8))
     return 0
 
 

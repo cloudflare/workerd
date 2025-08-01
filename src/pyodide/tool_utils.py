@@ -34,7 +34,7 @@ def bytesdigest(p: Path | str) -> bytes:
 def hexdigest(p: Path | str) -> str:
     """Calculate SHA256 digest of a file as hex string."""
     digest = bytesdigest(p)
-    return "".join(hex(e)[2:] for e in digest)
+    return "".join(hex(e)[2:].zfill(2) for e in digest)
 
 
 @contextmanager
