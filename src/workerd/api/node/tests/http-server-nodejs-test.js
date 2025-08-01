@@ -791,12 +791,15 @@ export const testCorkUncorkBasic = {
     await using server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
 
+      strictEqual(res.writableLength, 0);
       res.cork();
+      strictEqual(res.writableLength, 0);
       res.write('chunk1');
+      strictEqual(res.writableLength, 108);
       res.write('chunk2');
+      strictEqual(res.writableLength, 114);
       res.write('chunk3');
-      strictEqual(res.writableLength, 12);
-
+      strictEqual(res.writableLength, 120);
       res.uncork();
       strictEqual(res.writableLength, 0);
 
