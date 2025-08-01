@@ -26,6 +26,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #response?: Response;
   #reader?: ReadableStreamDefaultReader<Uint8Array>;
   #reading = false;
+  #socket: unknown;
 
   aborted = false;
   url: string = '';
@@ -357,6 +358,21 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     this.resume();
 
     return destination;
+  }
+
+  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
+  set connection(value: unknown) {
+    this.#socket = value;
+  }
+
+  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
+  get connection(): unknown {
+    return this.#socket;
+  }
+
+  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
+  get socket(): unknown {
+    return this.#socket;
   }
 }
 
