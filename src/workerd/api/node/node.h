@@ -59,6 +59,10 @@ constexpr bool isNodeHttpServerModule(kj::StringPtr name) {
   return name == "node:_http_server"_kj;
 }
 
+constexpr bool isNodeOsModule(kj::StringPtr name) {
+  return name == "node:os"_kj;
+}
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -99,6 +103,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     if (isNodeHttpServerModule(module.getName())) {
       return featureFlags.getEnableNodejsHttpServerModules() &&
           featureFlags.getWorkerdExperimental();
+    }
+
+    if (isNodeOsModule(module.getName())) {
+      return featureFlags.getEnableNodeJsOsModule() && featureFlags.getWorkerdExperimental();
     }
 
     return true;
