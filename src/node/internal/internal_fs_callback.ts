@@ -904,9 +904,7 @@ export function readdir(
   optionsOrCallback:
     | SingleArgCallback<ReadDirResult>
     | ReadDirOptions
-    | BufferEncoding
-    | 'buffer'
-    | null,
+    | ValidEncoding,
   callback?: SingleArgCallback<ReadDirResult>
 ): void {
   let options: ReadDirOptions | ValidEncoding;
