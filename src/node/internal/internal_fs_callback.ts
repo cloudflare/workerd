@@ -538,9 +538,7 @@ export function mkdtemp(
   optionsOrCallback:
     | SingleArgCallback<string>
     | MkdirTempSyncOptions
-    | BufferEncoding
-    | 'buffer'
-    | null,
+    | ValidEncoding,
   callback?: SingleArgCallback<string>
 ): void {
   let options: MkdirTempSyncOptions | ValidEncoding;
