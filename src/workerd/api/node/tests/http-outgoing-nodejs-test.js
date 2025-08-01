@@ -347,6 +347,35 @@ export const testHttpOutgoingEndTypes = {
   },
 };
 
+// Test is taken from test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
+export const testHttpOutgoingFirstChunkSingleByteEncoding = {
+  async test(_ctrl, env) {
+    // TODO(soon): Add utf-16 to this list when it's supported.
+    for (const enc of ['utf8', 'latin1', 'UTF-8']) {
+      await using server = http.createServer((req, res) => {
+        res.setHeader('content-type', `text/plain; charset=${enc}`);
+        res.write('helloworld', enc);
+        res.end();
+      });
+
+      server.listen(8080);
+
+      const res = await env.SERVICE.fetch('http://cloudflare.com', {
+        headers: {
+          'content-type': `text/plain; charset=${enc}`,
+        },
+      });
+      strictEqual(res.status, 200);
+      strictEqual(
+        res.headers.get('content-type'),
+        `text/plain; charset=${enc}`
+      );
+      const buf = await res.arrayBuffer();
+      strictEqual(Buffer.from(buf, enc).toString(), 'helloworld');
+    }
+  },
+};
+
 export default httpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
@@ -356,6 +385,7 @@ export default httpServerHandler({ port: 8080 });
 // - [x] test/parallel/test-http-outgoing-destroyed.js
 // - [x] test/parallel/test-http-outgoing-end-multiple.js
 // - [x] test/parallel/test-http-outgoing-end-types.js
+// - [x] test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
 // - [x] test/parallel/test-http-outgoing-finished.js
 // - [x] test/parallel/test-http-outgoing-finish-writable.js
 // - [x] test/parallel/test-http-outgoing-properties.js
@@ -368,7 +398,6 @@ export default httpServerHandler({ port: 8080 });
 //
 // - [ ] test/parallel/test-http-outgoing-end-cork.js
 // - [ ] test/parallel/test-http-outgoing-finish.js
-// - [ ] test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
 // - [ ] test/parallel/test-http-outgoing-message-capture-rejection.js
 // - [ ] test/parallel/test-http-outgoing-message-inheritance.js
 // - [ ] test/parallel/test-http-outgoing-message-write-callback.js
