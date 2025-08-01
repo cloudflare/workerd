@@ -54,6 +54,7 @@ import {
   type SymlinkType,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
   getValidatedFd,
   validateBufferArray,
   stringToFlags,
@@ -534,16 +535,32 @@ export function mkdir(
 
 export function mkdtemp(
   prefix: FilePath,
-  optionsOrCallback: SingleArgCallback<string> | MkdirTempSyncOptions,
+  optionsOrCallback:
+    | SingleArgCallback<string>
+    | MkdirTempSyncOptions
+    | ValidEncoding,
   callback?: SingleArgCallback<string>
 ): void {
-  let options: MkdirTempSyncOptions;
+  let options: MkdirTempSyncOptions | ValidEncoding;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+  validateObject(options, 'options');
+  const { encoding = null } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
   callWithSingleArgCallback(
     () => fssync.mkdtempSync(prefix, options),
     callback
@@ -884,10 +901,13 @@ export function read<T extends NodeJS.ArrayBufferView>(
 
 export function readdir(
   path: FilePath,
-  optionsOrCallback: SingleArgCallback<ReadDirResult> | ReadDirOptions,
+  optionsOrCallback:
+    | SingleArgCallback<ReadDirResult>
+    | ReadDirOptions
+    | ValidEncoding,
   callback?: SingleArgCallback<ReadDirResult>
 ): void {
-  let options: ReadDirOptions;
+  let options: ReadDirOptions | ValidEncoding;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {
@@ -922,13 +942,27 @@ export function readFile(
     | ReadFileSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadFileSyncOptions;
+  let options: ValidEncoding | ReadFileSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+  validateObject(options, 'options');
+  const { encoding = null } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
   // TODO(node-fs): Validate options more. Specifically the encoding option
   callWithSingleArgCallback(() => fssync.readFileSync(path, options), callback);
 }
@@ -942,12 +976,15 @@ export function readlink(
     | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | 'buffer' | null | ReadLinkSyncOptions;
+  let options: ValidEncoding | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
+  }
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
   }
   path = normalizePath(path);
   validateObject(options, 'options');
@@ -998,12 +1035,16 @@ export function realpath(
     | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadLinkSyncOptions;
+  let options: ValidEncoding | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
+  }
+
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
   }
 
   validateObject(options, 'options');
@@ -1182,7 +1223,7 @@ export function write<T extends NodeJS.ArrayBufferView>(
   callback?: DoubleArgCallback<number, T>
 ): void {
   let offsetOrOptions: WriteSyncOptions | Position | undefined;
-  let lengthOrEncoding: number | BufferEncoding | null | undefined;
+  let lengthOrEncoding: number | ValidEncoding | undefined;
   let position: Position | undefined;
   if (typeof offsetOptionsPositionOrCallback === 'function') {
     callback = offsetOptionsPositionOrCallback;
@@ -1255,7 +1296,7 @@ export function writeFile(
     | WriteFileOptions,
   callback?: ErrorOnlyCallback
 ): void {
-  let options: BufferEncoding | null | WriteFileOptions;
+  let options: ValidEncoding | WriteFileOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {

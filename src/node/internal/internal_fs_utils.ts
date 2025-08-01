@@ -83,6 +83,8 @@ import type {
   WriteFileOptions,
 } from 'node:fs';
 
+export type ValidEncoding = BufferEncoding | 'buffer' | null;
+
 import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 
 // A non-public symbol used to ensure that certain constructors cannot
@@ -313,20 +315,23 @@ export function validateRmDirArgs(
 // We could use the @types/node definition here but it's a bit overly
 // complex for our needs here.
 export type ReadDirOptions = {
-  encoding?: BufferEncoding | 'buffer' | null | undefined;
+  encoding?: ValidEncoding | undefined;
   withFileTypes?: boolean | undefined;
   recursive?: boolean | undefined;
 };
 
 export function validateReaddirArgs(
   path: FilePath,
-  options: ReadDirOptions
+  options: ReadDirOptions | ValidEncoding
 ): {
   path: URL;
-  encoding: BufferEncoding | 'buffer';
+  encoding: ValidEncoding;
   withFileTypes: boolean;
   recursive: boolean;
 } {
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
   validateObject(options, 'options');
   const {
     encoding = 'utf8',
@@ -351,7 +356,7 @@ export function validateOpendirArgs(
   options: OpenDirOptions
 ): {
   path: URL;
-  encoding: BufferEncoding | null | 'buffer';
+  encoding: ValidEncoding;
   recursive: boolean;
 } {
   validateObject(options, 'options');
@@ -381,7 +386,7 @@ export function validateWriteArgs(
   fd: number,
   buffer: NodeJS.ArrayBufferView | string,
   offsetOrOptions: WriteSyncOptions | Position | undefined,
-  length: number | BufferEncoding | null | undefined,
+  length: number | ValidEncoding | undefined,
   position: Position | undefined
 ): { fd: number; buffer: Buffer[]; position: Position } {
   fd = getValidatedFd(fd);
@@ -434,7 +439,7 @@ export function validateWriteArgs(
 export function validateWriteFileArgs(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions
+  options: ValidEncoding | WriteFileOptions
 ): {
   path: number | URL;
   data: NodeJS.ArrayBufferView;

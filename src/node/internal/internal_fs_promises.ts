@@ -59,6 +59,7 @@ import {
   type FilePath,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
 } from 'node-internal:internal_fs_utils';
 import type { Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
@@ -217,7 +218,7 @@ export class FileHandle extends EventEmitter {
   }
 
   async readFile(
-    options: BufferEncoding | null | ReadFileSyncOptions = {}
+    options: ValidEncoding | ReadFileSyncOptions = {}
   ): Promise<string | Buffer> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
@@ -256,7 +257,7 @@ export class FileHandle extends EventEmitter {
   async write(
     buffer: NodeJS.ArrayBufferView | string,
     offsetPositionOrOptions: WriteSyncOptions | Position = null,
-    lengthOrEncoding?: number | BufferEncoding | null,
+    lengthOrEncoding?: number | ValidEncoding,
     position: Position = null
   ): Promise<{ bytesWritten: number; buffer: NodeJS.ArrayBufferView }> {
     if (this.#fd === undefined) {
@@ -297,7 +298,7 @@ export class FileHandle extends EventEmitter {
 
   async writeFile(
     data: string | Buffer,
-    options: BufferEncoding | null | WriteFileOptions = {}
+    options: ValidEncoding | WriteFileOptions = {}
   ): Promise<{ bytesWritten: number; buffer: Buffer }> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
@@ -491,21 +492,21 @@ export function readdir(
 
 export function readFile(
   path: number | FilePath,
-  options: BufferEncoding | null | ReadFileSyncOptions = {}
+  options: ValidEncoding | ReadFileSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.readFileSync(path, options));
 }
 
 export function readlink(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.readlinkSync(path, options));
 }
 
 export function realpath(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.realpathSync(path, options));
 }
@@ -568,7 +569,7 @@ export function watch(): Promise<void> {
 export function writeFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): Promise<void> {
   return Promise.try(() => {
     // While writeFileSync returns the number of bytes written,
