@@ -302,17 +302,19 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
   auto tunneledException = decodeTunneledException(isolate, desc, exception.getType());
 
   if (tunneledException.isInternal) {
+    bool logWithInternalId = exception.getType() != kj::Exception::Type::DISCONNECTED &&
+        !isDoNotLogException(exception.getDescription());
     auto& observer = IsolateBase::from(isolate).getObserver();
     observer.reportInternalException(exception,
         {
           .isInternal = tunneledException.isInternal,
           .isFromRemote = tunneledException.isFromRemote,
           .isDurableObjectReset = tunneledException.isDurableObjectReset,
+          .internalErrorId = logWithInternalId ? tunneledException.internalErrorId : kj::none,
         });
     // Don't log exceptions that have been explicitly marked with worker_do_not_log or are
     // DISCONNECTED exceptions as these are unlikely to represent bugs worth tracking.
-    if (exception.getType() != kj::Exception::Type::DISCONNECTED &&
-        !isDoNotLogException(exception.getDescription())) {
+    if (logWithInternalId) {
       // LOG_EXCEPTION("jsgInternalError", ...), but with internal error ID:
       auto& e = exception;
       constexpr auto sentryErrorContext = "jsgInternalError";

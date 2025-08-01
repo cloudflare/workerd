@@ -143,6 +143,8 @@ struct InternalExceptionObserver {
     bool isInternal;
     bool isFromRemote;
     bool isDurableObjectReset;
+    using InternalErrorId = kj::FixedArray<char, 24>;
+    kj::Maybe<InternalErrorId> internalErrorId;
   };
 
   // Called when an internal exception is created (see makeInternalError).
