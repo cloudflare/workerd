@@ -55,10 +55,7 @@ py_wd_test("dont-snapshot-pyodide")
 
 py_wd_test("filter-non-py-files")
 
-py_wd_test(
-    "durable-object",
-    skip_python_flags = ["0.27.7"],
-)
+py_wd_test("durable-object")
 
 py_wd_test("worker-entrypoint")
 
