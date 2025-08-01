@@ -1,7 +1,8 @@
 import http from 'node:http';
-import { throws, strictEqual, ok, rejects } from 'node:assert';
+import { throws, strictEqual, ok, deepStrictEqual } from 'node:assert';
 import { httpServerHandler } from 'cloudflare:node';
 import { mock } from 'node:test';
+import stream from 'node:stream';
 
 export const checkPortsSetCorrectly = {
   test(_ctrl, env) {
@@ -286,13 +287,76 @@ export const testHttpOutgoingWriteTypes = {
   },
 };
 
+// Test is taken from test/parallel/test-http-outgoing-buffer.js
+export const testHttpOutgoingBuffer = {
+  async test() {
+    const msg = new http.OutgoingMessage();
+    msg._implicitHeader = function () {};
+
+    // Writes should be buffered until highwatermark
+    // even when no socket is assigned.
+
+    strictEqual(msg.write('asd'), true);
+    while (msg.write('asd'));
+    const highwatermark = msg.writableHighWaterMark || 65535;
+    ok(msg.outputSize >= highwatermark);
+  },
+};
+
+// Test is taken from test/parallel/test-http-outgoing-finished.js
+export const testHttpOutgoingFinished = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    await using server = http.createServer(function (req, res) {
+      let closed = false;
+      res
+        .on('close', () => {
+          closed = true;
+          stream.finished(res, resolve);
+        })
+        .end();
+      stream.finished(res, () => {
+        strictEqual(closed, true);
+      });
+    });
+
+    server.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com');
+  },
+};
+
+// Test is taken from test/parallel/test-http-outgoing-end-types.js
+export const testHttpOutgoingEndTypes = {
+  async test(_ctrl, env) {
+    await using httpServer = http.createServer(function (req, res) {
+      throws(
+        () => {
+          res.end(['Throws.']);
+        },
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
+      res.end();
+    });
+
+    httpServer.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com');
+  },
+};
+
 export default httpServerHandler({ port: 8080 });
 
 // Relevant Node.js tests
 //
+// - [x] test/parallel/test-http-outgoing-buffer.js
 // - [x] test/parallel/test-http-outgoing-destroy.js
 // - [x] test/parallel/test-http-outgoing-destroyed.js
 // - [x] test/parallel/test-http-outgoing-end-multiple.js
+// - [x] test/parallel/test-http-outgoing-end-types.js
+// - [x] test/parallel/test-http-outgoing-finished.js
 // - [x] test/parallel/test-http-outgoing-finish-writable.js
 // - [x] test/parallel/test-http-outgoing-properties.js
 // - [x] test/parallel/test-http-outgoing-proto.js
@@ -302,11 +366,8 @@ export default httpServerHandler({ port: 8080 });
 
 // The following tests is not relevant to us:
 //
-// - [ ] test/parallel/test-http-outgoing-buffer.js
 // - [ ] test/parallel/test-http-outgoing-end-cork.js
-// - [ ] test/parallel/test-http-outgoing-end-types.js
 // - [ ] test/parallel/test-http-outgoing-finish.js
-// - [ ] test/parallel/test-http-outgoing-finished.js
 // - [ ] test/parallel/test-http-outgoing-first-chunk-singlebyte-encoding.js
 // - [ ] test/parallel/test-http-outgoing-message-capture-rejection.js
 // - [ ] test/parallel/test-http-outgoing-message-inheritance.js

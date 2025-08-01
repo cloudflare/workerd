@@ -8,7 +8,6 @@
 
 import { validateString } from 'node-internal:validators';
 import { Writable } from 'node-internal:streams_writable';
-import { ok } from 'node-internal:internal_assert';
 import { getDefaultHighWaterMark } from 'node-internal:streams_util';
 import type { DataWrittenEvent } from 'node-internal:internal_http_server';
 import {
@@ -119,7 +118,8 @@ class MessageBuffer {
   write(
     data: WrittenDataBufferEntry['data'],
     encoding: WrittenDataBufferEntry['encoding'],
-    callback: WrittenDataBufferEntry['callback']
+    callback: WrittenDataBufferEntry['callback'],
+    onDrain?: (dataLength: number) => void
   ): boolean {
     const entry: WrittenDataBufferEntry = {
       data,
@@ -134,6 +134,7 @@ class MessageBuffer {
     if (this.#corked === 0) {
       this.#onWrite([{ index, entry }]);
       queueMicrotask(() => {
+        onDrain?.(entry.length);
         callback?.();
       });
     } else {
@@ -474,6 +475,12 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
 
   // @ts-expect-error TS2611 Required for accessor
   get writableLength(): number {
+    // If using buffer with headers, include buffer's writable length
+    if (this.#buffer != null && (this._header !== null || this._headerSent)) {
+      return (
+        this.outputSize + this.#buffer.writableLength + this[kChunkedLength]
+      );
+    }
     return this.outputSize + this[kChunkedLength];
   }
 
@@ -720,9 +727,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     // This is a shameful hack to get the headers and first body chunk onto
     // the same packet. Future versions of Node are going to take care of
     // this at a lower level and in a more general way.
-    if (!this._headerSent) {
-      // If we ever hit this assertion, we have a bug with our implementation.
-      ok(this._header);
+    if (!this._headerSent && this._header !== null) {
       const header = this._header;
       if (
         typeof data === 'string' &&
@@ -746,7 +751,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       this.writtenHeaderBytes = header.length;
 
       // Save written headers as object
-      const [statusLine, ...headerLines] = this._header.split('\r\n') as [
+      const [statusLine, ...headerLines] = header.split('\r\n') as [
         string,
         ...string[],
       ];
@@ -916,11 +921,21 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     // exists and is currently writable, it would flush any pending data to the socket and then
     // write the current chunk's data directly into the socket. Afterwards, it would return with the
     // value returned from socket.write().
-    if (this.#buffer != null) {
+    if (this.#buffer != null && (this._header !== null || this._headerSent)) {
       if (this.outputData.length) {
         this._flushOutput(this.#buffer);
       }
-      return this.#buffer.write(data, encoding, callback);
+
+      this.#buffer.write(data, encoding, callback);
+
+      // Always return true for corked writes (imitating Node.js behavior)
+      if (this.#buffer.writableCorked > 0) {
+        return true;
+      }
+
+      // For uncorked writes, check if we need to signal backpressure
+      // based on the buffer's high water mark
+      return this.#buffer.writableLength < this.#buffer.writableHighWaterMark;
     }
 
     this.outputData.push({ data, encoding, callback });
