@@ -417,8 +417,9 @@ function decodeSnapshot(
     return undefined;
   }
   if (reader.getMemorySnapshotSize() === 0) {
-    // TODO: This code path happens in the validator. It shouldn't.
-    return undefined;
+    throw new Error(
+      `SnapshotReader returned memory snapshot size of 0`
+    );
   }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
@@ -463,6 +464,7 @@ export function isRestoringSnapshot(): boolean {
 
 export function maybeRestoreSnapshot(Module: Module): void {
   if (!LOADED_SNAPSHOT_META) {
+    console.log("maybeRestoreSnapshot: no snapshot")
     return;
   }
   const { snapshotSize, snapshotOffset, snapshotReader } = LOADED_SNAPSHOT_META;
@@ -475,6 +477,7 @@ export function maybeRestoreSnapshot(Module: Module): void {
     Module,
     'from importlib import invalidate_caches as f; f(); del f'
   );
+  console.log("maybeRestoreSnapshot: restored snapshot")
 }
 
 export function maybeCollectSnapshot(Module: Module): void {

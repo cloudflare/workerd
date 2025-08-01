@@ -440,6 +440,7 @@ class SimplePythonLimiter: public jsg::Object {
   }
 
   void beginStartup() {
+    KJ_DBG("Beginning startup ", startupLimitMs);
     KJ_IF_SOME(cb, getTimeCb) {
       JSG_REQUIRE(startTime == kj::none, TypeError, "Cannot call `beginStartup` multiple times.");
       startTime = cb();
@@ -447,12 +448,14 @@ class SimplePythonLimiter: public jsg::Object {
   }
 
   void finishStartup() {
+    KJ_DBG("Finishing startup ", startupLimitMs);
     KJ_IF_SOME(cb, getTimeCb) {
       JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
       auto endTime = cb();
       kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
       auto diffMs = diff / kj::MILLISECONDS;
 
+      KJ_DBG("Diff: ", diffMs);
       JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
     }
   }
