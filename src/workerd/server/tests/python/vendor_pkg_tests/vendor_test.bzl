@@ -69,4 +69,6 @@ with open('$@', 'w') as f:
 
 def vendored_py_wd_test(name, test_template, main_py_file, vendored_srcs_target_prefix):
     for info in BUNDLE_VERSION_INFO.values():
+        if "name" not in info:
+            continue
         _vendored_py_wd_test(name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix)
