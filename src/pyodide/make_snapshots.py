@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from textwrap import indent
+from textwrap import dedent, indent
 from time import time
 
 TEMPLATE = """
@@ -23,7 +23,7 @@ const mainWorker :Workerd.Worker = (
     {requirements}
   ],
   compatibilityDate = "2023-12-18",
-  compatibilityFlags = ["python_workers", {compat_flags}],
+  compatibilityFlags = ["python_workers", "python_no_global_handlers", {compat_flags}],
   # Learn more about compatibility dates at:
   # https://developers.cloudflare.com/workers/platform/compatibility-dates/
 );
@@ -48,6 +48,12 @@ def make_worker(imports: list[str]) -> str:
     contents = ""
     for i in imports:
         contents += f"import {i}\n"
+    contents += dedent("""\
+    from workers import WorkerEntrypoint
+    class Default(WorkerEntrypoint):
+        def test(self):
+            pass
+    """)
     return contents
 
 
@@ -176,7 +182,7 @@ def main() -> int:
     print()
     print("Update python_metadata.bzl:\n")
     for key, val in res:
-        print(indent(f'"{key}": "{val}"', " " * 8))
+        print(indent(f'"{key}": "{val},"', " " * 8))
     return 0
 
 
