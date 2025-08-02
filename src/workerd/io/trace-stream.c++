@@ -982,7 +982,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   });
 
   co_await forked.addBranch().exclusiveJoin(ioContext.onAbort());
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+
+  // Return the outcome. Synchronous draining is not required.
+  co_return WorkerInterface::CustomEvent::Result{
+    .outcome = ioContext.waitUntilStatus(),
+  };
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
@@ -1010,8 +1014,21 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
+  // Forked promise for completion of all capabilities associated with the cap stream. This is
+  // expected to be resolved when the request is canceled or when the client receives the stop
+  // signal and deallocates cap after the tail worker indicates that it has processed all events
+  // successfully.
+  kj::ForkedPromise<void> forked = completionPaf.promise.fork();
   try {
-    co_await sent.ignoreResult().exclusiveJoin(kj::mv(completionPaf.promise));
+    EventOutcome outcome = co_await sent.then([](auto resp) {
+      return resp.getResult();
+    }).exclusiveJoin(forked.addBranch().then([]() { return EventOutcome::CANCELED; }));
+
+    // If the sent promise returned first, we still need to wait for the parent process to drop the
+    // capability (which should happen right after it receives the stop signal) so that no
+    // capabilities remain in an incomplete state when we return.
+    co_await forked.addBranch();
+    co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } catch (...) {
     auto e = kj::getCaughtExceptionAsKj();
     if (revokePaf.fulfiller->isWaiting()) {
@@ -1019,8 +1036,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
     }
     kj::throwFatalException(kj::mv(e));
   }
-
-  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
 }
 
 void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {

@@ -649,12 +649,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
-  tailStreamSession @10 () -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
+  tailStreamSession @10 () -> (topLevel :TailStreamTarget, result :EventOutcome) $Cxx.allowCancellation;
   # Opens a streaming tail session. The call does not return until the session is complete.
   #
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return
-  # until after the call completes.
+  # until after the call completes. result is accessed after the session is complete.
 
   obsolete5 @5();
   obsolete6 @6();
