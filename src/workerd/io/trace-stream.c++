@@ -659,6 +659,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     ioContext.getLimitEnforcer().topUpActor();
 
+    // If we did not receive a valid handler, don't attempt to process any more events (we can't).
+    if (noValidHandler) {
+      return kj::READY_NOW;
+    }
+
     auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
 
     auto promise =
@@ -761,7 +766,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     // Invoke the tailStream handler function.
     v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-    auto maybeCtx = KJ_ASSERT_NONNULL(handler->getCtx()).tryGetHandle(js);
+    kj::Maybe<v8::Local<v8::Object>> maybeCtx;
+    KJ_IF_SOME(hCtx, handler->getCtx()) {
+      maybeCtx = hCtx.tryGetHandle(js);
+    }
     v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
     handlerArgs[0] = ToJs(js, event, stringCache);
     handlerArgs[1] = handler->env.getHandle(js);
@@ -807,6 +815,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
           return;
         }
 
+        noValidHandler = true;
         // If the handler returned any other kind of value, let's be nice and
         // at least warn the user about it.
         if (!handle->IsUndefined()) {
@@ -823,11 +832,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       }),
               ioContext.addFunctor([this, results = sharedResults.addRef()](
                                        jsg::Lock& js, jsg::Value&& error) mutable {
+        noValidHandler = true;
         results->get().setStop(true);
         doneFulfiller->fulfill();
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
+      noValidHandler = true;
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
                                "not return a valid tailStream() handler.");
       results.setStop(true);
@@ -933,6 +944,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // or rejected if the capability is dropped before receiving the outcome
   // event.
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+  // Indicates that we failed to get a valid JS-level event handler.
+  bool noValidHandler = false;
 
   // The maybeHandler will be empty until we receive and process the
   // onset event.
