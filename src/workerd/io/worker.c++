@@ -510,6 +510,7 @@ struct Worker::Impl {
   kj::HashMap<kj::String, api::ExportedHandler> namedHandlers;
   kj::HashMap<kj::String, ActorClassInfo> actorClasses;
   kj::HashMap<kj::String, EntrypointClass> statelessClasses;
+  kj::HashMap<kj::String, EntrypointClass> workflowClasses;
 
   // If set, then any attempt to use this worker shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
@@ -1812,7 +1813,7 @@ void Worker::processEntrypointClass(jsg::Lock& js,
         impl->statelessClasses.insert(kj::mv(handlerName), kj::mv(cls));
         return;
       } else if (handle == entrypointClasses.workflowEntrypoint) {
-        impl->statelessClasses.insert(kj::mv(handlerName), kj::mv(cls));
+        impl->workflowClasses.insert(kj::mv(handlerName), kj::mv(cls));
         return;
       }
 
@@ -2052,17 +2053,9 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
   }
 
   kj::StringPtr n = name.orDefault("default"_kj);
-  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
-    jsg::Lock& js = *this;
-    if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
-      api::ExportedHandler constructedHandler = h.clone(js);
 
-      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
-          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
-      return kj::heap(kj::mv(constructedHandler));
-    }
-    return fakeOwn(h);
-  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+  auto getHandlerFromEntrypointClass =
+      [&](EntrypointClass& cls) -> kj::Maybe<kj::Own<api::ExportedHandler>> {
     jsg::Lock& js = *this;
     auto handler = kj::heap(cls(js,
         js.alloc<api::ExecutionContext>(js,
@@ -2076,6 +2069,21 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     handler->ctx = kj::none;
 
     return handler;
+  };
+
+  KJ_IF_SOME(h, worker.impl->namedHandlers.find(n)) {
+    jsg::Lock& js = *this;
+    if (!FeatureFlags::get(js).getReuseCtxAcrossNonclassEvents()) {
+      api::ExportedHandler constructedHandler = h.clone(js);
+      constructedHandler.ctx = js.alloc<api::ExecutionContext>(js,
+          jsg::JsValue(KJ_ASSERT_NONNULL(worker.impl->ctxExports).getHandle(js)), props.toJs(js));
+      return kj::heap(kj::mv(constructedHandler));
+    }
+    return fakeOwn(h);
+  } else KJ_IF_SOME(cls, worker.impl->statelessClasses.find(n)) {
+    return getHandlerFromEntrypointClass(cls);
+  } else KJ_IF_SOME(cls, worker.impl->workflowClasses.find(n)) {
+    return getHandlerFromEntrypointClass(cls);
   } else if (name == kj::none) {
     // If the default export was requested, and we didn't find a handler for it, we'll fall back
     // to addEventListener().
@@ -2093,7 +2101,7 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
     }
 
     KJ_FAIL_ASSERT("worker_do_not_log; Unable to get exported handler");
-  }
+  };
 }
 
 api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
@@ -2351,6 +2359,22 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
         });
 
         errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+      }
+
+      for (auto& entry: worker.impl->workflowClasses) {
+        KJ_IF_SOME(entrypointName, getEntrypointName(entry.key)) {
+          kj::HashSet<kj::String> seenNames;
+
+          js.withinHandleScope([&]() {
+            // For stateless classes, we need to get the class's prototype property
+            jsg::JsObject ctor(KJ_ASSERT_NONNULL(entry.value.tryGetHandle(js.v8Isolate)));
+            jsg::JsValue proto = ctor.get(js, "prototype");
+            collectMethodsFromPrototypeChain(proto, seenNames);
+          });
+
+          errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
+        } else {
+        }
       }
     }
   });
