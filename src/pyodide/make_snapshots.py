@@ -1,12 +1,10 @@
 import shutil
-import subprocess
 import sys
-from contextlib import contextmanager
-from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import indent
-from time import time
+
+from tool_utils import hexdigest, run, timing
 
 TEMPLATE = """
 using Workerd = import "/workerd/workerd.capnp";
@@ -51,20 +49,6 @@ def make_worker(imports: list[str]) -> str:
     return contents
 
 
-def run(cmd: list[str | Path]):
-    res = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if res.returncode:
-        print("Invocation failed:")
-        print(res.stdout)
-        print(res.stderr)
-        sys.exit(res.returncode)
-
-
 def make_snapshot(  # noqa: PLR0913
     d: Path,
     outdir: Path,
@@ -101,25 +85,6 @@ def make_snapshot(  # noqa: PLR0913
     shutil.copyfile(snapshot_path, outfile)
     snapshot_path.unlink()
     return [outname, digest]
-
-
-def bytesdigest(p: Path | str) -> bytes:
-    with Path(p).open("rb") as f:
-        return file_digest(f, "sha256").digest()
-
-
-def hexdigest(p: Path | str) -> str:
-    digest = bytesdigest(p)
-    return "".join(hex(e)[2:] for e in digest)
-
-
-@contextmanager
-def timing(name: str):
-    print(f"Making {name}...")
-    start = time()
-    yield
-    elapsed = time() - start
-    print(f"... made {name} in {elapsed:.2f} seconds")
 
 
 def make_baseline_snapshot(
