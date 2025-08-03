@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.30",
-    actual = "@crates_vendor__cc-1.2.30//:cc",
+    name = "cc-1.2.31",
+    actual = "@crates_vendor__cc-1.2.31//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.30//:cc",
+    actual = "@crates_vendor__cc-1.2.31//:cc",
     tags = ["manual"],
 )
 
@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.41",
-    actual = "@crates_vendor__clap-4.5.41//:clap",
+    name = "clap-4.5.42",
+    actual = "@crates_vendor__clap-4.5.42//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.41//:clap",
+    actual = "@crates_vendor__clap-4.5.42//:clap",
     tags = ["manual"],
 )
 
@@ -272,14 +272,14 @@ alias(
 )
 
 alias(
-    name = "serde_json-1.0.141",
-    actual = "@crates_vendor__serde_json-1.0.141//:serde_json",
+    name = "serde_json-1.0.142",
+    actual = "@crates_vendor__serde_json-1.0.142//:serde_json",
     tags = ["manual"],
 )
 
 alias(
     name = "serde_json",
-    actual = "@crates_vendor__serde_json-1.0.141//:serde_json",
+    actual = "@crates_vendor__serde_json-1.0.142//:serde_json",
     tags = ["manual"],
 )
 
@@ -320,14 +320,14 @@ alias(
 )
 
 alias(
-    name = "tokio-1.47.0",
-    actual = "@crates_vendor__tokio-1.47.0//:tokio",
+    name = "tokio-1.47.1",
+    actual = "@crates_vendor__tokio-1.47.1//:tokio",
     tags = ["manual"],
 )
 
 alias(
     name = "tokio",
-    actual = "@crates_vendor__tokio-1.47.0//:tokio",
+    actual = "@crates_vendor__tokio-1.47.1//:tokio",
     tags = ["manual"],
 )
 
@@ -364,7 +364,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.41//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.42//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
