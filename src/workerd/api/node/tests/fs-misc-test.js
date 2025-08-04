@@ -13,6 +13,8 @@ import {
   fdatasyncSync,
   fdatasync,
   fsync,
+  statfs,
+  statfsSync,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -93,5 +95,52 @@ export const miscTest = {
     }
 
     closeSync(fd);
+  },
+};
+
+export const statFsTest = {
+  async test() {
+    const stat = statfsSync('/');
+    strictEqual(typeof stat, 'object');
+    strictEqual(stat.type, 0);
+    strictEqual(stat.bsize, 0);
+    strictEqual(stat.blocks, 0);
+    strictEqual(stat.bfree, 0);
+    strictEqual(stat.bavail, 0);
+    strictEqual(stat.files, 0);
+    strictEqual(stat.ffree, 0);
+
+    throws(() => statfsSync(123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => statfsSync('/does/not/exist', { bigint: 123 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    statfs('/', (err, stat) => {
+      if (err) reject(err);
+      else {
+        strictEqual(typeof stat, 'object');
+        strictEqual(stat.type, 0);
+        strictEqual(stat.bsize, 0);
+        strictEqual(stat.blocks, 0);
+        strictEqual(stat.bfree, 0);
+        strictEqual(stat.bavail, 0);
+        strictEqual(stat.files, 0);
+        strictEqual(stat.ffree, 0);
+        resolve();
+      }
+    });
+    await promise;
+
+    throws(() => statfs(123, () => {}), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+
+    throws(() => statfs('/does/not/exist', { bigint: 123 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
   },
 };

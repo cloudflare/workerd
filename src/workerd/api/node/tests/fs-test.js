@@ -201,12 +201,9 @@ export const ftruncateTest = {
     }
 
     {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      ftruncate(fd, -1, (err) => {
-        if (err) return reject(err);
-        resolve();
+      throws(() => ftruncate(fd, -1, () => {}), {
+        code: 'ERR_OUT_OF_RANGE',
       });
-      await rejects(promise, kErrOutOfRange);
     }
 
     {
