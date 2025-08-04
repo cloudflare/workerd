@@ -1,0 +1,33 @@
+# Copyright (c) 2017-2024 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (
+      name = "main",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "starttls-nodejs-test.js")
+        ],
+        compatibilityDate = "2024-04-22",
+        compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "STARTTLS_CA_PORT", fromEnvironment = "STARTTLS_CA_PORT"),
+        ],
+      )
+    ),
+    ( name = "internet", 
+      network = ( 
+        allow = ["private"],
+        tlsOptions = (
+          trustedCertificates = [
+            embed "starttls-server.pem",
+          ],
+        ),
+      ) 
+    ),
+  ],
+);
