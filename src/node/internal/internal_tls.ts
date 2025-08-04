@@ -150,6 +150,7 @@ export function checkServerIdentity(
   const dnsNames: string[] = [];
   const ips: string[] = [];
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion
   hostname = '' + hostname;
 
   if (altNames) {

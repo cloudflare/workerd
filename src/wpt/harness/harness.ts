@@ -168,11 +168,7 @@ class RunnerState {
     if (unexpectedFailures.length > 0) {
       console.error(
         'The following tests unexpectedly failed:',
-        JSON.stringify(
-          unexpectedFailures.map((v) => v.toString()),
-          null,
-          2
-        )
+        JSON.stringify(unexpectedFailures, null, 2)
       );
     }
 
