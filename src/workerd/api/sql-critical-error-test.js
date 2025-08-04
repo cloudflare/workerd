@@ -38,7 +38,18 @@ export class DurableObjectExample extends DurableObject {
       }
     }
 
+    // With the OutputGate::onBroken() logging promise in place, adding an await here causes the
+    // test to pass again, apparently because it allows IoContext::abort() to run, ending the
+    // jsrpc call's execution here with the broken exception, and causing the next request for a
+    // stub to go to a new instance.
+    //
+    //await scheduler.wait(0);
+
     const smallData = new Uint8Array(10).fill(1);
+    // With the OutputGate::onBroken() logging promise in place, test fails because this exec
+    // throws "Error: database or disk is full: SQLITE_FULL", but does not immediately break the
+    // actor, so when the caller creates a new stub, it goes to the existing instance of the actor
+    // instead of a new broken instance.
     this.state.storage.sql.exec(
       'INSERT INTO test_full VALUES (?, ?)',
       1,
@@ -72,6 +83,12 @@ export let testAutoRollBackOnCriticalError = {
         throw err;
       }
     }
+
+    // With the OutputGate::onBroken() logging promise in place, adding an await here causes the
+    // test to pass again, apparently because it allows IoContext::abort() to run, ensuring the
+    // next request for a stub goes to a new instance.
+    //
+    //await scheduler.wait(0);
 
     // Get a new stub since the old stub is broken due to critical error
     stub = env.ns.get(id);
