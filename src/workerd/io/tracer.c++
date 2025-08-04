@@ -35,7 +35,7 @@ void TailStreamWriter::report(const InvocationSpanContext& context, TailEvent::E
   // been closed.
   // This could be an assert, but just log an error in case this is prevalent in some edge case.
   if (outcomeSeen) {
-    KJ_LOG(ERROR, "reported tail stream event after stream close ", event);
+    KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
   }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
