@@ -1,10 +1,5 @@
-# We do not use rules_java, but the build fails if it is not provided.
-bazel_dep(name = "rules_java", version = "8.13.0")
-
-# rules_java somehow fails on Bazel 8.3.0 when workspace logic is enabled based on missing
-# bazel_features variables, but requiring a more recent version fixes this.
-bazel_dep(name = "bazel_features", version = "1.32.0")
-bazel_dep(name = "bazel_skylib", version = "1.8.0")
+bazel_dep(name = "bazel_features", version = "1.33.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.1")
 
 # needed by perfetto, but not actually used.
 bazel_dep(name = "rules_android", version = "0.6.4")
@@ -24,7 +19,7 @@ bazel_dep(name = "platforms", version = "1.0.0")
 # apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
 # needs to be pulled in before rules_cc for this toolchain to actually be used.
 bazel_dep(name = "apple_support", version = "1.22.1")
-bazel_dep(name = "rules_cc", version = "0.1.2")
+bazel_dep(name = "rules_cc", version = "0.1.4")
 bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
 git_override(
     module_name = "zlib",
