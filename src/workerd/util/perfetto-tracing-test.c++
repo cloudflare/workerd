@@ -122,8 +122,7 @@ KJ_TEST("PerfettoSession category parsing") {
 
   auto singleCat = PerfettoSession::parseCategories("single");
   KJ_ASSERT(singleCat.size() == 1);
-  auto single = kj::str(singleCat[0]);
-  KJ_ASSERT(single == "single");
+  KJ_ASSERT(singleCat[0] == "single"_kj);
 
   auto emptyCats = PerfettoSession::parseCategories("");
   KJ_ASSERT(emptyCats.size() == 0);
