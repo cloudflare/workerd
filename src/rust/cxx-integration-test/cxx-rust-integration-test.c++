@@ -29,13 +29,25 @@ KJ_TEST("ok Result") {
 }
 
 KJ_TEST("err Result") {
-  // if fn returns an error, it is translated into ::rust::Error exception.
+  // if fn returns an error, it is translated into kj::Exception exception.
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
   } catch (kj::Exception e) {
     // this is expected
     KJ_EXPECT(e.getDescription() == "test error"_kj);
+  }
+}
+
+KJ_TEST("err Result with getCaughtExceptionAsKj") {
+  // if fn returns an error, it is translated into kj::Exception exception that can be accessed
+  // using getCaughtExceptionAsKj as is very common in the source code.
+  try {
+    rust::test::result_error();
+    KJ_FAIL_REQUIRE("exception is expected");
+  } catch (...) {
+    // this is expected
+    KJ_EXPECT(kj::getCaughtExceptionAsKj().getDescription() == "test error"_kj);
   }
 }
 
