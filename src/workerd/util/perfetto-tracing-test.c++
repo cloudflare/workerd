@@ -116,12 +116,9 @@ KJ_TEST("PerfettoSession category parsing") {
   auto categories = PerfettoSession::parseCategories("cat1,cat2,cat3");
   KJ_ASSERT(categories.size() == 3);
 
-  auto cat1 = kj::str(categories[0]);
-  auto cat2 = kj::str(categories[1]);
-  auto cat3 = kj::str(categories[2]);
-  KJ_ASSERT(cat1 == "cat1");
-  KJ_ASSERT(cat2 == "cat2");
-  KJ_ASSERT(cat3 == "cat3");
+  KJ_ASSERT(categories[0] == "cat1"_kj);
+  KJ_ASSERT(categories[1] == "cat2"_kj);
+  KJ_ASSERT(categories[2] == "cat3"_kj);
 
   auto singleCat = PerfettoSession::parseCategories("single");
   KJ_ASSERT(singleCat.size() == 1);
