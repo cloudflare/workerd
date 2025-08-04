@@ -775,3 +775,21 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/messageport-test.js"],
 )
+
+js_binary(
+    name = "starttls-nodejs-server",
+    entry_point = "tests/starttls-nodejs-server.js",
+)
+
+wd_test(
+    src = "tests/starttls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/starttls-nodejs-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "starttls-nodejs-server",
+    sidecar_port_bindings = [
+        "STARTTLS_CA_PORT",
+    ],
+)
