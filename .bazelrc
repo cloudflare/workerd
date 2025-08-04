@@ -83,6 +83,7 @@ build:unix --per_file_copt=external/ssl@-fno-exceptions
 build:unix --per_file_copt=external/v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/simdutf@-fno-exceptions
+build:unix --define=v8_use_perfetto=true
 build:windows --per_file_copt=external/abseil-cpp@/GX-
 build:windows --per_file_copt=external/protobuf@/GX-
 build:windows --per_file_copt=external/com_google_tcmalloc@/GX-

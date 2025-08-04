@@ -321,3 +321,15 @@ kj_test(
         ":uuid",
     ],
 )
+
+kj_test(
+    src = "perfetto-tracing-test.c++",
+    defines = select({
+        "@workerd//:enable_v8_perfetto": ["V8_USE_PERFETTO"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":perfetto",
+        ":test",
+    ],
+)

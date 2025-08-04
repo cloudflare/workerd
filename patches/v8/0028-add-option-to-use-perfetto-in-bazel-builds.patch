@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yagiz Nizipli <yagiz@nizipli.com>
+Date: Mon, 4 Aug 2025 16:37:54 -0400
+Subject: add option to use perfetto in bazel builds
+
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 20a3f70b3354d6d034b05a91286ae855544d04a7..eaca1c669a2d6f052eafdd2d06e1bca0057c1280 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -239,6 +239,11 @@ v8_flag(
+     default = False,
+ )
+ 
++v8_flag(
++    name = "v8_use_perfetto",
++    default = False,
++)
++
+ selects.config_setting_group(
+     name = "enable_drumbrake_x64",
+     match_all = [
+@@ -496,6 +501,7 @@ v8_config(
+         "v8_enable_drumbrake_tracing": "V8_ENABLE_DRUMBRAKE_TRACING",
+         "v8_jitless": "V8_JITLESS",
+         "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
++        "v8_use_perfetto": "V8_USE_PERFETTO",
+         "v8_use_zlib": "V8_USE_ZLIB",
+     },
+     defines = [

@@ -33,6 +33,7 @@ PATCHES = [
     "0025-Disable-slow-handle-check.patch",
     "0026-Workaround-for-builtin-can-allocate-issue.patch",
     "0027-Implement-additional-Exception-construction-methods.patch",
+    "0028-add-option-to-use-perfetto-in-bazel-builds.patch",
 ]
 
 # V8 and its dependencies

@@ -81,6 +81,14 @@ config_setting(
     flag_values = {"dead_strip": "True"},
 )
 
+selects.config_setting_group(
+    name = "enable_v8_perfetto",
+    match_any = [
+        "@platforms//os:linux",
+        "@platforms//os:macos",
+    ],
+)
+
 # Workaround for bazel not supporting negated conditions (https://github.com/bazelbuild/bazel-skylib/issues/272)
 selects.config_setting_group(
     name = "not_dbg_build",
