@@ -261,12 +261,6 @@ struct Trace @0x8e8d911203762d34 {
     # A hibernate event indicates that the tail session is being hibernated.
   }
 
-  struct Link {
-    # A link to another invocation span context.
-    label @0 :Text;
-    context @1 :InvocationSpanContext;
-  }
-
   struct TailEvent {
     # A streaming tail worker receives a series of Tail Events. Tail events always
     # occur within an InvocationSpanContext. The first TailEvent delivered to a
@@ -288,7 +282,6 @@ struct Trace @0x8e8d911203762d34 {
       diagnosticChannelEvent @10 :DiagnosticChannelEvent;
       exception @11 :Exception;
       log @12 :Log;
-      link @13 :Link;
     }
   }
 }
