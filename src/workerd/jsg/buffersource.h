@@ -91,8 +91,10 @@ class BackingStore {
       }, ptr),
           size, 0, getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
     } else {
-      auto result = BackingStore(v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size), size, 0,
-          getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
+      auto backingStore = js.allocBackingStore(size, Lock::AllocOption::UNINITIALIZED);
+
+      auto result = BackingStore(kj::mv(backingStore), size, 0, getBufferSourceElementSize<T>(),
+          construct<T>, checkIsIntegerType<T>());
       memcpy(result.asArrayPtr().begin(), data.begin(), size);
       return result;
     }
@@ -101,8 +103,8 @@ class BackingStore {
   // Creates a new BackingStore of the given size.
   template <BufferSourceType T = v8::Uint8Array>
   static BackingStore alloc(Lock& js, size_t size) {
-    return BackingStore(v8::ArrayBuffer::NewBackingStore(js.v8Isolate, size), size, 0,
-        getBufferSourceElementSize<T>(), construct<T>, checkIsIntegerType<T>());
+    return BackingStore(js.allocBackingStore(size), size, 0, getBufferSourceElementSize<T>(),
+        construct<T>, checkIsIntegerType<T>());
   }
 
   using Disposer = void(void*, size_t, void*);
