@@ -144,3 +144,19 @@ export const statFsTest = {
     });
   },
 };
+
+export const pathLimitTest = {
+  test() {
+    // Trying to open a path longer than 4096 characters should throw an error.
+    const longPath = '/tmp/a'.repeat(4097);
+    throws(() => openSync(longPath, 'r'), {
+      message: /File path is too long/,
+    });
+
+    // Trying to open a path with more than 48 segments should throw an error.
+    const tooManySegments = '/a'.repeat(49);
+    throws(() => openSync(tooManySegments, 'r'), {
+      message: /File path has too many segments/,
+    });
+  },
+};

@@ -59,6 +59,22 @@ struct NormalizedFilePath {
   void validate() {
     JSG_REQUIRE(url.getProtocol() == "file:"_kj, TypeError, "File path must be a file: URL");
     JSG_REQUIRE(url.getHost().size() == 0, Error, "File path must not have a host");
+
+    // Let's count the number of path segments in the URL. We want to make sure that
+    // it does not have more than 48 segments. Why 48? Great question! It's a completely
+    // arbitrary limit that we set to prevent excessively long paths that could lead to
+    // performance issues.
+    // We also limit the maximum total length of the path to 4096 characters.
+    auto pathname = url.getPathname();
+    JSG_REQUIRE(pathname.size() <= 4096, Error, "File path is too long"_kj);
+
+    uint32_t segmentCount = 0;
+    for (auto i: kj::indices(pathname)) {
+      if (pathname[i] == '/') {
+        segmentCount++;
+      }
+    }
+    JSG_REQUIRE(segmentCount <= 48, Error, "File path has too many segments"_kj);
   }
 
   operator const jsg::Url&() const {
