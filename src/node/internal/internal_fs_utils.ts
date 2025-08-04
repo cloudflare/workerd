@@ -26,14 +26,12 @@
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
-  ERR_INCOMPATIBLE_OPTION_PAIR,
 } from 'node-internal:internal_errors';
 import {
   validateAbortSignal,
   validateObject,
   validateBoolean,
   validateInteger,
-  validateFunction,
   validateInt32,
   validateUint32,
   validateEncoding,
@@ -73,8 +71,6 @@ import processImpl from 'node-internal:process';
 export type FilePath = string | URL | Buffer;
 
 import type {
-  CopyOptions,
-  CopySyncOptions,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadSyncOptions,
@@ -420,7 +416,13 @@ export function validateWriteArgs(
     };
   }
 
-  validateStringAfterArrayBufferView(buffer, 'buffer');
+  if (typeof buffer !== 'string') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'buffer',
+      ['string', 'Buffer', 'TypedArray', 'DataView'],
+      buffer
+    );
+  }
 
   // In this case, offsetOrOptions must either be a number, bigint, or null.
   validatePosition(offsetOrOptions, 'position');
@@ -654,39 +656,6 @@ export function getOptions(
   return options;
 }
 
-const defaultCpOptions: CopyOptions = {
-  dereference: false,
-  errorOnExist: false,
-  force: true,
-  preserveTimestamps: false,
-  recursive: false,
-  verbatimSymlinks: false,
-};
-
-export function validateCpOptions(
-  _options: unknown
-): CopyOptions | CopySyncOptions {
-  if (_options === undefined) return { ...defaultCpOptions };
-  validateObject(_options, 'options');
-  const options: CopyOptions = { ...defaultCpOptions, ..._options };
-  validateBoolean(options.dereference, 'options.dereference');
-  validateBoolean(options.errorOnExist, 'options.errorOnExist');
-  validateBoolean(options.force, 'options.force');
-  validateBoolean(options.preserveTimestamps, 'options.preserveTimestamps');
-  validateBoolean(options.recursive, 'options.recursive');
-  validateBoolean(options.verbatimSymlinks, 'options.verbatimSymlinks');
-  options.mode = validateMode(options.mode, 'copyFile');
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-  if (options.dereference === true && options.verbatimSymlinks === true) {
-    throw new ERR_INCOMPATIBLE_OPTION_PAIR('dereference', 'verbatimSymlinks');
-  }
-  if (options.filter !== undefined) {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    validateFunction(options.filter, 'options.filter');
-  }
-  return options;
-}
-
 export function stringToFlags(
   flags: number | null | undefined | string,
   name: string = 'flags'
@@ -746,29 +715,6 @@ export function stringToFlags(
   throw new ERR_INVALID_ARG_VALUE('flags', flags);
 }
 
-const defaultRmdirOptions: RmDirOptions = {
-  retryDelay: 100,
-  maxRetries: 0,
-  recursive: false,
-};
-
-export function validateRmdirOptions(
-  _options: RmDirOptions | undefined,
-  defaults: RmDirOptions = defaultRmdirOptions
-): RmDirOptions {
-  if (_options === undefined) return defaults;
-  validateObject(_options, 'options');
-
-  const options = { ...defaults, ..._options };
-
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  validateBoolean(options.recursive, 'options.recursive');
-  validateInt32(options.retryDelay, 'options.retryDelay', 0);
-  validateUint32(options.maxRetries, 'options.maxRetries');
-
-  return options;
-}
-
 export type Position = number | null | bigint;
 
 export function validatePosition(
@@ -809,19 +755,6 @@ export function validateBufferArray(
   }
 
   return buffers as ArrayBufferView[];
-}
-
-function validateStringAfterArrayBufferView(
-  buffer: unknown,
-  name: string
-): void {
-  if (typeof buffer !== 'string') {
-    throw new ERR_INVALID_ARG_TYPE(
-      name,
-      ['string', 'Buffer', 'TypedArray', 'DataView'],
-      buffer
-    );
-  }
 }
 
 // Our implementation of the Stats class differs a bit from Node.js' in that
