@@ -2827,6 +2827,13 @@ class Lock {
   // not in the right sandbox.
   BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
+  enum class AllocOption { ZERO_INITIALIZED, UNINITIALIZED };
+
+  // Utility method to safely allocate a v8::BackingStore with allocation failure handling.
+  // Throws a javascript error if allocation fails.
+  std::unique_ptr<v8::BackingStore> allocBackingStore(
+      size_t size, AllocOption init_mode = AllocOption::ZERO_INITIALIZED) KJ_WARN_UNUSED_RESULT;
+
   enum RegExpFlags {
     kNONE = v8::RegExp::Flags::kNone,
     kGLOBAL = v8::RegExp::Flags::kGlobal,

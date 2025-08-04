@@ -543,4 +543,14 @@ bool USVString::isValidUtf8() const {
   return simdutf::validate_utf8(cStr(), size());
 }
 
+std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOption init_mode) {
+  auto v8_mode = (init_mode == AllocOption::ZERO_INITIALIZED)
+      ? v8::BackingStoreInitializationMode::kZeroInitialized
+      : v8::BackingStoreInitializationMode::kUninitialized;
+  auto store = v8::ArrayBuffer::NewBackingStore(
+      v8Isolate, size, v8_mode, v8::BackingStoreOnFailureMode::kReturnNull);
+  JSG_REQUIRE(store != nullptr, RangeError, "Failed to allocate ArrayBuffer backing store");
+  return kj::mv(store);
+}
+
 }  // namespace workerd::jsg

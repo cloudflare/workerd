@@ -1080,14 +1080,15 @@ class ArrayBufferWrapper {
           begin, size, [](void* begin, size_t size, void* ownerPtr) {
         delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
       }, ownerPtr);
+      KJ_REQUIRE(backing != nullptr, "Failed to create ArrayBuffer backing store");
 
       return v8::ArrayBuffer::New(isolate, kj::mv(backing));
     } else {
       // The Array is not already inside the sandbox.  We have to make a copy and move it in.
       // For performance reasons we might want to throw here and fix all callers to allocate
       // inside the sandbox.
-      std::unique_ptr<v8::BackingStore> in_sandbox = v8::ArrayBuffer::NewBackingStore(
-          isolate, size, v8::BackingStoreInitializationMode::kUninitialized);
+      auto& js = Lock::from(isolate);
+      auto in_sandbox = js.allocBackingStore(size, Lock::AllocOption::UNINITIALIZED);
 
       memcpy(in_sandbox->Data(), value.begin(), size);
 

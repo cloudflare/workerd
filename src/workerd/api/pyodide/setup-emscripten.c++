@@ -56,8 +56,9 @@ jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
 
-  auto pythonStdlibZip = v8::ArrayBuffer::New(js.v8Isolate, pythonStdlibZipReader.size(),
-      v8::BackingStoreInitializationMode::kUninitialized);
+  auto backingStore =
+      js.allocBackingStore(pythonStdlibZipReader.size(), jsg::Lock::AllocOption::UNINITIALIZED);
+  auto pythonStdlibZip = v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore));
   memcpy(pythonStdlibZip->Data(), pythonStdlibZipReader.begin(), pythonStdlibZipReader.size());
   auto pyodideAsmWasm = jsg::check(v8::WasmModuleObject::Compile(js.v8Isolate,
       v8::MemorySpan<const uint8_t>(pyodideAsmWasmReader.begin(), pyodideAsmWasmReader.size())));
