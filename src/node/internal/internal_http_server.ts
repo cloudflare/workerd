@@ -376,9 +376,11 @@ let getServerResponseFetchResponse: (
 // 3. After headers: Data streams directly without buffering
 //    - New '_dataWritten' events are immediately enqueued to the stream
 // 4. Completion: 'finish' event closes the ReadableStream
+// @ts-expect-error TS2720 Trailers related methods/attributes are missing.
 export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   extends OutgoingMessage
-  implements _ServerResponse
+  // @ts-expect-error TS2720 `rawTrailers` attribute is missing.
+  implements _ServerResponse<Req>
 {
   override [kOutHeaders]: Record<string, [string, string | string[]]> | null =
     null;
@@ -554,8 +556,6 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     throw new ERR_METHOD_NOT_IMPLEMENTED('writeContinue');
   }
 
-  // Ref: https://github.com/DefinitelyTyped/DefinitelyTyped/pull/73275
-  // @ts-expect-error TS2416 This is a bug with @types/node.
   writeProcessing(_cb: VoidFunction): void {
     // There is no path forward to support this with fetch or kj.
     throw new ERR_METHOD_NOT_IMPLEMENTED('writeProcessing');

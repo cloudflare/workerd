@@ -101,8 +101,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     if (options.path) {
-      const path = String(options.path);
-      if (INVALID_PATH_REGEX.test(path)) {
+      if (INVALID_PATH_REGEX.test(options.path)) {
         throw new ERR_UNESCAPED_CHARACTERS('Request path');
       }
     }
@@ -150,7 +149,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const setHost =
       options.setHost !== undefined
-        ? Boolean(options.setHost)
+        ? Boolean(options.setHost) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
         : options.setDefaultHeaders !== false;
     if (options.timeout !== undefined)
       this.timeout = getTimerDuration(options.timeout, 'timeout');

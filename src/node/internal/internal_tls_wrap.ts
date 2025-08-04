@@ -713,7 +713,7 @@ export function connect(...args: unknown[]): TLSSocket {
     lookup: options.lookup,
     rejectUnauthorized:
       options.rejectUnauthorized !== undefined
-        ? Boolean(options.rejectUnauthorized)
+        ? Boolean(options.rejectUnauthorized) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
         : true,
   });
 
