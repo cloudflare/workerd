@@ -508,6 +508,32 @@ KJ_TEST("External memory adjustment - defered") {
   KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
 }
 
+KJ_TEST("Memory Allocation Error Propagation") {
+  class MyAllocator final: public v8::ArrayBuffer::Allocator {
+   public:
+    void* Allocate(size_t length) override {
+      return nullptr;
+    }
+    void* AllocateUninitialized(size_t length) override {
+      return nullptr;
+    }
+    void Free(void* data, size_t length) override {}
+    size_t MaxAllocationSize() const override {
+      return 10;
+    }
+  };
+
+  MyAllocator allocator;
+  v8::Isolate::CreateParams createParams;
+  createParams.constraints.ConfigureDefaults(10, 10);
+  createParams.array_buffer_allocator = &allocator;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>(), createParams);
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    KJ_EXPECT_THROW_MESSAGE(
+        "Failed to allocate ArrayBuffer backing store", lock.allocBackingStore(100 * 1024));
+  });
+}
+
 }  // namespace
 
 }  // namespace workerd::jsg::test
