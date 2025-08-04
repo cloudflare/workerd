@@ -5,6 +5,7 @@
 #include "perfetto-tracing.h"
 
 #include <kj/debug.h>
+#include <kj/io.h>
 #include <kj/test.h>
 
 #ifdef WORKERD_USE_PERFETTO
@@ -19,6 +20,7 @@
 #endif  // WORKERD_USE_PERFETTO
 
 #include <cstdlib>
+#include <cstring>
 
 namespace workerd {
 namespace {
@@ -42,12 +44,27 @@ size_t getFileSize(const char* path) {
   return buffer.st_size;
 }
 
+bool traceFileContainsEvent(const char* path, kj::StringPtr eventName) {
+  kj::FdInputStream input(kj::OwnFd(open(path, O_RDONLY)));
+  auto data = input.readAllBytes();
+
+  if (data.size() < eventName.size()) return false;
+
+  for (size_t i = 0; i <= data.size() - eventName.size(); ++i) {
+    if (memcmp(data.begin() + i, eventName.begin(), eventName.size()) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void removeFile(const char* path) {
   unlink(path);
 }
 
 KJ_TEST("PerfettoSession basic functionality") {
   auto traceFile = getTempFileName("perfetto-test");
+  KJ_DEFER(removeFile(traceFile.cStr()));
 
   {
     PerfettoSession session(traceFile, "workerd");
@@ -70,11 +87,16 @@ KJ_TEST("PerfettoSession basic functionality") {
   KJ_ASSERT(fileExists(traceFile.cStr()));
   KJ_ASSERT(getFileSize(traceFile.cStr()) > 0);
 
-  removeFile(traceFile.cStr());
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "test_event"));
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "test_event_with_args"));
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "test_duration_event"));
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "test_instant_event"));
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "test_counter"));
 }
 
 KJ_TEST("PerfettoSession with file descriptor") {
   auto traceFile = getTempFileName("perfetto-fd-test");
+  KJ_DEFER(removeFile(traceFile.cStr()));
 
   int fd = open(traceFile.cStr(), O_RDWR | O_CREAT | O_TRUNC, 0600);
   KJ_REQUIRE(fd >= 0);
@@ -87,8 +109,7 @@ KJ_TEST("PerfettoSession with file descriptor") {
   }
 
   KJ_ASSERT(getFileSize(traceFile.cStr()) > 0);
-
-  removeFile(traceFile.cStr());
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "fd_test_event"));
 }
 
 KJ_TEST("PerfettoSession category parsing") {
@@ -113,6 +134,7 @@ KJ_TEST("PerfettoSession category parsing") {
 
 KJ_TEST("PerfettoSession multiple categories") {
   auto traceFile = getTempFileName("perfetto-multi-cat-test");
+  KJ_DEFER(removeFile(traceFile.cStr()));
 
   {
     PerfettoSession session(traceFile, "workerd,v8");
@@ -123,18 +145,18 @@ KJ_TEST("PerfettoSession multiple categories") {
   }
 
   KJ_ASSERT(fileExists(traceFile.cStr()));
-  removeFile(traceFile.cStr());
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "workerd_event"));
 }
 
 KJ_TEST("V8 Perfetto integration") {
   auto traceFile = getTempFileName("v8-perfetto-test");
+  KJ_DEFER(removeFile(traceFile.cStr()));
 
   {
     PerfettoSession baselineSession(traceFile, "workerd");
     TRACE_EVENT("workerd", "baseline_event");
     baselineSession.flush();
   }
-  removeFile(traceFile.cStr());
 
   {
     PerfettoSession session(traceFile, "v8,workerd");
@@ -149,12 +171,12 @@ KJ_TEST("V8 Perfetto integration") {
   KJ_ASSERT(fileExists(traceFile.cStr()));
   size_t v8IntegratedSize = getFileSize(traceFile.cStr());
   KJ_ASSERT(v8IntegratedSize > 0);
-
-  removeFile(traceFile.cStr());
+  KJ_ASSERT(traceFileContainsEvent(traceFile.cStr(), "v8_integration_test"));
 }
 
 KJ_TEST("Perfetto macros work when enabled") {
   auto traceFile = getTempFileName("perfetto-macros-test");
+  KJ_DEFER(removeFile(traceFile.cStr()));
 
   {
     PerfettoSession session(traceFile, "workerd");
@@ -170,15 +192,13 @@ KJ_TEST("Perfetto macros work when enabled") {
     (void)termFlow;
     (void)track;
   }
-
-  removeFile(traceFile.cStr());
 }
 
 KJ_TEST("Perfetto configuration validation") {
-
   auto testFile = getTempFileName("config-validation");
+  KJ_DEFER(removeFile(testFile.cStr()));
+
   { PerfettoSession session(testFile, "workerd"); }
-  removeFile(testFile.cStr());
 }
 
 #endif  // WORKERD_USE_PERFETTO
