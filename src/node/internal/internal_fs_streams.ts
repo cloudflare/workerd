@@ -9,6 +9,7 @@ import {
   type FilePath,
   type Position,
   type WriteSyncOptions,
+  type ValidEncoding,
 } from 'node-internal:internal_fs_utils';
 import { toPathIfFileURL } from 'node-internal:internal_url';
 
@@ -252,7 +253,7 @@ const kDefaultFsOperations: RealizedFsOperations = {
     fd: number,
     buffer: T | string,
     offset?: WriteSyncOptions | Position | DoubleArgCallback<number, T>,
-    length?: number | BufferEncoding | DoubleArgCallback<number, T>,
+    length?: number | ValidEncoding | DoubleArgCallback<number, T>,
     position?: Position | DoubleArgCallback<number, T>,
     cb?: DoubleArgCallback<number, T>
   ): void {
@@ -776,7 +777,7 @@ export type WriteStreamOptions = {
 
 declare type WriteVChunk = {
   chunk: string | NodeJS.ArrayBufferView;
-  encoding: BufferEncoding | 'buffer';
+  encoding: ValidEncoding;
 };
 
 // @ts-expect-error TS2323 Cannot redeclare.
@@ -930,11 +931,11 @@ function writevAll(
 function writeImpl(
   this: WriteStream,
   data: string | NodeJS.ArrayBufferView,
-  encodingOrCallback: BufferEncoding | ErrorOnlyCallback | null | undefined,
+  encodingOrCallback: ValidEncoding | ErrorOnlyCallback | undefined,
   cb?: ErrorOnlyCallback
 ): void {
   let callback: ErrorOnlyCallback;
-  let encoding: BufferEncoding | null = null;
+  let encoding: ValidEncoding = null;
   if (typeof encodingOrCallback === 'function') {
     callback = encodingOrCallback;
   } else if (encodingOrCallback != null) {
