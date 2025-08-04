@@ -105,13 +105,15 @@ cc_library(
         "crc32_simd.c",
         "crc32_simd.h",
     ],
-    # TODO(soon): The canonical GN build adds "-march=armv8-a+aes+crc" here. We could do the same,
-    # but this may reduce the target CPU level if the compiler defaults to e.g. armv8.5-a. We really
-    # should compile all of workerd with the same compile options. For now, just specify -mcrc which
-    # adds CRC instructions to whatever is already defined. The source file still compiles without
-    # explicitly enabling AES/PMULL extensions as these are used in inline assembly and only enabled
-    # if support for them is detected at runtime.
-    copts = ["-mcrc"],
+    # Enable specific ARM instruction set extensions needed for optimal zlib performance.
+    # Using individual feature flags instead of -march=armv8-a+aes+crc to avoid potentially
+    # downgrading from a higher architecture level (e.g. armv8.5-a -> armv8-a).
+    # This provides the necessary CRC32 and crypto extensions while preserving the base
+    # architecture level set by the compiler's default or global build configuration.
+    copts = [
+        "-mcrc",  # Enable CRC32 instructions
+        "-mcrypto",  # Enable AES/PMULL instructions for crypto operations
+    ],
     local_defines = [
         "CRC32_ARMV8_CRC32",
         "ZLIB_IMPLEMENTATION",
