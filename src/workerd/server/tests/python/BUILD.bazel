@@ -74,3 +74,5 @@ py_wd_test("importable-env")
 py_wd_test("python-rpc")
 
 py_wd_test("workflow-entrypoint")
+
+py_wd_test("vendor_dir_compat_flag")

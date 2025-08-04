@@ -17,6 +17,7 @@ import {
   getRandomValues,
   entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
+import { legacyVendorPath } from 'pyodide-internal:metadata';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -66,12 +67,13 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
+      LEGACY_VENDOR_PATH = "${legacyVendorPath}" == "true"
       VENDOR_PATH = "/session/metadata/vendor"
       PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
-      if VENDOR_PATH in sys.path:
+      if VENDOR_PATH in sys.path and LEGACY_VENDOR_PATH:
         sys.path.remove(VENDOR_PATH)
 
       if PYTHON_MODULES_PATH in sys.path:
@@ -86,7 +88,8 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       # that reproduces this (vendor_dir).
       for i, path in enumerate(sys.path):
         if 'site-packages' in path:
-          sys.path.insert(i, VENDOR_PATH)
+          if LEGACY_VENDOR_PATH:
+            sys.path.insert(i, VENDOR_PATH)
           sys.path.insert(i, PYTHON_MODULES_PATH)
           break
       else:
