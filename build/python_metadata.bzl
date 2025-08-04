@@ -65,6 +65,14 @@ def _add_integrity(entry):
         newkey = key.removesuffix("_hash") + "_integrity"
         entry[newkey] = hex_to_b64(value)
 
+def _make_vendored_packages(entry):
+    if entry["name"] == "development":
+        return
+    vendor_tests = {}
+    for e in entry["vendored_packages_for_tests"]:
+        vendor_tests[e["name"]] = e
+    entry["vendored_packages_for_tests"] = vendor_tests
+
 def _make_bundle_version_info(versions):
     result = {}
     for entry in versions:
@@ -77,6 +85,8 @@ def _make_bundle_version_info(versions):
             entry["packages"] = entry["packages"]["info"]["tag"]
         _add_integrity(entry)
         result[name] = entry
+        _make_vendored_packages(entry)
+
     dev = result["development"]
 
     # Uncomment to test with development = 0.27.7
