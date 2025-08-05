@@ -46,6 +46,7 @@ class FileFdHandle final: public jsg::Object {
 
  private:
   kj::Maybe<kj::Own<void>> fdHandle;
+  v8::Isolate* isolate;
 };
 
 class FileSystemModule final: public jsg::Object {

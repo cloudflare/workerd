@@ -238,7 +238,7 @@ void IsolateBase::terminateExecution() const {
 }
 
 void IsolateBase::applyDeferredActions() {
-  // Clear the deferred desturction queue.
+  // Clear the deferred destruction queue.
   {
     // Safe to destroy the popped batch outside of the lock because the lock is only actually used
     // to guard the push buffer.

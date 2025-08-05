@@ -125,7 +125,18 @@
 // destroyed/closed rather than leaking for the entire process. We use just a
 // simple in-memory table to track the file descriptors and their associated
 // files/directories.
-
+//
+// Note: It is important to keep in mind that Directory, File, and SymbolicLink
+// instances are kj::Refcounted objects. We utilize the Isolate lock to safely
+// manage the refcounts to avoid having to make these AtomicRefcounted, which
+// would carry additional overhead. This means that it is essentially that all
+// references to these objects, and all operations on them, as well as dropping
+// the references, are done while holding the isolate lock. It is particularly
+// necessary to take care when capturing these objects, for instance, into a
+// kj Promise then lambda. If the promise is dropped outside of the isolate lock,
+// the refcount will be decremented outside of the lock, causing issues. The
+// bottom line is that you should always be holding the isolate lock when
+// interacting with the virtual file system.
 namespace workerd {
 
 // TODO(node-fs): Currently, all files and directories use a fixed last
@@ -313,6 +324,12 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   virtual size_t count(
       jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
+  // Provides a simple iterator iterface over the directory entries. It is important
+  // to only use these iterators while holding the isolate lock as entries may have
+  // their refcounts incremented and decremented while iterating. To avoid issues using
+  // the iterators using idiomatic C++ syntax, we don't require passing the jsg::Lock&
+  // to the begin() and end() methods so it is important to ensure they are only called
+  // while holding the lock.
   using Item = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
   using Entry = kj::HashMap<kj::String, Item>::Entry;
   virtual Entry* begin() = 0;
@@ -480,6 +497,9 @@ using FsNodeWithError = kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>, kj::
 class FsMap;
 
 // The virtual file system interface. This is the main entry point for accessing the vfs.
+// It is important to always destroy the VirtualFileSystem instance under the isolate lock.
+// The VFS holds a table of Refcounted objects (File, Directory, SymbolicLink) that can only
+// be safely destroyed under the isolate lock.
 class VirtualFileSystem {
  public:
   virtual ~VirtualFileSystem() noexcept(false) {}
