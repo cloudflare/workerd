@@ -6,6 +6,7 @@
 
 #include <workerd/api/node/exceptions.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::api {
 
@@ -1860,36 +1861,46 @@ jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
 }
 
 FileFdHandle::FileFdHandle(jsg::Lock& js, const workerd::VirtualFileSystem& vfs, int fd)
-    : fdHandle(vfs.wrapFd(js, fd)) {}
+    : fdHandle(vfs.wrapFd(js, fd)),
+      isolate(js.v8Isolate) {}
 
 void FileFdHandle::close(jsg::Lock& js) {
   fdHandle = kj::none;
 }
 
 FileFdHandle::~FileFdHandle() noexcept {
-  if (fdHandle != kj::none) {
-    // We can safely close the file descriptor without an explicit lock
-    // because we are in the destructor of a jsg::Object which should
-    // only be destroyed when the isolate lock is held per the rules of
-    // the jsg::Ref<T> holder and the deferred destruction queue.
-    fdHandle = kj::none;
+  // In Node.js, closing the file descriptor on destruction is an
+  // error (it was a deprecated behavior for a long time and
+  // was recently upgraded to a catchable error in Node.js. However,
+  // throwing an error in our implementation is of questionable value
+  // since it's not clear exactly what the user is supposed to do about
+  // it beyond making sure to explicitly close the file descriptor
+  // before the object is destroyed, which we can't guarantee.
+  KJ_IF_SOME(handle, fdHandle) {
+    if (isolate != nullptr) {
+      if (v8::Locker::IsLocked(isolate)) {
+        // If the isolate is locked, we can safely close the fdHandle.
+        // This is because closing the handle requires decrementing the
+        // refcount on the underlying node object, which can only be done
+        // safely while the isolate is locked.
+        fdHandle = kj::none;
+      } else {
+        // If the isolate is not locked, we cannot safely close the fdHandle
+        // yet. We need to make sure the isolate is locked before we close it.
+        // So instead, we will defer the actual destruction to when we next
+        // hold the isolate lock.
+        jsg::IsolateBase::from(isolate).destroyUnderLock(kj::mv(handle));
+        fdHandle = kj::none;
+      }
+    }
 
-    // In Node.js, closing the file descriptor on destruction is an
-    // error (it has been a deprecated behavior for a long time and
-    // is being upgraded to a catchable error in Node.js moving
-    // forward). However, throwing an error in our implementation is
-    // of questionable value since it's not clear exactly what the
-    // user is supposed to do about it beyond making sure to explicitly
-    // close the file descriptor before the object is destroyed.
-    // If we have an active IoContext, then we'll go ahead and log
-    // a warning.
-    // In preview, let's try to warn the developer about the problem.
+    // If we have an active IoContext, then we'll go ahead and log a warning.
     if (IoContext::hasCurrent()) {
       IoContext::current().logWarning(
-          kj::str("A FileHandle was destroyed without being closed. This is "
-                  "not recommended and may lead to file descriptors being held "
-                  "far longer than necessary. Please make sure to explicitly close "
-                  "the FileHandle object explicitly before it is destroyed."));
+          "A FileHandle was destroyed without being closed. This is "
+          "not recommended and may lead to file descriptors being held "
+          "far longer than necessary. Please make sure to explicitly close "
+          "the FileHandle object explicitly before it is destroyed."_kj);
     }
   }
 }

@@ -247,6 +247,12 @@ class IsolateBase {
     return v8System.pumpMsgLoop(ptr);
   }
 
+  // Allows an object to register an that will be dropped when the destroy
+  // queue is drained under the isolate lock.
+  void destroyUnderLock(kj::Own<void> item) {
+    deferDestruction(kj::mv(item));
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -277,7 +283,7 @@ class IsolateBase {
     Wrappable* wrappable;
   };
 
-  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
+  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete, kj::Own<void>>;
 
   V8System& v8System;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
