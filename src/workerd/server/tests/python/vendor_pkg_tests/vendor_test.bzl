@@ -67,6 +67,16 @@ with open('$@', 'w') as f:
         ],
     )
 
-def vendored_py_wd_test(name, test_template, main_py_file, vendored_srcs_target_prefix):
+def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendored_srcs_target_prefix = None):
+    bzl_name = "%s_vendor_test" % name
+    if test_template == None:
+        test_template = "%s_vendor.wd-test" % name
+    if main_py_file == None:
+        main_py_file = "%s.py" % name
+    if vendored_srcs_target_prefix == None:
+        vendored_srcs_target_prefix = "@%s_src" % name
+
     for info in BUNDLE_VERSION_INFO.values():
-        _vendored_py_wd_test(name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix)
+        if name not in info["vendored_packages_for_tests"]:
+            continue
+        _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix)

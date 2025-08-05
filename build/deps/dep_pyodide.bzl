@@ -44,7 +44,7 @@ def dep_pyodide():
         _pyodide_core(**info)
 
     for info in BUNDLE_VERSION_INFO.values():
-        for pkg in info["vendored_packages_for_tests"]:
+        for pkg in info["vendored_packages_for_tests"].values():
             _py_vendor_test_deps(version = info["name"], **pkg)
 
     for info in PYTHON_LOCKFILES:
