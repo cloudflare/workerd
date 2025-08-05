@@ -140,6 +140,7 @@ class WorkerTracer: public BaseTracer {
       PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
+  virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   void addLog(const tracing::InvocationSpanContext& context,
