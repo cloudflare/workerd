@@ -173,6 +173,12 @@ class FileSystemModule final: public jsg::Object {
 
   void cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions options);
 
+  struct OpenAsBlobOptions {
+    jsg::Optional<kj::String> type;
+    JSG_STRUCT(type);
+  };
+  jsg::Ref<Blob> openAsBlob(jsg::Lock& js, FilePath path, OpenAsBlobOptions options);
+
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_METHOD(stat);
     JSG_METHOD(setLastModified);
@@ -192,6 +198,7 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(readdir);
     JSG_METHOD(getFdHandle);
     JSG_METHOD(cp);
+    JSG_METHOD(openAsBlob);
   }
 
  private:
@@ -623,6 +630,7 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
       workerd::api::FileSystemModule::DirEntHandle,                                                \
       workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle,                  \
-      workerd::api::FileSystemModule::CpOptions
+      workerd::api::FileSystemModule::CpOptions,                                                   \
+      workerd::api::FileSystemModule::OpenAsBlobOptions
 
 }  // namespace workerd::api

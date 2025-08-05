@@ -109,3 +109,9 @@ interface FdHandle {
 }
 
 export function getFdHandle(fd: number): FdHandle;
+
+export interface OpenAsBlobOptions {
+  type?: string | undefined;
+}
+
+export function openAsBlob(path: URL, options: OpenAsBlobOptions): Blob;

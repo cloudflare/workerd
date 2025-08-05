@@ -25,6 +25,7 @@ import {
   R_OK,
   W_OK,
   X_OK,
+  writeFileSync,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -172,7 +173,7 @@ export const pathLimitTest = {
 };
 
 export const openAsBlobTest = {
-  test() {
+  async test() {
     // We currently do not implement openAsBlob, but let's verify arg validation.
     throws(() => openAsBlob(), {
       code: 'ERR_INVALID_ARG_TYPE',
@@ -186,12 +187,20 @@ export const openAsBlobTest = {
     throws(() => openAsBlob('/', { type: 123 }), {
       code: 'ERR_INVALID_ARG_TYPE',
     });
+
+    writeFileSync('/tmp/abc', '123');
     throws(() => openAsBlob('/'), {
-      message: /The requested operation is unsupported/,
+      message: /illegal operation on a directory/,
     });
     throws(() => openAsBlob(new URL('file:///')), {
-      message: /The requested operation is unsupported/,
+      message: /illegal operation on a directory/,
     });
+
+    const blob = openAsBlob('/tmp/abc', { type: 'text/plain' });
+    strictEqual(blob instanceof Blob, true);
+    strictEqual(blob.size, 3);
+    strictEqual(blob.type, 'text/plain');
+    strictEqual(await blob.text(), '123');
   },
 };
 

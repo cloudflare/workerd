@@ -1853,6 +1853,39 @@ void FileSystemModule::cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions 
   cpImpl(js, vfs, normalizedSrc, normalizedDest, options);
 }
 
+jsg::Ref<Blob> FileSystemModule::openAsBlob(
+    jsg::Lock& js, FilePath path, OpenAsBlobOptions options) {
+  auto& vfs = workerd::VirtualFileSystem::current(js);
+  NormalizedFilePath normalizedSrc(kj::mv(path));
+  KJ_IF_SOME(item, vfs.resolve(js, normalizedSrc, {})) {
+    KJ_SWITCH_ONEOF(item) {
+      KJ_CASE_ONEOF(err, workerd::FsError) {
+        node::THROW_ERR_UV_ENOENT(js, "open"_kj);
+      }
+      KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
+        KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
+          KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
+            return js.alloc<Blob>(js, kj::mv(bytes), kj::mv(options.type).orDefault(kj::String()));
+          }
+          KJ_CASE_ONEOF(err, workerd::FsError) {
+            throwFsError(js, err, "open"_kj);
+          }
+        }
+        KJ_UNREACHABLE;
+      }
+      KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
+        node::THROW_ERR_UV_EISDIR(js, "open"_kj);
+      }
+      KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
+        node::THROW_ERR_UV_EINVAL(js, "open"_kj);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
+
+  node::THROW_ERR_UV_ENOENT(js, "open"_kj);
+}
+
 // =======================================================================================
 
 jsg::Ref<FileFdHandle> FileFdHandle::constructor(jsg::Lock& js, int fd) {
