@@ -1006,7 +1006,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
       if (!stat.writable) {
         node::THROW_ERR_UV_EPERM(js, "mkdir"_kj);
       }
-      auto dir = workerd::Directory::newWritable();
+      auto dir = workerd::Directory::newWritable(js);
       KJ_IF_SOME(err, current->add(js, part, dir.addRef())) {
         throwFsError(js, err, "mkdir"_kj);
       }
@@ -1017,7 +1017,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
     }
 
     // Now that we have the parent directory, let's try creating the new directory.
-    auto newDir = workerd::Directory::newWritable();
+    auto newDir = workerd::Directory::newWritable(js);
     KJ_IF_SOME(err, current->add(js, name.toString(false), kj::mv(newDir))) {
       throwFsError(js, err, "mkdir"_kj);
     }
@@ -1040,7 +1040,7 @@ jsg::Optional<kj::String> FileSystemModule::mkdir(
         if (!stat.writable) {
           node::THROW_ERR_UV_EPERM(js, "mkdir"_kj);
         }
-        auto newDir = workerd::Directory::newWritable();
+        auto newDir = workerd::Directory::newWritable(js);
         if (options.tmp) {
           if (tmpFileCounter >= kMax) {
             node::THROW_ERR_UV_EPERM(js, "mkdir"_kj, "Too many temporary directories created"_kj);
@@ -1536,7 +1536,7 @@ void handleCpDir(jsg::Lock& js,
         } else {
           // The destination does not exist, we'll need to create a new directory.
           // then recursively copy into it.
-          auto newDir = workerd::Directory::newWritable();
+          auto newDir = workerd::Directory::newWritable(js);
           KJ_IF_SOME(err, dest->add(js, name, newDir.addRef())) {
             // If we got here, an error was reported
             throwFsError(js, err, "cp"_kj);

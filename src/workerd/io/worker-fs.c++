@@ -285,6 +285,7 @@ template <bool Writable = false>
 class DirectoryBase final: public Directory {
  public:
   DirectoryBase() = default;
+
   DirectoryBase(kj::HashMap<kj::String, Item> entries): entries(kj::mv(entries)) {
     // When this constructor is used, we assume that the directory is read-only.
     KJ_DASSERT(!Writable);
@@ -581,9 +582,22 @@ class DirectoryBase final: public Directory {
     return KJ_ASSERT_NONNULL(maybeUniqueId);
   }
 
+  void countTowardsIsolateLimit(jsg::Lock& js) const override {
+    // We only count writable directories towards the isolate limit.
+    // Why? Because read-only directories are controlled by the runtime
+    // and not users and we don't want to count them against the isolate.
+    if constexpr (Writable) {
+      if (maybeMemoryAdjustment == kj::none) {
+        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
+        KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(DirectoryBase));
+      }
+    }
+  }
+
  private:
   kj::HashMap<kj::String, Item> entries;
   mutable kj::Maybe<kj::String> maybeUniqueId;
+  mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
 
   // Called by tryOpen to create a new file or directory at the given path.
   kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>> tryCreate(
@@ -602,7 +616,7 @@ class DirectoryBase final: public Directory {
           return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
         }
         case FsType::DIRECTORY: {
-          auto dir = Directory::newWritable();
+          auto dir = Directory::newWritable(js);
           auto ret = dir.addRef();
           entries.insert(kj::str(path[0]), kj::mv(dir));
           return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(kj::mv(ret));
@@ -615,7 +629,7 @@ class DirectoryBase final: public Directory {
     }
 
     // Otherwise we need to recursively create a directory and ask it to create the file.
-    auto dir = Directory::newWritable();
+    auto dir = Directory::newWritable(js);
     KJ_IF_SOME(ret,
         dir->tryOpen(js, path.slice(1, path.size()),
             OpenOptions{
@@ -809,6 +823,17 @@ class FileImpl final: public File {
     return KJ_ASSERT_NONNULL(maybeUniqueId);
   }
 
+  void countTowardsIsolateLimit(jsg::Lock& js) const override {
+    // We only count writable files towards the isolate limit. Read-only files are
+    // controlled by the runtime. We don't want to count them against the isolate.
+    if (isWritable()) {
+      if (maybeMemoryAdjustment == kj::none) {
+        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
+        KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(FileImpl));
+      }
+    }
+  }
+
  private:
   struct Owned {
     kj::Array<kj::byte> data;
@@ -822,6 +847,7 @@ class FileImpl final: public File {
   kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>> ownedOrView;
   kj::Date lastModified;
   mutable kj::Maybe<kj::String> maybeUniqueId;
+  mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
 
   bool isWritable() const {
     // Our file is only writable if it owns the actual data buffer.
@@ -1197,13 +1223,21 @@ kj::Rc<Directory> Directory::newWritable() {
   return kj::rc<WritableDirectory>();
 }
 
+kj::Rc<Directory> Directory::newWritable(jsg::Lock& js) {
+  auto dir = kj::rc<WritableDirectory>();
+  dir->countTowardsIsolateLimit(js);
+  return kj::mv(dir);
+}
+
 kj::Rc<File> File::newWritable(jsg::Lock& js, kj::Maybe<uint32_t> size) {
   // We will cap the maximum size of the file.
   auto maxSize = Worker::Isolate::from(js).getLimitEnforcer().getBlobSizeLimit();
   auto actualSize = kj::min(size.orDefault(0), maxSize);
   auto data = kj::heapArray<kj::byte>(actualSize);
   if (actualSize > 0) data.asPtr().fill(0);
-  return kj::rc<FileImpl>(js, kj::mv(data));
+  auto file = kj::rc<FileImpl>(js, kj::mv(data));
+  file->countTowardsIsolateLimit(js);
+  return kj::mv(file);
 }
 
 kj::Rc<File> File::newReadable(kj::ArrayPtr<const kj::byte> data) {
@@ -1314,6 +1348,13 @@ kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock&) const {
   auto& ioContext = IoContext::current();
   maybeUniqueId = workerd::randomUUID(ioContext.getEntropySource());
   return KJ_ASSERT_NONNULL(maybeUniqueId);
+}
+
+void SymbolicLink::countTowardsIsolateLimit(jsg::Lock& js) const {
+  if (maybeMemoryAdjustment == kj::none) {
+    maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
+    KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(SymbolicLink));
+  }
 }
 
 kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
