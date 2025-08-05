@@ -140,7 +140,8 @@ static const PythonConfig defaultConfig{
 kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     const Worker::Script::ModulesSource& source,
     const PythonConfig& pythonConfig,
-    PythonSnapshotRelease::Reader pythonRelease) {
+    PythonSnapshotRelease::Reader pythonRelease,
+    CompatibilityFlags::Reader featureFlags) {
   auto modules = source.modules.asPtr();
   auto mainModule = kj::str(source.mainModule);
   int numFiles = 0;
@@ -247,6 +248,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     false     /* isTracing */,
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
+    featureFlags.getPythonDedicatedSnapshot() /* isDedicatedSnapshotEnabled */,
     kj::mv(memorySnapshot)
   );
   // clang-format on
@@ -736,7 +738,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       // Inject metadata that the entrypoint module will read.
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
           lockParam.alloc<PyodideMetadataReader>(
-              makePyodideMetadataReader(source, impl->pythonConfig, pythonRelease)),
+              makePyodideMetadataReader(source, impl->pythonConfig, pythonRelease, featureFlags)),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
@@ -1239,7 +1241,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       pyodideBundleBuilder.addSynthetic(metadataSpecifier,
           jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
               JsgWorkerdIsolate_TypeWrapper>(
-              [state = makePyodideMetadataReader(source, pythonConfig, pythonRelease)](
+              [state =
+                      makePyodideMetadataReader(source, pythonConfig, pythonRelease, featureFlags)](
                   jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
         // The ModuleRegistry may be shared across multiple isolates and workers.
         // We need to clone the PyodideMetadataReader::State for each instance

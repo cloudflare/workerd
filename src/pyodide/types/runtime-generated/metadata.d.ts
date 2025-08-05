@@ -23,6 +23,7 @@ declare namespace MetadataReader {
   const constructor: {
     getBaselineSnapshotImports(): string[];
   };
+  const isDedicatedSnapshotEnabled: () => boolean;
 }
 
 export default MetadataReader;
