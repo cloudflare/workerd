@@ -5,6 +5,7 @@
     "lib": ["ESNext", "dom", "Webworker.Iterable"],
     "alwaysStrict": true,
     "strict": true,
+    "strictNullChecks": true,
     "allowJs": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
@@ -16,11 +17,13 @@
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "strictNullChecks": true,
     "esModuleInterop": true,
     "moduleResolution": "node",
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
+    "composite": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
     "types": []
   },
   "exclude": ["node_modules", "**/*.mjs"]

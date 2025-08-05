@@ -112,9 +112,9 @@ export {
   randomInt,
   randomUUID,
   // Primes
-  PrimeNum as primeNum,
-  GeneratePrimeOptions as generatePrimeOptions,
-  CheckPrimeOptions as checkPrimeOptions,
+  type PrimeNum as primeNum,
+  type GeneratePrimeOptions as generatePrimeOptions,
+  type CheckPrimeOptions as checkPrimeOptions,
   generatePrime,
   generatePrimeSync,
   checkPrime,
@@ -123,7 +123,7 @@ export {
   createHash,
   createHmac,
   Hash,
-  HashOptions,
+  type HashOptions,
   Hmac,
   hash,
   // Hkdf
@@ -135,7 +135,7 @@ export {
   // Scrypt
   scrypt,
   scryptSync,
-  ArrayLike as arrayLike,
+  type ArrayLike as arrayLike,
   // Keys
   KeyObject,
   PublicKeyObject,
