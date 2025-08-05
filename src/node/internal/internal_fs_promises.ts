@@ -61,7 +61,11 @@ import {
   ERR_EBADF,
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
-import { validateUint32 } from 'node-internal:validators';
+import {
+  validateBoolean,
+  validateObject,
+  validateUint32,
+} from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
 import type {
   BigIntStatsFs,
@@ -232,7 +236,10 @@ export class FileHandle extends EventEmitter {
   }
 
   readLines(_options: CreateReadStreamOptions = {}): void {
-    // TODO(node-fs): Implement
+    // TODO(node-fs): This method is not yet implemented. In Node.js,
+    // it depends on the readline module which has not yet been
+    // implemented in the workers runtime. We'll want to implement
+    // it first then come back and implement this method.
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
@@ -346,12 +353,19 @@ export class FileHandle extends EventEmitter {
     await this.close();
   }
 
-  readableWebStream(_options: ReadableWebStreamOptions = {}): void {
-    // TODO(node-fs): Implement
+  readableWebStream(
+    options: ReadableWebStreamOptions = {}
+  ): ReadableStream<Uint8Array> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
-    throw new Error('not implemented');
+    validateObject(options, 'options');
+    // Node.js actually defaults autoClose to false here because of backwards
+    // compatibility issues but will change to autoClose = true in a semver-major
+    // soon.
+    const { autoClose = true } = options;
+    validateBoolean(autoClose, 'options.autoClose');
+    return getReadableWebStream(this, { autoClose });
   }
 
   createReadStream(options: ReadStreamOptions = {}): ReadStream {
@@ -662,4 +676,51 @@ export function glob(
   // which is not yet available in the workers runtime. This will be
   // explored for implementation separately in the future.
   throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+function getReadableWebStream(
+  fh: FileHandle,
+  options: ReadableWebStreamOptions
+): ReadableStream<Uint8Array> {
+  const readFn = fh.read.bind(fh);
+  const { autoClose } = options;
+  let controller: ReadableByteStreamController;
+  const ondone = async (): Promise<void> => {
+    if (autoClose) await fh.close();
+  };
+
+  const readable = new ReadableStream({
+    type: 'bytes',
+    autoAllocateChunkSize: 16384,
+    start(c: ReadableByteStreamController): void {
+      controller = c;
+    },
+
+    async pull(controller: ReadableByteStreamController): Promise<void> {
+      const req = controller.byobRequest as ReadableStreamBYOBRequest;
+      const view = req.view;
+      const { bytesRead } = await readFn(
+        view as Uint8Array,
+        (view as Uint8Array).byteOffset,
+        (view as Uint8Array).byteLength
+      );
+
+      if (bytesRead === 0) {
+        controller.close();
+        await ondone();
+      }
+
+      req.respond(bytesRead);
+    },
+
+    async cancel(): Promise<void> {
+      await ondone();
+    },
+  });
+
+  fh.once('close', () => {
+    controller.close();
+  });
+
+  return readable;
 }
