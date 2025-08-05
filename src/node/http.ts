@@ -12,13 +12,22 @@ import { ClientRequest } from 'node-internal:internal_http_client';
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { IncomingMessage } from 'node-internal:internal_http_incoming';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
-import { Server, ServerResponse } from 'node-internal:internal_http_server';
+import {
+  Server,
+  ServerResponse,
+  _connectionListener,
+} from 'node-internal:internal_http_server';
+import { validateInteger } from 'node-internal:validators';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 import type { RequestOptions, ServerOptions, RequestListener } from 'node:http';
-import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 const enableNodejsHttpServerModules =
   !!Cloudflare.compatibilityFlags['enable_nodejs_http_server_modules'];
+
+export const WebSocket = globalThis.WebSocket;
+export const CloseEvent = globalThis.CloseEvent;
+export const MessageEvent = globalThis.MessageEvent;
 
 export function request(
   url: string | URL | RequestOptions,
@@ -49,6 +58,15 @@ export function createServer(
   return new Server(options, handler);
 }
 
+// the maximum size of HTTP headers (default: 16384 (16KB))
+// ref: https://github.com/nodejs/node/blob/3b715d35440d509c6242ea61dec9d2802f219c83/src/node_options.cc#L787
+export const maxHeaderSize = 16384;
+
+export function setMaxIdleHTTPParsers(max: unknown): void {
+  validateInteger(max, 'max', 1);
+  throw new ERR_METHOD_NOT_IMPLEMENTED('setMaxIdleHTTPParsers');
+}
+
 export {
   validateHeaderName,
   validateHeaderValue,
@@ -61,6 +79,7 @@ export {
   IncomingMessage,
   Server,
   ServerResponse,
+  _connectionListener,
 };
 export default {
   validateHeaderName,
@@ -77,4 +96,10 @@ export default {
   Server,
   ServerResponse,
   createServer,
+  maxHeaderSize,
+  setMaxIdleHTTPParsers,
+  _connectionListener,
+  WebSocket,
+  CloseEvent,
+  MessageEvent,
 };
