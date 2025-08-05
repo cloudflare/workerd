@@ -206,7 +206,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
     // Compose span events
     // TODO(o11y): Actually report the spanOpen event at span creation time
-    writer->report(context, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    writer->report(context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)));
     if (span.tags.size()) {
       kj::Array<tracing::Attribute> attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
