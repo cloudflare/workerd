@@ -1962,8 +1962,9 @@ kj::Own<ValueQueue::Consumer> ReadableStreamDefaultController::getConsumer(
 
 // ======================================================================================
 
-ReadableStreamBYOBRequest::Impl::Impl(
-    jsg::Lock& js, kj::Own<ByteQueue::ByobRequest> readRequest, ByobController controller)
+ReadableStreamBYOBRequest::Impl::Impl(jsg::Lock& js,
+    kj::Own<ByteQueue::ByobRequest> readRequest,
+    kj::Rc<WeakRef<ReadableByteStreamController>> controller)
     : readRequest(kj::mv(readRequest)),
       controller(kj::mv(controller)),
       view(js.v8Ref(this->readRequest->getView(js))) {}
@@ -1975,12 +1976,13 @@ void ReadableStreamBYOBRequest::Impl::updateView(jsg::Lock& js) {
 
 void ReadableStreamBYOBRequest::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(impl, maybeImpl) {
-    visitor.visit(impl.view, impl.controller);
+    visitor.visit(impl.view);
   }
 }
 
-ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(
-    jsg::Lock& js, kj::Own<ByteQueue::ByobRequest> readRequest, ByobController controller)
+ReadableStreamBYOBRequest::ReadableStreamBYOBRequest(jsg::Lock& js,
+    kj::Own<ByteQueue::ByobRequest> readRequest,
+    kj::Rc<WeakRef<ReadableByteStreamController>> controller)
     : ioContext(tryGetIoContext()),
       maybeImpl(Impl(js, kj::mv(readRequest), kj::mv(controller))) {}
 
@@ -2004,7 +2006,8 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
     jsg::check(impl.view.getHandle(js)->Buffer()->Detach(v8::Local<v8::Value>()));
-    impl.controller->maybeByobRequest = kj::none;
+    impl.controller->runIfAlive(
+        [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
   }
   maybeImpl = kj::none;
 }
@@ -2012,75 +2015,81 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
 void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
+  JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
   JSG_REQUIRE(impl.view.getHandle(js)->ByteLength() > 0, TypeError,
       "Cannot respond with a zero-length or detached view");
-  if (!impl.controller->canCloseOrEnqueue()) {
-    JSG_REQUIRE(
-        bytesWritten == 0, TypeError, "The bytesWritten must be zero after the stream is closed.");
-    KJ_ASSERT(impl.readRequest->isInvalidated());
-    invalidate(js);
-  } else {
-    bool shouldInvalidate = false;
-    if (impl.readRequest->isInvalidated() && impl.controller->impl.consumerCount() >= 1) {
-      // While this particular request may be invalidated, there are still
-      // other branches we can push the data to. Let's do so.
-      jsg::BufferSource source(js, impl.view.getHandle(js));
-      auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, source.detach(js)));
-      impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
+  impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
+    if (!controller.canCloseOrEnqueue()) {
+      JSG_REQUIRE(bytesWritten == 0, TypeError,
+          "The bytesWritten must be zero after the stream is closed.");
+      KJ_ASSERT(impl.readRequest->isInvalidated());
+      invalidate(js);
     } else {
-      JSG_REQUIRE(bytesWritten > 0, TypeError,
-          "The bytesWritten must be more than zero while the stream is open.");
-      if (impl.readRequest->respond(js, bytesWritten)) {
-        // The read request was fulfilled, we need to invalidate.
-        shouldInvalidate = true;
+      bool shouldInvalidate = false;
+      if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
+        // While this particular request may be invalidated, there are still
+        // other branches we can push the data to. Let's do so.
+        jsg::BufferSource source(js, impl.view.getHandle(js));
+        auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, source.detach(js)));
+        controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
-        // The response did not fulfill the minimum requirements of the read.
-        // We do not want to invalidate the read request and we need to update the
-        // view so that on the next read the view will be properly adjusted.
-        impl.updateView(js);
+        JSG_REQUIRE(bytesWritten > 0, TypeError,
+            "The bytesWritten must be more than zero while the stream is open.");
+        if (impl.readRequest->respond(js, bytesWritten)) {
+          // The read request was fulfilled, we need to invalidate.
+          shouldInvalidate = true;
+        } else {
+          // The response did not fulfill the minimum requirements of the read.
+          // We do not want to invalidate the read request and we need to update the
+          // view so that on the next read the view will be properly adjusted.
+          impl.updateView(js);
+        }
+      }
+      controller.pull(js);
+      if (shouldInvalidate) {
+        invalidate(js);
       }
     }
-    impl.controller->pull(js);
-    if (shouldInvalidate) {
-      invalidate(js);
-    }
-  }
+  });
 }
 
 void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource view) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
-  if (!impl.controller->canCloseOrEnqueue()) {
-    JSG_REQUIRE(view.size() == 0, TypeError,
-        "The view byte length must be zero after the stream is closed.");
-    KJ_ASSERT(impl.readRequest->isInvalidated());
-    invalidate(js);
-  } else {
-    bool shouldInvalidate = false;
-    if (impl.readRequest->isInvalidated() && impl.controller->impl.consumerCount() >= 1) {
-      // While this particular request may be invalidated, there are still
-      // other branches we can push the data to. Let's do so.
-      auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, view.detach(js)));
-      impl.controller->impl.enqueue(js, kj::mv(entry), impl.controller.addRef());
+  JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
+  impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
+    if (!controller.canCloseOrEnqueue()) {
+      JSG_REQUIRE(view.size() == 0, TypeError,
+          "The view byte length must be zero after the stream is closed.");
+      KJ_ASSERT(impl.readRequest->isInvalidated());
+      invalidate(js);
     } else {
-      JSG_REQUIRE(view.size() > 0, TypeError,
-          "The view byte length must be more than zero while the stream is open.");
-      if (impl.readRequest->respondWithNewView(js, kj::mv(view))) {
-        // The read request was fulfilled, we need to invalidate.
-        shouldInvalidate = true;
+      bool shouldInvalidate = false;
+      if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
+        // While this particular request may be invalidated, there are still
+        // other branches we can push the data to. Let's do so.
+        auto entry = kj::heap<ByteQueue::Entry>(jsg::BufferSource(js, view.detach(js)));
+        controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
-        // The response did not fulfill the minimum requirements of the read.
-        // We do not want to invalidate the read request and we need to update the
-        // view so that on the next read the view will be properly adjusted.
-        impl.updateView(js);
+        JSG_REQUIRE(view.size() > 0, TypeError,
+            "The view byte length must be more than zero while the stream is open.");
+        if (impl.readRequest->respondWithNewView(js, kj::mv(view))) {
+          // The read request was fulfilled, we need to invalidate.
+          shouldInvalidate = true;
+        } else {
+          // The response did not fulfill the minimum requirements of the read.
+          // We do not want to invalidate the read request and we need to update the
+          // view so that on the next read the view will be properly adjusted.
+          impl.updateView(js);
+        }
+      }
+
+      controller.pull(js);
+      if (shouldInvalidate) {
+        invalidate(js);
       }
     }
-
-    impl.controller->pull(js);
-    if (shouldInvalidate) {
-      invalidate(js);
-    }
-  }
+  });
 }
 
 bool ReadableStreamBYOBRequest::isPartiallyFulfilled() {
@@ -2094,8 +2103,14 @@ bool ReadableStreamBYOBRequest::isPartiallyFulfilled() {
 
 ReadableByteStreamController::ReadableByteStreamController(
     UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy)
-    : ioContext(tryGetIoContext()),
+    : weakSelf(kj::rc<WeakRef<ReadableByteStreamController>>(
+          kj::Badge<ReadableByteStreamController>{}, *this)),
+      ioContext(tryGetIoContext()),
       impl(kj::mv(underlyingSource), kj::mv(queuingStrategy)) {}
+
+ReadableByteStreamController::~ReadableByteStreamController() noexcept(false) {
+  weakSelf->invalidate();
+}
 
 void ReadableByteStreamController::start(jsg::Lock& js) {
   impl.start(js, JSG_THIS);
@@ -2160,7 +2175,8 @@ kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> ReadableByteStreamController::get
   if (maybeByobRequest == kj::none) {
     KJ_IF_SOME(queue, impl.state.tryGet<ByteQueue>()) {
       KJ_IF_SOME(pendingByob, queue.nextPendingByobReadRequest()) {
-        maybeByobRequest = js.alloc<ReadableStreamBYOBRequest>(js, kj::mv(pendingByob), JSG_THIS);
+        maybeByobRequest =
+            js.alloc<ReadableStreamBYOBRequest>(js, kj::mv(pendingByob), weakSelf.addRef());
       }
     } else {
       return kj::none;
@@ -4060,7 +4076,6 @@ void ReadableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
 void ReadableStreamBYOBRequest::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(impl, maybeImpl) {
     tracker.trackField("readRequest", impl.readRequest);
-    tracker.trackField("controller", impl.controller);
     tracker.trackField("view", impl.view);
   }
 }
