@@ -58,6 +58,7 @@ import {
   validateBoolean,
   validateObject,
   validateOneOf,
+  validateString,
   validateUint32,
 } from 'node-internal:validators';
 import {
@@ -842,6 +843,22 @@ export function globSync(
   // function depends heavily on the third party minimatch library
   // which is not yet available in the workers runtime. This will be
   // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export interface OpenAsBlobOptions {
+  type?: string | undefined;
+}
+export function openAsBlob(
+  path: FilePath,
+  options: OpenAsBlobOptions = {}
+): Blob {
+  // TODO(soon): We do not yet implement the openAsBlob API. We will implement
+  // this soon.
+  normalizePath(path);
+  validateObject(options, 'options');
+  const { type = '' } = options;
+  validateString(type, 'options.type');
   throw new ERR_UNSUPPORTED_OPERATION();
 }
 

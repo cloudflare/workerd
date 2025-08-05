@@ -1,7 +1,7 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { strictEqual, throws } from 'node:assert';
+import { notStrictEqual, strictEqual, throws } from 'node:assert';
 
 // sync and datasync are generally non-ops. The most they do is
 // verify that the file descriptor is valid.
@@ -15,6 +15,16 @@ import {
   fsync,
   statfs,
   statfsSync,
+  openAsBlob,
+  WriteStream,
+  FileWriteStream,
+  ReadStream,
+  FileReadStream,
+  constants,
+  F_OK,
+  R_OK,
+  W_OK,
+  X_OK,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -158,5 +168,46 @@ export const pathLimitTest = {
     throws(() => openSync(tooManySegments, 'r'), {
       message: /File path has too many segments/,
     });
+  },
+};
+
+export const openAsBlobTest = {
+  test() {
+    // We currently do not implement openAsBlob, but let's verify arg validation.
+    throws(() => openAsBlob(), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => openAsBlob(1), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => openAsBlob('/', 123), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => openAsBlob('/', { type: 123 }), {
+      code: 'ERR_INVALID_ARG_TYPE',
+    });
+    throws(() => openAsBlob('/'), {
+      message: /The requested operation is unsupported/,
+    });
+    throws(() => openAsBlob(new URL('file:///')), {
+      message: /The requested operation is unsupported/,
+    });
+  },
+};
+
+export const otherExportsTest = {
+  test() {
+    strictEqual(WriteStream, FileWriteStream);
+    strictEqual(ReadStream, FileReadStream);
+    strictEqual(constants.F_OK, F_OK);
+    strictEqual(constants.R_OK, R_OK);
+    strictEqual(constants.W_OK, W_OK);
+    strictEqual(constants.X_OK, X_OK);
+    notStrictEqual(F_OK, undefined);
+    notStrictEqual(R_OK, undefined);
+    notStrictEqual(W_OK, undefined);
+    notStrictEqual(X_OK, undefined);
+    notStrictEqual(WriteStream, undefined);
+    notStrictEqual(ReadStream, undefined);
   },
 };

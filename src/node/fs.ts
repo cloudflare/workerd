@@ -59,10 +59,21 @@ import {
   writeFileSync,
   writeSync,
   writevSync,
+  openAsBlob,
 } from 'node-internal:internal_fs_sync';
+
+const { F_OK, R_OK, W_OK, X_OK } = constants;
+
+// Node.js exports these as aliases
+export const FileWriteStream = WriteStream;
+export const FileReadStream = ReadStream;
 
 export {
   constants,
+  F_OK,
+  R_OK,
+  W_OK,
+  X_OK,
   promises,
   Dirent,
   Dir,
@@ -114,10 +125,15 @@ export {
   WriteStream,
   createReadStream,
   createWriteStream,
+  openAsBlob,
 };
 
 export default {
   constants,
+  F_OK,
+  R_OK,
+  W_OK,
+  X_OK,
   promises,
   Dirent,
   Dir,
@@ -168,6 +184,9 @@ export default {
   writevSync,
   WriteStream,
   ReadStream,
+  FileWriteStream,
+  FileReadStream,
   createReadStream,
   createWriteStream,
+  openAsBlob,
 };
