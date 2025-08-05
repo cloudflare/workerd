@@ -291,9 +291,7 @@ function recordDsoHandles(Module: Module): DsoHandles {
     if (handle === 0) {
       continue;
     }
-    if (!(name in dylinkInfo)) {
-      dylinkInfo[name] = { handles: [] };
-    }
+    dylinkInfo[name] ??= { handles: [] };
     dylinkInfo[name].handles.push(handle);
   }
   return dylinkInfo;
@@ -427,8 +425,8 @@ function decodeSnapshot(
     );
   }
   // buf[1] is SNAPSHOT_VERSION (unused currently)
-  const snapshotOffset = header[2];
-  const jsonByteLength = header[3];
+  const snapshotOffset = header[2] as number;
+  const jsonByteLength = header[3] as number;
 
   const snapshotSize = reader.getMemorySnapshotSize() - snapshotOffset;
   const jsonBuf = new Uint8Array(jsonByteLength);

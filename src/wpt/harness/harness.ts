@@ -513,14 +513,12 @@ class WPTTestResult {
   duration: number = 0;
 
   constructor(result: RunnerState, options: TestRunnerOptions) {
-    this.test = WPTTestResult.getTestNameFromUrl(result.testUrl);
+    this.test = WPTTestResult.#getTestNameFromUrl(result.testUrl);
     this.status = options.disabledTests === true ? 'ERROR' : 'OK';
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
   }
 
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private static getTestNameFromUrl(testUrl: URL): string {
+  static #getTestNameFromUrl(testUrl: URL): string {
     const testNameUrl = new URL(testUrl);
     testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
     return testNameUrl.href.slice(testNameUrl.origin.length);

@@ -7,13 +7,14 @@ def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, testonl
     ts_config(
         name = name + "@tsconfig",
         src = tsconfig_json,
+        deps = ["//tools:base-tsconfig"],
     )
 
     ts_project(
         name = name,
         srcs = srcs,
         deps = deps,
-        tsconfig = tsconfig_json,
+        tsconfig = ":" + name + "@tsconfig",
         allow_js = True,
         composite = True,
         source_map = True,

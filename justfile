@@ -114,7 +114,8 @@ eslint:
     //src/cloudflare:cloudflare@eslint \
     //src/node:node@eslint \
     //src/pyodide:pyodide_static@eslint \
-    //src/wpt:wpt-all@eslint
+    //src/wpt:wpt-all@eslint \
+    //types:types_lib@eslint
 
 coverage path="//...":
   bazel coverage {{path}}

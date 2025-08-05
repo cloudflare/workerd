@@ -18,6 +18,7 @@ def eslint_test(
         data = srcs + data + [
             eslintrc_json,
             tsconfig_json,
+            "//tools:base-tsconfig",
             "//tools:base-eslint",
         ],
         tags = ["lint"],
