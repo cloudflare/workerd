@@ -480,6 +480,10 @@ class DirectoryBase final: public Directory {
       if (entries.find(name) != kj::none) {
         return FsError::ALREADY_EXISTS;
       }
+      // Prevent adding more entries than the maximum allowed.
+      if (entries.size() == kMaxDirectoryEntryCount) {
+        return FsError::ENTRY_COUNT_EXCEEDED;
+      }
       auto ret = ([&]() -> Item {
         KJ_SWITCH_ONEOF(fileOrDirectory) {
           KJ_CASE_ONEOF(file, kj::Rc<File>) {
@@ -590,6 +594,12 @@ class DirectoryBase final: public Directory {
       jsg::Lock& js, kj::PathPtr path, FsType createAs) {
     KJ_DASSERT(Writable);
     KJ_DASSERT(path.size() > 0);
+
+    // Prevent adding more entries than the maximum allowed.
+    if (entries.size() == kMaxDirectoryEntryCount) {
+      return kj::Maybe<kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>>>(
+          FsError::ENTRY_COUNT_EXCEEDED);
+    }
 
     // If the path size is one, then we are creating the file or directory
     // in *this* directory.

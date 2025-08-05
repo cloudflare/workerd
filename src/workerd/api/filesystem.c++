@@ -124,7 +124,10 @@ struct NormalizedFilePath {
       node::THROW_ERR_UV_EPERM(js, syscall, "File size limit exceeded"_kj);
     }
     case workerd::FsError::SYMLINK_DEPTH_EXCEEDED: {
-      node::THROW_ERR_UV_ELOOP(js, syscall, "symlink depth exceeded"_kj);
+      node::THROW_ERR_UV_ELOOP(js, syscall, "Symlink depth exceeded"_kj);
+    }
+    case workerd::FsError::ENTRY_COUNT_EXCEEDED: {
+      node::THROW_ERR_UV_EINVAL(js, syscall, "Directory entry count exceeded"_kj);
     }
     default: {
       node::THROW_ERR_UV_EPERM(js, syscall);
@@ -1944,6 +1947,10 @@ jsg::Ref<jsg::DOMException> fsErrorToDomException(jsg::Lock& js, workerd::FsErro
     case workerd::FsError::SYMLINK_DEPTH_EXCEEDED: {
       return js.domException(kj::str("InvalidStateError"),
           kj::str("Symbolic link depth exceeded, please check the symbolic links"));
+    }
+    case workerd::FsError::ENTRY_COUNT_EXCEEDED: {
+      return js.domException(
+          kj::str("QuotaExceededError"), kj::str("Directory entry count exceeded"));
     }
     default: {
       return js.domException(

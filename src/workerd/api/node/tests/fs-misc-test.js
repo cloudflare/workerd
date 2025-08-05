@@ -15,6 +15,9 @@ import {
   fsync,
   statfs,
   statfsSync,
+  writeFileSync,
+  mkdirSync,
+  symlinkSync,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -157,6 +160,25 @@ export const pathLimitTest = {
     const tooManySegments = '/a'.repeat(49);
     throws(() => openSync(tooManySegments, 'r'), {
       message: /File path has too many segments/,
+    });
+  },
+};
+
+export const dirEntryLimitTest = {
+  test() {
+    for (let i = 0; i < 1024; i++) {
+      writeFileSync(`/tmp/${i}`, `${i}`);
+    }
+
+    // It is not permitted to create a directory with more than 1024 entries.
+    throws(() => writeFileSync('/tmp/1024', '1024'), {
+      message: /Directory entry count exceeded/,
+    });
+    throws(() => mkdirSync('/tmp/1024'), {
+      message: /Directory entry count exceeded/,
+    });
+    throws(() => symlinkSync('/tmp/0', '/tmp/1024'), {
+      message: /Directory entry count exceeded/,
     });
   },
 };

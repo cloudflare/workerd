@@ -131,6 +131,8 @@ namespace workerd {
 // TODO(node-fs): Currently, all files and directories use a fixed last
 // modified time set to the Unix epoch. This is temporary.
 
+constexpr size_t kMaxDirectoryEntryCount = 1024;
+
 enum class FsType {
   FILE,
   DIRECTORY,
@@ -189,6 +191,8 @@ enum class FsError {
   FILE_SIZE_LIMIT_EXCEEDED,
   // Symlink depth exceeded
   SYMLINK_DEPTH_EXCEEDED,
+  // Directory entry count exceeded
+  ENTRY_COUNT_EXCEEDED,
 };
 
 // A file in the virtual file system. If the file is read-only, then the
