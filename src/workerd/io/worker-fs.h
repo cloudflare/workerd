@@ -305,6 +305,12 @@ class File: public kj::Refcounted {
   // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
+
+  // Ensures that the symlink instance itself is counted towards the isolate
+  // memory limit.
+  virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
+    // Non-op by default.
+  };
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -412,6 +418,14 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // when the handle is dropped.
   static kj::Rc<Directory> newWritable() KJ_WARN_UNUSED_RESULT;
 
+  // Variation of newWritable that ensures the Directory instance itself is
+  // counted towwards the isolate memory limit. This should be the typical
+  // case for directories created by user code, such as when creating a
+  // temporary directory under /tmp. This should not be used for directories
+  // that are created by the runtime that aren't directly under the users
+  // control, such as the /tmp directory itself.
+  static kj::Rc<Directory> newWritable(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
+
   // Used to build a new read-only directory. All files and directories added
   // may or may not be writable. The directory will not be initially included
   // in a directory. To add it to a directory, use the add method.
@@ -452,6 +466,13 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
   // but is being implemented and has Web Platform Tests.
   virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
+
+  // Ensures that the directory instance itself is counted towards the isolate
+  // memory limit. Not every directory needs to be counted so we don't do this
+  // by default automatically for every Directory instance.
+  virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
+    // Non-op by default.
+  }
 };
 
 // The equivalent to a symbolic link. A symlink holds a reference to the
@@ -486,10 +507,15 @@ class SymbolicLink final: public kj::Refcounted {
   // but is being implemented and has Web Platform Tests.
   kj::StringPtr getUniqueId(jsg::Lock&) const;
 
+  // Ensures that the symlink instance itself is counted towards the isolate
+  // memory limit.
+  void countTowardsIsolateLimit(jsg::Lock& js) const;
+
  private:
   kj::Rc<Directory> root;
   kj::Path targetPath;
   mutable kj::Maybe<kj::String> maybeUniqueId;
+  mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
 };
 
 using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
