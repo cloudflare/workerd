@@ -444,6 +444,16 @@ export const httpRedirectsAreNotFollowed = {
   },
 };
 
+export const testExports = {
+  async test() {
+    strictEqual(typeof http.WebSocket, 'function');
+    strictEqual(typeof http.CloseEvent, 'function');
+    strictEqual(typeof http.MessageEvent, 'function');
+    strictEqual(typeof http._connectionListener, 'function');
+    strictEqual(typeof http.setMaxIdleHTTPParsers, 'function');
+  },
+};
+
 // The following tests does not make sense for workerd
 //
 // - [ ] test/parallel/test-http-parser-bad-ref.js
