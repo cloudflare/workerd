@@ -28,6 +28,7 @@ export type PyodideEntrypointHelper = {
   cloudflareSocketsModule: any;
   workerEntrypoint: any;
 };
+import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
 let pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
@@ -69,7 +70,12 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
+      const pyodide = loadPyodide(
+        IS_WORKERD,
+        LOCKFILE,
+        WORKERD_INDEX_URL,
+        pyodide_entrypoint_helper
+      );
       await setupPatches(pyodide);
       return pyodide;
     })();
@@ -123,6 +129,11 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     }
 
     // Expose the doAnImport function and global modules to Python globals
+    if (!pyodide_entrypoint_helper) {
+      throw new PythonRuntimeError(
+        'pyodide_entrypoint_helper is not initialized'
+      );
+    }
     pyodide.registerJsModule(
       '_pyodide_entrypoint_helper',
       pyodide_entrypoint_helper
@@ -480,6 +491,10 @@ export async function initPython(): Promise<PythonInitResult> {
       break;
     }
   }
+
+  // Collect a dedicated snapshot at the very end.
+  const pyodide = await getPyodide();
+  maybeCollectDedicatedSnapshot(pyodide._module, pyodide_entrypoint_helper);
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

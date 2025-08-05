@@ -306,7 +306,8 @@ struct ArtifactBundler_State {
   kj::Own<ArtifactBundler_State> clone() {
     return kj::heap<ArtifactBundler_State>(packageManager,
         existingSnapshot.map(
-            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
+        isValidating);
   }
 };
 

@@ -36,7 +36,7 @@ interface API {
   pyodide_base: {
     pyimport_impl: PyCallable;
   };
-  serializeHiwireState(): SnapshotConfig;
+  serializeHiwireState(serializer: (obj: any) => any): SnapshotConfig;
   pyVersionTuple: [number, number, number];
 }
 
