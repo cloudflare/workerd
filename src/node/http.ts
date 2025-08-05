@@ -25,6 +25,12 @@ import type { RequestOptions, ServerOptions, RequestListener } from 'node:http';
 const enableNodejsHttpServerModules =
   !!Cloudflare.compatibilityFlags['enable_nodejs_http_server_modules'];
 
+// TODO(soon): Our global implementation of WebSocket does not match
+// Node.js' implementation which is compliant to the spec. However,
+// We were previously relying on the unenv polyfills for this, and
+// it just re-exported the global also, so this shouldn't be a breaking
+// change. Later, however, we'll need to reconcile the Node.js and
+// standard spec conformance here.
 export const WebSocket = globalThis.WebSocket;
 export const CloseEvent = globalThis.CloseEvent;
 export const MessageEvent = globalThis.MessageEvent;
