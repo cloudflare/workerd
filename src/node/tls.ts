@@ -36,6 +36,7 @@ import {
 } from 'node-internal:internal_tls_common';
 import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 export * from 'node-internal:internal_tls_constants';
 export {
   TLSSocket,
@@ -48,6 +49,9 @@ export {
   convertALPNProtocols,
   getCiphers,
 };
+export function createSecurePair(): void {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
+}
 export default {
   SecureContext,
   Server,
@@ -58,5 +62,6 @@ export default {
   checkServerIdentity,
   convertALPNProtocols,
   getCiphers,
+  createSecurePair,
   ...constants,
 };
