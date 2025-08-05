@@ -114,6 +114,8 @@ filegroup(
         ":bench-util",
     ],
     visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "test-reprl",
     srcs = [
