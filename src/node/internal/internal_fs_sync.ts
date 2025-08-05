@@ -853,7 +853,7 @@ export function openAsBlob(
   path: FilePath,
   options: OpenAsBlobOptions = {}
 ): Blob {
-  // TODO(soon): We do not yet implement the openAsBlob API. We will implement
+  // TODO(node-fs): We do not yet implement the openAsBlob API. We will implement
   // this soon.
   normalizePath(path);
   validateObject(options, 'options');
