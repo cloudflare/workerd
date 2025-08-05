@@ -25,7 +25,7 @@
 
 import {
   Socket,
-  SocketOptions,
+  type SocketOptions,
   _normalizeArgs,
   onConnectionOpened,
   onConnectionClosed,

@@ -37,7 +37,7 @@ import { validateString } from 'node-internal:validators';
 
 import internalUtil from 'node-internal:util';
 import {
-  InspectOptionsStylized,
+  type InspectOptionsStylized,
   inspect as utilInspect,
 } from 'node-internal:internal_inspect';
 

@@ -48,8 +48,8 @@ import {
 } from 'node-internal:internal_http_util';
 import {
   kOutHeaders,
-  WrittenDataBufferEntry,
-  HeadersSentEvent,
+  type WrittenDataBufferEntry,
+  type HeadersSentEvent,
 } from 'node-internal:internal_http_outgoing';
 import {
   chunkExpression,

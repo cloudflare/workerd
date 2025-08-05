@@ -23,7 +23,12 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { FilterList, UnknownFunc, TestFn, PromiseTestFn } from './common';
+import {
+  FilterList,
+  type UnknownFunc,
+  type TestFn,
+  type PromiseTestFn,
+} from './common';
 
 declare global {
   function promise_test(

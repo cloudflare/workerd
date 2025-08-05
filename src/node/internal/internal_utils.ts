@@ -31,7 +31,7 @@ import type { Encoding } from 'node-internal:buffer';
 import { validateFunction, validateString } from 'node-internal:validators';
 import {
   ERR_FALSY_VALUE_REJECTION,
-  Falsy,
+  type Falsy,
 } from 'node-internal:internal_errors';
 
 const { UTF8, UTF16LE, HEX, ASCII, BASE64, BASE64URL, LATIN1 } = bufferUtil;

@@ -25,9 +25,9 @@
 
 import crypto from 'node:crypto';
 import {
-  UnknownFunc,
-  TestFn,
-  PromiseTestFn,
+  type UnknownFunc,
+  type TestFn,
+  type PromiseTestFn,
   type HostInfo,
   getHostInfo,
 } from './common';

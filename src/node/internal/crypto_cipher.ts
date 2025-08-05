@@ -33,8 +33,8 @@ import {
 
 import {
   Transform,
-  TransformOptions,
-  TransformCallback,
+  type TransformOptions,
+  type TransformCallback,
 } from 'node-internal:streams_transform';
 
 import {

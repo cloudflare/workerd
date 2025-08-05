@@ -2,7 +2,7 @@ import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
-import { FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
+import { type FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
