@@ -859,7 +859,8 @@ export function openAsBlob(
   validateObject(options, 'options');
   const { type = '' } = options;
   validateString(type, 'options.type');
-  throw new ERR_UNSUPPORTED_OPERATION();
+
+  return cffs.openAsBlob(normalizePath(path), { type });
 }
 
 // An API is considered stubbed if it is not implemented by the function
