@@ -23,13 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// TODO(node-fs): These will be remove as development continues.
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-confusing-void-expression */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import * as fssync from 'node-internal:internal_fs_sync';
 import { EventEmitter } from 'node-internal:events';
 import { default as cffs } from 'cloudflare-internal:filesystem';
@@ -78,12 +71,16 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadSyncOptions,
+  ReadAsyncOptions,
   RmOptions,
   RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type {
+  ReadableWebStreamOptions,
+  CreateReadStreamOptions,
+} from 'node:fs/promises';
 import { isArrayBufferView } from 'node-internal:internal_types';
 
 export class FileHandle extends EventEmitter {
@@ -149,72 +146,80 @@ export class FileHandle extends EventEmitter {
     await fsync(this.#fd);
   }
 
-  async read<T extends NodeJS.ArrayBufferView>(
-    bufferOrOptions: T | ReadSyncOptions = {},
-    offsetOrOptions: number | ReadSyncOptions = {},
+  read<T extends NodeJS.ArrayBufferView>(
+    bufferOrOptions: T | ReadAsyncOptions<T> = {},
+    offsetOrOptions: number | ReadAsyncOptions<T> = {},
     length?: number,
     position: Position = null
   ): Promise<{ bytesRead: number; buffer: T }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-
-    let options: any;
-    if (isArrayBufferView(bufferOrOptions)) {
-      if (typeof offsetOrOptions === 'number') {
-        options = {
-          buffer: bufferOrOptions,
-          offset: offsetOrOptions,
-          length: length ?? bufferOrOptions.byteLength,
-          position: position ?? null,
-        };
-      } else {
-        options = {
-          buffer: bufferOrOptions,
-          ...offsetOrOptions,
-        };
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
       }
-    } else {
-      options = bufferOrOptions;
+
+      let options: ReadAsyncOptions<T>;
+      if (isArrayBufferView(bufferOrOptions)) {
+        if (typeof offsetOrOptions === 'number') {
+          options = {
+            buffer: bufferOrOptions,
+            offset: offsetOrOptions,
+            length: length ?? bufferOrOptions.byteLength,
+            position: position ?? null,
+          };
+        } else {
+          options = {
+            buffer: bufferOrOptions,
+            ...offsetOrOptions,
+          };
+        }
+      } else {
+        options = bufferOrOptions;
+      }
+
+      const {
+        buffer = Buffer.alloc(16384),
+        offset: actualOffset = buffer.byteOffset,
+        length: actualLength = buffer.byteLength - buffer.byteOffset,
+        position: actualPosition = null,
+      } = options;
+
+      validateUint32(actualOffset, 'offset');
+      validateUint32(actualLength, 'length');
+      validatePosition(actualPosition, 'position');
+
+      const bytesRead = fssync.readSync(
+        this.#fd,
+        buffer as NodeJS.ArrayBufferView,
+        actualOffset,
+        actualLength,
+        actualPosition
+      );
+
+      return Promise.resolve({
+        bytesRead,
+        buffer: buffer as T,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-
-    const {
-      buffer = Buffer.alloc(16384),
-      offset: actualOffset = buffer.byteOffset,
-      length: actualLength = buffer.byteLength - buffer.byteOffset,
-      position: actualPosition = null,
-    } = options || {};
-
-    validateUint32(actualOffset, 'offset');
-    validateUint32(actualLength, 'length');
-    validatePosition(actualPosition, 'position');
-
-    const bytesRead = fssync.readSync(
-      this.#fd,
-      buffer,
-      actualOffset,
-      actualLength,
-      actualPosition
-    );
-
-    return {
-      bytesRead,
-      buffer,
-    };
   }
 
-  async readv<T extends NodeJS.ArrayBufferView>(
+  readv<T extends NodeJS.ArrayBufferView>(
     buffers: T[],
     position: Position = null
   ): Promise<{ bytesRead: number; buffers: T[] }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesRead = fssync.readvSync(this.#fd, buffers, position);
+      return Promise.resolve({
+        bytesRead,
+        buffers,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesRead = fssync.readvSync(this.#fd, buffers, position);
-    return {
-      bytesRead,
-      buffers,
-    };
   }
 
   async readFile(
@@ -226,7 +231,8 @@ export class FileHandle extends EventEmitter {
     return await readFile(this.#fd, options);
   }
 
-  readLines(_options: any = undefined): void {
+  readLines(_options: CreateReadStreamOptions = {}): void {
+    // TODO(node-fs): Implement
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
@@ -254,76 +260,94 @@ export class FileHandle extends EventEmitter {
     await futimes(this.#fd, atime, mtime);
   }
 
-  async write(
+  write(
     buffer: NodeJS.ArrayBufferView | string,
     offsetPositionOrOptions: WriteSyncOptions | Position = null,
     lengthOrEncoding?: number | ValidEncoding,
     position: Position = null
   ): Promise<{ bytesWritten: number; buffer: NodeJS.ArrayBufferView }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+
+      if (typeof buffer === 'string') {
+        buffer = Buffer.from(buffer, lengthOrEncoding as string);
+      }
+
+      const bytesWritten = fssync.writeSync(
+        this.#fd,
+        buffer,
+        offsetPositionOrOptions,
+        lengthOrEncoding,
+        position
+      );
+
+      return Promise.resolve({
+        bytesWritten,
+        buffer,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-
-    if (typeof buffer === 'string') {
-      buffer = Buffer.from(buffer, lengthOrEncoding as string);
-    }
-
-    const bytesWritten = fssync.writeSync(
-      this.#fd,
-      buffer,
-      offsetPositionOrOptions,
-      lengthOrEncoding,
-      position
-    );
-
-    return {
-      bytesWritten,
-      buffer,
-    };
   }
 
-  async writev(
+  writev(
     buffers: NodeJS.ArrayBufferView[],
     position: Position = null
   ): Promise<{ bytesWritten: number; buffers: NodeJS.ArrayBufferView[] }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesWritten = fssync.writevSync(this.#fd, buffers, position);
+      return Promise.resolve({
+        bytesWritten,
+        buffers,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesWritten = fssync.writevSync(this.#fd, buffers, position);
-    return {
-      bytesWritten,
-      buffers,
-    };
   }
 
-  async writeFile(
+  writeFile(
     data: string | Buffer,
     options: ValidEncoding | WriteFileOptions = {}
   ): Promise<{ bytesWritten: number; buffer: Buffer }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesWritten = fssync.writeFileSync(this.#fd, data, options);
+      return Promise.resolve({
+        bytesWritten,
+        buffer: isArrayBufferView(data)
+          ? data
+          : Buffer.from(data, options as BufferEncoding),
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesWritten = fssync.writeFileSync(this.#fd, data, options);
-    return {
-      bytesWritten,
-      buffer: isArrayBufferView(data)
-        ? data
-        : Buffer.from(data, options as BufferEncoding),
-    };
   }
 
-  async close(): Promise<void> {
-    this.#handle?.close();
-    this.#fd = undefined;
-    this.#handle = undefined;
-    (this as unknown as EventEmitter).emit('close');
+  close(): Promise<void> {
+    try {
+      this.#handle?.close();
+      this.#fd = undefined;
+      this.#handle = undefined;
+      (this as unknown as EventEmitter).emit('close');
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(err as Error);
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
 
-  readableWebStream(_options: any = {}): void {
+  readableWebStream(_options: ReadableWebStreamOptions = {}): void {
+    // TODO(node-fs): Implement
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
@@ -347,7 +371,9 @@ export function access(
   // rather than forwarding them to the callback, the promise version throws a errors
   // asynchronously by rejecting the promise. So we can rely on accessSync to do the
   // input validation for us.
-  return Promise.try(() => fssync.accessSync(path, mode));
+  return Promise.try(() => {
+    fssync.accessSync(path, mode);
+  });
 }
 
 export function appendFile(
@@ -363,11 +389,15 @@ export function appendFile(
 }
 
 export function chmod(path: FilePath, mode: number): Promise<void> {
-  return Promise.try(() => fssync.chmodSync(path, mode));
+  return Promise.try(() => {
+    fssync.chmodSync(path, mode);
+  });
 }
 
 export function chown(path: FilePath, uid: number, gid: number): Promise<void> {
-  return Promise.try(() => fssync.chownSync(path, uid, gid));
+  return Promise.try(() => {
+    fssync.chownSync(path, uid, gid);
+  });
 }
 
 export function copyFile(
@@ -375,7 +405,9 @@ export function copyFile(
   dest: FilePath,
   mode: number
 ): Promise<void> {
-  return Promise.try(() => fssync.copyFileSync(src, dest, mode));
+  return Promise.try(() => {
+    fssync.copyFileSync(src, dest, mode);
+  });
 }
 
 export function cp(
@@ -383,34 +415,48 @@ export function cp(
   dest: FilePath,
   options: CopySyncOptions
 ): Promise<void> {
-  return Promise.try(() => fssync.cpSync(src, dest, options));
+  return Promise.try(() => {
+    fssync.cpSync(src, dest, options);
+  });
 }
 
 function fchmod(fd: number, mode: string | number): Promise<void> {
-  return Promise.try(() => fssync.fchmodSync(fd, mode));
+  return Promise.try(() => {
+    fssync.fchmodSync(fd, mode);
+  });
 }
 
 function fchown(fd: number, uid: number, gid: number): Promise<void> {
-  return Promise.try(() => fssync.fchownSync(fd, uid, gid));
+  return Promise.try(() => {
+    fssync.fchownSync(fd, uid, gid);
+  });
 }
 
 function fdatasync(fd: number): Promise<void> {
-  return Promise.try(() => fssync.fdatasyncSync(fd));
+  return Promise.try(() => {
+    fssync.fdatasyncSync(fd);
+  });
 }
 
 function fsync(fd: number): Promise<void> {
-  return Promise.try(() => fssync.fsyncSync(fd));
+  return Promise.try(() => {
+    fssync.fsyncSync(fd);
+  });
 }
 
 function fstat(
   fd: number,
   options: StatOptions = {}
 ): Promise<Stats | undefined> {
-  return Promise.try(() => fssync.fstatSync(fd, options));
+  return Promise.try(() => {
+    return fssync.fstatSync(fd, options);
+  });
 }
 
 function ftruncate(fd: number, len: number = 0): Promise<void> {
-  return Promise.try(() => fssync.ftruncateSync(fd, len));
+  return Promise.try(() => {
+    fssync.ftruncateSync(fd, len);
+  });
 }
 
 function futimes(
@@ -418,11 +464,15 @@ function futimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.futimesSync(fd, atime, mtime));
+  return Promise.try(() => {
+    fssync.futimesSync(fd, atime, mtime);
+  });
 }
 
 export function lchmod(path: FilePath, mode: number): Promise<void> {
-  return Promise.try(() => fssync.lchmodSync(path, mode));
+  return Promise.try(() => {
+    fssync.lchmodSync(path, mode);
+  });
 }
 
 export function lchown(
@@ -430,7 +480,9 @@ export function lchown(
   uid: number,
   gid: number
 ): Promise<void> {
-  return Promise.try(() => fssync.lchownSync(path, uid, gid));
+  return Promise.try(() => {
+    fssync.lchownSync(path, uid, gid);
+  });
 }
 
 export function lutimes(
@@ -438,18 +490,24 @@ export function lutimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.lutimesSync(path, atime, mtime));
+  return Promise.try(() => {
+    fssync.lutimesSync(path, atime, mtime);
+  });
 }
 
 export function link(existingPath: FilePath, newPath: FilePath): Promise<void> {
-  return Promise.try(() => fssync.linkSync(existingPath, newPath));
+  return Promise.try(() => {
+    fssync.linkSync(existingPath, newPath);
+  });
 }
 
 export function lstat(
   path: FilePath,
   options: StatOptions = {}
 ): Promise<Stats | undefined> {
-  return Promise.try(() => fssync.lstatSync(path, options));
+  return Promise.try(() => {
+    return fssync.lstatSync(path, options);
+  });
 }
 
 export function mkdir(
@@ -512,15 +570,21 @@ export function realpath(
 }
 
 export function rename(oldPath: FilePath, newPath: FilePath): Promise<void> {
-  return Promise.try(() => fssync.renameSync(oldPath, newPath));
+  return Promise.try(() => {
+    fssync.renameSync(oldPath, newPath);
+  });
 }
 
 export function rmdir(path: FilePath, options: RmDirOptions): Promise<void> {
-  return Promise.try(() => fssync.rmdirSync(path, options));
+  return Promise.try(() => {
+    fssync.rmdirSync(path, options);
+  });
 }
 
 export function rm(path: FilePath, options: RmOptions = {}): Promise<void> {
-  return Promise.try(() => fssync.rmSync(path, options));
+  return Promise.try(() => {
+    fssync.rmSync(path, options);
+  });
 }
 
 export function stat(
@@ -542,15 +606,21 @@ export function symlink(
   path: FilePath,
   type: SymlinkType = null
 ): Promise<void> {
-  return Promise.try(() => fssync.symlinkSync(target, path, type));
+  return Promise.try(() => {
+    fssync.symlinkSync(target, path, type);
+  });
 }
 
 export function truncate(path: FilePath, len: number = 0): Promise<void> {
-  return Promise.try(() => fssync.truncateSync(path, len));
+  return Promise.try(() => {
+    fssync.truncateSync(path, len);
+  });
 }
 
 export function unlink(path: FilePath): Promise<void> {
-  return Promise.try(() => fssync.unlinkSync(path));
+  return Promise.try(() => {
+    fssync.unlinkSync(path);
+  });
 }
 
 export function utimes(
@@ -558,7 +628,9 @@ export function utimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.utimesSync(path, atime, mtime));
+  return Promise.try(() => {
+    fssync.utimesSync(path, atime, mtime);
+  });
 }
 
 export function watch(): Promise<void> {
