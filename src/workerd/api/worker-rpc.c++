@@ -11,6 +11,7 @@
 #include <workerd/util/completion-membrane.h>
 
 #include <capnp/membrane.h>
+
 #include <mutex>
 
 namespace workerd::api {
@@ -36,18 +37,18 @@ void EntrypointsModule::registerRpcTargetClass(jsg::Lock& js, jsg::JsValue const
   if (!handle->IsFunction()) {
     JSG_FAIL_REQUIRE(TypeError, "registerRpcTargetClass() requires a constructor function");
   }
-  
+
   auto func = handle.As<v8::Function>();
   v8::String::Utf8Value name(js.v8Isolate, func->GetName());
-  
+
   // Store the constructor name instead of V8 reference to avoid cross-isolate issues
   kj::String constructorName = kj::str(*name ? *name : "<anonymous>");
-  
+
   std::lock_guard<std::mutex> lock(registryMutex);
   // Avoid duplicate registrations
-  for (const auto& registered : registeredRpcClasses) {
+  for (const auto& registered: registeredRpcClasses) {
     if (registered == constructorName) {
-      return; // Already registered
+      return;  // Already registered
     }
   }
   registeredRpcClasses.add(kj::mv(constructorName));
@@ -55,23 +56,23 @@ void EntrypointsModule::registerRpcTargetClass(jsg::Lock& js, jsg::JsValue const
 
 bool EntrypointsModule::isRegisteredRpcTargetClass(jsg::Lock& js, jsg::JsObject obj) {
   std::lock_guard<std::mutex> lock(registryMutex);
-  
+
   auto context = js.v8Context();
   v8::Local<v8::Object> objHandle = obj;
-  
+
   // Get the constructor property from the object
   auto constructorKey = jsg::v8StrIntern(js.v8Isolate, "constructor");
   v8::Local<v8::Value> constructorValue;
-  if (!objHandle->Get(context, constructorKey).ToLocal(&constructorValue) || 
+  if (!objHandle->Get(context, constructorKey).ToLocal(&constructorValue) ||
       !constructorValue->IsFunction()) {
     return false;
   }
-  
+
   auto ctorFunc = constructorValue.As<v8::Function>();
   v8::String::Utf8Value ctorName(js.v8Isolate, ctorFunc->GetName());
   kj::StringPtr ctorNameStr(*ctorName ? *ctorName : "<anonymous>", ctorName.length());
-  
-  for (const auto& registeredName : registeredRpcClasses) {
+
+  for (const auto& registeredName: registeredRpcClasses) {
     if (registeredName == ctorNameStr) {
       return true;
     }
@@ -1233,7 +1234,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     if (EntrypointsModule::isRegisteredRpcTargetClass(js, object)) {
       allowInstanceProperties = false;
     }
-    
+
     auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
 
     // Get the named property of `object`.

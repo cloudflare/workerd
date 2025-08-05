@@ -26,4 +26,6 @@ export class RpcStub {
 export class RpcTarget {}
 
 export function waitUntil(promise: Promise<unknown>): void;
-export function registerRpcTargetClass(constructor: new (...args: any[]) => any): void;
+export function registerRpcTargetClass(
+  constructor: new (...args: any[]) => any
+): void;
