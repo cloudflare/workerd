@@ -7,6 +7,9 @@
 #include <iostream>
 #include <unistd.h>
 
+#include <workerd/jsg/script.h>
+
+
 namespace workerd::api {
 
 struct shmem_data {
@@ -88,6 +91,7 @@ do { \
         exit(EXIT_FAILURE); \
     } \
 } while (0)
+
 // A special binding that allows access to stdin. Used for REPL.
 class Stdin: public jsg::Object {
 public:
@@ -98,7 +102,7 @@ public:
     std::getline(std::cin, res);
     return kj::heapString(res.c_str());
   }
-
+  
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
 
@@ -136,8 +140,11 @@ public:
 
       CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
 
-      char script[script_size+1];
-      char* source_buffer_tail = script;
+      char* script_ = (char*) malloc(script_size + 1);
+      CHECK(script_ != nullptr);
+
+
+      char* source_buffer_tail = script_;
       ssize_t remaining = (ssize_t) script_size;
 
       printf("Reading in script with size: %zu\n",script_size);
@@ -153,24 +160,21 @@ public:
         source_buffer_tail += rv;
       }
 
-      script[script_size] = '\0';
+      script_[script_size] = '\0';
 
       int status = 0;
       int32_t res_val = 0;
-      auto compiled = jsg::NonModuleScript::compile(script, js, "reprl"_kj);
+      const kj::String script = kj::str(script_);
+      auto compiled = jsg::NonModuleScript::compile(js, script, "reprl"_kj);
       try {
-        //global_context.Get(js.v8Isolate)->Enter();
-        auto result = compiled.runAndReturn(js.v8Context())->Int32Value(js.v8Context());
-        //global_context.Get(js.v8Isolate)->Exit();
-        if (!result.IsJust()) {
-          printf("Result arg is not just...\n");
-          fflush(stdout);
-          return;
-        }
-        res_val = result.FromJust();
+        auto result = compiled.runAndReturn(js);
+        res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(js.v8Context()));
+        //fprintf(stderr,"Res val: %d\n",res_val);
+        // if we reach that point execution was successful -> return 0
+        res_val = 0;
       } catch(jsg::JsExceptionThrown&) {
         if(try_catch.HasCaught()) {
-          res_val = -1;
+          res_val = 1;
           auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
           v8::String::Utf8Value string(js.v8Isolate, str);
           printf("%s\n",*string);
@@ -184,6 +188,7 @@ public:
       status = (res_val & 0xFF) << 8;
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
       __sanitizer_cov_reset_edgeguards();
+      free(script_);
     } while(true);
   }
 

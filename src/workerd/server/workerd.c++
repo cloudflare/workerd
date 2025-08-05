@@ -1534,8 +1534,8 @@ void runFuzz() {
             // Evaluate the script
             int status = 0;
             try {
-                auto compiled = workerd::jsg::NonModuleScript::compile(script, js, "reprl"_kj);
-                auto val = workerd::jsg::JsValue(compiled.runAndReturn(js.v8Context()));
+                auto compiled = workerd::jsg::NonModuleScript::compile(js, script, "reprl"_kj);
+                auto val = workerd::jsg::JsValue(compiled.runAndReturn(js));
             } catch (const std::exception& e) {
                 fprintf(stderr, "Script execution error: %s\n", e.what());
                 _exit(-1);
@@ -1871,6 +1871,7 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
   // TODO: this is reeeeaaally bad
   argc = 4;
   char *new_argv[5];
@@ -1881,7 +1882,6 @@ int main(int argc, char* argv[]) {
   new_argv[4] = nullptr;
   argv = new_argv;
 
-  ::kj::TopLevelProcessContext context(argv[0]);
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
