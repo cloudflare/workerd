@@ -33,7 +33,7 @@ import {
   resolve,
   resolveAny,
 } from 'node-internal:internal_dns';
-import {
+import type {
   CAA,
   MX,
   NAPTR,

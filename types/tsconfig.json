@@ -17,7 +17,8 @@
     "exactOptionalPropertyTypes": false,
     "strictNullChecks": false,
     "noImplicitReturns": false,
-    "noImplicitOverride": false
+    "noImplicitOverride": false,
+    "verbatimModuleSyntax": false
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "eslint.config.mjs"],
   "exclude": ["test/types/**/*.ts", "src/worker/**", "node_modules", "**/*.mjs"]

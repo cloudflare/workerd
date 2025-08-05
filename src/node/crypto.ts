@@ -32,9 +32,9 @@ import {
   randomFill,
   randomInt,
   randomUUID,
-  PrimeNum,
-  GeneratePrimeOptions,
-  CheckPrimeOptions,
+  type PrimeNum,
+  type GeneratePrimeOptions,
+  type CheckPrimeOptions,
   generatePrime,
   generatePrimeSync,
   checkPrime,
@@ -45,7 +45,7 @@ import {
   createHash,
   createHmac,
   Hash,
-  HashOptions,
+  type HashOptions,
   Hmac,
   hash,
 } from 'node-internal:crypto_hash';
@@ -73,7 +73,11 @@ import {
 
 import { hkdf, hkdfSync } from 'node-internal:crypto_hkdf';
 
-import { pbkdf2, pbkdf2Sync, ArrayLike } from 'node-internal:crypto_pbkdf2';
+import {
+  pbkdf2,
+  pbkdf2Sync,
+  type ArrayLike,
+} from 'node-internal:crypto_pbkdf2';
 
 import { scrypt, scryptSync } from 'node-internal:crypto_scrypt';
 

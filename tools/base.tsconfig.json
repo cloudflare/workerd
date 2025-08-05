@@ -24,6 +24,7 @@
     "composite": true,
     "moduleDetection": "force",
     "isolatedModules": true,
+    "verbatimModuleSyntax": true,
     "types": []
   },
   "exclude": ["node_modules", "**/*.mjs"]

@@ -26,7 +26,7 @@
 import { default as path } from 'node:path';
 import {
   FilterList,
-  UnknownFunc,
+  type UnknownFunc,
   sanitize_unpaired_surrogates,
   getHostInfo,
   getBindingPath,
