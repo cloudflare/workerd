@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export {
-  AiOptions,
+  type AiOptions,
   InferenceUpstreamError,
   Ai,
 } from 'cloudflare-internal:ai-api';
