@@ -119,6 +119,34 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
           kj::none, kj::none, kj::none, kj::none, kj::none, nullptr, kj::none, executionModel)),
       userRequestSpan(nullptr) {}
 
+WorkerTracer::~WorkerTracer() noexcept(false) {
+  // Report the outcome event, which should have been delivered by now.
+  if (trace->outcome == EventOutcome::UNKNOWN) {
+    KJ_LOG(WARNING, "failed to set proper outcome event");
+    return;
+  }
+
+  // Do not attempt to report an outcome event if logging is disabled, as with other event types.
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
+  // wd_test), we never set up a tail stream and accordingly should not report an outcome
+  // event. Worker events that should be traced need to set the event info at the start of the
+  // invocation to submit the onset event before any other tail events.
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+    if (isPredictableModeForTest()) {
+      writer->report(spanContext,
+          tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
+    } else {
+      writer->report(
+          spanContext, tracing::Outcome(trace->outcome, trace->cpuTime, trace->wallTime));
+    }
+  }
+};
+
 constexpr kj::LiteralStringConst logSizeExceeded =
     "[\"Log size limit exceeded: More than 256KB of data (across console.log statements, exception, request metadata and headers) was logged during a single request. Subsequent data for this request will not be recorded in logs, appear when tailing this Worker's logs, or in Tail Workers.\"]"_kjc;
 
@@ -346,26 +374,17 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->wallTime = wallTime;
 
   // All spans must have wrapped up before the outcome is reported. Report the top-level "worker"
-  // span by deallocating its span builder.
+  // span by deallocating its span builder. (Note exceptions to this explained in the next comment –
+  // we still report the "worker" span here as the worker will have returned at this point)
   userRequestSpan = nullptr;
 
-  // Do not attempt to report an outcome event if logging is disabled, as with other event types.
-  if (pipelineLogLevel == PipelineLogLevel::NONE) {
-    return;
-  }
-  // For worker events where we never set the event info (such as WorkerEntrypoint::test() used in
-  // wd_test), we never set up a tail stream and accordingly should not report an outcome
-  // event. Worker events that should be traced need to set the event info at the start of the
-  // invocation to submit the onset event before any other tail events.
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-    if (isPredictableModeForTest()) {
-      writer->report(
-          spanContext, tracing::Outcome(outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS));
-    } else {
-      writer->report(spanContext, tracing::Outcome(outcome, cpuTime, wallTime));
-    }
-  }
+  // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
+  // reported when the metrics request is deallocated, but with ctx.waitUntil() there might be spans
+  // continuing to exist beyond that point. By the time the WorkerTracer is deallocated, the
+  // IoContext and its task set will be done and any additional spans will have wrapped up.
+  // This is somewhat at odds with the concept of "streaming" events, but benign as the WorkerTracer
+  // wraps up right after the metrics request object in the average case and since the outcome has a
+  // fixed size.
 }
 
 void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
