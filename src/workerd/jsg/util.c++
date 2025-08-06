@@ -183,7 +183,7 @@ struct DecodedException {
 };
 
 DecodedException decodeTunneledException(
-    v8::Isolate* isolate, kj::StringPtr internalMessage, kj::Exception::Type excType) {
+    v8::Isolate* isolate, const kj::Exception& exception, const MakeInternalErrorOptions& options) {
   // We currently support tunneling the following error types:
   //
   // - Error:        While the Web IDL spec claims this is reserved for use by program authors, this
@@ -202,7 +202,7 @@ DecodedException decodeTunneledException(
   // https://heycam.github.io/webidl/#idl-exceptions
   //
   // TODO(someday): Support arbitrary user-defined error types, not just Error?
-  auto tunneledInfo = tunneledErrorType(internalMessage);
+  auto tunneledInfo = tunneledErrorType(exception.getDescription());
 
   DecodedException result;
   auto errorType = tunneledInfo.message;
@@ -219,6 +219,56 @@ DecodedException decodeTunneledException(
   result.isFromRemote = tunneledInfo.isFromRemote;
   result.isDurableObjectReset = tunneledInfo.isDurableObjectReset;
 
+  do {
+    // DOMExceptions require a parenthesized error name argument, like DOMException(SyntaxError).
+    // TODO(soon): Decoding a DOMException from the serialization detail would be better but
+    // causes problems with some code paths. For now, we will decode these as new instances and
+    // ignore serialized detail that may be included.
+    if (errorType.startsWith("DOMException(")) {
+      errorType = errorType.slice(strlen("DOMException("));
+      // Check for closing brace
+      KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
+        auto& js = Lock::from(isolate);
+        auto errorName = kj::str(errorType.first(closeParen));
+        auto message = appMessage(errorType.slice(1 + closeParen));
+        auto exception = js.domException(kj::mv(errorName), kj::str(message));
+        result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
+        break;
+      }
+    }
+
+    if (tunneledInfo.isJsgError) {
+      // If the error was originally converted from a JS error, then we likely have
+      // serialized the original error object as a detail, if so, let's try to use
+      // that, otherwise, we'll fall back to constructing a new error object. If
+      // the ignoreDetail optiom is set, we skip trying to deserialize.
+      if (!options.ignoreDetail) {
+        KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
+          kj::Maybe<jsg::JsValue> deserialized;
+          v8::TryCatch tryCatch(isolate);
+          try {
+            auto& js = Lock::from(isolate);
+            jsg::Deserializer deser(js, serializedJsError, kj::none, kj::none,
+                jsg::Deserializer::Options{
+                  // By default, we do not preserve stacks in deserialized errors because
+                  // of trust concerns sharing stack details over potentially untrusted
+                  // boundaries. However, if the caller has explicitly indiciate that the
+                  // scope it trusted, we will preserve the stack in the deserialized error.
+                  .preserveStackInErrors = options.trusted,
+                });
+            result.handle = deser.readValue(js);
+
+            // If the result came from a serialized JS detail, it might not be an object!
+            // If that's the case, we'll ignore and fallback to the normal decoding below.
+            if (result.handle->IsObject() || options.allowNonObjects) {
+              break;
+            }
+          } catch (jsg::JsExceptionThrown&) {
+            // Failed to deserialize, we'll continue with the original decoding below.
+          }
+        }
+      }
+
 #define HANDLE_V8_ERROR(error_name, error_type)                                                    \
   if (errorType.startsWith(error_name)) {                                                          \
     auto message = appMessage(errorType.slice(strlen(error_name)));                                \
@@ -226,8 +276,6 @@ DecodedException decodeTunneledException(
     break;                                                                                         \
   }
 
-  do {
-    if (tunneledInfo.isJsgError) {
       HANDLE_V8_ERROR("Error", Error);
       HANDLE_V8_ERROR("RangeError", RangeError);
       HANDLE_V8_ERROR("TypeError", TypeError);
@@ -236,36 +284,28 @@ DecodedException decodeTunneledException(
       HANDLE_V8_ERROR("CompileError", WasmCompileError);
       HANDLE_V8_ERROR("LinkError", WasmCompileError);
       HANDLE_V8_ERROR("RuntimeError", WasmCompileError);
+      HANDLE_V8_ERROR("AggregateError", AggregateError);
+      HANDLE_V8_ERROR("SuppressedError", SuppressedError);
+      HANDLE_V8_ERROR("URIError", URIError);
+      HANDLE_V8_ERROR("EvalError", EvalError);
 
-      // DOMExceptions require a parenthesized error name argument, like DOMException(SyntaxError).
-      if (errorType.startsWith("DOMException(")) {
-        errorType = errorType.slice(strlen("DOMException("));
-        // Check for closing brace
-        KJ_IF_SOME(closeParen, errorType.findFirst(')')) {
-          auto& js = Lock::from(isolate);
-          auto errorName = kj::str(errorType.first(closeParen));
-          auto message = appMessage(errorType.slice(1 + closeParen));
-          auto exception = js.domException(kj::mv(errorName), kj::str(message));
-          result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
-          break;
-        }
-      }
+#undef HANDLE_V8_ERROR
     }
-    // unrecognized exception type
+
+    // unrecognized exception type and no serialized JS error detail.
     result.internalErrorId = makeInternalErrorId();
     result.handle = v8::Exception::Error(
         v8Str(isolate, renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId))));
     result.isInternal = true;
   } while (false);
-#undef HANDLE_V8_ERROR
 
   if (result.isFromRemote) {
     setRemoteError(isolate, result.handle);
   }
 
-  if (excType == kj::Exception::Type::DISCONNECTED) {
+  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
     setRetryableError(isolate, result.handle);
-  } else if (excType == kj::Exception::Type::OVERLOADED) {
+  } else if (exception.getType() == kj::Exception::Type::OVERLOADED) {
     setOverloadedError(isolate, result.handle);
   }
 
@@ -288,22 +328,13 @@ kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
   }
 }
 
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
-  auto desc = exception.getDescription();
-
-  // TODO(someday): Deserialize encoded V8 exception from
-  //   exception.getDetail(TUNNELED_EXCEPTION_DETAIL_ID), if present. WARNING: We must think
-  //   carefully about security in the case that the exception has passed between workers that
-  //   don't trust each other. Perhaps we should explicitly remove the stack trace in this case.
-  //   REMINDER: Worker::logUncaughtException() currently deserializes TUNNELED_EXCEPTION_DETAIL_ID
-  //   in order to extract a full stack trace. Once we do it here, we can remove the code from
-  //   there.
-
-  auto tunneledException = decodeTunneledException(isolate, desc, exception.getType());
-
+v8::Local<v8::Value> kjExceptionToJs(
+    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options) {
+  auto tunneledException = decodeTunneledException(isolate, exception, options);
+  bool isDisconnected = exception.getType() == kj::Exception::Type::DISCONNECTED;
   if (tunneledException.isInternal) {
-    bool logWithInternalId = exception.getType() != kj::Exception::Type::DISCONNECTED &&
-        !isDoNotLogException(exception.getDescription());
+    bool logWithInternalId =
+        !isDisconnected && !isDoNotLogException(exception.getDescription()) && !options.doNotLog;
     auto& observer = IsolateBase::from(isolate).getObserver();
     observer.reportInternalException(exception,
         {
@@ -324,34 +355,35 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
       KJ_LOG(INFO, exception);  // Run with --verbose to see exception logs.
     }
 
-    if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-      auto exception = v8::Exception::Error(v8StrIntern(isolate, "Network connection lost."_kj));
+    if (isDisconnected) {
+      auto ex = v8::Exception::Error(v8StrIntern(isolate, "Network connection lost."_kj));
       if (tunneledException.isFromRemote) {
-        setRemoteError(isolate, exception);
+        setRemoteError(isolate, ex);
       }
 
       // DISCONNECTED exceptions are considered retryable
-      setRetryableError(isolate, exception);
+      setRetryableError(isolate, ex);
 
       if (tunneledException.isDurableObjectReset) {
-        setDurableObjectResetError(isolate, exception);
+        setDurableObjectResetError(isolate, ex);
       }
 
-      return exception;
+      return ex;
     }
   }
 
   return tunneledException.handle;
 }
 
-Value Lock::exceptionToJs(kj::Exception&& exception) {
+Value Lock::exceptionToJs(kj::Exception&& exception, MakeInternalErrorOptions options) {
   return withinHandleScope(
-      [&] { return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return Value(v8Isolate, kjExceptionToJs(v8Isolate, kj::mv(exception), options)); });
 }
 
-JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
+JsRef<JsValue> Lock::exceptionToJsValue(
+    kj::Exception&& exception, MakeInternalErrorOptions options) {
   return withinHandleScope([&] {
-    JsValue val = JsValue(makeInternalError(v8Isolate, kj::mv(exception)));
+    JsValue val = JsValue(kjExceptionToJs(v8Isolate, kj::mv(exception), options));
     return val.addRef(*this);
   });
 }
@@ -370,9 +402,10 @@ void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
   isolate->ThrowException(makeInternalError(isolate, internalMessage));
 }
 
-void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
+void throwInternalError(
+    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options) {
   KJ_IF_SOME(renderingError, kj::runCatchingExceptions([&]() {
-    isolate->ThrowException(makeInternalError(isolate, kj::mv(exception)));
+    isolate->ThrowException(kjExceptionToJs(isolate, kj::mv(exception), options));
   })) {
     KJ_LOG(ERROR, "error rendering exception", renderingError);
     KJ_LOG(ERROR, exception);
@@ -388,6 +421,7 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
           // Make sure we don't break compatibility if V8 introduces a new version. This value can
           // be bumped to match the new version once all of production is updated to understand it.
           .version = 15,
+          .treatErrorsAsHostObjects = true,
         });
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);

@@ -205,7 +205,9 @@ def _to_python_exception(exc: JsException) -> Exception:
 def _from_js_error(exc: JsException) -> Exception:
     # convert into Python exception after a full round trip
     # Python - JS - Python
-    if not exc.message or not exc.message.startswith("PythonError"):
+    if exc.name != "PythonError" and (
+        not exc.message or not exc.message.startswith("PythonError")
+    ):
         return _to_python_exception(exc)
 
     # extract the Python exception type from the traceback
