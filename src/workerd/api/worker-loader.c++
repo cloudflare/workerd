@@ -118,7 +118,8 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
         .compatibilityFlags = compatFlags,
         .env = kj::mv(env),
         .globalOutbound = kj::mv(globalOutbound),
-        .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule))};
+        .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
+        .ownContentIsRpcResponse = false};
     });
   });
 
