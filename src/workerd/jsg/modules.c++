@@ -239,7 +239,8 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
     // I.e. NOT a rejected promise. OK...
-    js.v8Isolate->ThrowException(kjExceptionToJs(js.v8Isolate, kj::mv(exception)));
+    auto ex = js.exceptionToJsValue(kj::mv(exception));
+    js.v8Isolate->ThrowException(ex.getHandle(js));
     result = v8::Local<v8::Promise>();
   }
 

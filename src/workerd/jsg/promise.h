@@ -345,7 +345,8 @@ class Promise {
     }
 
     void reject(Lock& js, kj::Exception exception) {
-      reject(js, kjExceptionToJs(js.v8Isolate, kj::mv(exception)));
+      auto exc = js.exceptionToJs(kj::mv(exception));
+      reject(js, exc.getHandle(js));
     }
 
     Resolver addRef(Lock& js) {
