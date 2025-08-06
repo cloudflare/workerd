@@ -251,6 +251,13 @@ struct DynamicWorkerSource {
   // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
   // `StringPtr`s; `ownContent` owns the backing buffer for them.)
   kj::Own<void> ownContent;
+
+  // Indicates whether ownContent is holding onto a Cap'n Proto RPC response. This is important
+  // to know because such an RPC response must be destroyed on the same thread where it was
+  //  created, and generally should be destroyed "relatively soon", not kept around forever. If
+  //  this is false, then it is perfectly safe to transfer ownership of ownContent between threads
+  //  and keep it alive indefinitely long.
+  bool ownContentIsRpcResponse = true;
 };
 
 }  // namespace workerd
