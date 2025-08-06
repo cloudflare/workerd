@@ -255,7 +255,7 @@ struct TunneledContext: public ContextGlobalObject {
     } catch (...) {
       auto ex = kj::getCaughtExceptionAsKj();
       KJ_ASSERT(isTunneledException(ex.getDescription()));
-      auto decodedErr = jsg::JsValue(makeInternalError(js.v8Isolate, kj::mv(ex)));
+      auto decodedErr = jsg::JsValue(kjExceptionToJs(js.v8Isolate, kj::mv(ex)));
       auto obj = KJ_ASSERT_NONNULL(decodedErr.tryCast<jsg::JsObject>());
       KJ_ASSERT(obj.get(js, "foo"_kj).strictEquals(js.boolean(true)));
       KJ_ASSERT(obj.get(js, "message"_kj).toString(js) == "foo"_kj);

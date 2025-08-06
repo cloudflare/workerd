@@ -1461,8 +1461,8 @@ class ExceptionWrapper {
     // Converts the error with default options. If the exception is a tunneled
     // exception that has a serialized JS error, then that will be used. If
     // that is used, the stack will be omitted by default. Pass the .trusted = true
-    // option to include the stack. See makeInternalError for details.
-    return makeInternalError(js.v8Isolate, kj::mv(exception));
+    // option to include the stack. See kjExceptionToJs for details.
+    return kjExceptionToJs(js.v8Isolate, kj::mv(exception));
   }
 
   kj::Maybe<kj::Exception> tryUnwrap(Lock& js,

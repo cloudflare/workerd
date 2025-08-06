@@ -328,7 +328,7 @@ kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
   }
 }
 
-v8::Local<v8::Value> makeInternalError(
+v8::Local<v8::Value> kjExceptionToJs(
     v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options) {
   auto tunneledException = decodeTunneledException(isolate, exception, options);
   bool isDisconnected = exception.getType() == kj::Exception::Type::DISCONNECTED;
@@ -377,13 +377,13 @@ v8::Local<v8::Value> makeInternalError(
 
 Value Lock::exceptionToJs(kj::Exception&& exception, MakeInternalErrorOptions options) {
   return withinHandleScope(
-      [&] { return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception), options)); });
+      [&] { return Value(v8Isolate, kjExceptionToJs(v8Isolate, kj::mv(exception), options)); });
 }
 
 JsRef<JsValue> Lock::exceptionToJsValue(
     kj::Exception&& exception, MakeInternalErrorOptions options) {
   return withinHandleScope([&] {
-    JsValue val = JsValue(makeInternalError(v8Isolate, kj::mv(exception), options));
+    JsValue val = JsValue(kjExceptionToJs(v8Isolate, kj::mv(exception), options));
     return val.addRef(*this);
   });
 }
@@ -405,7 +405,7 @@ void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
 void throwInternalError(
     v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options) {
   KJ_IF_SOME(renderingError, kj::runCatchingExceptions([&]() {
-    isolate->ThrowException(makeInternalError(isolate, kj::mv(exception), options));
+    isolate->ThrowException(kjExceptionToJs(isolate, kj::mv(exception), options));
   })) {
     KJ_LOG(ERROR, "error rendering exception", renderingError);
     KJ_LOG(ERROR, exception);
