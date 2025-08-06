@@ -744,7 +744,10 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
 }
 
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
-  return js.alloc<SqlStorage>(JSG_THIS);
+  auto sql = js.alloc<SqlStorage>(JSG_THIS);
+  // TODO(perf): can this be done lazily?
+  sql->init(js);
+  return sql;
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
