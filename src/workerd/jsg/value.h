@@ -1458,6 +1458,10 @@ class ExceptionWrapper {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::Exception exception) {
+    // Converts the error with default options. If the exception is a tunneled
+    // exception that has a serialized JS error, then that will be used. If
+    // that is used, the stack will be omitted by default. Pass the .trusted = true
+    // option to include the stack. See makeInternalError for details.
     return makeInternalError(js.v8Isolate, kj::mv(exception));
   }
 
@@ -1508,6 +1512,10 @@ class ExceptionWrapper {
           "TypeError"_kj,
           "SyntaxError"_kj,
           "ReferenceError"_kj,
+          "AggregateError"_kj,
+          "SuppressedError"_kj,
+          "URIError"_kj,
+          "EvalError"_kj,
           // WASM Error Types
           "CompileError"_kj,
           "LinkError"_kj,

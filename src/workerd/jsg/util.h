@@ -53,6 +53,26 @@ bool getShouldSetToStringTag(v8::Isolate* isolate);
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
+struct MakeInternalErrorOptions {
+  // When trusted is true and the kj::Exception has a serialized exception detail, the
+  // stack will be included in the deserialized error if it is available. When false,
+  // the stack will be omitted.
+  bool trusted = false;
+
+  // When ignoreDetail is true, tells makeInternalError() to ignore any serialized
+  // exception detail in the kj::Exception.
+  bool ignoreDetail = false;
+
+  // If the deserialized exception detail is not an object, then it will be ignored
+  // and we will fall back to constructing a new error object. The default is true
+  // to preserve existing behavior, but setting this to false may be useful in some
+  // cases. When false, the makeInternalError() might return a non-object value.
+  bool ignoreNonObjects = true;
+
+  // When doNotLog is true, the error will not be logged.
+  bool doNotLog = false;
+};
+
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
@@ -61,13 +81,15 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+v8::Local<v8::Value> makeInternalError(
+    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
 // calls makeInternalError() and then tells the isolate to throw it.
-void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+void throwInternalError(
+    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 

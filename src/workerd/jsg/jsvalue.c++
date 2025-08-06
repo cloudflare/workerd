@@ -624,8 +624,8 @@ JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) {
   return JsPromise(handleScope.Escape(resolver->GetPromise()));
 }
 
-JsPromise Lock::rejectedJsPromise(kj::Exception&& exception) {
-  return rejectedJsPromise(exceptionToJsValue(kj::mv(exception)).getHandle(*this));
+JsPromise Lock::rejectedJsPromise(kj::Exception&& exception, MakeInternalErrorOptions options) {
+  return rejectedJsPromise(exceptionToJsValue(kj::mv(exception), options).getHandle(*this));
 }
 
 PromiseState JsPromise::state() {

@@ -487,9 +487,9 @@ Promise<T> Lock::rejectedPromise(jsg::Value exception) {
 }
 
 template <typename T>
-Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
+Promise<T> Lock::rejectedPromise(kj::Exception&& exception, MakeInternalErrorOptions options) {
   return withinHandleScope(
-      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception), options)); });
 }
 
 template <class Func>
