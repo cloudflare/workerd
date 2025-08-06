@@ -4669,7 +4669,9 @@ class Server::HttpListener final: public kj::Refcounted {
       context.getResults().setTopLevel(kj::mv(cap));
 
       auto worker = getWorker();
-      return worker->customEvent(kj::mv(customEvent)).ignoreResult().attach(kj::mv(worker));
+      auto result = co_await worker->customEvent(kj::mv(customEvent)).attach(kj::mv(worker));
+      auto response = context.getResults();
+      response.setResult(result.outcome);
     }
 
    private:
