@@ -67,9 +67,10 @@ struct MakeInternalErrorOptions {
   // and we will fall back to constructing a new error object. The default is true
   // to preserve existing behavior, but setting this to false may be useful in some
   // cases. When false, the makeInternalError() might return a non-object value.
-  bool ignoreNonObjects = true;
+  bool allowNonObjects = false;
 
-  // When doNotLog is true, the error will not be logged.
+  // When doNotLog is true and this is an actually-internal error, the error will
+  // not be logged.
   bool doNotLog = false;
 };
 

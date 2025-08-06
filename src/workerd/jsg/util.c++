@@ -260,7 +260,7 @@ DecodedException decodeTunneledException(
 
             // If the result came from a serialized JS detail, it might not be an object!
             // If that's the case, we'll ignore and fallback to the normal decoding below.
-            if (result.handle->IsObject() || !options.ignoreNonObjects) {
+            if (result.handle->IsObject() || options.allowNonObjects) {
               break;
             }
           } catch (jsg::JsExceptionThrown&) {
