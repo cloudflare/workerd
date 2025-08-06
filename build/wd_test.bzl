@@ -45,7 +45,6 @@ def wd_test(
             tsconfig = ":" + name + "@ts_config",
             allow_js = True,
             source_map = True,
-            composite = True,
             declaration = True,
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )

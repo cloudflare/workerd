@@ -1,7 +1,7 @@
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@workerd//:build/eslint_test.bzl", "eslint_test")
 
-def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, testonly = False):
+def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, testonly = False, composite = False):
     """Bazel rule for a workerd TypeScript project, setting common options"""
 
     ts_config(
@@ -16,9 +16,9 @@ def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, testonl
         deps = deps,
         tsconfig = ":" + name + "@tsconfig",
         allow_js = True,
-        composite = True,
         source_map = True,
         testonly = testonly,
+        composite = composite,
     )
 
     if eslintrc_json:

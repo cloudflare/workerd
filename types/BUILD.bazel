@@ -12,6 +12,7 @@ wd_ts_project(
         ],
         exclude = ["src/worker/**/*"],
     ),
+    composite = True,
     eslintrc_json = "eslint.config.mjs",
     tsconfig_json = "//types:tsconfig.json",
     deps = [
@@ -77,6 +78,7 @@ js_run_binary(
 [
     wd_ts_test(
         src = src,
+        composite = True,
         node_options = ["--enable-source-maps"],
         tsconfig_json = "//types:tsconfig.json",
         deps = [":types_lib"],

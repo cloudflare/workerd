@@ -21,7 +21,6 @@
     "moduleResolution": "node",
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    "composite": true,
     "moduleDetection": "force",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,

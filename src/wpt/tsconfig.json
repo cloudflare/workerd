@@ -2,7 +2,6 @@
   "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
     "sourceMap": true,
-    "composite": true,
     "types": ["@types/node"],
     "lib": ["ESNext", "dom"],
     "paths": {

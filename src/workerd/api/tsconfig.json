@@ -6,7 +6,6 @@
     "paths": {
       "@workerd/*": ["../../bazel-bin/src/workerd/*"]
     },
-    "composite": true,
     "declaration": true,
     "skipLibCheck": true,
     "types": ["@types/node"]

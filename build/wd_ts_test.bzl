@@ -2,7 +2,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_test")
 load("//:build/typescript.bzl", "js_name", "module_name")
 load("//:build/wd_ts_project.bzl", "wd_ts_project")
 
-def wd_ts_test(src, tsconfig_json, deps = [], eslintrc_json = None, **kwargs):
+def wd_ts_test(src, tsconfig_json, deps = [], eslintrc_json = None, composite = False, **kwargs):
     """Bazel rule to compile and run a TypeScript test"""
 
     name = module_name(src)
@@ -14,6 +14,7 @@ def wd_ts_test(src, tsconfig_json, deps = [], eslintrc_json = None, **kwargs):
         testonly = True,
         eslintrc_json = eslintrc_json,
         tsconfig_json = tsconfig_json,
+        composite = composite,
     )
 
     js_test(
