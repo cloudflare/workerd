@@ -2,9 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
 import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
@@ -40,26 +37,27 @@ import {
   isNodeStream,
 } from 'node-internal:streams_util';
 
-let isBoolean = undefined;
-let isBuffer = undefined;
-let isDate = undefined;
-let isError = undefined;
-let isFunction = undefined;
-let isNull = undefined;
-let isNullOrUndefined = undefined;
-let isNumber = undefined;
-let isObject = undefined;
-let isPrimitive = undefined;
-let isRegExp = undefined;
-let isString = undefined;
-let isSymbol = undefined;
-let isUndefined = undefined;
+let isBoolean: ((val: unknown) => boolean) | undefined = undefined;
+let isBuffer: ((val: unknown) => boolean) | undefined = undefined;
+let isDate: ((val: unknown) => boolean) | undefined = undefined;
+let isError: ((val: unknown) => boolean) | undefined = undefined;
+let isFunction: ((val: unknown) => boolean) | undefined = undefined;
+let isNull: ((val: unknown) => boolean) | undefined = undefined;
+let isNullOrUndefined: ((val: unknown) => boolean) | undefined = undefined;
+let isNumber: ((val: unknown) => boolean) | undefined = undefined;
+let isObject: ((val: unknown) => boolean) | undefined = undefined;
+let isPrimitive: ((val: unknown) => boolean) | undefined = undefined;
+let isRegExp: ((val: unknown) => boolean) | undefined = undefined;
+let isString: ((val: unknown) => boolean) | undefined = undefined;
+let isSymbol: ((val: unknown) => boolean) | undefined = undefined;
+let isUndefined: ((val: unknown) => boolean) | undefined = undefined;
 
 if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_methods) {
   isBoolean = (val: unknown): boolean => typeof val === 'boolean';
   isBuffer = (val: unknown): boolean => Buffer.isBuffer(val);
   isDate = (val: unknown): boolean => val instanceof Date;
   // @ts-expect-error TS2339 Error.isError is not defined in the current typescript version.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return,@typescript-eslint/no-unsafe-call
   isError = (val: unknown): boolean => Error.isError(val);
   isFunction = (val: unknown): boolean => typeof val === 'function';
   isNull = (val: unknown): boolean => val === null;
@@ -110,6 +108,7 @@ const kCustomPromisifyArgsSymbol = Symbol.for(
 );
 
 // TODO(later): Proper type signature for promisify.
+/* eslint-disable */
 export function promisify(original: Function): Function {
   validateFunction(original, 'original');
 
@@ -169,10 +168,13 @@ export function promisify(original: Function): Function {
 }
 
 promisify.custom = kCustomPromisifiedSymbol;
+/* eslint-enable */
 
-export function inherits(ctor: Function, superCtor: Function) {
-  if (ctor === undefined || ctor === null)
-    throw new ERR_INVALID_ARG_TYPE('ctor', 'Function', ctor);
+export function inherits(
+  ctor: Function | null | undefined, // eslint-disable-line @typescript-eslint/no-unsafe-function-type
+  superCtor: Function | null | undefined // eslint-disable-line @typescript-eslint/no-unsafe-function-type
+): void {
+  if (ctor == null) throw new ERR_INVALID_ARG_TYPE('ctor', 'Function', ctor);
 
   if (superCtor === undefined || superCtor === null)
     throw new ERR_INVALID_ARG_TYPE('superCtor', 'Function', superCtor);
@@ -189,17 +191,22 @@ export function inherits(ctor: Function, superCtor: Function) {
     writable: true,
     configurable: true,
   });
-  Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
+  Object.setPrototypeOf(ctor.prototype, superCtor.prototype); // eslint-disable-line @typescript-eslint/no-unsafe-argument
 }
 
-export function _extend(target: Object, source: Object) {
+export function _extend<T extends Record<string, unknown>>(
+  target: T,
+  source: unknown
+): T {
   // Don't do anything if source isn't an object
   if (source === null || typeof source !== 'object') return target;
 
   const keys = Object.keys(source);
   let i = keys.length;
   while (i--) {
-    (target as any)[keys[i]!] = (source as any)[keys[i]!];
+    (target as Record<string, unknown>)[keys[i] as keyof typeof source] = (
+      source as Record<string, unknown>
+    )[keys[i] as keyof typeof source];
   }
   return target;
 }
@@ -207,11 +214,11 @@ export function _extend(target: Object, source: Object) {
 export const TextDecoder = globalThis.TextDecoder;
 export const TextEncoder = globalThis.TextEncoder;
 
-export function toUSVString(input: any) {
+export function toUSVString(input: string): string {
   return input.toWellFormed();
 }
 
-function pad(n: any): string {
+function pad(n: unknown): string {
   return `${n}`.padStart(2, '0');
 }
 
@@ -227,24 +234,28 @@ function timestamp(): string {
   return `${d.getDate()} ${months[d.getMonth()]} ${t}`;
 }
 
-export function log(...args: any[]) {
+export function log(...args: unknown[]): void {
   console.log('%s - %s', timestamp(), format(...args));
 }
 
-export function parseArgs(..._: any[]): any {
+export function parseArgs(): unknown {
   // We currently have no plans to implement the util.parseArgs API.
   throw new Error('node:util parseArgs is not implemented');
 }
 
-export function transferableAbortController(..._: any[]): any {
+export function transferableAbortController(): void {
   throw new Error('node:util transferableAbortController is not implemented');
 }
 
-export function transferableAbortSignal(..._: any[]): any {
+export function transferableAbortSignal(): void {
   throw new Error('node:util transferableAbortSignal is not implemented');
 }
 
-export async function aborted(signal: AbortSignal, resource: object) {
+export async function aborted(
+  signal: unknown,
+  resource: unknown
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+): Promise<Event | void> {
   if (signal === undefined) {
     throw new ERR_INVALID_ARG_TYPE('signal', 'AbortSignal', signal);
   }
@@ -256,18 +267,18 @@ export async function aborted(signal: AbortSignal, resource: object) {
   validateAbortSignal(signal, 'signal');
   validateObject(resource, 'resource', kValidateObjectAllowObjects);
   if (signal.aborted) return Promise.resolve();
-  const { promise, resolve } = Promise.withResolvers();
+  const { promise, resolve } = Promise.withResolvers<Event>();
   const opts = { __proto__: null, once: true };
   signal.addEventListener('abort', resolve, opts);
   return promise;
 }
 
-export function deprecate(
-  fn: Function,
+export function deprecate<T = unknown>(
+  fn: T,
   _1?: string,
   _2?: string,
   _3?: boolean
-) {
+): T {
   // TODO(soon): Node.js's implementation wraps the given function in a new function that
   // logs a warning to the console if the function is called. Do we want to support that?
   // For now, we're just going to silently return the input method unmodified.
@@ -315,10 +326,9 @@ type TTYStream = (ReadableStream | WritableStream) & {
   getColorDepth(): number;
 };
 
-function isTTYStream(
-  stream: ReadableStream | WritableStream
-): stream is TTYStream {
+function isTTYStream(stream: unknown): stream is TTYStream {
   return (
+    stream != null &&
     typeof stream === 'object' &&
     'isTTY' in stream &&
     !!stream.isTTY &&
@@ -326,13 +336,15 @@ function isTTYStream(
   );
 }
 
-const stdoutPlaceholder = Object.create(null);
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+const stdoutPlaceholder: StyleTextOptions['stream'] = Object.create(null);
 export function styleText(
   format: string | string[],
-  text: string,
+  text: unknown,
   { validateStream = true, stream = stdoutPlaceholder }: StyleTextOptions = {}
 ): string {
   validateString(text, 'text');
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
   if (validateStream !== true)
     validateBoolean(validateStream, 'options.validateStream');
 
