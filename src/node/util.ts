@@ -8,6 +8,7 @@
 import { default as internalTypes } from 'node-internal:internal_types';
 import { default as utilImpl } from 'node-internal:util';
 import { isDeepStrictEqual as _isDeepStrictEqual } from 'node-internal:internal_comparisons';
+import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   validateFunction,
@@ -38,7 +39,66 @@ import {
   isWritableStream,
   isNodeStream,
 } from 'node-internal:streams_util';
-export { inspect, format, formatWithOptions, stripVTControlCharacters };
+
+let isBoolean = undefined;
+let isBuffer = undefined;
+let isDate = undefined;
+let isError = undefined;
+let isFunction = undefined;
+let isNull = undefined;
+let isNullOrUndefined = undefined;
+let isNumber = undefined;
+let isObject = undefined;
+let isPrimitive = undefined;
+let isRegExp = undefined;
+let isString = undefined;
+let isSymbol = undefined;
+let isUndefined = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_methods) {
+  isBoolean = (val: unknown): boolean => typeof val === 'boolean';
+  isBuffer = (val: unknown): boolean => Buffer.isBuffer(val);
+  isDate = (val: unknown): boolean => val instanceof Date;
+  // @ts-expect-error TS2339 Error.isError is not defined in the current typescript version.
+  isError = (val: unknown): boolean => Error.isError(val);
+  isFunction = (val: unknown): boolean => typeof val === 'function';
+  isNull = (val: unknown): boolean => val === null;
+  isNullOrUndefined = (val: unknown): boolean => val == null;
+  isNumber = (val: unknown): boolean => typeof val === 'number';
+  isObject = (val: unknown): boolean => val != null && typeof val === 'object';
+  isPrimitive = (val: unknown): boolean =>
+    val === null || (typeof val !== 'object' && typeof val !== 'function');
+  isRegExp = (val: unknown): boolean => val instanceof RegExp;
+  isString = (val: unknown): boolean => typeof val === 'string';
+  isSymbol = (val: unknown): boolean => typeof val === 'symbol';
+  isUndefined = (val: unknown): boolean => val === undefined;
+}
+
+export {
+  inspect,
+  format,
+  formatWithOptions,
+  stripVTControlCharacters,
+
+  // EOL methods
+  isBoolean,
+  isBuffer,
+  isDate,
+  isError,
+  isFunction,
+  isNull,
+  isNullOrUndefined,
+  isNumber,
+  isObject,
+  isPrimitive,
+  isRegExp,
+  isString,
+  isSymbol,
+  isUndefined,
+};
+export function isArray(val: unknown): boolean {
+  return Array.isArray(val);
+}
 export { callbackify, parseEnv } from 'node-internal:internal_utils';
 export const types = internalTypes;
 
@@ -225,10 +285,6 @@ export function isDeepStrictEqual(a: unknown, b: unknown): boolean {
   return _isDeepStrictEqual(a, b);
 }
 
-export function isArray(a: unknown): a is Array<any> {
-  return Array.isArray(a);
-}
-
 export function getSystemErrorMap(): void {
   throw new Error('node:util getSystemErrorMap is not implemented');
 }
@@ -353,5 +409,21 @@ export default {
   getCallSite,
   getCallSites,
   isDeepStrictEqual,
+
+  // EOL methods
   isArray,
+  isBoolean,
+  isBuffer,
+  isDate,
+  isError,
+  isFunction,
+  isNull,
+  isNullOrUndefined,
+  isNumber,
+  isObject,
+  isPrimitive,
+  isRegExp,
+  isString,
+  isSymbol,
+  isUndefined,
 };

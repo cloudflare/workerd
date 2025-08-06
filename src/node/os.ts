@@ -74,13 +74,7 @@ export function networkInterfaces(): NetworkInterfaceInfo[] {
   return {};
 }
 
-export function platform():
-  | 'linux'
-  | 'darwin'
-  | 'win32'
-  | 'freebsd'
-  | 'sunos'
-  | 'aix' {
+export function platform(): NodeJS.Platform {
   // Workers only supports POSIX platforms.
   return 'linux';
 }

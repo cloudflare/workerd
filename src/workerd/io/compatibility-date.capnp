@@ -935,4 +935,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-08-11");
   # Disables adding `/session/metadata/vendor` to the Python Worker's sys.path. So Workers using
   # this flag will have to place their vendored modules in a `python_modules` directory.
+
+  removeNodejsCompatEOLMethods @108 :Bool
+    $compatEnableFlag("remove_nodejs_compat_eol_methods")
+    $compatDisableFlag("add_nodejs_compat_eol_methods")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-01");
+  # Removes the Node.js compatibility layer for EOL versions of Node.js.
+  # When the flag is enabled, APIs that have reached End-of-Life in Node.js
+  # will be removed for workers. When disabled, the APIs are present (but
+  # might still be non-functional stubs)
+  # This flag is intended to be a roll-up flag. That is, as additional APIs
+  # reach EOL, new compat flags will be added for those that will have
+  # `impliedByAfterDate(name = "removeNodeJsCompatEOL", ...` annotations.
 }
