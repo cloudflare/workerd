@@ -64,7 +64,6 @@ def wd_ts_bundle(
         srcs = ts_srcs,
         allow_js = True,
         declaration = True,
-        composite = True,
         tsconfig = ":" + name + "@tsconfig",
         deps = deps,
         out_dir = out_dir.removesuffix("/"),
