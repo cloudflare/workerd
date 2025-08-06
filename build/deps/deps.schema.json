@@ -124,8 +124,7 @@
               "type",
               "name",
               "owner",
-              "repo",
-              "file_regex"
+              "repo"
             ],
             "additionalProperties": false
           },
