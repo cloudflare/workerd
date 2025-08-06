@@ -461,7 +461,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  public:
   ReadableStreamBYOBRequest(jsg::Lock& js,
       kj::Own<ByteQueue::ByobRequest> readRequest,
-      jsg::Ref<ReadableByteStreamController> controller);
+      kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamBYOBRequest);
 
@@ -495,12 +495,12 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  private:
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
-    jsg::Ref<ReadableByteStreamController> controller;
+    kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::V8Ref<v8::Uint8Array> view;
 
     Impl(jsg::Lock& js,
         kj::Own<ByteQueue::ByobRequest> readRequest,
-        jsg::Ref<ReadableByteStreamController> controller);
+        kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
     void updateView(jsg::Lock& js);
   };
@@ -521,6 +521,11 @@ class ReadableByteStreamController: public jsg::Object {
 
   ReadableByteStreamController(
       UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ~ReadableByteStreamController() noexcept(false);
+
+  jsg::Ref<ReadableByteStreamController> getSelf() {
+    return JSG_THIS;
+  }
 
   void start(jsg::Lock& js);
 
@@ -557,6 +562,7 @@ class ReadableByteStreamController: public jsg::Object {
   }
 
  private:
+  kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;

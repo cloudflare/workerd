@@ -11,7 +11,7 @@ import {
   promises,
 } from 'node:fs';
 
-import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
+import { notStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
 
 strictEqual(typeof ReadStream, 'function');
@@ -900,7 +900,36 @@ export const emptyReadStreamTest = {
   },
 };
 
+export const fileHandleReadableWebStreamTest = {
+  async test() {
+    writeFileSync('/tmp/stream.txt', 'abcde'.repeat(1000));
+    const fh = await promises.open('/tmp/stream.txt', 'r');
+    const stream = fh.readableWebStream();
+    const enc = new TextEncoder();
+    let data = '';
+    for await (const chunk of stream) {
+      strictEqual(chunk instanceof Uint8Array, true);
+      data += new TextDecoder().decode(chunk);
+    }
+    strictEqual(data, 'abcde'.repeat(1000));
+    strictEqual(fh.fd, undefined);
+
+    // Should throw if the stream is closed.
+    throws(() => fh.readableWebStream(), {
+      code: 'EBADF',
+    });
+
+    const fh2 = await promises.open('/tmp/stream.txt', 'r');
+    const stream2 = fh2.readableWebStream({ autoClose: false });
+    await fh2.close();
+    const res = await stream2.getReader().read();
+    strictEqual(res.done, true);
+    strictEqual(res.value, undefined);
+  },
+};
+
 /**
+ * TODO(node-fs): Revisit
  * Temporarily comment out. These are larger tests causing timeouts
  * In CI. Will move them out to separate tests in a follow on PR
 export const readStreamTest98 = {
