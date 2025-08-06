@@ -96,8 +96,8 @@
     },
     // microbenchmark
     {
-      "type": "github_release",
       "name": "codspeed",
+      "type": "github_release",
       "owner": "CodSpeedHQ",
       "repo": "codspeed-cpp"
     }
