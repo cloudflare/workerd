@@ -12,8 +12,7 @@ type GatewayRetries = {
   backoff?: 'constant' | 'linear' | 'exponential';
 };
 
-export type GatewayOptions = {
-  id: string;
+export type GatewayOptionsNoId = {
   cacheKey?: string;
   cacheTtl?: number;
   skipCache?: boolean;
@@ -22,6 +21,10 @@ export type GatewayOptions = {
   eventId?: string;
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
+};
+
+export type GatewayOptions = GatewayOptionsNoId & {
+  id: string;
 };
 
 export type AiGatewayPatchLog = {
@@ -219,11 +222,11 @@ export class AiGateway {
 
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    options?: { gateway?: GatewayOptionsNoId; extraHeaders?: object }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
 
-    const headers = this.getHeadersFromOptions(
+    const headers = this.#getHeadersFromOptions(
       options?.gateway,
       options?.extraHeaders
     );
@@ -250,10 +253,8 @@ export class AiGateway {
     );
   }
 
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private getHeadersFromOptions(
-    options?: GatewayOptions,
+  #getHeadersFromOptions(
+    options?: GatewayOptionsNoId,
     extraHeaders?: object
   ): Headers {
     const headers = new Headers();
@@ -311,11 +312,11 @@ export class AiGateway {
           headers.set('cf-aig-backoff', options.retries.backoff);
         }
       }
+    }
 
-      if (extraHeaders) {
-        for (const [key, value] of Object.entries(extraHeaders)) {
-          headers.set(key, value as string);
-        }
+    if (extraHeaders) {
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        headers.set(key, value as string);
       }
     }
 

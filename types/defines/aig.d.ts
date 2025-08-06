@@ -4,8 +4,7 @@ type GatewayRetries = {
   backoff?: 'constant' | 'linear' | 'exponential';
 };
 
-export type GatewayOptions = {
-  id: string;
+export type GatewayOptionsNoId = {
   cacheKey?: string;
   cacheTtl?: number;
   skipCache?: boolean;
@@ -14,6 +13,10 @@ export type GatewayOptions = {
   eventId?: string;
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
+};
+
+export type GatewayOptions = GatewayOptionsNoId & {
+  id: string;
 };
 
 export type AiGatewayPatchLog = {
@@ -109,7 +112,7 @@ export declare abstract class AiGateway {
   getLog(logId: string): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    options?: { gateway?: GatewayOptionsNoId; extraHeaders?: object }
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
