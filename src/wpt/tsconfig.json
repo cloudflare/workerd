@@ -1,9 +1,10 @@
 {
   "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "sourceMap": true,
     "types": ["@types/node"],
     "lib": ["ESNext", "dom"],
+    "isolatedModules": false,
+    "verbatimModuleSyntax": false,
     "paths": {
       "harness/*": ["./harness/*"]
     }

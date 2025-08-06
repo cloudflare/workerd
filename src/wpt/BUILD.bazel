@@ -16,6 +16,7 @@ filegroup(
 wd_ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,
+    source_map = False,
     tsconfig_json = "tsconfig.json",
     deps = [
         "//:node_modules/@types/node",
