@@ -139,6 +139,10 @@ def main() -> int:
         with timing("fastapi snapshot"):
             res += make_fastapi_snapshot(cache, cwd, compat_flags)
     print()
+    print(
+        "Upload these files to the ew-snapshot-tests R2 bucket: "
+        + "https://dash.cloudflare.com/e415f1017791ced9d5f3eb0df2b31c9e/r2/default/buckets/ew-snapshot-tests"
+    )
     print("Update python_metadata.bzl:\n")
     for key, val in res:
         print(indent(f'"{key}": "{val}"', " " * 8))
