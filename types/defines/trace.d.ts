@@ -66,11 +66,6 @@ interface HibernatableWebSocketEventInfo {
                  HibernatableWebSocketEventInfoMessage;
 }
 
-interface Resume {
-  readonly type: "resume";
-  readonly attachment?: any;
-}
-
 interface CustomEventInfo {
   readonly type: "custom";
 }
@@ -108,7 +103,7 @@ interface Onset {
   readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
                  AlarmEventInfo | QueueEventInfo | EmailEventInfo |
                  TraceEventInfo | HibernatableWebSocketEventInfo |
-                 Resume | CustomEventInfo;
+                 CustomEventInfo;
 }
 
 interface Outcome {
@@ -116,10 +111,6 @@ interface Outcome {
   readonly outcome: EventOutcome;
   readonly cpuTime: number;
   readonly wallTime: number;
-}
-
-interface Hibernate {
-  readonly type: "hibernate";
 }
 
 interface SpanOpen {
@@ -170,7 +161,6 @@ interface Attributes {
 type EventType =
   | Onset
   | Outcome
-  | Hibernate
   | SpanOpen
   | SpanClose
   | DiagnosticChannelEvent
@@ -193,7 +183,6 @@ type TailEventHandler<Event extends EventType = EventType> = (
 
 type TailEventHandlerObject = {
   outcome?: TailEventHandler<Outcome>;
-  hibernate?: TailEventHandler<Hibernate>;
   spanOpen?: TailEventHandler<SpanOpen>;
   spanClose?: TailEventHandler<SpanClose>;
   diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;

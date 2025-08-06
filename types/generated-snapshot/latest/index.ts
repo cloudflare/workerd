@@ -7957,10 +7957,6 @@ export declare namespace TailStream {
       | HibernatableWebSocketEventInfoError
       | HibernatableWebSocketEventInfoMessage;
   }
-  interface Resume {
-    readonly type: "resume";
-    readonly attachment?: any;
-  }
   interface CustomEventInfo {
     readonly type: "custom";
   }
@@ -8008,7 +8004,6 @@ export declare namespace TailStream {
       | EmailEventInfo
       | TraceEventInfo
       | HibernatableWebSocketEventInfo
-      | Resume
       | CustomEventInfo;
   }
   interface Outcome {
@@ -8016,9 +8011,6 @@ export declare namespace TailStream {
     readonly outcome: EventOutcome;
     readonly cpuTime: number;
     readonly wallTime: number;
-  }
-  interface Hibernate {
-    readonly type: "hibernate";
   }
   interface SpanOpen {
     readonly type: "spanOpen";
@@ -8068,7 +8060,6 @@ export declare namespace TailStream {
   type EventType =
     | Onset
     | Outcome
-    | Hibernate
     | SpanOpen
     | SpanClose
     | DiagnosticChannelEvent
@@ -8088,7 +8079,6 @@ export declare namespace TailStream {
   ) => void | Promise<void>;
   type TailEventHandlerObject = {
     outcome?: TailEventHandler<Outcome>;
-    hibernate?: TailEventHandler<Hibernate>;
     spanOpen?: TailEventHandler<SpanOpen>;
     spanClose?: TailEventHandler<SpanClose>;
     diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;

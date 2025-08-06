@@ -522,32 +522,6 @@ struct Exception final {
   Exception clone() const;
 };
 
-// Used to indicate that a previously hibernated tail stream is being resumed.
-struct Resume final {
-  explicit Resume(kj::Maybe<kj::Array<kj::byte>> attachment);
-  Resume(rpc::Trace::Resume::Reader reader);
-  Resume(Resume&&) = default;
-  KJ_DISALLOW_COPY(Resume);
-  ~Resume() noexcept(false) = default;
-
-  kj::Maybe<kj::Array<kj::byte>> attachment;
-
-  void copyTo(rpc::Trace::Resume::Builder builder) const;
-  Resume clone() const;
-};
-
-// Used to indicate that a tail stream is being hibernated.
-struct Hibernate final {
-  explicit Hibernate();
-  Hibernate(rpc::Trace::Hibernate::Reader reader);
-  Hibernate(Hibernate&&) = default;
-  KJ_DISALLOW_COPY(Hibernate);
-  ~Hibernate() noexcept(false) = default;
-
-  void copyTo(rpc::Trace::Hibernate::Builder builder) const;
-  Hibernate clone() const;
-};
-
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
 // can also be used to describe the start of a fetch subrequest.
 // TODO(o11y): Write KJ_STRINGIFY() for EventInfo to beef up logging for events reported after
@@ -560,7 +534,6 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
-    Resume,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
@@ -778,7 +751,6 @@ struct Outcome final {
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
-      Hibernate,
       SpanOpen,
       SpanClose,
       DiagnosticChannelEvent,
