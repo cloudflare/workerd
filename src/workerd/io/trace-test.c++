@@ -369,42 +369,6 @@ KJ_TEST("Read/Write Exception works") {
   KJ_ASSERT(info3.stack == kj::none);
 }
 
-KJ_TEST("Read/Write Resume works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::Resume>();
-
-  tracing::Resume info(kj::arr<kj::byte>(1, 2, 3));
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  tracing::Resume info2(reader);
-  auto& attachment = KJ_ASSERT_NONNULL(info2.attachment);
-  KJ_ASSERT(attachment.size() == 3);
-  KJ_ASSERT(attachment[0] == 1);
-  KJ_ASSERT(attachment[1] == 2);
-  KJ_ASSERT(attachment[2] == 3);
-
-  tracing::Resume info3 = info.clone();
-  auto& attachment2 = KJ_ASSERT_NONNULL(info3.attachment);
-  KJ_ASSERT(attachment2.size() == 3);
-  KJ_ASSERT(attachment2[0] == 1);
-  KJ_ASSERT(attachment2[1] == 2);
-  KJ_ASSERT(attachment2[2] == 3);
-}
-
-KJ_TEST("Read/Write Hibernate works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::Hibernate>();
-
-  tracing::Hibernate info;
-  info.copyTo(infoBuilder);
-
-  auto reader = infoBuilder.asReader();
-  tracing::Hibernate info2(reader);
-
-  info.clone();
-}
-
 KJ_TEST("Read/Write Attribute works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::Attribute>();

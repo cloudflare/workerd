@@ -14,7 +14,6 @@ namespace {
 
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
-  V(ATTACHMENT, "attachment")                                                                      \
   V(ATTRIBUTES, "attributes")                                                                      \
   V(BATCHSIZE, "batchSize")                                                                        \
   V(CANCELED, "canceled")                                                                          \
@@ -39,7 +38,6 @@ namespace {
   V(FETCH, "fetch")                                                                                \
   V(HEADERS, "headers")                                                                            \
   V(HIBERNATABLEWEBSOCKET, "hibernatableWebSocket")                                                \
-  V(HIBERNATE, "hibernate")                                                                        \
   V(ID, "id")                                                                                      \
   V(INFO, "info")                                                                                  \
   V(INVOCATIONID, "invocationId")                                                                  \
@@ -62,7 +60,6 @@ namespace {
   V(RAWSIZE, "rawSize")                                                                            \
   V(RCPTTO, "rcptTo")                                                                              \
   V(RESPONSESTREAMDISCONNECTED, "responseStreamDisconnected")                                      \
-  V(RESUME, "resume")                                                                              \
   V(RETURN, "return")                                                                              \
   V(SCHEDULED, "scheduled")                                                                        \
   V(SCHEDULEDTIME, "scheduledTime")                                                                \
@@ -296,21 +293,6 @@ jsg::JsValue ToJs(
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Resume& info, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, RESUME_STR));
-
-  KJ_IF_SOME(attachment, info.attachment) {
-    jsg::Serializer::Released data{
-      .data = kj::heapArray<kj::byte>(attachment),
-    };
-    jsg::Deserializer deser(js, data);
-    obj.set(js, ATTACHMENT_STR, deser.readValue(js));
-  }
-
-  return obj;
-}
-
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::CustomEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, CUSTOM_STR));
@@ -420,9 +402,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     KJ_CASE_ONEOF(hws, tracing::HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
-    KJ_CASE_ONEOF(resume, tracing::Resume) {
-      obj.set(js, INFO_STR, ToJs(js, resume, cache));
-    }
     KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }
@@ -442,12 +421,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& c
   obj.set(js, CPUTIME_STR, js.num(cpuTime));
   obj.set(js, WALLTIME_STR, js.num(wallTime));
 
-  return obj;
-}
-
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Hibernate& hibernate, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, HIBERNATE_STR));
   return obj;
 }
 
@@ -548,9 +521,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     KJ_CASE_ONEOF(outcome, tracing::Outcome) {
       obj.set(js, EVENT_STR, ToJs(js, outcome, cache));
     }
-    KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
-      obj.set(js, EVENT_STR, ToJs(js, hibernate, cache));
-    }
     KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
       obj.set(js, EVENT_STR, ToJs(js, spanOpen, cache));
     }
@@ -586,9 +556,6 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, tracing::Outcome) {
       return OUTCOME_STR;
-    }
-    KJ_CASE_ONEOF(_, tracing::Hibernate) {
-      return HIBERNATE_STR;
     }
     KJ_CASE_ONEOF(_, tracing::SpanOpen) {
       return SPANOPEN_STR;
@@ -1148,9 +1115,8 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       [&state = *state, &waitUntilTasks](tracing::TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state.inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
-        // The tail stream has already been closed because we have received either
-        // an outcome or hibernate event. The writer should have failed and we
-        // actually shouldn't get here. Assert!
+        // The tail stream has already been closed because we have received an outcome event. The
+        // writer should have failed and we actually shouldn't get here. Assert!
         KJ_FAIL_ASSERT("tracing::TailStreamWriter report callback invoked after close");
       }
       KJ_CASE_ONEOF(pending, TailStreamWriterState::Pending) {
@@ -1185,12 +1151,10 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
     }
     state.reportImpl(kj::mv(event));
 
-    // The state is determined to be closing when it receives a terminal event
-    // like tracing::Outcome or tracing::Hibernate. If we return true, then the
-    // writer expects more events to be received. If we return false, then the
-    // writer can release any state it is holding because we don't expect any
-    // more events to be dispatched. The writer should handle that case by
-    // dropping this lambda.
+    // The state is determined to be closing when it receives a terminal event (tracing::Outcome).
+    // If we return true, then the writer expects more events to be received. If we return false,
+    // then the writer can release any state it is holding because we don't expect any more events
+    // to be dispatched. The writer should handle that case by dropping this lambda.
 
     return !state.closing;
   }).attach(kj::mv(state));

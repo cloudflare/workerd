@@ -206,17 +206,6 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
   }
 
-  struct Resume {
-    # A resume event indicates that we are resuming a previously hibernated
-    # tail session.
-
-    attachment @0 :Data;
-    # When a tail session is hibernated, the tail worker is given the opportunity
-    # to provide some additional data that will be serialized and stored with the
-    # hibernated state. When the stream is resumed, if the tail worker has provided
-    # such data, it will be passed back to the worker in the resume event.
-  }
-
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -245,8 +234,7 @@ struct Trace @0x8e8d911203762d34 {
       email @5 :EmailEventInfo;
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
-      resume @8 :Resume;
-      custom @9 :CustomEventInfo;
+      custom @8 :CustomEventInfo;
     }
     }
     info @8: Info;
@@ -258,16 +246,11 @@ struct Trace @0x8e8d911203762d34 {
     wallTime @2 :UInt64;
   }
 
-  struct Hibernate {
-    # A hibernate event indicates that the tail session is being hibernated.
-  }
-
   struct TailEvent {
-    # A streaming tail worker receives a series of Tail Events. Tail events always
-    # occur within an InvocationSpanContext. The first TailEvent delivered to a
-    # streaming tail session is always an Onset. The final TailEvent delivered is
-    # always an Outcome or Hibernate. Between those can be any number of SpanOpen,
-    # SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
+    # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
+    # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
+    # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
+    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
     # unless the stream was abruptly terminated.
     context @0 :InvocationSpanContext;
     timestampNs @1 :Int64;
@@ -275,14 +258,13 @@ struct Trace @0x8e8d911203762d34 {
     event :union {
       onset @3 :Onset;
       outcome @4 :Outcome;
-      hibernate @5 :Hibernate;
-      spanOpen @6 :SpanOpen;
-      spanClose @7 :SpanClose;
-      attribute @8 :List(Attribute);
-      return @9 :Return;
-      diagnosticChannelEvent @10 :DiagnosticChannelEvent;
-      exception @11 :Exception;
-      log @12 :Log;
+      spanOpen @5 :SpanOpen;
+      spanClose @6 :SpanClose;
+      attribute @7 :List(Attribute);
+      return @8 :Return;
+      diagnosticChannelEvent @9 :DiagnosticChannelEvent;
+      exception @10 :Exception;
+      log @11 :Log;
     }
   }
 }

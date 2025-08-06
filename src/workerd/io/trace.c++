@@ -259,9 +259,6 @@ kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
     KJ_CASE_ONEOF(outcome, tracing::Outcome) {
       return kj::str("Outcome");
     }
-    KJ_CASE_ONEOF(hibernate, tracing::Hibernate) {
-      return kj::str("Hibernate");
-    }
     KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
       return spanOpen.toString();
     }
@@ -718,10 +715,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
         auto hibWsBuilder = eventInfoBuilder.initHibernatableWebSocket();
         hibWs.copyTo(hibWsBuilder);
       }
-      KJ_CASE_ONEOF(resume, tracing::Resume) {
-        // Resume is not used in legacy trace.
-        KJ_UNREACHABLE;
-      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         eventInfoBuilder.initCustom();
       }
@@ -867,41 +860,6 @@ tracing::Exception::Exception(rpc::Trace::Exception::Reader reader)
   if (reader.hasStack()) {
     stack = kj::str(reader.getStack());
   }
-}
-
-namespace {
-kj::Maybe<kj::Array<kj::byte>> readResumeAttachment(const auto& reader) {
-  if (reader.hasAttachment()) {
-    return kj::heapArray<kj::byte>(reader.getAttachment());
-  }
-  return kj::none;
-}
-}  // namespace
-
-tracing::Resume::Resume(kj::Maybe<kj::Array<kj::byte>> attachment)
-    : attachment(kj::mv(attachment)) {}
-
-tracing::Resume::Resume(rpc::Trace::Resume::Reader reader)
-    : attachment(readResumeAttachment(reader)) {}
-
-void tracing::Resume::copyTo(rpc::Trace::Resume::Builder builder) const {
-  KJ_IF_SOME(attach, attachment) {
-    builder.setAttachment(attach);
-  }
-}
-
-tracing::Resume tracing::Resume::clone() const {
-  return Resume(attachment.map([](auto& attach) { return kj::heapArray<kj::byte>(attach); }));
-}
-
-tracing::Hibernate::Hibernate() {}
-
-tracing::Hibernate::Hibernate(rpc::Trace::Hibernate::Reader reader) {}
-
-void tracing::Hibernate::copyTo(rpc::Trace::Hibernate::Builder builder) const {}
-
-tracing::Hibernate tracing::Hibernate::clone() const {
-  return Hibernate();
 }
 
 tracing::Attribute::Attribute(kj::ConstString name, Value&& value)
@@ -1107,9 +1065,6 @@ tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reade
     case rpc::Trace::Onset::Info::HIBERNATABLE_WEB_SOCKET: {
       return tracing::HibernatableWebSocketEventInfo(info.getHibernatableWebSocket());
     }
-    case rpc::Trace::Onset::Info::RESUME: {
-      return tracing::Resume(info.getResume());
-    }
     case rpc::Trace::Onset::Info::CUSTOM: {
       return tracing::CustomEventInfo();
     }
@@ -1143,9 +1098,6 @@ void tracing::writeOnsetInfo(
     }
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       hws.copyTo(infoBuilder.initHibernatableWebSocket());
-    }
-    KJ_CASE_ONEOF(resume, Resume) {
-      resume.copyTo(infoBuilder.initResume());
     }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       infoBuilder.initCustom();
@@ -1305,9 +1257,6 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
     KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       return hws.clone();
     }
-    KJ_CASE_ONEOF(resume, Resume) {
-      return resume.clone();
-    }
     KJ_CASE_ONEOF(custom, CustomEventInfo) {
       return CustomEventInfo();
     }
@@ -1375,9 +1324,6 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::OUTCOME: {
       return tracing::Outcome(event.getOutcome());
     }
-    case rpc::Trace::TailEvent::Event::HIBERNATE: {
-      return tracing::Hibernate(event.getHibernate());
-    }
     case rpc::Trace::TailEvent::Event::SPAN_OPEN: {
       return tracing::SpanOpen(event.getSpanOpen());
     }
@@ -1432,9 +1378,6 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(outcome, Outcome) {
       outcome.copyTo(eventBuilder.initOutcome());
     }
-    KJ_CASE_ONEOF(hibernate, Hibernate) {
-      hibernate.copyTo(eventBuilder.initHibernate());
-    }
     KJ_CASE_ONEOF(open, SpanOpen) {
       open.copyTo(eventBuilder.initSpanOpen());
     }
@@ -1471,9 +1414,6 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(outcome, Outcome) {
         return outcome.clone();
-      }
-      KJ_CASE_ONEOF(hibernate, Hibernate) {
-        return hibernate.clone();
       }
       KJ_CASE_ONEOF(open, SpanOpen) {
         return open.clone();
