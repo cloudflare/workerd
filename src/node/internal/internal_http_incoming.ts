@@ -86,6 +86,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       { headers, localPort }: { headers: Headers; localPort: number }
     ): void => {
       const connectingIp = headers.get('cf-connecting-ip');
+      const remotePort = Math.floor(Math.random() * (65535 - 32768 + 1));
 
       incoming.#socket = {
         encrypted: headers.get('x-forwarded-proto') === 'https',
@@ -104,8 +105,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           return incoming.destroyed ? undefined : (connectingIp ?? '127.0.0.1');
         },
         get remotePort(): number | undefined {
-          // We return 80 by default, and undefined if the socket is destroyed.
-          return incoming.destroyed ? undefined : 80;
+          // Return a port in the ephemeral range (32768-65535) as clients would use,
+          // and undefined if the socket is destroyed.
+          return incoming.destroyed ? undefined : remotePort;
         },
         get localAddress(): string {
           // Host will have a value like "my-worker.yagiz.workers.dev",

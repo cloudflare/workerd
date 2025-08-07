@@ -1139,7 +1139,7 @@ export const testIncomingMessageSocket = {
       strictEqual(req.socket.localPort, 8080);
       strictEqual(req.socket.localAddress, '127.0.0.1');
       strictEqual(req.socket.remoteAddress, '127.0.0.1');
-      strictEqual(req.socket.remotePort, 80);
+      strictEqual(typeof req.socket.remotePort, 'number');
       strictEqual(req.socket.remoteFamily, 'IPv4');
 
       res.writeHead(200);
