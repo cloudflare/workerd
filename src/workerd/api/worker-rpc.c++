@@ -1243,11 +1243,33 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
               failLookup(name);
             }
 
+            // If the object is a Proxy, then `isInstanceOf<JsRpcTarget>()` won't actually work,
+            // because the Proxy is not an instance of any native type. But for our purposes,
+            // RpcTarget is only a marker used to indicate what semantics are desired.
+            bool isProxyOfRpcTarget = false;
+            if (jsg::JsValue(object).isProxy()) {
+              // Unfortunatley in this case we need to follow the prototype chain manually, looking
+              // for `JsRpcTarget`.
+              js.withinHandleScope([&]() {
+                auto proto = object.getPrototype(js);
+                auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
+
+                for (;;) {
+                  auto objProto = KJ_UNWRAP_OR(proto.tryCast<jsg::JsObject>(), break);
+                  if (objProto == prototypeOfRpcTarget) {
+                    isProxyOfRpcTarget = true;
+                    break;
+                  }
+                  proto = objProto.getPrototype(js);
+                }
+              });
+            }
+
             // Decide whether the new object is a suitable RPC target.
             if (object.getPrototype(js) == prototypeOfObject) {
               // Yes. It's a simple object.
               allowInstanceProperties = true;
-            } else if (object.isInstanceOf<JsRpcTarget>(js)) {
+            } else if (isProxyOfRpcTarget || object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
             } else if (object.isInstanceOf<JsRpcStub>(js) ||

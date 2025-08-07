@@ -1779,6 +1779,22 @@ export let proxiedRpcTarget = {
 
       assert.strictEqual(await env.MyService.call(proxy, 2), 8);
       assert.strictEqual(await env.MyService.getProp(proxy, 'ownProp'), 123);
+
+      // Try pipelining.
+      assert.strictEqual(await env.MyService.identity(() => proxy)()(4), 14);
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().ownProp,
+        123
+      );
+
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x(4),
+        14
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x.ownProp,
+        123
+      );
     }
 
     // Proxy RPC target that is callable.
@@ -1823,6 +1839,16 @@ export let proxiedRpcTarget = {
       // We *can* access prototype properties, becaues it's an RpcTarget.
       await env.MyService.incrementCounter(proxy, 1);
       assert.strictEqual(counter.i, 124);
+
+      // Try pipelined calls.
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().increment(3),
+        250
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ p: proxy }))().p.increment(4),
+        377
+      );
     }
 
     // Can't proxy a class that doesn't extend `RpcTarget`.
