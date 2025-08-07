@@ -425,8 +425,8 @@ function decodeSnapshot(
     );
   }
   // buf[1] is SNAPSHOT_VERSION (unused currently)
-  const snapshotOffset = header[2] as number;
-  const jsonByteLength = header[3] as number;
+  const snapshotOffset = header[2]!;
+  const jsonByteLength = header[3]!;
 
   const snapshotSize = reader.getMemorySnapshotSize() - snapshotOffset;
   const jsonBuf = new Uint8Array(jsonByteLength);
