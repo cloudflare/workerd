@@ -86,7 +86,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       { headers, localPort }: { headers: Headers; localPort: number }
     ): void => {
       const connectingIp = headers.get('cf-connecting-ip');
-      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : false;
+      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true;
       const remotePort = Math.floor(Math.random() * (65535 - 32768 + 1));
 
       incoming.#socket = {
