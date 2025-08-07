@@ -1373,12 +1373,6 @@ tracing::TailEvent::TailEvent(rpc::Trace::TailEvent::Reader reader)
       event(readEventFromTailEvent(reader)) {}
 
 void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
-  /*auto context = builder.initSpanContext();
-  spanContext.getTraceId().toCapnp(context.initTraceId());
-  auto info = context.initInfo();
-  KJ_IF_SOME(spanId, spanContext.getSpanId()) {
-    info.setSpanId(spanId);
-  }*/
   spanContext.toCapnp(builder.initSpanContext());
   invocationId.toCapnp(builder.initInvocationId());
   builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);

@@ -719,20 +719,6 @@ struct Onset final {
     WorkerInfo clone() const;
   };
 
-  struct TriggerContext final {
-    TraceId traceId;
-    TraceId invocationId;
-    SpanId spanId;
-
-    TriggerContext(TraceId traceId, TraceId invocationId, SpanId spanId)
-        : traceId(kj::mv(traceId)),
-          invocationId(kj::mv(invocationId)),
-          spanId(kj::mv(spanId)) {}
-
-    TriggerContext(const InvocationSpanContext& ctx)
-        : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
-  };
-
   explicit Onset(tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo);
 
   Onset(rpc::Trace::Onset::Reader reader);
@@ -802,8 +788,8 @@ struct TailEvent final {
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);
 
+  // The span context this event is associated with.
   SpanContext spanContext;
-  // The invocation span context this event is associated with.
   TraceId invocationId;
 
   kj::Date timestamp;  // Unix epoch, Spectre-mitigated resolution
