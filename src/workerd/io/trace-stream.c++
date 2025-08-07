@@ -358,8 +358,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
   obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
-  // TODO
-  //obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
+  obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
     obj.set(js, DISPATCHNAMESPACE_STR, js.str(ns));
@@ -449,9 +448,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
-  // TODO: Confirm if trimmed/non-trimmed hex is right choice here.
-  //obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
-  obj.set(js, SPANID_STR, js.str(kj::hex(spanOpen.spanId.getId())));
+  // Export span ID as non-truncated hex value – in practice this will be a random span ID.
+  obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
 
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {

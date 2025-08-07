@@ -133,6 +133,28 @@ KJ_TEST("InvocationSpanContext") {
   KJ_EXPECT(sc5.isTrigger());
 }
 
+KJ_TEST("SpanContext") {
+  setPredictableModeForTest();
+  FakeEntropySource fakeEntropySource;
+  auto sc =
+      SpanContext(TraceId::fromEntropy(fakeEntropySource), SpanId::fromEntropy(fakeEntropySource));
+
+  // We can create a SpanContext...
+  static constexpr auto kCheck = TraceId(0x2a2a2a2a2a2a2a2a, 0x2a2a2a2a2a2a2a2a);
+  KJ_EXPECT(sc.getTraceId() == kCheck);
+  KJ_EXPECT(sc.getSpanId() == SpanId(1));
+
+  // And serialize that to a capnp struct...
+  capnp::MallocMessageBuilder builder;
+  auto root = builder.initRoot<rpc::SpanContext>();
+  sc.toCapnp(root);
+
+  // Then back again...
+  auto sc2 = SpanContext::fromCapnp(root.asReader());
+  KJ_EXPECT(sc2.getTraceId() == kCheck);
+  KJ_EXPECT(sc2.getSpanId() == SpanId(1));
+}
+
 KJ_TEST("Read/Write FetchEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto fetchInfoBuilder = builder.initRoot<rpc::Trace::FetchEventInfo>();
