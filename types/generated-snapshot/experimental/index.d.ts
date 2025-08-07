@@ -6378,6 +6378,7 @@ type AutoRagSearchRequest = {
 };
 type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
+  system_prompt?: string;
 };
 type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
