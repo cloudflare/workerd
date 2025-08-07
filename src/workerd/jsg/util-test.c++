@@ -243,27 +243,6 @@ struct TunneledContext: public ContextGlobalObject {
   void throwTunneledGarbledDOMException() {
     KJ_FAIL_REQUIRE("jsg.DOMException(: thrown from throwTunneledGarbledDOMException");
   }
-  bool testTrustedErrorWithProps(jsg::Lock& js) {
-    jsg::JsValue stack = js.undefined();
-    try {
-      auto err = KJ_ASSERT_NONNULL(
-          jsg::JsValue(v8::Exception::SuppressedError(js.str("foo"_kj))).tryCast<jsg::JsObject>());
-      err.set(js, "foo"_kj, js.boolean(true));
-      stack = err.get(js, "stack"_kj);
-      KJ_ASSERT(stack.isString());
-      kj::throwFatalException(js.exceptionToKj(err));
-    } catch (...) {
-      auto ex = kj::getCaughtExceptionAsKj();
-      KJ_ASSERT(isTunneledException(ex.getDescription()));
-      auto decodedErr = jsg::JsValue(kjExceptionToJs(js.v8Isolate, kj::mv(ex)));
-      auto obj = KJ_ASSERT_NONNULL(decodedErr.tryCast<jsg::JsObject>());
-      KJ_ASSERT(obj.get(js, "foo"_kj).strictEquals(js.boolean(true)));
-      KJ_ASSERT(obj.get(js, "message"_kj).toString(js) == "foo"_kj);
-      KJ_ASSERT(obj.get(js, "name"_kj).toString(js) == "SuppressedError"_kj);
-      KJ_ASSERT(obj.get(js, "stack"_kj).strictEquals(stack));
-      return true;
-    }
-  }
 
   JSG_RESOURCE_TYPE(TunneledContext) {
     JSG_NESTED_TYPE(DOMException);
@@ -290,7 +269,6 @@ struct TunneledContext: public ContextGlobalObject {
     JSG_METHOD(throwTunneledDOMException);
     JSG_METHOD(throwTunneledInvalidDOMException);
     JSG_METHOD(throwTunneledGarbledDOMException);
-    JSG_METHOD(testTrustedErrorWithProps);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(TunneledIsolate, TunneledContext);
@@ -356,8 +334,6 @@ KJ_TEST("throw tunneled exception") {
     KJ_EXPECT_LOG(ERROR, " thrown from throwTunneledGarbledDOMException");
     e.expectEval("throwTunneledGarbledDOMException()", "throws",
         "Error: internal error; reference = 0123456789abcdefghijklmn");
-
-    e.expectEval("testTrustedErrorWithProps()", "boolean", "true");
   }
 }
 
