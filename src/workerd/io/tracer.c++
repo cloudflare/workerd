@@ -217,7 +217,6 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   // Span events are transmitted together for now.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // TODO(o11y): Provide correct nested spans
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
     auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span);
@@ -231,30 +230,20 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
     // Compose span events
     // TODO(o11y): Actually report the spanOpen event at span creation time
-    // Important: We'll pass in a zero parentSpanId for the top level span, to indicate that it
-    // should take the spanId from the top level spanId as defined in this system.
-    // TODO: spanId or parentSpanId?
-    writer->report(
-        context, tracing::SpanOpen(span.spanId, kj::str(span.operationName), span.startTime));
-    // writer->report(context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)));
-    // TODO: We ought to use these.
     auto spanOpenContext = tracing::InvocationSpanContext(
         topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.parentSpanId);
     auto spanComponentContext = tracing::InvocationSpanContext(
         topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
-    //writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
-    writer->report(context, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)), span.startTime);
     // If a span manages to exceed the size limit, truncate it by not providing span attributes.
     if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
-      //writer->report(spanComponentContext, kj::mv(attr), span.startTime);
-      writer->report(context, kj::mv(attr), span.startTime);
+      writer->report(spanComponentContext, kj::mv(attr), span.startTime);
     }
-    //writer->report(spanComponentContext, tracing::SpanClose(), span.endTime);
-    writer->report(context, tracing::SpanClose(), span.endTime);
+    writer->report(spanComponentContext, tracing::SpanClose(), span.endTime);
   }
 
   // Note: spans will not be shipped to the production version of the legacy tail worker, so we
@@ -396,26 +385,11 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    // TODO: inheriting span context is not implemented yet, so spanId of the tailEvent of Onset is always zero.
-
-    // For Onset:
-    // traceId is taken from global, shared ISC (as taken from first onset).
-    // invocationId is taken from global, shared ISC.
-    // spanId is always null.
-    // onset.spanId is taken from global, shared ISC.
-    // For SpanOpen:
-    // spanId is parent span ID.
-    // spanOpen.spanId is own spanId.
-    // For Span attributes, span close:
-    // spanId is own span ID.
-    // Otherwise:
-    // traceId is taken from global, shared ISC.
-    // invocationId is taken from global, shared ISC.
-    // spanId is taken from global ISC.
-
-    // TODO: needs to have event.spanId = null.
+    // TODO(o11y): At this time, the onset spanId is always zero. We could use the invocation span
+    // context ID, but we'd need to propagate it to the top-level span as its parent span ID and
+    // would have to still use a fixed ID in tests.
     writer->report(
-        context, tracing::Onset(context.getSpanId(), cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray(), kj::none), timestamp);
+        context, tracing::Onset(tracing::SpanId::nullId, cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray(), kj::none), timestamp);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.

@@ -1673,39 +1673,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
 class SpanSubmitter final: public kj::Refcounted {
  public:
-  SpanSubmitter(kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource);
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span);
-
-  tracing::SpanId makeSpanId();
-  KJ_DISALLOW_COPY(SpanSubmitter);
-
- private:
-  uint64_t predictableSpanId;
-  kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
-  kj::EntropySource& entropySource;
-};
-
-SpanSubmitter::SpanSubmitter(
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource)
-    : predictableSpanId(2),
-      workerTracer(kj::mv(workerTracer)),
-      entropySource(entropySource) {}
-
-void SpanSubmitter::submitSpan(
-    tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
-
-  // TODO(o11y): Investigate under which conditions the worker tracer terminates before the
-  // top-level span, document or mitigate these limitations.
-  KJ_IF_SOME(tracer, this->workerTracer) {
-    /*kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
-
-      for (const auto& tag: span.tags) {
-        tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
-      }
-
-      CompleteSpan completeSpan(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
-          span.startTime, span.endTime, kj::mv(tags));*/
-
+  SpanSubmitter(kj::Own<WorkerTracer> workerTracer)
+      : predictableSpanId(1),
+        workerTracer(kj::mv(workerTracer)) {}
+  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
     CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
@@ -1718,33 +1689,32 @@ void SpanSubmitter::submitSpan(
       span2.startTime = span2.endTime = kj::UNIX_EPOCH;
     }
 
-    tracer->addSpan(kj::mv(span2));
+    workerTracer->addSpan(kj::mv(span2));
   }
-}
 
-tracing::SpanId SpanSubmitter::makeSpanId() {
-  //return tracing::SpanId::fromEntropy(entropySource);
-  return tracing::SpanId(predictableSpanId++);
-}
+  tracing::SpanId makeSpanId() {
+    return tracing::SpanId(predictableSpanId++);
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(SpanSubmitter);
+
+ private:
+  uint64_t predictableSpanId;
+  kj::Own<WorkerTracer> workerTracer;
+};
 
 class WorkerTracerSpanObserver: public SpanObserver,
                                 public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
  public:
   WorkerTracerSpanObserver(
-      kj::Maybe<kj::Own<WorkerTracer>> workerTracer, kj::EntropySource& entropySource)
-      : spanSubmitter(kj::refcounted<SpanSubmitter>(kj::mv(workerTracer), entropySource)),
-        spanId(1),
-        parentSpanId(tracing::SpanId::nullId) {}
-
-  WorkerTracerSpanObserver(
-      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId spanId, tracing::SpanId parentSpanId)
+      kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
       : spanSubmitter(kj::mv(spanSubmitter)),
-        spanId(spanId),
+        spanId(this->spanSubmitter->makeSpanId()),
         parentSpanId(parentSpanId) {}
 
+  KJ_DISALLOW_COPY_AND_MOVE(WorkerTracerSpanObserver);
+
   [[nodiscard]] kj::Own<SpanObserver> newChild() override {
-    return kj::refcounted<WorkerTracerSpanObserver>(
-        kj::addRef(*spanSubmitter), spanSubmitter->makeSpanId(), spanId);
+    return kj::refcounted<WorkerTracerSpanObserver>(kj::addRef(*spanSubmitter), spanId);
   }
 
   void report(const Span& span) override {
@@ -1920,8 +1890,7 @@ class Server::WorkerService final: public Service,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Maybe<kj::String> dockerPathParam,
-      kj::EntropySource& entropySource)
+      kj::Maybe<kj::String> dockerPathParam)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1930,8 +1899,7 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        dockerPath(kj::mv(dockerPathParam)),
-        entropySource(entropySource) {}
+        dockerPath(kj::mv(dockerPathParam)) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -2124,7 +2092,6 @@ class Server::WorkerService final: public Service,
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
-    kj::Own<RequestObserver> observer = kj::refcounted<RequestObserver>();
 
     if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
       // Setting up legacy tail workers support, but only if we actually have tail workers
@@ -2168,11 +2135,12 @@ class Server::WorkerService final: public Service,
     KJ_IF_SOME(w, workerTracer) {
       if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
         auto tracerSpanObserver =
-            kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer), entropySource);
+            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
         w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
       }
     }
-    observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+    kj::Own<RequestObserver> observer =
+        kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
 
     return newWorkerEntrypoint(threadContext, kj::atomicAddRef(*worker), entrypointName,
         kj::mv(props), kj::mv(actor), kj::Own<LimitEnforcer>(this, kj::NullDisposer::instance),
@@ -3024,7 +2992,6 @@ class Server::WorkerService final: public Service,
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   kj::Maybe<kj::String> dockerPath;
-  kj::EntropySource& entropySource;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -4409,7 +4376,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), entropySource);
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
