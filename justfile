@@ -20,7 +20,7 @@ prepare-ubuntu:
   sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
 
 prepare-macos:
-  brew install --quiet bazelisk python3 lcov fd
+  brew install --quiet bazelisk python3 lcov fd lld@19 llvm@19
 
 compile-commands:
   rm -f compile_commands.json

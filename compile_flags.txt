@@ -18,6 +18,8 @@
 -Isrc
 -isystem/usr/lib/llvm-19/include/c++/v1
 -isystem/usr/lib/llvm-19/lib/clang/19/include
+-isystem/opt/homebrew/opt/llvm@19/include/c++/v1
+-isystem/opt/homebrew/opt/llvm@19/lib/clang/19/include
 -isystem/usr/include/x86_64-linux-gnu
 -isystem/usr/include/aarch64-linux-gnu
 -isystem/usr/include
