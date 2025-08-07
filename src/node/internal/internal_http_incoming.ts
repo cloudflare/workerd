@@ -86,6 +86,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       { headers, localPort }: { headers: Headers; localPort: number }
     ): void => {
       const connectingIp = headers.get('cf-connecting-ip');
+      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : false;
       const remotePort = Math.floor(Math.random() * (65535 - 32768 + 1));
 
       incoming.#socket = {
@@ -94,10 +95,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           if (incoming.destroyed) {
             return undefined;
           }
-          if (connectingIp != null) {
-            return isIPv4(connectingIp) ? 'IPv4' : 'IPv6';
-          }
-          return 'IPv4';
+          return isConnectingIpIpv4 ? 'IPv4' : 'IPv6';
         },
         get remoteAddress(): string | undefined {
           // This is defined in production, and will fallback to localhost on local development
