@@ -11,10 +11,20 @@ default:
 pwd := `pwd`
 
 prepare:
-  cargo install gen-compile-commands
+  @if [ "{{os()}}" = "macos" ]; then just prepare-macos; elif [ "{{os()}}" = "linux" ]; then just prepare-ubuntu; else echo "Unsupported OS: {{os()}}"; exit 1; fi
+  cargo install gen-compile-commands watchexec-cli
+  just create-external
+  just compile-commands
+
+prepare-ubuntu:
+  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
+
+prepare-macos:
+  brew install --quiet bazelisk python3 lcov fd
 
 compile-commands:
-  rm -f compile_commands.json | gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
+  rm -f compile_commands.json
+  gen-compile-commands --root {{pwd}} --compile-flags compile_flags.txt --out compile_commands.json --src-dir {{pwd}}/src
 
 clean:
   rm -f compile_commands.json
@@ -84,10 +94,6 @@ bench path:
 # example: just clippy dns
 clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
-
-prepare-ubuntu:
-  sudo apt-get install -y --no-install-recommends libc++abi1-19 libc++1-19 libc++-19-dev lld-19 bazelisk python3 lcov fd-find
-  cargo install watchexec-cli
 
 generate-types:
   bazel build //types:types
