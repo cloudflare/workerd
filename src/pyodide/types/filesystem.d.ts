@@ -31,7 +31,7 @@ interface FS {
   ): FSNode<Info>;
   isFile: (mode: number) => boolean;
   readdir: (path: string) => string[];
-  genericErrors: Error[];
+  genericErrors: { 44: Error };
   sitePackages: string;
   sessionSitePackages: string;
   ErrnoError: { new (errno: number): Error };

@@ -49,7 +49,7 @@ export function createMetadataFS(Module: Module): object {
         node.tree = info as MetadataDirInfo;
       } else {
         node.index = info as number;
-        node.usedBytes = sizes[info as number] as number;
+        node.usedBytes = sizes[info as number]!;
       }
     },
     readdir(node) {

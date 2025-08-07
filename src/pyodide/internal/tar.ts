@@ -28,7 +28,7 @@ function decodeHeader(buf: Uint8Array, reader: Reader): TarFSInfo {
   const mode = decodeNumber(buf, 100, 8);
   const size = decodeNumber(buf, 124, 12);
   const modtime = decodeNumber(buf, 136, 12);
-  const type = String.fromCharCode(buf[156] as number);
+  const type = String.fromCharCode(buf[156]!);
   return {
     path,
     name: path,
@@ -112,7 +112,7 @@ export function parseTarInfo(reader: Reader): [TarFSInfo, string[]] {
     const parts = info.path.slice(0, -1).split('/');
     for (let i = directories.length; i < parts.length - 1; i++) {
       directories.push(directory);
-      directory = directory.children!.get(parts[i] as string)!;
+      directory = directory.children!.get(parts[i]!)!;
     }
     if (info.type === '5') {
       // a directory
