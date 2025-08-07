@@ -116,11 +116,13 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
                 "name": "beautifulsoup4",
+                "abi": None,
                 "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
             },
             {
-                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-312-vendored-for-ew-testing.zip
                 "name": "fastapi",
+                "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
             },
         ],
@@ -146,11 +148,13 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
                 "name": "beautifulsoup4",
+                "abi": None,
                 "sha256": "5aa09c5f549443969dda260a70e58e3ac8537bd3d29155b307a3d98b36eb70fd",
             },
             {
-                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-vendored-for-ew-testing.zip
+                # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/fastapi-312-vendored-for-ew-testing.zip
                 "name": "fastapi",
+                "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
             },
         ],

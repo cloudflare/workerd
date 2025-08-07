@@ -25,7 +25,8 @@ def _pyodide_packages(*, tag, lockfile_hash, all_wheels_hash, **_kwds):
         urls = ["https://github.com/cloudflare/pyodide-build-scripts/releases/download/%s/all_wheels.zip" % tag],
     )
 
-def _py_vendor_test_deps(version, name, sha256, **_kwds):
+def _py_vendor_test_deps(version, name, sha256, abi, **_kwds):
+    pyver = "-" + abi.replace(".", "") if abi else ""
     http_archive(
         name = name + "_src_" + version,
         build_file_content = """
@@ -36,7 +37,7 @@ filegroup(
 )
 """,
         sha256 = sha256,
-        url = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/" + name + "-vendored-for-ew-testing.zip",
+        url = "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/" + name + pyver + "-vendored-for-ew-testing.zip",
     )
 
 def dep_pyodide():

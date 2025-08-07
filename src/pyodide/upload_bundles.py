@@ -1,15 +1,14 @@
 import json
 import subprocess
 import sys
-from base64 import b64encode
 from copy import deepcopy
 from functools import cache
-from hashlib import file_digest
 from os import environ
 from pathlib import Path
 
 import requests
 from boto3 import client
+from tool_utils import b64digest
 
 
 def cquery(rule):
@@ -82,10 +81,7 @@ def main():
         info["backport"] = b
         key = bundle_key(**info)
         print(f"Uploading version {ver} backport {b}")
-        shasum = (
-            "sha256-"
-            + b64encode(file_digest(path.open("rb"), "sha256").digest()).decode()
-        )
+        shasum = b64digest(path)
         i = " " * 8
         print("Update python_metadata.bzl with:\n")
         print(i + f'"backport": "{b}",')
