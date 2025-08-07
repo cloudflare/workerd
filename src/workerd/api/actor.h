@@ -79,7 +79,6 @@ class DurableObjectId: public jsg::Object {
 
 // Stub object used to send messages to a remote durable object.
 class DurableObject final: public Fetcher {
-
  public:
   DurableObject(jsg::Ref<DurableObjectId> id,
       IoOwn<OutgoingFactory> outgoingFactory,
@@ -129,24 +128,6 @@ class DurableObject final: public Fetcher {
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(id);
   }
-};
-
-// Like `GlobalActorOutgoingFactory` in the source file, but only used for creating a stub to
-// primary DO so the stub can be given to a replica.
-//
-// The main distinction here is we already have the capability to the primary, so we don't need to
-// make an outgoing request to set things up.
-class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
- public:
-  ReplicaActorOutgoingFactory(kj::Own<IoChannelFactory::ActorChannel> channel, kj::String actorId)
-      : actorChannel(kj::mv(channel)),
-        actorId(kj::mv(actorId)) {}
-
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
-
- private:
-  kj::Own<IoChannelFactory::ActorChannel> actorChannel;
-  kj::String actorId;
 };
 
 // Global durable object class binding type.
@@ -256,6 +237,65 @@ class DurableObjectNamespace: public jsg::Object {
       ActorGetMode mode,
       jsg::Ref<DurableObjectId> id,
       jsg::Optional<GetDurableObjectOptions> options);
+};
+
+class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  using ChannelIdOrFactory = kj::OneOf<uint, kj::Own<DurableObjectNamespace::ActorChannelFactory>>;
+
+  GlobalActorOutgoingFactory(ChannelIdOrFactory channelIdOrFactory,
+      jsg::Ref<DurableObjectId> id,
+      kj::Maybe<kj::String> locationHint,
+      ActorGetMode mode,
+      bool enableReplicaRouting)
+      : channelIdOrFactory(kj::mv(channelIdOrFactory)),
+        id(kj::mv(id)),
+        locationHint(kj::mv(locationHint)),
+        mode(mode),
+        enableReplicaRouting(enableReplicaRouting) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+
+ private:
+  ChannelIdOrFactory channelIdOrFactory;
+  jsg::Ref<DurableObjectId> id;
+  kj::Maybe<kj::String> locationHint;
+  ActorGetMode mode;
+  bool enableReplicaRouting;
+  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+};
+
+// Like `GlobalActorOutgoingFactory`, but for colo-local actors
+class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  LocalActorOutgoingFactory(uint channelId, kj::String actorId)
+      : channelId(channelId),
+        actorId(kj::mv(actorId)) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+
+ private:
+  uint channelId;
+  kj::String actorId;
+  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+};
+
+// Like `GlobalActorOutgoingFactory`, but only used for creating a stub to the primary DO so the
+// stub can be given to a replica.
+//
+// The main distinction here is we already have the capability to the primary, so we don't need to
+// make an outgoing request to set things up.
+class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  ReplicaActorOutgoingFactory(kj::Own<IoChannelFactory::ActorChannel> channel, kj::String actorId)
+      : actorChannel(kj::mv(channel)),
+        actorId(kj::mv(actorId)) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+
+ private:
+  kj::Own<IoChannelFactory::ActorChannel> actorChannel;
+  kj::String actorId;
 };
 
 // DurableObjectClass represents a binding to a Durable Object class that can be used
