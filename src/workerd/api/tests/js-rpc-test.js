@@ -473,6 +473,19 @@ export class MyService extends WorkerEntrypoint {
 
     waitUntil(scheduler.wait(100).then(resolve));
   }
+
+  async call(func, arg) {
+    return await func(arg);
+  }
+
+  async getProp(obj, prop) {
+    return await obj[prop];
+  }
+
+  // Useful to test pipelining.
+  async identity(x) {
+    return x;
+  }
 }
 
 // An entrypoint which forwards methods calls to MyService, thus acting as a proxy.
@@ -1749,6 +1762,66 @@ export let proxiedRpcTarget = {
 
       await env.MyService.incrementCounter(proxy, 1);
 
+      assert.strictEqual(counter.i, 124);
+    }
+
+    // Proxy function.
+    {
+      let func = (i) => {
+        return i * 3;
+      };
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        apply(target, thisArg, argumentsList) {
+          return target(...argumentsList) + 2;
+        },
+      });
+
+      assert.strictEqual(await env.MyService.call(proxy, 2), 8);
+      assert.strictEqual(await env.MyService.getProp(proxy, 'ownProp'), 123);
+    }
+
+    // Proxy RPC target that is callable.
+    {
+      let counter = new MyCounter(0);
+
+      // We make the proxy target be a function so that it is callable, but we implement
+      // getPrototypeOf() to make it appear to implement RpcTarget.
+      let func = (i) => i * 11;
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => counter.increment(i + 123);
+          } else if (prop == 'ownProp') {
+            return target.ownProp;
+          } else {
+            let result = counter[prop];
+            if (result instanceof Function) {
+              result = result.bind(counter);
+            }
+            return result;
+          }
+        },
+        has(target, prop) {
+          return prop in counter || prop === 'ownProp';
+        },
+        getPrototypeOf(target) {
+          return Object.getPrototypeOf(counter);
+        },
+      });
+
+      // We can call it.
+      assert.strictEqual(await env.MyService.call(proxy, 3), 33);
+
+      // We *cannot* access own properties of the function.
+      assert.rejects(() => env.MyService.getProp(proxy, 'ownProp'), {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "ownProp".',
+      });
+
+      // We *can* access prototype properties, becaues it's an RpcTarget.
+      await env.MyService.incrementCounter(proxy, 1);
       assert.strictEqual(counter.i, 124);
     }
 

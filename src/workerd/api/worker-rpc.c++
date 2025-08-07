@@ -1685,6 +1685,10 @@ void RpcSerializerExternalHandler::serializeProxy(
 
         KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
           proto = protoObj.getPrototype(js);
+        } else if (isFunctionForRpc(js, handle)) {
+          // This is NOT an RpcTarget, but it IS callable as a function, so treat it as such.
+          allowInstanceProperties = true;
+          break;
         } else {
           // End of prototype chain, and didn't find RpcTarget.
           JSG_FAIL_REQUIRE(DOMDataCloneError,
