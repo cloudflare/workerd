@@ -53,27 +53,6 @@ bool getShouldSetToStringTag(v8::Isolate* isolate);
 kj::String fullyQualifiedTypeName(const std::type_info& type);
 kj::String typeName(const std::type_info& type);
 
-struct MakeInternalErrorOptions {
-  // When trusted is true and the kj::Exception has a serialized exception detail, the
-  // stack will be included in the deserialized error if it is available. When false,
-  // the stack will be omitted.
-  bool trusted = false;
-
-  // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
-  // exception detail in the kj::Exception.
-  bool ignoreDetail = false;
-
-  // If the deserialized exception detail is not an object, then it will be ignored
-  // and we will fall back to constructing a new error object. The default is true
-  // to preserve existing behavior, but setting this to false may be useful in some
-  // cases. When false, the kjExceptionToJs() might return a non-object value.
-  bool allowNonObjects = false;
-
-  // When doNotLog is true and this is an actually-internal error, the error will
-  // not be logged.
-  bool doNotLog = false;
-};
-
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
@@ -82,15 +61,13 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
-v8::Local<v8::Value> kjExceptionToJs(
-    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options = {});
+v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
 
-// calls kjExceptionToJs() and then tells the isolate to throw it.
+// calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
-// calls kjExceptionToJs() and then tells the isolate to throw it.
-void throwInternalError(
-    v8::Isolate* isolate, kj::Exception&& exception, MakeInternalErrorOptions options = {});
+// calls makeInternalError() and then tells the isolate to throw it.
+void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 
@@ -183,11 +160,11 @@ void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message);
 
 // Given a JavaScript exception, returns a KJ exception that contains a tunneled exception type that
-// can be converted back to JavaScript via kjExceptionToJs().
+// can be converted back to JavaScript via makeInternalError().
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
 
 // Given a JavaScript exception, throw a KJ exception that contains a tunneled exception type that
-// can be converted back to JavaScript via kjExceptionToJs().
+// can be converted back to JavaScript via makeInternalError().
 //
 // Equivalent to throwing the exception returned by `createTunneledException(exception)`.
 [[noreturn]] void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception);
@@ -389,7 +366,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
         // the v8::Value representing the tunneled error, it itself may cause a JS exception to be
         // thrown. This is the reason for the nested try-catch blocks -- we need to be able to
         // swallow any JsExceptionThrown exceptions that this catch block generates.
-        returnRejectedPromise(info, kjExceptionToJs(isolate, kj::mv(exception)), tryCatch);
+        returnRejectedPromise(info, makeInternalError(isolate, kj::mv(exception)), tryCatch);
       }
     } catch (JsExceptionThrown&) {
       if (tryCatch.CanContinue()) {
