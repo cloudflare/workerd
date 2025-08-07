@@ -893,7 +893,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodejsHttpServerModules @103 :Bool
       $compatEnableFlag("enable_nodejs_http_server_modules")
       $compatDisableFlag("disable_nodejs_http_server_modules")
-      $experimental;
+      $impliedByAfterDate(name = "enableNodejsHttpModules", date = "2025-09-01");
   # Enables Node.js http server related modules such as node:_http_server
   # This flag is experimental and may change or be removed in future versions.
   # It is required to use this flag with `enable_nodejs_http_modules` since
@@ -902,8 +902,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Regarding the recommendation for using import { env, waitUntil } from 'cloudflare:workers';
   # `disallow_importable_env` compat flag should not be set if you are using this
   # and need access to the env since that will prevent access.
-  # TODO(soon): Add a implifiedByAfter when node.js is enabled as well as
-  # `enable_nodejs_http_modules`
 
   pythonNoGlobalHandlers @104 :Bool
       $compatEnableFlag("python_no_global_handlers")
