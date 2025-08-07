@@ -1622,15 +1622,63 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   });
 }
 
-jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object) {
+// RpcStub are allowed to wrap:
+// * RpcTargets
+// * Functions
+// * Plain objects (only when created explicitly via `new RpcStub`)
+//
+// This function checks for these and returns:
+// * kj::none if it's not a valid type to be wrapped in as tub.
+// * The value for allowInstanceProperties if it is.
+kj::Maybe<bool> checkStubType(jsg::Lock& js, jsg::JsObject handle) {
+  return js.withinHandleScope([&]() -> kj::Maybe<bool> {
+    // TODO(perf): We should really cache `prototypeOfObject` somewhere so we don't have to create
+    //   an object to get it. (We do this other places in this file, too...)
+    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
+    auto proto = handle.getPrototype(js);
+    if (proto == prototypeOfObject) {
+      // A regular object. Allow access to instance properties.
+      return true;
+    } else {
+      // Walk the prototype chain looking for RpcTarget.
+      //
+      // (Note we can't simply use handle.isInstanceOf<JsRpcTarget>() because that doesn't work
+      // correctly for proxies. Since RpcTarget is only used as a marker, we don't really need
+      // the object to be an instance of it -- we just care if it's in the prototype chain, even
+      // if the prototype chain is faked by the Proxy.)
+      //
+      // TODO(someday): Consider whether `new RpcStub(obj)` should work on arbitrary types. This
+      //   could be a useful way to say: "I am explicitly opting into treating this like an
+      //   RpcTarget even though I do not have the ability to make its type extend RpcTarget."
+      for (;;) {
+        if (proto == prototypeOfRpcTarget) {
+          // An RpcTarget, don't allow instance properties.
+          return false;
+        }
+
+        KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
+          proto = protoObj.getPrototype(js);
+        } else if (isFunctionForRpc(js, handle)) {
+          // This is NOT an RpcTarget, but it IS callable as a function, so treat it as such.
+          return true;
+        } else {
+          // End of prototype chain, and didn't find RpcTarget.
+          return kj::none;
+        }
+      }
+    }
+  });
+}
+
+jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::JsObject object) {
   auto& ioctx = IoContext::current();
 
-  // We really only took `jsg::Ref<JsRpcTarget>` as the input type for type-checking reasons, but
-  // we'd prefer to store the JS handle. There definitely must be one since we just received this
-  // object from JS.
-  auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(object.tryGetHandle(js)));
+  bool allowInstanceProperties = JSG_REQUIRE_NONNULL(checkStubType(js, object), TypeError,
+      "RpcStubs can only wrap plain objects, functions, and RpcTarget derivatives.");
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, ioctx, handle);
+  rpc::JsRpcTarget::Client cap =
+      kj::heap<TransientJsRpcTarget>(js, ioctx, object, allowInstanceProperties);
 
   return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
@@ -1670,65 +1718,30 @@ void RpcSerializerExternalHandler::serializeFunction(
 
 void RpcSerializerExternalHandler::serializeProxy(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) {
-  js.withinHandleScope([&]() {
-    auto handle = jsg::JsObject(proxy);
+  auto handle = jsg::JsObject(proxy);
 
-    // Proxies are only allowed to wrap objects that would normally be serialized by writing a
-    // stub, e.g. plain objects and RpcTargets. In such cases, we can write a stub pointing to the
-    // proxy.
-    //
-    // However, note that we don't actually want to test the Proxy's *target* directly, because
-    // it's possible the Proxy is trying to disguise the target as something else. Instead, we must
-    // determine the type by following the prototype chain. That way, if the Proxy overrides
-    // getPrototype(), we will honor that override.
-    //
-    // Note that we don't support functions. This is because our isFunctionForRpc() check is not
-    // prototype-based, and as such it's unclear how exactly we should go about checking for a
-    // function here. Luckily, you really don't need to use a `Proxy` to wrap a function... you
-    // can just use a function.
+  // Proxies are allowed to present themselves as anything that you could pass to `new RpcStub`.
+  //
+  // Note there's an intentional quirk here: If the Proxy presents itself as a plain object, we
+  // wrap it in a stub, rather than serialize the object. This enables the Proxy to continue
+  // intercepting property accesses when they happen, rather than have all the properties accessed
+  // and serialized upfront. However, in retrospect, this may haev been a bad choice, as it means a
+  // Proxy on a plain object cannot have exactly the same behavior as a plain object would have.
+  // Note that apps which explicitly want to prevent a plain object from being serialized over
+  // RPC can simply use `new RpcStub(object)` to explicitly wrap it in a stub -- no need to use
+  // a Proxy for that.
+  auto allowInstanceProperties = JSG_REQUIRE_NONNULL(checkStubType(js, handle), DOMDataCloneError,
+      "Proxy could not be serialized because it is not a valid RPC receiver type. The "
+      "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
+      "Proxy's prototype chain.");
 
-    // TODO(perf): We should really cache `prototypeOfObject` somewhere so we don't have to create
-    //   an object to get it. (We do this other places in this file, too...)
-    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
-    auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
-    bool allowInstanceProperties = false;
-    auto proto = handle.getPrototype(js);
-    if (proto == prototypeOfObject) {
-      // A regular object. Allow access to instance properties.
-      allowInstanceProperties = true;
-    } else {
-      // Walk the prototype chain looking for RpcTarget.
-      for (;;) {
-        if (proto == prototypeOfRpcTarget) {
-          // An RpcTarget, don't allow instance properties.
-          allowInstanceProperties = false;
-          break;
-        }
+  // Great, we've concluded we can indeed point a stub at this proxy.
+  serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
-        KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
-          proto = protoObj.getPrototype(js);
-        } else if (isFunctionForRpc(js, handle)) {
-          // This is NOT an RpcTarget, but it IS callable as a function, so treat it as such.
-          allowInstanceProperties = true;
-          break;
-        } else {
-          // End of prototype chain, and didn't find RpcTarget.
-          JSG_FAIL_REQUIRE(DOMDataCloneError,
-              "Proxy could not be serialized because it is not a valid RPC receiver type. The "
-              "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
-              "Proxy's prototype chain.");
-        }
-      }
-    }
-
-    // Great, we've concluded we can indeed point a stub at this proxy.
-    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
-
-    rpc::JsRpcTarget::Client cap =
-        kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
-    write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-      builder.setRpcTarget(kj::mv(cap));
-    });
+  rpc::JsRpcTarget::Client cap =
+      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
+  write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+    builder.setRpcTarget(kj::mv(cap));
   });
 }
 

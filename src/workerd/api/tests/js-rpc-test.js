@@ -897,23 +897,55 @@ export let defaultExportClass = {
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
-    let counter = new MyCounter(4);
-    let stub = new RpcStub(counter);
-    assert.strictEqual(await stub.increment(5), 9);
-    assert.strictEqual(await stub.increment(7), 16);
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(counter);
+      assert.strictEqual(await stub.increment(5), 9);
+      assert.strictEqual(await stub.increment(7), 16);
 
-    assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
+      assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
 
-    assert.strictEqual(counter.disposed, false);
-    stub[Symbol.dispose]();
+      assert.strictEqual(counter.disposed, false);
+      stub[Symbol.dispose]();
 
-    await assert.rejects(stub.increment(2), {
-      name: 'Error',
-      message: 'RPC stub used after being disposed.',
-    });
+      await assert.rejects(stub.increment(2), {
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
+      });
 
-    await counter.onDisposed();
-    assert.strictEqual(counter.disposed, true);
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+    }
+
+    // In fact, RpcStubs can be created from any old object.
+    {
+      let stub = new RpcStub({
+        sum(a, b) {
+          return a + b;
+        },
+      });
+
+      assert.strictEqual(await stub.sum(12, 34), 46);
+    }
+
+    // Or function.
+    {
+      let func = (a, b) => {
+        return a + b;
+      };
+      func.ownProperty = 'hello';
+      let stub = new RpcStub(func);
+
+      assert.strictEqual(await stub(12, 34), 46);
+      assert.strictEqual(await stub.ownProperty, 'hello');
+    }
+
+    // Or Proxy of an RpcTarget.
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(new Proxy(counter, {}));
+      assert.strictEqual(await stub.increment(5), 9);
+    }
   },
 };
 
