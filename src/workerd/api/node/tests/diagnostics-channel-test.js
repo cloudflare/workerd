@@ -108,3 +108,15 @@ export const test_tracing = {
     await Promise.all(promises.map((p) => p.promise));
   },
 };
+
+export const serFailureTest = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const channel1 = channel('ser');
+    subscribe('ser', () => {
+      resolve();
+    });
+    channel1.publish(function () {});
+    await promise;
+  },
+};
