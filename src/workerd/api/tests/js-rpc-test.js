@@ -3,6 +3,8 @@ import { waitUntil } from 'cloudflare:workers';
 import {
   WorkerEntrypoint,
   DurableObject,
+  RpcPromise,
+  RpcProperty,
   RpcStub,
   RpcTarget,
 } from 'cloudflare:workers';
@@ -915,6 +917,10 @@ export let loopbackJsRpcTarget = {
 
       await counter.onDisposed();
       assert.strictEqual(counter.disposed, true);
+
+      assert.strictEqual(stub instanceof RpcStub, true);
+      assert.strictEqual(stub.increment instanceof RpcProperty, true);
+      assert.strictEqual(stub.increment(1) instanceof RpcPromise, true);
     }
 
     // In fact, RpcStubs can be created from any old object.
