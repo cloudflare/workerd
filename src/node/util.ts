@@ -422,8 +422,8 @@ export default {
   getCallSites,
   isDeepStrictEqual,
 
-  // EOL methods
   isArray,
+  // EOL methods
   isBoolean,
   isBuffer,
   isDate,
