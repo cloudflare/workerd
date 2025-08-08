@@ -23,6 +23,10 @@ export class RpcStub {
   constructor(server: object);
 }
 
+export class RpcPromise {}
+
+export class RpcProperty {}
+
 export class RpcTarget {}
 
 export function waitUntil(promise: Promise<unknown>): void;

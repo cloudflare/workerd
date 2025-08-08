@@ -368,7 +368,7 @@ class JsRpcStub: public JsRpcClientProvider {
   // that extend `JsRpcTarget` and then they will simply return those. The serializer will
   // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
   // for testing to be able to construct a loopback stub.
-  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
+  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::JsObject object);
 
   // Call the stub itself as a function.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);

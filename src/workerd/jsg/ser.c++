@@ -284,11 +284,11 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
         !Wrappable::isWorkerdApiObject(object)) {
       KJ_IF_SOME(eh, externalHandler) {
-        if (object->IsFunction()) {
-          eh.serializeFunction(js, *this, object.As<v8::Function>());
-          return v8::Just(true);
-        } else if (object->IsProxy()) {
+        if (object->IsProxy()) {
           eh.serializeProxy(js, *this, object.As<v8::Proxy>());
+          return v8::Just(true);
+        } else if (object->IsFunction()) {
+          eh.serializeFunction(js, *this, object.As<v8::Function>());
           return v8::Just(true);
         }
       }

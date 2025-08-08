@@ -3,6 +3,8 @@ import { waitUntil } from 'cloudflare:workers';
 import {
   WorkerEntrypoint,
   DurableObject,
+  RpcPromise,
+  RpcProperty,
   RpcStub,
   RpcTarget,
 } from 'cloudflare:workers';
@@ -473,6 +475,19 @@ export class MyService extends WorkerEntrypoint {
 
     waitUntil(scheduler.wait(100).then(resolve));
   }
+
+  async call(func, arg) {
+    return await func(arg);
+  }
+
+  async getProp(obj, prop) {
+    return await obj[prop];
+  }
+
+  // Useful to test pipelining.
+  async identity(x) {
+    return x;
+  }
 }
 
 // An entrypoint which forwards methods calls to MyService, thus acting as a proxy.
@@ -884,23 +899,59 @@ export let defaultExportClass = {
 
 export let loopbackJsRpcTarget = {
   async test(controller, env, ctx) {
-    let counter = new MyCounter(4);
-    let stub = new RpcStub(counter);
-    assert.strictEqual(await stub.increment(5), 9);
-    assert.strictEqual(await stub.increment(7), 16);
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(counter);
+      assert.strictEqual(await stub.increment(5), 9);
+      assert.strictEqual(await stub.increment(7), 16);
 
-    assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
+      assert.strictEqual(await stub.fetch(true, 123, 'baz'), '16 true 123 baz');
 
-    assert.strictEqual(counter.disposed, false);
-    stub[Symbol.dispose]();
+      assert.strictEqual(counter.disposed, false);
+      stub[Symbol.dispose]();
 
-    await assert.rejects(stub.increment(2), {
-      name: 'Error',
-      message: 'RPC stub used after being disposed.',
-    });
+      await assert.rejects(stub.increment(2), {
+        name: 'Error',
+        message: 'RPC stub used after being disposed.',
+      });
 
-    await counter.onDisposed();
-    assert.strictEqual(counter.disposed, true);
+      await counter.onDisposed();
+      assert.strictEqual(counter.disposed, true);
+
+      assert.strictEqual(stub instanceof RpcStub, true);
+      assert.strictEqual(stub.increment instanceof RpcProperty, true);
+      assert.strictEqual(stub.increment(1) instanceof RpcPromise, true);
+    }
+
+    // In fact, RpcStubs can be created from any old object.
+    {
+      let stub = new RpcStub({
+        sum(a, b) {
+          return a + b;
+        },
+      });
+
+      assert.strictEqual(await stub.sum(12, 34), 46);
+    }
+
+    // Or function.
+    {
+      let func = (a, b) => {
+        return a + b;
+      };
+      func.ownProperty = 'hello';
+      let stub = new RpcStub(func);
+
+      assert.strictEqual(await stub(12, 34), 46);
+      assert.strictEqual(await stub.ownProperty, 'hello');
+    }
+
+    // Or Proxy of an RpcTarget.
+    {
+      let counter = new MyCounter(4);
+      let stub = new RpcStub(new Proxy(counter, {}));
+      assert.strictEqual(await stub.increment(5), 9);
+    }
   },
 };
 
@@ -1750,6 +1801,92 @@ export let proxiedRpcTarget = {
       await env.MyService.incrementCounter(proxy, 1);
 
       assert.strictEqual(counter.i, 124);
+    }
+
+    // Proxy function.
+    {
+      let func = (i) => {
+        return i * 3;
+      };
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        apply(target, thisArg, argumentsList) {
+          return target(...argumentsList) + 2;
+        },
+      });
+
+      assert.strictEqual(await env.MyService.call(proxy, 2), 8);
+      assert.strictEqual(await env.MyService.getProp(proxy, 'ownProp'), 123);
+
+      // Try pipelining.
+      assert.strictEqual(await env.MyService.identity(() => proxy)()(4), 14);
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().ownProp,
+        123
+      );
+
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x(4),
+        14
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ x: proxy }))().x.ownProp,
+        123
+      );
+    }
+
+    // Proxy RPC target that is callable.
+    {
+      let counter = new MyCounter(0);
+
+      // We make the proxy target be a function so that it is callable, but we implement
+      // getPrototypeOf() to make it appear to implement RpcTarget.
+      let func = (i) => i * 11;
+      func.ownProp = 123;
+      let proxy = new Proxy(func, {
+        get(target, prop, receiver) {
+          if (prop == 'increment') {
+            return (i) => counter.increment(i + 123);
+          } else if (prop == 'ownProp') {
+            return target.ownProp;
+          } else {
+            let result = counter[prop];
+            if (result instanceof Function) {
+              result = result.bind(counter);
+            }
+            return result;
+          }
+        },
+        has(target, prop) {
+          return prop in counter || prop === 'ownProp';
+        },
+        getPrototypeOf(target) {
+          return Object.getPrototypeOf(counter);
+        },
+      });
+
+      // We can call it.
+      assert.strictEqual(await env.MyService.call(proxy, 3), 33);
+
+      // We *cannot* access own properties of the function.
+      assert.rejects(() => env.MyService.getProp(proxy, 'ownProp'), {
+        name: 'TypeError',
+        message: 'The RPC receiver does not implement the method "ownProp".',
+      });
+
+      // We *can* access prototype properties, becaues it's an RpcTarget.
+      await env.MyService.incrementCounter(proxy, 1);
+      assert.strictEqual(counter.i, 124);
+
+      // Try pipelined calls.
+      assert.strictEqual(
+        await env.MyService.identity(() => proxy)().increment(3),
+        250
+      );
+      assert.strictEqual(
+        await env.MyService.identity(() => ({ p: proxy }))().p.increment(4),
+        377
+      );
     }
 
     // Can't proxy a class that doesn't extend `RpcTarget`.
