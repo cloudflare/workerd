@@ -12,7 +12,8 @@ type GatewayRetries = {
   backoff?: 'constant' | 'linear' | 'exponential';
 };
 
-export type GatewayOptionsNoId = {
+export type GatewayOptions = {
+  id: string;
   cacheKey?: string;
   cacheTtl?: number;
   skipCache?: boolean;
@@ -23,8 +24,11 @@ export type GatewayOptionsNoId = {
   retries?: GatewayRetries;
 };
 
-export type GatewayOptions = GatewayOptionsNoId & {
-  id: string;
+export type UniversalGatewayOptions = Exclude<GatewayOptions, 'id'> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
 };
 
 export type AiGatewayPatchLog = {
@@ -222,7 +226,7 @@ export class AiGateway {
 
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: GatewayOptionsNoId; extraHeaders?: object }
+    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
 
@@ -254,7 +258,7 @@ export class AiGateway {
   }
 
   #getHeadersFromOptions(
-    options?: GatewayOptionsNoId,
+    options?: UniversalGatewayOptions,
     extraHeaders?: object
   ): Headers {
     const headers = new Headers();
