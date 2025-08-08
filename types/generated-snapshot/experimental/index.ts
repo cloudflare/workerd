@@ -6258,7 +6258,8 @@ export type GatewayRetries = {
   retryDelayMs?: number;
   backoff?: "constant" | "linear" | "exponential";
 };
-export type GatewayOptionsNoId = {
+export type GatewayOptions = {
+  id: string;
   cacheKey?: string;
   cacheTtl?: number;
   skipCache?: boolean;
@@ -6268,8 +6269,11 @@ export type GatewayOptionsNoId = {
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
 };
-export type GatewayOptions = GatewayOptionsNoId & {
-  id: string;
+export type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
 };
 export type AiGatewayPatchLog = {
   score?: number | null;
@@ -6364,7 +6368,7 @@ export declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
     options?: {
-      gateway?: GatewayOptionsNoId;
+      gateway?: UniversalGatewayOptions;
       extraHeaders?: object;
     },
   ): Promise<Response>;
