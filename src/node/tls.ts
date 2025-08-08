@@ -40,7 +40,7 @@ import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 let createSecurePair = undefined;
 
-if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_methods) {
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
   createSecurePair = function createSecurePair(): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
   };

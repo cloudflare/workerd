@@ -52,7 +52,7 @@ let isString: ((val: unknown) => boolean) | undefined = undefined;
 let isSymbol: ((val: unknown) => boolean) | undefined = undefined;
 let isUndefined: ((val: unknown) => boolean) | undefined = undefined;
 
-if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_methods) {
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
   isBoolean = (val: unknown): boolean => typeof val === 'boolean';
   isBuffer = (val: unknown): boolean => Buffer.isBuffer(val);
   isDate = (val: unknown): boolean => val instanceof Date;
