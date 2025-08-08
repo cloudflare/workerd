@@ -667,6 +667,27 @@ wd_test(
     ],
 )
 
+js_binary(
+    name = "http-socket-server",
+    entry_point = "tests/http-socket-server.js",
+)
+
+wd_test(
+    src = "tests/http-socket-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/http-socket-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "http-socket-server",
+    sidecar_port_bindings = [
+        "HTTP_SOCKET_SERVER_PORT",
+        "SOCKET_PARTIALLY_WRITTEN",
+        "STARTTLS_SOCKET",
+        "FLUSH_HELLO_SOCKET",
+    ],
+)
+
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
     args = [

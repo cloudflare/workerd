@@ -4,9 +4,11 @@
 
 #include "sockets.h"
 
+#include "streams/standard.h"
 #include "system-streams.h"
 
 #include <workerd/io/worker-interface.h>
+#include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {
@@ -510,5 +512,119 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
 jsg::Ref<Socket> SocketsModule::connect(
     jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options) {
   return connectImpl(js, kj::none, kj::mv(address), kj::mv(options));
+}
+
+kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
+  writable->detach(js);
+  readable->detach(js);
+
+  closedResolver.resolve(js);
+  return connectionStream->addWrappedRef();
+}
+
+// Definition of the StreamWorkerInterface class
+class StreamWorkerInterface final: public WorkerInterface {
+ public:
+  StreamWorkerInterface(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
+      : stream(kj::mv(stream)),
+        headerTable(headerTable) {}
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      kj::HttpService::Response& response) override {
+    // Parse the URL to extract the path
+    auto parsedUrl = KJ_REQUIRE_NONNULL(kj::Url::tryParse(url, kj::Url::Context::HTTP_PROXY_REQUEST,
+                                            {.percentDecode = false, .allowEmpty = true}),
+        "invalid url", url);
+
+    // We need to convert the URL from proxy format (full URL in request line) to host format
+    // (path in request line, hostname in Host header).
+    auto newHeaders = headers.cloneShallow();
+    newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
+    auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
+    // Create a new HTTP client using our stream
+    auto httpClient = kj::newHttpClient(headerTable, *stream);
+
+    // Create a new HTTP service from the client
+    auto service = kj::newHttpService(*httpClient);
+
+    // Forward the request to the service
+    return service->request(method, noHostUrl, newHeaders, requestBody, response)
+        .attach(kj::mv(service), kj::mv(httpClient));
+  }
+
+  kj::Promise<void> connect(kj::StringPtr host,
+      const kj::HttpHeaders& headers,
+      kj::AsyncIoStream& connection,
+      ConnectResponse& response,
+      kj::HttpConnectSettings settings) override {
+    JSG_FAIL_REQUIRE(TypeError,
+        "connect is not something that can be done on a fetcher converted from a socket");
+  }
+
+  kj::Promise<void> prewarm(kj::StringPtr url) override {
+    KJ_UNIMPLEMENTED("prewarm() not supported on StreamWorkerInterface");
+  }
+
+  kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
+    KJ_UNIMPLEMENTED("runScheduled() not supported on StreamWorkerInterface");
+  }
+
+  kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
+    KJ_UNIMPLEMENTED("runAlarm() not supported on StreamWorkerInterface");
+  }
+
+  kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
+    return event->notSupported();
+  }
+
+ private:
+  kj::Own<kj::AsyncIoStream> stream;
+  const kj::HttpHeaderTable& headerTable;
+};
+
+// Implementation of the custom factory for creating WorkerInterface instances from a socket
+class StreamOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  StreamOutgoingFactory(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
+      : stream(kj::mv(stream)),
+        headerTable(headerTable) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+    JSG_ASSERT(stream.get() != nullptr, Error,
+        "Fetcher created from internalNewHttpClient can only be used once");
+    // Create a WorkerInterface that wraps the stream
+    return kj::heap<StreamWorkerInterface>(kj::mv(stream), headerTable);
+  }
+
+ private:
+  kj::Own<kj::AsyncIoStream> stream;
+  const kj::HttpHeaderTable& headerTable;
+};
+
+jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
+    jsg::Lock& js, jsg::Ref<Socket> socket) {
+
+  // TODO(soon) check for nothing to read, this will require things using a promise so this function
+  // must remain returning a jsg::Promise waiting on a TODO for releaseLock
+
+  // Flush the writable stream before taking the connection stream to ensure all data is written
+  // before the stream is detatched
+  return socket->getWritable()->flush(js).then(
+      js, JSG_VISITABLE_LAMBDA((socket = kj::mv(socket)), (socket), (jsg::Lock & js) mutable {
+        auto& ioctx = IoContext::current();
+
+        // Create our custom factory that will create client instances from this socket
+        kj::Own<Fetcher::OutgoingFactory> outgoingFactory = kj::heap<StreamOutgoingFactory>(
+            socket->takeConnectionStream(js), ioctx.getHeaderTable());
+
+        // Create a Fetcher that uses our custom factory
+        auto fetcher = js.alloc<Fetcher>(
+            ioctx.addObject(kj::mv(outgoingFactory)), Fetcher::RequiresHostAndProtocol::YES);
+
+        return kj::mv(fetcher);
+      }));
 }
 }  // namespace workerd::api
