@@ -10,9 +10,10 @@
 #include <workerd/io/supported-compatibility-date.embed.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
+#include <workerd/server/cpp-capnp-schema.embed.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
-#include <workerd/server/workerd-meta.capnp.h>
+#include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 

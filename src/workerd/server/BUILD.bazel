@@ -4,6 +4,7 @@ load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 config_setting(
@@ -41,16 +42,31 @@ wd_cc_library(
     }),
 )
 
+wd_cc_embed(
+    name = "workerd-capnp-schema",
+    src = "workerd.capnp",
+    base_name = "workerd-capnp-schema",
+    is_text = True,
+)
+
+wd_cc_embed(
+    name = "cpp-capnp-schema",
+    src = "@capnp-cpp//src/capnp:c++.capnp",
+    base_name = "cpp-capnp-schema",
+    is_text = True,
+)
+
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":cpp-capnp-schema",
         ":json-logger",
         ":server",
         ":v8-platform-impl",
-        ":workerd-meta_capnp",
+        ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/rust/cxx-integration",
@@ -268,11 +284,6 @@ wd_capnp_library(
         "//src/workerd/api:__pkg__",
         "//src/workerd/tests:__pkg__",
     ],
-)
-
-wd_capnp_library(
-    src = "workerd-meta.capnp",
-    deps = [":workerd_capnp"],
 )
 
 kj_test(
