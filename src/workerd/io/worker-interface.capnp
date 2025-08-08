@@ -196,6 +196,7 @@ struct Trace @0x8e8d911203762d34 {
       fetch @3 :FetchEventInfo;
       jsRpc @4 :JsRpcEventInfo;
     }
+    parentSpanId @5 :UInt64;
   }
 
   struct SpanClose {
