@@ -526,6 +526,10 @@ interface DurableObjectNamespace<
   ): DurableObjectId;
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
+  getByName(
+    name: string,
+    options?: DurableObjectNamespaceGetDurableObjectOptions,
+  ): DurableObjectStub;
   get(
     id: DurableObjectId,
     options?: DurableObjectNamespaceGetDurableObjectOptions,

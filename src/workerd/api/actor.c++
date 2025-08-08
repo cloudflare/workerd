@@ -123,6 +123,12 @@ jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromString(jsg::Lock& js, kj
   return js.alloc<DurableObjectId>(idFactory->idFromString(kj::mv(id)));
 }
 
+jsg::Ref<DurableObject> DurableObjectNamespace::getByName(
+    jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptions> options) {
+  auto id = js.alloc<DurableObjectId>(idFactory->idFromName(kj::mv(name)));
+  return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
+}
+
 jsg::Ref<DurableObject> DurableObjectNamespace::get(
     jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options) {
   return getImpl(js, ActorGetMode::GET_OR_CREATE, kj::mv(id), kj::mv(options));
