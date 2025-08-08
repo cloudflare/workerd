@@ -39,7 +39,10 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { portMapper } from 'cloudflare-internal:http';
-import { IncomingMessage } from 'node-internal:internal_http_incoming';
+import {
+  IncomingMessage,
+  setIncomingMessageSocket,
+} from 'node-internal:internal_http_incoming';
 import { STATUS_CODES } from 'node-internal:internal_http_constants';
 import {
   kServerResponse,
@@ -227,6 +230,10 @@ export class Server
     response: ServerResponse;
   } {
     const incoming = new this[kIncomingMessage]();
+    setIncomingMessageSocket(incoming, {
+      headers: request.headers,
+      localPort: this.#port as number,
+    });
     const reqUrl = new URL(request.url);
     incoming.url = reqUrl.pathname + reqUrl.search;
 

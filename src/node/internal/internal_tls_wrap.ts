@@ -522,7 +522,10 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
     this._handle.socket.closed.then(
       onConnectionClosed.bind(this),
-      this.destroy.bind(socket)
+      (error: unknown): void => {
+        // Do not call this.destroy.bind(this) since user can override it.
+        this.destroy(error as Error);
+      }
     );
   } catch (error) {
     this.destroy(error as Error);

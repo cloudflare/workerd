@@ -388,7 +388,9 @@ Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = this.setTimeout(s.timeout, s._onTimeout.bind(s));
+      s[kTimeout] = this.setTimeout(s.timeout, (): void => {
+        s._onTimeout();
+      });
     }
   }
 };
@@ -416,7 +418,9 @@ Socket.prototype.setTimeout = function (
     }
   } else {
     // @ts-expect-error TS2740 Required to not overcomplicate types
-    this[kTimeout] = setTimeout(this._onTimeout.bind(this), msecs);
+    this[kTimeout] = setTimeout((): void => {
+      this._onTimeout();
+    }, msecs);
     if (callback !== undefined) {
       validateFunction(callback, 'callback');
       this.once('timeout', callback);
@@ -754,7 +758,10 @@ Socket.prototype.destroySoon = function (this: Socket): void {
   if (this.writableFinished) {
     this.destroy();
   } else {
-    this.once('finish', this.destroy.bind(this));
+    this.once('finish', () => {
+      // Do not call this.destroy.bind(this) since user can override it.
+      this.destroy();
+    });
   }
 };
 
@@ -1222,7 +1229,10 @@ function initializeConnection(
 
       handle.closed.then(
         onConnectionClosed.bind(socket),
-        socket.destroy.bind(socket)
+        (error: unknown): void => {
+          // Do not call socket.destroy.bind(socket) since user can override it.
+          socket.destroy(error as Error);
+        }
       );
     } catch (err) {
       socket.destroy(err as Error);
