@@ -55,6 +55,7 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/python-entrypoint.embed.h>
 
 #include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
