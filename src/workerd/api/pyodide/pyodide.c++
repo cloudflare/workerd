@@ -410,6 +410,7 @@ PyodideMetadataReader::State::State(const State& other)
       isTracingFlag(other.isTracingFlag),
       snapshotToDisk(other.snapshotToDisk),
       createBaselineSnapshot(other.createBaselineSnapshot),
+      isDedicatedSnapshotEnabled(other.isDedicatedSnapshotEnabled),
       memorySnapshot(other.memorySnapshot.map(
           [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
 

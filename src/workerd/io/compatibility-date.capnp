@@ -935,4 +935,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-08-11");
   # Disables adding `/session/metadata/vendor` to the Python Worker's sys.path. So Workers using
   # this flag will have to place their vendored modules in a `python_modules` directory.
+
+
+  pythonDedicatedSnapshot @108 :Bool
+      $compatEnableFlag("python_dedicated_snapshot")
+      $experimental;
+  # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
+  # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
+  # top-level execution of the Worker.
 }

@@ -130,6 +130,7 @@ class PyodideMetadataReader: public jsg::Object {
     bool isTracingFlag;
     bool snapshotToDisk;
     bool createBaselineSnapshot;
+    bool isDedicatedSnapshotEnabled;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
 
     State(kj::String mainModule,
@@ -143,6 +144,7 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
+        bool isDedicatedSnapshotEnabled,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
@@ -154,6 +156,7 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
+          isDedicatedSnapshotEnabled(isDedicatedSnapshotEnabled),
           memorySnapshot(kj::mv(memorySnapshot)) {
       verifyNoMainModuleInVendor();
     }
@@ -181,6 +184,9 @@ class PyodideMetadataReader: public jsg::Object {
 
   bool isCreatingBaselineSnapshot() {
     return state->createBaselineSnapshot;
+  }
+  bool isDedicatedSnapshotEnabled() {
+    return state->isDedicatedSnapshotEnabled;
   }
 
   kj::StringPtr getMainModule() {
@@ -249,6 +255,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesVersion);
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
+    JSG_METHOD(isDedicatedSnapshotEnabled);
     JSG_METHOD(getTransitiveRequirements);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
@@ -306,7 +313,8 @@ struct ArtifactBundler_State {
   kj::Own<ArtifactBundler_State> clone() {
     return kj::heap<ArtifactBundler_State>(packageManager,
         existingSnapshot.map(
-            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
+        isValidating);
   }
 };
 

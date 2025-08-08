@@ -9,6 +9,7 @@ import {
   preloadDynamicLibs,
   finalizeBootstrap,
   isRestoringSnapshot,
+  type PyodideEntrypointHelper,
 } from 'pyodide-internal:snapshot';
 import {
   entropyMountFiles,
@@ -27,7 +28,7 @@ import { legacyVendorPath } from 'pyodide-internal:metadata';
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-import { reportError } from 'pyodide-internal:util';
+import { PythonRuntimeError, reportError } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
@@ -38,7 +39,16 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  * `noInitialRun: true` and so the C runtime is in an incoherent state until we
  * restore the linear memory from the snapshot.
  */
-function prepareWasmLinearMemory(Module: Module): void {
+function prepareWasmLinearMemory(
+  Module: Module,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+): void {
+  if (!pyodide_entrypoint_helper) {
+    throw new PythonRuntimeError(
+      'pyodide_entrypoint_helper is required to load snapshot'
+    );
+  }
+
   enterJaegerSpan('preload_dynamic_libs', () => {
     preloadDynamicLibs(Module);
   });
@@ -57,7 +67,7 @@ function prepareWasmLinearMemory(Module: Module): void {
     adjustSysPath(Module);
   }
   if (Module.API.version !== '0.26.0a2') {
-    finalizeBootstrap(Module);
+    finalizeBootstrap(Module, pyodide_entrypoint_helper);
   }
 }
 
@@ -138,7 +148,8 @@ function setTimeoutTopLevelPatch(
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
-  indexURL: string
+  indexURL: string,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
@@ -166,7 +177,7 @@ export function loadPyodide(
     });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module);
+      prepareWasmLinearMemory(Module, pyodide_entrypoint_helper);
     });
 
     maybeCollectSnapshot(Module);
@@ -177,7 +188,7 @@ export function loadPyodide(
     if (Module.API.version === '0.26.0a2') {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module);
+      finalizeBootstrap(Module, pyodide_entrypoint_helper);
     }
     const pyodide = Module.API.public_api;
 

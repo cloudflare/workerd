@@ -16,10 +16,14 @@ import {
   legacyGlobalHandlers,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
-import { reportError } from 'pyodide-internal:util';
+import { PythonRuntimeError, reportError } from 'pyodide-internal:util';
+import {
+  maybeCollectDedicatedSnapshot,
+  type PyodideEntrypointHelper,
+} from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
-const pyodide_entrypoint_helper: any = {};
+let pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
 
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
@@ -27,10 +31,12 @@ export function setDoAnImport(
   cloudflareSockets: any,
   workerEntrypoint: any
 ): void {
-  pyodide_entrypoint_helper.doAnImport = func;
-  pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
-  pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
-  pyodide_entrypoint_helper.workerEntrypoint = workerEntrypoint;
+  pyodide_entrypoint_helper = {
+    doAnImport: func,
+    cloudflareWorkersModule: cloudflareWorkers,
+    cloudflareSocketsModule: cloudflareSockets,
+    workerEntrypoint: workerEntrypoint,
+  };
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
@@ -54,7 +60,12 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
+      const pyodide = loadPyodide(
+        IS_WORKERD,
+        LOCKFILE,
+        WORKERD_INDEX_URL,
+        pyodide_entrypoint_helper
+      );
       await setupPatches(pyodide);
       return pyodide;
     })();
@@ -102,6 +113,11 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     const sitePackages = pyodide.FS.sitePackages;
 
     // Expose the doAnImport function and global modules to Python globals
+    if (!pyodide_entrypoint_helper) {
+      throw new PythonRuntimeError(
+        'pyodide_entrypoint_helper is not initialized'
+      );
+    }
     pyodide.registerJsModule(
       '_pyodide_entrypoint_helper',
       pyodide_entrypoint_helper
@@ -444,6 +460,11 @@ export async function initPython(): Promise<PythonInitResult> {
       if (Object.keys(handlers).length > 0) {
         throw new TypeError('Cannot define multiple default entrypoints');
       }
+      if (!pyodide_entrypoint_helper) {
+        throw new PythonRuntimeError(
+          'pyodide_entrypoint_helper is not initialized'
+        );
+      }
       handlers['default'] = makeEntrypointClass(
         'Default',
         pyodide_entrypoint_helper.workerEntrypoint,
@@ -454,6 +475,10 @@ export async function initPython(): Promise<PythonInitResult> {
       break;
     }
   }
+
+  // Collect a dedicated snapshot at the very end.
+  const pyodide = await getPyodide();
+  maybeCollectDedicatedSnapshot(pyodide._module, pyodide_entrypoint_helper);
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

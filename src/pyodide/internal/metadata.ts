@@ -9,6 +9,8 @@ export const SHOULD_SNAPSHOT_TO_DISK = MetadataReader.shouldSnapshotToDisk();
 export const IS_CREATING_BASELINE_SNAPSHOT =
   MetadataReader.isCreatingBaselineSnapshot();
 export const IS_EW_VALIDATING = ArtifactBundler.isEwValidating();
+export const IS_DEDICATED_SNAPSHOT_ENABLED =
+  MetadataReader.isDedicatedSnapshotEnabled();
 export const IS_CREATING_SNAPSHOT = IS_EW_VALIDATING || SHOULD_SNAPSHOT_TO_DISK;
 
 export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
@@ -52,7 +54,8 @@ export interface CloudflareGlobal {
   };
 }
 
-const compatibilityFlags: CompatibilityFlags =
+// WARNING: this doesn't seem to support experimental flags.
+export const compatibilityFlags: CompatibilityFlags =
   (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
 export const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;
 export const legacyGlobalHandlers: boolean =
