@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Fri, 8 Aug 2025 16:48:06 -0400
+Subject: [build] Export icudata file to facilitate embedding it
+
+Change-Id: Ie8ccf14aa86bae3c3c7ff1d3c2b507e19c6178be
+
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 5127ceb7b783b11d5750c01977d7e34606c39667..de8e20ac3ad50fe2199d3b56753e655d1355b19f 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -1,6 +1,7 @@
+ # Copyright 2021 the V8 project authors. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
++exports_files(["common/icudtl.dat"])
+ 
+ filegroup(
+     name = "icudata",
