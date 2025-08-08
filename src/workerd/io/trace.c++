@@ -1003,13 +1003,13 @@ kj::Maybe<tracing::SpanOpen::Info> readSpanOpenInfo(rpc::Trace::SpanOpen::Reader
 }  // namespace
 
 tracing::SpanOpen::SpanOpen(rpc::Trace::SpanOpen::Reader reader)
-    // TODO(streaming-tail): Propagate parentSpanId properly
     : operationName(kj::str(reader.getOperationName())),
       info(readSpanOpenInfo(reader)),
-      parentSpanId(0) {}
+      parentSpanId(reader.getParentSpanId()) {}
 
 void tracing::SpanOpen::copyTo(rpc::Trace::SpanOpen::Builder builder) const {
   builder.setOperationName(operationName.asPtr());
+  builder.setParentSpanId(parentSpanId);
   KJ_IF_SOME(i, info) {
     auto infoBuilder = builder.initInfo();
     KJ_SWITCH_ONEOF(i) {
