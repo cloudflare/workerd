@@ -14,7 +14,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from tool_utils import b64digest, run
+from tool_utils import hexdigest, run
 
 PYPROJECT_TEMPLATE = """[project]
 name = "vendor-test"
@@ -147,7 +147,7 @@ def main() -> int:
         print(i1 + "{")
         print(i2 + f'"name": "{args.package_name}",')
         print(i2 + f'"abi": "{abi}",')
-        print(i2 + f'"sha256": "{b64digest(zip_path)}",')
+        print(i2 + f'"sha256": "{hexdigest(zip_path)}",')
         print(i1 + "},")
         print()
     except KeyboardInterrupt:
