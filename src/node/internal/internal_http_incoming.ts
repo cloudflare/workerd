@@ -11,6 +11,7 @@ import type {
   IncomingHttpHeaders,
 } from 'node:http';
 import { Readable } from 'node-internal:streams_readable';
+import { isIPv4 } from 'node-internal:internal_net';
 
 const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
@@ -20,6 +21,14 @@ export let setIncomingMessageFetchResponse: (
   incoming: IncomingMessage,
   response: Response,
   resetTimers?: (opts: { finished: boolean }) => void
+) => void;
+
+export let setIncomingMessageSocket: (
+  incoming: IncomingMessage,
+  options: {
+    headers: Headers;
+    localPort: number;
+  }
 ) => void;
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
@@ -66,6 +75,53 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       response: Response
     ): void => {
       incoming.#setFetchResponse(response);
+    };
+
+    // This method sets the socket property of the IncomingMessage object.
+    // Please rest assured that this method implements a subset of Socket since
+    // in Node.js it's net.Socket which isn't possible to implement within our own
+    // implementation since our implementation is based on Request and Response objects.
+    setIncomingMessageSocket = (
+      incoming: IncomingMessage,
+      { headers, localPort }: { headers: Headers; localPort: number }
+    ): void => {
+      const connectingIp = headers.get('cf-connecting-ip');
+      const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true;
+      // Return a port number between 2^15 and 2^16.
+      const remotePort =
+        Math.floor(Math.random() * (65535 - 32768 + 1)) + 32768;
+
+      incoming.#socket = {
+        encrypted: headers.get('x-forwarded-proto') === 'https',
+        get remoteFamily(): string | undefined {
+          if (incoming.destroyed) {
+            return undefined;
+          }
+          return isConnectingIpIpv4 ? 'IPv4' : 'IPv6';
+        },
+        get remoteAddress(): string | undefined {
+          // This is defined in production, and will fallback to localhost on local development
+          // where request headers does not contain cf-connecting-ip.
+          return incoming.destroyed ? undefined : (connectingIp ?? '127.0.0.1');
+        },
+        get remotePort(): number | undefined {
+          // Return a port in the ephemeral range (32768-65535) as clients would use,
+          // and undefined if the socket is destroyed.
+          return incoming.destroyed ? undefined : remotePort;
+        },
+        get localAddress(): string {
+          // Host will have a value like "my-worker.yagiz.workers.dev",
+          return headers.get('host') ?? '127.0.0.1';
+        },
+        get localPort(): number {
+          // This is the port defined by the `server.listen(port)` call.
+          return localPort;
+        },
+        // Since we don't implement net.Socket, we fallback to IncomingMessage.destroy here.
+        // We do not use .bind() in case user overwrites destroy method.
+        destroy: (err: Error | undefined): IncomingMessage =>
+          incoming.destroy(err),
+      };
     };
   }
 

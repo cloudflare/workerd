@@ -1132,6 +1132,30 @@ export const testConfigurableHighWaterMark = {
   },
 };
 
+export const testIncomingMessageSocket = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req.socket.encrypted, false);
+      strictEqual(req.socket.localPort, 8080);
+      strictEqual(req.socket.localAddress, '127.0.0.1');
+      strictEqual(req.socket.remoteAddress, '127.0.0.1');
+      strictEqual(typeof req.socket.remotePort, 'number');
+      ok(req.socket.remotePort >= Math.pow(2, 15));
+      ok(req.socket.remotePort <= Math.pow(2, 16));
+      strictEqual(req.socket.remoteFamily, 'IPv4');
+
+      res.writeHead(200);
+      res.end('Hello, World!');
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://cloudflare.com');
+    strictEqual(res.status, 200);
+    strictEqual(await res.text(), 'Hello, World!');
+  },
+};
+
 let scheduledCallCount = 0;
 
 export default httpServerHandler(
