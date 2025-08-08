@@ -87,7 +87,9 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     ): void => {
       const connectingIp = headers.get('cf-connecting-ip');
       const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true;
-      const remotePort = Math.floor(Math.random() * (65535 - 32768 + 1));
+      // Return a port number between 2^15 and 2^16.
+      const remotePort =
+        Math.floor(Math.random() * (65535 - 32768 + 1)) + 32768;
 
       incoming.#socket = {
         encrypted: headers.get('x-forwarded-proto') === 'https',
@@ -113,11 +115,12 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
         },
         get localPort(): number {
           // This is the port defined by the `server.listen(port)` call.
-          // TODO(soon): Investigate if we should return 443 on production.
           return localPort;
         },
         // Since we don't implement net.Socket, we fallback to IncomingMessage.destroy here.
-        destroy: incoming.destroy.bind(incoming),
+        // We do not use .bind() in case user overwrites destroy method.
+        destroy: (err: Error | undefined): IncomingMessage =>
+          incoming.destroy(err),
       };
     };
   }
