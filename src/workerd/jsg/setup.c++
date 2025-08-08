@@ -20,7 +20,8 @@
 #endif
 
 #ifdef WORKERD_ICU_DATA_EMBED
-#include <icudata-embed.capnp.h>
+#include "icu-data-file.embed.h"
+
 #include <unicode/udata.h>
 #endif
 
@@ -171,10 +172,10 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
-  // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
-  // containing the data.
+  // ourselves. `ICU_DATA_FILE`, if defined, will refer to a `kj::ArrayPtr<const byte>` containing
+  // the data.
   UErrorCode err = U_ZERO_ERROR;
-  udata_setCommonData(EMBEDDED_ICU_DATA_FILE->begin(), &err);
+  udata_setCommonData(ICU_DATA_FILE.begin(), &err);
   udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
   KJ_ASSERT(err == U_ZERO_ERROR);
 #else
