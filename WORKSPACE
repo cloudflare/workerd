@@ -221,14 +221,26 @@ bind(
 # We indirect through `@workerd-v8` to allow dependents to override how and where `v8` is built.
 #
 # TODO(cleanup): There must be a better way to do this?
-# TODO(soon): Figure out how to build v8 with perfetto enabled. It does not appear
-#             as if the v8 bazel build currently includes support for building with
-#             perfetto enabled as an option.
+# V8 Perfetto integration is automatically enabled on non-Windows platforms.
 new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
-        deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
+        deps = select({
+            "@workerd//:enable_v8_perfetto": [
+                "@v8//:v8_icu",
+                "@workerd//:icudata-embed",
+                "@perfetto//:libperfetto_client_experimental"
+            ],
+            "//conditions:default": [
+                "@v8//:v8_icu",
+                "@workerd//:icudata-embed"
+            ],
+        }),
+        defines = select({
+            "@workerd//:enable_v8_perfetto": ["V8_USE_PERFETTO"],
+            "//conditions:default": [],
+        }),
         visibility = ["//visibility:public"])""",
     path = "empty",
 )

@@ -764,12 +764,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
             "Enable the inspector protocol to connect to the address <addr>.")
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
         .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
             "<path>=<categories>", "Enable perfetto tracing output to the specified file.")
-#endif
+#endif  // WORKERD_USE_PERFETTO
         .addOption({'w', "watch"}, CLI_METHOD(watch),
             "Watch configuration files (and server binary) and reload if they change. "
             "Useful for development, but not recommended in production.")
@@ -1027,13 +1027,13 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     server->overrideExternal(kj::mv(name), kj::str(value));
   }
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   void enablePerfetto(kj::StringPtr param) {
     auto [name, value] = parseOverride(param);
     perfettoTraceDestination = kj::str(name);
     perfettoTraceCategories = kj::str(value);
   }
-#endif
+#endif  // WORKERD_USE_PERFETTO
 
   void enableInspector(kj::StringPtr param) {
     server->enableInspector(kj::str(param));
@@ -1340,7 +1340,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         maybePerfettoSession =
             PerfettoSession(dest, kj::mv(perfettoTraceCategories).orDefault(kj::String()));
       }
-#endif
+#endif  // WORKERD_USE_PERFETTO
       TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
 
@@ -1366,7 +1366,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
         auto dropMe = kj::mv(perfettoSession);
         maybePerfettoSession = kj::none;
       }
-#endif
+#endif  // WORKERD_USE_PERFETTO
 
       if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
         context.exit();
@@ -1486,10 +1486,10 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   kj::Maybe<kj::String> testServicePattern;
   kj::Maybe<kj::String> testEntrypointPattern;
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   kj::Maybe<kj::String> perfettoTraceDestination;
   kj::Maybe<kj::String> perfettoTraceCategories;
-#endif
+#endif  // WORKERD_USE_PERFETTO
 
   kj::Own<Server> server;
 
