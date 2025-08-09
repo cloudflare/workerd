@@ -437,6 +437,13 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
+    src = "sql-critical-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["sql-critical-error-test.js"],
+)
+
+wd_test(
     src = "streams/identitytransformstream-backpressure-test.wd-test",
     args = ["--experimental"],
     data = ["streams/identitytransformstream-backpressure-test.js"],
