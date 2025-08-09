@@ -16,8 +16,46 @@ export const checkPortsSetCorrectly = {
   },
 };
 
-export class GlobalService extends WorkerEntrypoint {}
-Object.assign(GlobalService.prototype, httpServerHandler({ port: 9090 }));
+export const GlobalService = httpServerHandler(
+  { port: 9090 },
+  class GlobalService extends WorkerEntrypoint {}
+);
+strictEqual(typeof GlobalService.prototype.fetch, 'function');
+
+export const testHttpServerHandler = {
+  test() {
+    throws(
+      () => {
+        httpServerHandler(null);
+      },
+      {
+        message: /Server descriptor cannot be null or undefined/,
+      }
+    );
+
+    throws(
+      () => {
+        httpServerHandler({});
+      },
+      {
+        message: /Failed to determine port for server/,
+      }
+    );
+
+    throws(
+      () => {
+        httpServerHandler({ port: 123 }, 123);
+      },
+      {
+        message: /^Expected a constructor function or an object/,
+      }
+    );
+
+    const handlerObj = {};
+    const withFetch = httpServerHandler({ port: 9999 }, handlerObj);
+    strictEqual(handlerObj, withFetch);
+  },
+};
 
 const globalServer = http.createServer((req, res) => {
   res.writeHead(200);
@@ -1158,17 +1196,17 @@ export const testIncomingMessageSocket = {
 
 let scheduledCallCount = 0;
 
-export default httpServerHandler(
-  { port: 8080 },
-  {
-    async scheduled(event) {
-      scheduledCallCount++;
+const handler = {
+  async scheduled(event) {
+    scheduledCallCount++;
 
-      strictEqual(typeof event.scheduledTime, 'number');
-      strictEqual(typeof event.cron, 'string');
-    },
-  }
-);
+    strictEqual(typeof event.scheduledTime, 'number');
+    strictEqual(typeof event.cron, 'string');
+  },
+};
+const exportedHandler = httpServerHandler({ port: 8080 }, handler);
+strictEqual(handler, exportedHandler);
+export default exportedHandler;
 
 // Relevant Node.js tests
 // - [x] test/parallel/test-http-server-async-dispose.js
