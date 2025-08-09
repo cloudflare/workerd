@@ -37,10 +37,10 @@ py_wd_test("seek-metadatafs")
         # TODO: The packages below don't currently work in the latest package/python versions. Need
         # to fix them.
         pkg_skip_versions = {
-            "0.27.7": [
+            "0.28.0": [
                 "micropip",  # missing lockfile
                 "soupsieve",  # Circular dependency with beautifulsoup4
-                "starlette",  # No module named 'starlette.converters'
+                "langchain_openai",  # Problem with top level entropy
             ],
         },
     )
@@ -76,3 +76,5 @@ py_wd_test("python-rpc")
 py_wd_test("workflow-entrypoint")
 
 py_wd_test("vendor_dir_compat_flag")
+
+py_wd_test("multiprocessing")

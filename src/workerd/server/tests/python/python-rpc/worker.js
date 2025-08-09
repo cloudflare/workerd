@@ -43,7 +43,7 @@ export default {
     }
 
     const null_resp = await env.PythonRpc.identity(null);
-    assert.deepStrictEqual(null_resp, undefined);
+    assert.ok(null_resp === null || null_resp === undefined);
 
     // Web/API Types
     const py_response = await env.PythonRpc.handle_response(

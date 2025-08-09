@@ -163,10 +163,10 @@ class FetchResponse(pyodide.http.FetchResponse):
         return Blob(await self.js_object.blob())
 
 
-async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
-    # TODO: This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
+if pyodide_version == "0.26.0a2":
 
-    if pyodide_version == "0.26.0a2":
+    async def pyfetch(url: str, **kwargs: Any) -> FetchResponse:
+        # This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
         custom_fetch = kwargs["fetcher"] if "fetcher" in kwargs else js.fetch
         kwargs["fetcher"] = None
         try:
@@ -178,9 +178,6 @@ async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
             )
         except JsException as e:
             raise OSError(e.message) from None
-    else:
-        kwargs["fetcher"] = None
-        return await pyfetch(url, **kwargs)
 
 
 async def fetch(
@@ -189,7 +186,7 @@ async def fetch(
 ) -> FetchResponse:
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
-    resp = await _pyfetch_patched(resource, **other_options)
+    resp = await pyfetch(resource, **other_options)
     return FetchResponse(resp.url, resp.js_response)
 
 
