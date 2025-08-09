@@ -144,7 +144,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
       return js.num(d);
     }
     KJ_CASE_ONEOF(i, int64_t) {
-      return js.bigInt(i);
+      // We report integer values using the JS number type, instead of BigInt (which is not natively
+      // stringifiable). This limits precision to 53 bits.
+      // TODO: Document this limitation
+      // TODO(someday): Prohibit reporting integer tag values at tag creation time? For that we'd
+      // need to change the SpanTag definition, not sure if it's it since being unable to create a
+      // tag with an integral type is confusing.
+      return js.num((double)i);
     }
   }
   KJ_UNREACHABLE;

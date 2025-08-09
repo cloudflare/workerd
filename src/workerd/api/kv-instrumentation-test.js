@@ -99,7 +99,7 @@ export const test = {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.cacheTtl': 100n,
+        'cloudflare.kv.query.parameter.cacheTtl': 100,
         closed: true,
       },
       { closed: true, name: 'worker' },
