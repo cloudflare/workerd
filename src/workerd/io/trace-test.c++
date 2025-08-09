@@ -527,23 +527,6 @@ KJ_TEST("Read/Write Outcome works") {
   KJ_ASSERT(info3.cpuTime == 1 * kj::MILLISECONDS);
 }
 
-KJ_TEST("Read/Write Link works") {
-  capnp::MallocMessageBuilder builder;
-  auto infoBuilder = builder.initRoot<rpc::Trace::Link>();
-
-  FakeEntropySource entropy;
-  auto context = tracing::InvocationSpanContext::newForInvocation(kj::none, entropy);
-
-  tracing::Link link(context, kj::str("foo"));
-  link.copyTo(infoBuilder);
-
-  tracing::Link link2(infoBuilder.asReader());
-  KJ_ASSERT(KJ_ASSERT_NONNULL(link2.label) == "foo"_kj);
-  KJ_ASSERT(link2.traceId == context.getTraceId());
-  KJ_ASSERT(link2.invocationId == context.getInvocationId());
-  KJ_ASSERT(link2.spanId == context.getSpanId());
-}
-
 KJ_TEST("Read/Write TailEvent works") {
   capnp::MallocMessageBuilder builder;
   auto infoBuilder = builder.initRoot<rpc::Trace::TailEvent>();

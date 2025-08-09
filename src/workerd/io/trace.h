@@ -657,26 +657,7 @@ struct Return final {
   Return clone() const;
 };
 
-// A Link mark is used to establish a link from one span to another.
-// The optional label can be used to identify the link.
-struct Link final {
-  explicit Link(const InvocationSpanContext& other, kj::Maybe<kj::String> label = kj::none);
-  explicit Link(kj::Maybe<kj::String> label, TraceId traceId, TraceId invocationId, SpanId spanId);
-  Link(rpc::Trace::Link::Reader reader);
-  Link(Link&&) = default;
-  Link& operator=(Link&&) = default;
-  KJ_DISALLOW_COPY(Link);
-
-  kj::Maybe<kj::String> label;
-  TraceId traceId;
-  TraceId invocationId;
-  SpanId spanId;
-
-  void copyTo(rpc::Trace::Link::Builder builder) const;
-  Link clone() const;
-};
-
-// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, Link, and CustomInfo events.
+// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, and CustomInfo events.
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -793,6 +774,7 @@ struct Outcome final {
 // always an Outcome. Between those can be any number of SpanOpen, SpanClose,
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
+// A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
@@ -803,7 +785,6 @@ struct TailEvent final {
       Exception,
       Log,
       Return,
-      Link,
       CustomInfo>;
 
   explicit TailEvent(

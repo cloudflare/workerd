@@ -280,9 +280,6 @@ kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event) {
     KJ_CASE_ONEOF(ret, tracing::Return) {
       return kj::str("Return");
     }
-    KJ_CASE_ONEOF(link, tracing::Link) {
-      return kj::str("Link");
-    }
     KJ_CASE_ONEOF(customInfo, tracing::CustomInfo) {
       return kj::str(customInfo);
     }
@@ -1084,58 +1081,6 @@ kj::String tracing::SpanClose::toString() const {
   return kj::str("SpanClose: ", outcome);
 }
 
-namespace {
-kj::Maybe<kj::String> readLabelFromReader(const rpc::Trace::Link::Reader& reader) {
-  if (!reader.hasLabel()) return kj::none;
-  return kj::str(reader.getLabel());
-}
-tracing::TraceId readTraceIdFromReader(const rpc::Trace::Link::Reader& reader) {
-  KJ_ASSERT(reader.hasContext());
-  auto context = reader.getContext();
-  return tracing::TraceId::fromCapnp(context.getTraceId());
-}
-tracing::TraceId readInvocationIdFromReader(const rpc::Trace::Link::Reader& reader) {
-  KJ_ASSERT(reader.hasContext());
-  auto context = reader.getContext();
-  return tracing::TraceId::fromCapnp(context.getInvocationId());
-}
-tracing::SpanId readSpanIdFromReader(const rpc::Trace::Link::Reader& reader) {
-  KJ_ASSERT(reader.hasContext());
-  auto context = reader.getContext();
-  return tracing::SpanId(context.getSpanId());
-}
-}  // namespace
-
-tracing::Link::Link(const InvocationSpanContext& other, kj::Maybe<kj::String> label)
-    : Link(kj::mv(label), other.getTraceId(), other.getInvocationId(), other.getSpanId()) {}
-
-tracing::Link::Link(
-    kj::Maybe<kj::String> label, TraceId traceId, TraceId invocationId, SpanId spanId)
-    : label(kj::mv(label)),
-      traceId(kj::mv(traceId)),
-      invocationId(kj::mv(invocationId)),
-      spanId(kj::mv(spanId)) {}
-
-tracing::Link::Link(rpc::Trace::Link::Reader reader)
-    : label(readLabelFromReader(reader)),
-      traceId(readTraceIdFromReader(reader)),
-      invocationId(readInvocationIdFromReader(reader)),
-      spanId(readSpanIdFromReader(reader)) {}
-
-void tracing::Link::copyTo(rpc::Trace::Link::Builder builder) const {
-  KJ_IF_SOME(l, label) {
-    builder.setLabel(l);
-  }
-  auto ctx = builder.initContext();
-  traceId.toCapnp(ctx.initTraceId());
-  invocationId.toCapnp(ctx.initInvocationId());
-  ctx.setSpanId(spanId.getId());
-}
-
-tracing::Link tracing::Link::clone() const {
-  return Link(mapCopyString(label), traceId, invocationId, spanId);
-}
-
 tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reader& info) {
   switch (info.which()) {
     case rpc::Trace::Onset::Info::FETCH: {
@@ -1459,9 +1404,6 @@ tracing::TailEvent::Event readEventFromTailEvent(const rpc::Trace::TailEvent::Re
     case rpc::Trace::TailEvent::Event::LOG: {
       return tracing::Log(event.getLog());
     }
-    case rpc::Trace::TailEvent::Event::LINK: {
-      return tracing::Link(event.getLink());
-    }
   }
   KJ_UNREACHABLE;
 }
@@ -1511,9 +1453,6 @@ void tracing::TailEvent::copyTo(rpc::Trace::TailEvent::Builder builder) const {
     KJ_CASE_ONEOF(ret, Return) {
       ret.copyTo(eventBuilder.initReturn());
     }
-    KJ_CASE_ONEOF(link, Link) {
-      link.copyTo(eventBuilder.initLink());
-    }
     KJ_CASE_ONEOF(attrs, CustomInfo) {
       // Mark is a collection of attributes.
       auto attrBuilder = eventBuilder.initAttribute(attrs.size());
@@ -1553,9 +1492,6 @@ tracing::TailEvent tracing::TailEvent::clone() const {
       }
       KJ_CASE_ONEOF(ret, Return) {
         return ret.clone();
-      }
-      KJ_CASE_ONEOF(link, Link) {
-        return link.clone();
       }
       KJ_CASE_ONEOF(attrs, tracing::CustomInfo) {
         return KJ_MAP(attr, attrs) { return attr.clone(); };
