@@ -75,8 +75,6 @@ import {
 
 import { StringDecoder } from 'node-internal:internal_stringdecoder';
 
-import { isDuplexInstance } from 'node-internal:streams_duplex';
-
 // ======================================================================================
 // ReadableState
 
@@ -86,7 +84,6 @@ export function ReadableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream.
   // These options can be provided separately as readableXXX and writableXXX.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag. Used to make read(n) ignore n and to
   // make all the buffer merging and length checks go away.
@@ -194,16 +191,13 @@ Object.setPrototypeOf(Readable, Stream);
 export function Readable(options) {
   if (!(this instanceof Readable)) return new Readable(options);
 
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the ReadableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  this._readableState = new ReadableState(options, this, isDuplex);
+  this._readableState = new ReadableState(options, this, false);
   if (options) {
     if (typeof options.read === 'function') this._read = options.read;
     if (typeof options.destroy === 'function') this._destroy = options.destroy;
     if (typeof options.construct === 'function')
       this._construct = options.construct;
-    if (options.signal && !isDuplex) addAbortSignal(options.signal, this);
+    if (options.signal) addAbortSignal(options.signal, this);
   }
   Stream.call(this, options);
   construct(this, () => {

@@ -70,23 +70,7 @@ Object.setPrototypeOf(Duplex, Readable);
 }
 
 // Use the `destroy` method of `Writable`.
-// Guard against circular dependency issues where Writable.prototype.destroy might not be ready
-if (typeof Writable.prototype.destroy === 'function') {
-  Duplex.prototype.destroy = Writable.prototype.destroy;
-} else {
-  // Define a fallback that will be replaced once Writable.prototype.destroy is available
-  Object.defineProperty(Duplex.prototype, 'destroy', {
-    get() {
-      // Let's define a property rather than a getter to avoid
-      // having a performance penalty for this lazy initialization.
-      Object.defineProperty(this, 'destroy', {
-        value: Writable.prototype.destroy,
-      });
-      return this.destroy;
-    },
-    configurable: true,
-  });
-}
+Duplex.prototype.destroy = Writable.prototype.destroy;
 
 export function Duplex(options) {
   if (!(this instanceof Duplex)) return new Duplex(options);
@@ -158,13 +142,8 @@ export function Duplex(options) {
   }
 }
 
-// Ensure destroy method is properly assigned (in case the first assignment didn't work)
-if (
-  typeof Writable.prototype.destroy === 'function' &&
-  Duplex.prototype.destroy !== Writable.prototype.destroy
-) {
-  Duplex.prototype.destroy = Writable.prototype.destroy;
-}
+// Use the `destroy` method of `Writable`.
+Duplex.prototype.destroy = Writable.prototype.destroy;
 
 Object.defineProperties(Duplex.prototype, {
   writable: {

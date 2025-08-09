@@ -60,8 +60,6 @@ import {
   ERR_UNKNOWN_ENCODING,
 } from 'node-internal:internal_errors';
 
-import { isDuplexInstance } from 'node-internal:streams_duplex';
-
 // ======================================================================================
 // WritableState
 
@@ -71,7 +69,6 @@ export function WritableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream,
   // e.g. options.readableObjectMode vs. options.writableObjectMode, etc.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag to indicate whether or not this stream
   // contains buffers or objects.
@@ -221,20 +218,9 @@ Object.setPrototypeOf(Writable.prototype, Stream.prototype);
 Object.setPrototypeOf(Writable, Stream);
 
 export function Writable(options) {
-  // Writable ctor is applied to Duplexes, too.
-  // `realHasInstance` is necessary because using plain `instanceof`
-  // would return false, as no `_writableState` property is attached.
+  if (!(this instanceof Writable)) return new Writable(options);
 
-  // Trying to use the custom `instanceof` for Writable here will also break the
-  // Node.js LazyTransform implementation, which has a non-trivial getter for
-  // `_writableState` that would lead to infinite recursion.
-
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the WritableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  if (!isDuplex && !Writable[Symbol.hasInstance](this))
-    return new Writable(options);
-  this._writableState = new WritableState(options, this, isDuplex);
+  this._writableState = new WritableState(options, this, false);
   if (options) {
     if (typeof options.write === 'function') this._write = options.write;
     if (typeof options.writev === 'function') this._writev = options.writev;
