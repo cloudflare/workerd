@@ -196,6 +196,12 @@ class DurableObjectNamespace: public jsg::Object {
   jsg::Ref<DurableObject> get(
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
+  // Gets a durable object by name or creates it if it doesn't already exist.
+  //
+  // Short for `idFromName()` followed by `get()`.
+  jsg::Ref<DurableObject> getByName(
+      jsg::Lock& js, kj::String name, jsg::Optional<GetDurableObjectOptions> options);
+
   // Experimental. Gets a durable object by ID if it already exists. Currently, gated for use
   // by cloudflare only.
   jsg::Ref<DurableObject> getExisting(
@@ -208,6 +214,7 @@ class DurableObjectNamespace: public jsg::Object {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
+    JSG_METHOD(getByName);
     JSG_METHOD(get);
     if (flags.getDurableObjectGetExisting()) {
       JSG_METHOD(getExisting);
