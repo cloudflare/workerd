@@ -814,3 +814,9 @@ wd_test(
         "STARTTLS_CA_PORT",
     ],
 )
+
+wd_test(
+    src = "tests/streams-circ-ref-regression-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-circ-ref-regression-test.js"],
+)

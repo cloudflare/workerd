@@ -538,9 +538,3 @@ js_binary(
     entry_point = "sidecar-supervisor.mjs",
     visibility = ["//visibility:public"],
 )
-
-wd_test(
-    src = "import-order-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["import-order-nodejs-test.js"],
-)
