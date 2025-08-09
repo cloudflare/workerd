@@ -5908,3 +5908,23 @@ export const testParseEnv = {
     );
   },
 };
+
+export const supportEOLMethods = {
+  async test() {
+    assert.strictEqual(typeof util.isArray, 'function');
+    assert.strictEqual(typeof util.isBoolean, 'function');
+    assert.strictEqual(typeof util.isBuffer, 'function');
+    assert.strictEqual(typeof util.isDate, 'function');
+    assert.strictEqual(typeof util.isError, 'function');
+    assert.strictEqual(typeof util.isFunction, 'function');
+    assert.strictEqual(typeof util.isNull, 'function');
+    assert.strictEqual(typeof util.isNullOrUndefined, 'function');
+    assert.strictEqual(typeof util.isNumber, 'function');
+    assert.strictEqual(typeof util.isObject, 'function');
+    assert.strictEqual(typeof util.isPrimitive, 'function');
+    assert.strictEqual(typeof util.isRegExp, 'function');
+    assert.strictEqual(typeof util.isString, 'function');
+    assert.strictEqual(typeof util.isSymbol, 'function');
+    assert.strictEqual(typeof util.isUndefined, 'function');
+  },
+};

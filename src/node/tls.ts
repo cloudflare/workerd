@@ -36,6 +36,16 @@ import {
 } from 'node-internal:internal_tls_common';
 import * as constants from 'node-internal:internal_tls_constants';
 import { TLSSocket, connect } from 'node-internal:internal_tls_wrap';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+
+let createSecurePair = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
+  createSecurePair = function createSecurePair(): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createSecurePair');
+  };
+}
+
 export * from 'node-internal:internal_tls_constants';
 export {
   TLSSocket,
@@ -47,6 +57,7 @@ export {
   Server,
   convertALPNProtocols,
   getCiphers,
+  createSecurePair,
 };
 export default {
   SecureContext,
@@ -58,5 +69,6 @@ export default {
   checkServerIdentity,
   convertALPNProtocols,
   getCiphers,
+  createSecurePair,
   ...constants,
 };
