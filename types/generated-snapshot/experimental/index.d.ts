@@ -8391,7 +8391,7 @@ declare namespace TailStream {
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
-    readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
+    readonly parentSpanId: string;
   }
   interface SpanClose {
     readonly type: "spanClose";
