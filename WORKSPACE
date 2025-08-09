@@ -228,6 +228,7 @@ new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
+        defines = ["WORKERD_ICU_DATA_EMBED"],
         deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
