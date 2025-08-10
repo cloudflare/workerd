@@ -35,7 +35,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2021",
     proc_macro_deps = [
-        "@crates_vendor__rustversion-1.0.21//:rustversion",
+        "@crates_vendor__rustversion-1.0.22//:rustversion",
     ],
     rustc_flags = [
         "--cap-lints=allow",
