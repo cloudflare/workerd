@@ -1,3 +1,24 @@
+/**
+ * This is an exception we should be throwing whenever there is something unexpected in our runtime
+ * that is **not** a result of the user doing something wrong, i.e. it's an internal error that is
+ * a result of a bug in our runtime.
+ */
+export class PythonRuntimeError extends Error {
+  override get name(): string {
+    return this.constructor.name;
+  }
+}
+
+/**
+ * This is an exception we throw whenever there is an issue with the user's code, i.e. it's a result
+ * of the user doing something wrong.
+ */
+export class PythonUserError extends Error {
+  override get name(): string {
+    return this.constructor.name;
+  }
+}
+
 // Split the stack into lines and print them individually.
 // We do this because edgeworker's test runner will put a multiline log all on one line. This is
 // very hard to read.
@@ -44,7 +65,7 @@ export function simpleRunPython(
     // PyRun_SimpleString will have written a Python traceback to stderr.
     console.warn('Command failed:', code);
     console.warn(cause);
-    throw new Error('Failed to run Python code');
+    throw new PythonRuntimeError('Failed to run Python code');
   }
   return cause;
 }

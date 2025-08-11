@@ -12,7 +12,7 @@ import {
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
 } from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+import { PythonRuntimeError, simpleRunPython } from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 
 // A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
@@ -443,12 +443,14 @@ function decodeSnapshot(
     return undefined;
   }
   if (reader.getMemorySnapshotSize() === 0) {
-    throw new Error(`SnapshotReader returned memory snapshot size of 0`);
+    throw new PythonRuntimeError(
+      `SnapshotReader returned memory snapshot size of 0`
+    );
   }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
   if (header[0] !== SNAPSHOT_MAGIC) {
-    throw new Error(
+    throw new PythonRuntimeError(
       `Invalid magic number ${header[0]}, expected ${SNAPSHOT_MAGIC}`
     );
   }
