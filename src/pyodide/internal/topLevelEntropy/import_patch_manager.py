@@ -11,10 +11,11 @@ IN_REQUEST_CONTEXT variable.
 
 import sys
 from functools import wraps
+from importlib.machinery import ExtensionFileLoader
 
 
-class PatchLoader:
-    """Loader that calls the original loader in the given context manager"""
+class PatchExecModuleLoader:
+    """Loader that calls the original exec_module in the given context manager"""
 
     def __init__(self, orig_loader, import_context):
         self.orig_loader = orig_loader
@@ -26,6 +27,21 @@ class PatchLoader:
     def exec_module(self, module):
         with self.import_context(module):
             self.orig_loader.exec_module(module)
+
+
+class PatchCreateModuleLoader:
+    """Loader that calls the original create_module in the given context manager"""
+
+    def __init__(self, orig_loader, import_context):
+        self.orig_loader = orig_loader
+        self.import_context = import_context
+
+    def __getattr__(self, name):
+        return getattr(self.orig_loader, name)
+
+    def create_module(self, module):
+        with self.import_context(module):
+            return self.orig_loader.create_module(module)
 
 
 class PatchFinder:
@@ -62,7 +78,16 @@ class PatchFinder:
             # Not found. This is going to be an ImportError.
             return None
         # Overwrite the loader with our wrapped loader
-        spec.loader = PatchLoader(spec.loader, import_context)
+        # For Python modules we want to patch `exec_module`. Generally it seems that for binary
+        # extensions we want to patch `create_module` and not `exec_module`, with the exception of
+        # "numpy.random.mtrand". When there is a second case of a binary extension that needs a
+        # patch to exec_module, we can consider switching to a less ad-hoc approach.
+        if isinstance(spec.loader, ExtensionFileLoader) and fullname not in [
+            "numpy.random.mtrand"
+        ]:
+            spec.loader = PatchCreateModuleLoader(spec.loader, import_context)
+        else:
+            spec.loader = PatchExecModuleLoader(spec.loader, import_context)
         return spec
 
     @staticmethod
