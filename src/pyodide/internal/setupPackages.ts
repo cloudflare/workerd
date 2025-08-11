@@ -1,7 +1,11 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  simpleRunPython,
+} from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 
 const canonicalizeNameRegex = /[-_.]+/g;
@@ -75,7 +79,7 @@ class VirtualizedDir {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new Error(
+        throw new PythonRuntimeError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -130,7 +134,9 @@ class VirtualizedDir {
     for (const req of requirements) {
       const child = tarInfo.children!.get(req);
       if (!child) {
-        throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+        throw new PythonUserError(
+          `Requirement ${req} not found in pyodide packages tar`
+        );
       }
       this.mountOverlay(child, 'site');
       this.loadedRequirements.add(req);
@@ -205,7 +211,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new Error(
+  throw new PythonRuntimeError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }

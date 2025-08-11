@@ -1,5 +1,6 @@
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
+import { PythonRuntimeError } from 'pyodide-internal:util';
 
 function createTree(paths: string[]): MetadataDirInfo {
   const tree: MetadataFSInfo = new Map();
@@ -9,7 +10,7 @@ function createTree(paths: string[]): MetadataDirInfo {
     const name = parts.pop()!;
     for (const part of parts) {
       if (typeof subTree === 'number') {
-        throw new Error('internal error');
+        throw new PythonRuntimeError('expected subtree to not be a number');
       }
       let next: MetadataFSInfo | undefined = subTree.get(part);
       if (!next) {
@@ -19,7 +20,7 @@ function createTree(paths: string[]): MetadataDirInfo {
       subTree = next;
     }
     if (typeof subTree === 'number') {
-      throw new Error('internal error');
+      throw new PythonRuntimeError('expected subtree to not be a number');
     }
     subTree.set(name, idx);
   });
@@ -54,13 +55,17 @@ export function createMetadataFS(Module: Module): object {
     },
     readdir(node) {
       if (node.tree == undefined) {
-        throw new Error('cannot read directory, tree is undefined');
+        throw new PythonRuntimeError(
+          'cannot read directory, tree is undefined'
+        );
       }
       return Array.from(node.tree.keys());
     },
     lookup(parent, name) {
       if (parent.tree == undefined) {
-        throw new Error('cannot lookup directory, tree is undefined');
+        throw new PythonRuntimeError(
+          'cannot lookup directory, tree is undefined'
+        );
       }
       const res = parent.tree.get(name);
       if (res === undefined) {

@@ -16,10 +16,21 @@ import {
   legacyGlobalHandlers,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
-import { reportError } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  reportError,
+} from 'pyodide-internal:util';
+
+export type PyodideEntrypointHelper = {
+  doAnImport: (mod: string) => Promise<any>;
+  cloudflareWorkersModule: any;
+  cloudflareSocketsModule: any;
+  workerEntrypoint: any;
+};
 
 // Function to import JavaScript modules from Python
-const pyodide_entrypoint_helper: any = {};
+let pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
 
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
@@ -27,15 +38,19 @@ export function setDoAnImport(
   cloudflareSockets: any,
   workerEntrypoint: any
 ): void {
-  pyodide_entrypoint_helper.doAnImport = func;
-  pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
-  pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
-  pyodide_entrypoint_helper.workerEntrypoint = workerEntrypoint;
+  pyodide_entrypoint_helper = {
+    doAnImport: func,
+    cloudflareWorkersModule: cloudflareWorkers,
+    cloudflareSocketsModule: cloudflareSockets,
+    workerEntrypoint: workerEntrypoint,
+  };
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
-    throw new Error('Main module needs to end with a .py file extension');
+    throw new PythonUserError(
+      'Main module needs to end with a .py file extension'
+    );
   }
   const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
   if (pyodide.version === '0.26.0a2') {
@@ -100,6 +115,12 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
 
     // install any extra packages into the site-packages directory
     const sitePackages = pyodide.FS.sitePackages;
+
+    if (!pyodide_entrypoint_helper) {
+      throw new PythonRuntimeError(
+        'pyodide_entrypoint_helper is not initialized'
+      );
+    }
 
     // Expose the doAnImport function and global modules to Python globals
     pyodide.registerJsModule(
@@ -209,7 +230,7 @@ function makeHandler(pyHandlerName: string): Handler {
     );
     const handler = mainModule[pyHandlerName];
     if (!handler) {
-      throw new Error(
+      throw new PythonUserError(
         `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
       );
     }
@@ -443,6 +464,11 @@ export async function initPython(): Promise<PythonInitResult> {
       // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
       if (Object.keys(handlers).length > 0) {
         throw new TypeError('Cannot define multiple default entrypoints');
+      }
+      if (!pyodide_entrypoint_helper) {
+        throw new PythonRuntimeError(
+          'pyodide_entrypoint_helper is not initialized'
+        );
       }
       handlers['default'] = makeEntrypointClass(
         'Default',

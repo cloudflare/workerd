@@ -2,6 +2,8 @@
 // And some trial and error with real tar files.
 // https://en.wikipedia.org/wiki/Tar_(computing)#File_format
 
+import { PythonRuntimeError } from 'pyodide-internal:util';
+
 const decoder = new TextDecoder();
 function decodeString(buf: Uint8Array): string {
   const nullIdx = buf.indexOf(0);
@@ -132,7 +134,9 @@ export function parseTarInfo(reader: Reader): [TarFSInfo, string[]] {
       directory.children!.set(info.name, info);
     } else {
       // fail if we encounter other values of type (e.g., symlink, LongName, etc)
-      throw new Error(`Python TarFS error: Unexpected type ${info.type}`);
+      throw new PythonRuntimeError(
+        `Python TarFS error: Unexpected type ${info.type}`
+      );
     }
   }
 }

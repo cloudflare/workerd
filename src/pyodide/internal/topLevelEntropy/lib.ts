@@ -9,7 +9,7 @@
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
-import { simpleRunPython } from 'pyodide-internal:util';
+import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
 
 let allowed_entropy_calls_addr: number;
 
@@ -62,7 +62,9 @@ export function getRandomValues(Module: Module, arr: Uint8Array): Uint8Array {
     console.log('JS stack:', new Error().stack);
     console.log('Python stack:');
     Module._dump_traceback();
-    throw new Error('Disallowed operation called within global scope');
+    throw new PythonUserError(
+      'Disallowed operation called within global scope'
+    );
   }
   // "entropy" in the test suite is a bunch of 42's. Good to use a readily identifiable pattern
   // here which is different than the test suite.
