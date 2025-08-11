@@ -31,7 +31,7 @@ class DurableObjectExample(DurableObject, MixinTest):
         assert isinstance(request, Request)
 
         curr = await self.storage.getAlarm()
-        if curr is None:
+        if not curr:
             self.storage.setAlarm(Date.now() + 100)
 
         url = urlparse(request.url)

@@ -9,6 +9,7 @@ interface PyodideConfig {
   resolveLockFilePromise?: (lockfile: PackageLock) => void;
   indexURL?: string;
   _makeSnapshot?: boolean;
+  lockFileURL: '';
 }
 
 type SerializedHiwireValue = { path: string[] } | { serialized: any } | null;
@@ -36,6 +37,7 @@ interface API {
     pyimport_impl: PyCallable;
   };
   serializeHiwireState(): SnapshotConfig;
+  pyVersionTuple: [number, number, number];
 }
 
 interface LDSO {
@@ -76,14 +78,17 @@ interface EmscriptenSettings {
 
 interface Module {
   HEAP8: Uint8Array;
+  HEAPU32: Uint32Array;
   _dump_traceback: () => void;
   FS: FS;
   API: API;
   ENV: ENV;
   LDSO: LDSO;
   newDSO: (path: string, opt: object | undefined, handle: string) => DSO;
-  _py_version_major: () => number;
+  _Py_Version: number;
+  _py_version_major?: () => number;
   _py_version_minor: () => number;
+  _py_version_micro: () => number;
   loadWebAssemblyModule: (
     mod: WebAssembly.Module,
     opt: object,
@@ -112,10 +117,12 @@ interface Module {
     size: number
   ): number;
   promise: Promise<void>;
-  reportUndefinedSymbols: () => void;
+  reportUndefinedSymbols(): void;
   wasmTable: WebAssembly.Table;
   // Set snapshotDebug to true to print relocation information when loading dynamic libraries. If
   // there are crashes involving snapshots this information can be compared between when creating
   // and using the snapshot and any discrepancy explains the crash.
   snapshotDebug?: boolean;
+  getEmptyTableSlot(): number;
+  freeTableIndexes: number[];
 }

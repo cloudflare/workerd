@@ -215,6 +215,37 @@ function getMemoryPatched(
   }
 }
 
+function loadDynlibFromTarFs(
+  Module: Module,
+  base: string,
+  node: TarFSInfo | undefined,
+  soFile: string[]
+): void {
+  for (const part of soFile) {
+    node = node?.children?.get(part);
+  }
+  if (!node?.contentsOffset) {
+    node = VIRTUALIZED_DIR.getDynlibRoot();
+    for (const part of soFile) {
+      node = node?.children?.get(part);
+    }
+  }
+  if (!node?.contentsOffset) {
+    throw Error(`fs node could not be found for ${soFile.join('/')}`);
+  }
+  const { contentsOffset, size } = node;
+  if (contentsOffset === undefined) {
+    throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
+  }
+  const wasmModuleData = new Uint8Array(size);
+  (node.reader ?? EmbeddedPackagesTarReader).read(
+    contentsOffset,
+    wasmModuleData
+  );
+  const path = base + soFile.join('/');
+  loadDynlib(Module, path, wasmModuleData);
+}
+
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
  * are loaded before the runtime is initialized outside of the heap, using the
@@ -230,53 +261,50 @@ export function preloadDynamicLibs(Module: Module): void {
   Module.noInitialRun = isRestoringSnapshot();
   Module.getMemoryPatched = getMemoryPatched;
   Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
-  let SO_FILES_TO_LOAD: string[][] = [];
   const sitePackages = Module.FS.sessionSitePackages + '/';
+  const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
   if (Module.API.version === '0.26.0a2') {
     const loadedBaselineSnapshot =
       LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
+    let SO_FILES_TO_LOAD: string[][];
     if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
       SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
     } else {
       SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
     }
-  } else if (LOADED_SNAPSHOT_META?.loadOrder) {
-    SO_FILES_TO_LOAD = LOADED_SNAPSHOT_META.loadOrder.map((x) => {
-      // We need the path relative to the site-packages directory, not relative to the root of the file
-      // system.
-      if (x.startsWith(sitePackages)) {
-        x = x.slice(sitePackages.length);
-      }
-      return x.split('/');
-    });
+    for (const soFile of SO_FILES_TO_LOAD) {
+      loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
+    }
+    return;
   }
+  if (!LOADED_SNAPSHOT_META?.loadOrder) {
+    return;
+  }
+  // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
+  // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
+  // could drop this patch because we are now on Emscripten 4.0.9.
+  // https://github.com/pyodide/pyodide/blob/main/cpython/patches/0008-Fix-Emscripten-call-trampoline-compatibility-with-Em.patch
+  //
+  // Unfortunately, this initializer allocates a function table slot and is called before dynamic
+  // loading when taking the snapshot but after when restoring the snapshot. Thus, when restoring a
+  // snapshot, before loading dynamic libraries we reserve a function pointer for the
+  // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
+  // used at the right moment.
+  const PyEMCountArgsPtr = Module.getEmptyTableSlot();
 
-  for (const soFile of SO_FILES_TO_LOAD) {
-    let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
-    for (const part of soFile) {
-      node = node?.children?.get(part);
+  const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
+  const dynlibPath = '/usr/lib/';
+  for (let path of LOADED_SNAPSHOT_META.loadOrder) {
+    let root = sitePackagesRoot;
+    if (path.startsWith(sitePackages)) {
+      path = path.slice(sitePackages.length);
+    } else if (path.startsWith(dynlibPath)) {
+      path = path.slice(dynlibPath.length);
+      root = dynlibRoot;
     }
-    if (!node?.contentsOffset) {
-      node = VIRTUALIZED_DIR.getDynlibRoot();
-      for (const part of soFile) {
-        node = node?.children?.get(part);
-      }
-    }
-    if (!node?.contentsOffset) {
-      throw Error(`fs node could not be found for ${soFile.join('/')}`);
-    }
-    const { contentsOffset, size } = node;
-    if (contentsOffset === undefined) {
-      throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
-    }
-    const wasmModuleData = new Uint8Array(size);
-    (node.reader ?? EmbeddedPackagesTarReader).read(
-      contentsOffset,
-      wasmModuleData
-    );
-    const path = sitePackages + soFile.join('/');
-    loadDynlib(Module, path, wasmModuleData);
+    loadDynlibFromTarFs(Module, sitePackages, root, path.split('/'));
   }
+  Module.freeTableIndexes.push(PyEMCountArgsPtr);
 }
 
 /**

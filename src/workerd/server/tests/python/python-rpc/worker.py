@@ -51,7 +51,9 @@ class PythonRpcTester(WorkerEntrypoint):
         curr_date = datetime.now()
         py_date = await self.env.PythonRpc.identity(curr_date)
         assert isinstance(py_date, datetime)
-        assert py_date == curr_date
+        # JavaScript Date objects only have millisecond precision
+        assert abs((py_date - curr_date).microseconds) < 1e6
+
         return True
 
 
@@ -119,7 +121,8 @@ async def test(ctrl, env, ctx):
     curr_date = datetime.now()
     py_date = await env.PythonRpc.identity(curr_date)
     assert isinstance(py_date, datetime)
-    assert py_date == curr_date
+    # JavaScript Date objects only have millisecond precision
+    assert abs((py_date - curr_date).microseconds) < 1e6
 
     py_date_list = await env.PythonRpc.identity([datetime.now(), datetime.now()])
     for d in py_date_list:

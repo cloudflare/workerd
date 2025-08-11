@@ -647,7 +647,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the use of cache: no-cache in the fetch api.
 
   pythonWorkers20250116 @71 :Bool
-      $compatEnableFlag("python_workers_20250116")
+      $compatEnableFlag("python_workers_20250808")
       $experimental
       $pythonSnapshotRelease;
 
