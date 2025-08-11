@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap_builder",
+    name = "derive_more",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,25 @@ rust_library(
         ],
     ),
     crate_features = [
-        "help",
+        "add",
+        "add_assign",
+        "default",
         "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__derive_more-impl-2.0.1//:derive_more_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap_builder",
+        "crate-name=derive_more",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.43",
-    deps = [
-        "@crates_vendor__anstyle-1.0.11//:anstyle",
-        "@crates_vendor__clap_lex-0.7.5//:clap_lex",
-    ],
+    version = "2.0.1",
 )

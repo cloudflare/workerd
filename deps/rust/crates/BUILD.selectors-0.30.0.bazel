@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "libc",
+    name = "selectors",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,26 +29,31 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "extra_traits",
-        "std",
-    ],
-    crate_root = "src/lib.rs",
+    crate_root = "lib.rs",
     edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.174",
+    version = "0.30.0",
     deps = [
-        "@crates_vendor__libc-0.2.174//:build_script_build",
+        "@crates_vendor__bitflags-2.9.1//:bitflags",
+        "@crates_vendor__cssparser-0.35.0//:cssparser",
+        "@crates_vendor__derive_more-2.0.1//:derive_more",
+        "@crates_vendor__fxhash-0.2.1//:fxhash",
+        "@crates_vendor__log-0.4.27//:log",
+        "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
+        "@crates_vendor__phf-0.11.3//:phf",
+        "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
+        "@crates_vendor__selectors-0.30.0//:build_script_build",
+        "@crates_vendor__servo_arc-0.4.1//:servo_arc",
+        "@crates_vendor__smallvec-1.15.1//:smallvec",
     ],
 )
 
@@ -71,11 +76,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "extra_traits",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -91,19 +91,22 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "libc",
+    pkg_name = "selectors",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.174",
+    version = "0.30.0",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__phf_codegen-0.11.3//:phf_codegen",
+    ],
 )
 
 alias(

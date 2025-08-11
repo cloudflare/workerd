@@ -54,6 +54,6 @@ rust_library(
         "@crates_vendor__ruff_source_file-0.0.0//:ruff_source_file",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__thiserror-2.0.12//:thiserror",
+        "@crates_vendor__thiserror-2.0.13//:thiserror",
     ],
 )

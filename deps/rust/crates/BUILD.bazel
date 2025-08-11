@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.43",
-    actual = "@crates_vendor__clap-4.5.43//:clap",
+    name = "clap-4.5.44",
+    actual = "@crates_vendor__clap-4.5.44//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.43//:clap",
+    actual = "@crates_vendor__clap-4.5.44//:clap",
     tags = ["manual"],
 )
 
@@ -188,14 +188,14 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.95",
-    actual = "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
+    name = "proc-macro2-1.0.96",
+    actual = "@crates_vendor__proc-macro2-1.0.96//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.95//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.96//:proc_macro2",
     tags = ["manual"],
 )
 
@@ -308,14 +308,14 @@ alias(
 )
 
 alias(
-    name = "thiserror-2.0.12",
-    actual = "@crates_vendor__thiserror-2.0.12//:thiserror",
+    name = "thiserror-2.0.13",
+    actual = "@crates_vendor__thiserror-2.0.13//:thiserror",
     tags = ["manual"],
 )
 
 alias(
     name = "thiserror",
-    actual = "@crates_vendor__thiserror-2.0.12//:thiserror",
+    actual = "@crates_vendor__thiserror-2.0.13//:thiserror",
     tags = ["manual"],
 )
 
@@ -364,7 +364,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.43//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.44//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
