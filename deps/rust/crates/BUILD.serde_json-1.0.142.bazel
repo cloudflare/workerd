@@ -31,7 +31,9 @@ rust_library(
     ),
     crate_features = [
         "default",
+        "raw_value",
         "std",
+        "unbounded_depth",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -76,7 +78,9 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
+        "raw_value",
         "std",
+        "unbounded_depth",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
