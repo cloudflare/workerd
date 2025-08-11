@@ -10,7 +10,7 @@ bazel_dep(name = "rules_android", version = "0.6.4")
 bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
 
 # abseil is used by protobuf and tcmalloc.
-bazel_dep(name = "abseil-cpp", version = "20250512.0")
+bazel_dep(name = "abseil-cpp", version = "20250512.1")
 
 # Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
 bazel_dep(name = "platforms", version = "1.0.0")
@@ -19,7 +19,7 @@ bazel_dep(name = "platforms", version = "1.0.0")
 # apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
 # needs to be pulled in before rules_cc for this toolchain to actually be used.
 bazel_dep(name = "apple_support", version = "1.22.1")
-bazel_dep(name = "rules_cc", version = "0.1.4")
+bazel_dep(name = "rules_cc", version = "0.2.0")
 bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
 git_override(
     module_name = "zlib",
@@ -27,7 +27,7 @@ git_override(
     # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
     # for it to be behind – zlib is very stable and its API has not changed in a long time, most
     # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
-    commit = "1e85c01b15363d11fab81c46fe2b5c2179113f70",
+    commit = "363a126ed293970f3df97ee5f760cba29a29e193",
     patch_args = ["-p1"],
     patches = ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"],
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",
@@ -37,4 +37,4 @@ git_override(
 # version, often by rejecting key values that it considers invalid/unsafe even though they are still
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
-bazel_dep(name = "boringssl", version = "0.20250701.0", repo_name = "ssl")
+bazel_dep(name = "boringssl", version = "0.20250807.0", repo_name = "ssl")

@@ -40,7 +40,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.5.0",
+    version = "2.6.0",
     deps = [
         "@crates_vendor__bitflags-2.9.1//:bitflags",
         "@crates_vendor__cfg-if-1.0.1//:cfg_if",
@@ -50,7 +50,7 @@ rust_library(
         "@crates_vendor__memchr-2.7.5//:memchr",
         "@crates_vendor__mime-0.3.17//:mime",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
-        "@crates_vendor__selectors-0.27.0//:selectors",
-        "@crates_vendor__thiserror-2.0.12//:thiserror",
+        "@crates_vendor__selectors-0.30.0//:selectors",
+        "@crates_vendor__thiserror-2.0.13//:thiserror",
     ],
 )
