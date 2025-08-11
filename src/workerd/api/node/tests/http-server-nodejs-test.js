@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { strictEqual, ok, throws, notStrictEqual, rejects } from 'node:assert';
-import { httpServerHandler } from 'cloudflare:node';
+import { httpServerHandler, handleAsNodeRequest } from 'cloudflare:node';
 import { mock } from 'node:test';
 import url from 'node:url';
 import qs from 'node:querystring';
@@ -16,44 +16,27 @@ export const checkPortsSetCorrectly = {
   },
 };
 
-export const GlobalService = httpServerHandler(
-  { port: 9090 },
-  class GlobalService extends WorkerEntrypoint {}
-);
-strictEqual(typeof GlobalService.prototype.fetch, 'function');
+export class GlobalService extends WorkerEntrypoint {
+  async fetch(request) {
+    await rejects(handleAsNodeRequest({}, request), {
+      message: /Failed to determine port for server/,
+    });
+    await rejects(handleAsNodeRequest(1234, request), {
+      message: /^Http server with port 1234 not found/,
+    });
+    return await handleAsNodeRequest({ port: 9090 }, request);
+  }
+}
 
 export const testHttpServerHandler = {
   test() {
-    throws(
-      () => {
-        httpServerHandler(null);
-      },
-      {
-        message: /Server descriptor cannot be null or undefined/,
-      }
-    );
+    throws(() => httpServerHandler(null), {
+      message: /Server descriptor cannot be null or undefined/,
+    });
 
-    throws(
-      () => {
-        httpServerHandler({});
-      },
-      {
-        message: /Failed to determine port for server/,
-      }
-    );
-
-    throws(
-      () => {
-        httpServerHandler({ port: 123 }, 123);
-      },
-      {
-        message: /^Expected a constructor function or an object/,
-      }
-    );
-
-    const handlerObj = {};
-    const withFetch = httpServerHandler({ port: 9999 }, handlerObj);
-    strictEqual(handlerObj, withFetch);
+    throws(() => httpServerHandler({}), {
+      message: /Failed to determine port for server/,
+    });
   },
 };
 
@@ -1196,17 +1179,16 @@ export const testIncomingMessageSocket = {
 
 let scheduledCallCount = 0;
 
-const handler = {
+export default {
+  fetch(request) {
+    return handleAsNodeRequest(8080, request);
+  },
   async scheduled(event) {
     scheduledCallCount++;
-
     strictEqual(typeof event.scheduledTime, 'number');
     strictEqual(typeof event.cron, 'string');
   },
 };
-const exportedHandler = httpServerHandler({ port: 8080 }, handler);
-strictEqual(handler, exportedHandler);
-export default exportedHandler;
 
 // Relevant Node.js tests
 // - [x] test/parallel/test-http-server-async-dispose.js
