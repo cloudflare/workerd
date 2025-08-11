@@ -19,7 +19,12 @@ from contextlib import contextmanager
 
 from .import_patch_manager import block_calls
 
-RUST_PACKAGES = ["pydantic_core", "tiktoken", "cryptography.exceptions", "jiter"]
+RUST_PACKAGES = [
+    "pydantic_core",
+    "tiktoken._tiktoken",
+    "cryptography.exceptions",
+    "jiter",
+]
 MODULES_TO_PATCH = [
     "random",
     "numpy.random",
@@ -56,12 +61,14 @@ def is_bad_entropy_enabled():
 
 @contextmanager
 def allow_bad_entropy_calls(n):
+    old_allowed_entropy_calls = ALLOWED_ENTROPY_CALLS[0]
     ALLOWED_ENTROPY_CALLS[0] = n
     yield
     if ALLOWED_ENTROPY_CALLS[0] > 0:
         raise RuntimeError(
             f"{ALLOWED_ENTROPY_CALLS[0]} unexpected leftover getentropy calls "
         )
+    ALLOWED_ENTROPY_CALLS[0] = old_allowed_entropy_calls
 
 
 # Module instantiation context managers
@@ -86,10 +93,23 @@ def get_entropy_import_context(name):
     raise RuntimeError(f"Missing context for {name}")
 
 
+IMPORTED_RUST_PACKAGE = False
+
+
 @contextmanager
 def rust_package_context(module):
     """Rust packages need one entropy call if they create a rust hash map at
-    init time."""
+    init time.
+
+    For reasons I don't entirely understand, in Pyodide 0.28 only the first Rust package to be
+    imported makes the get_entropy call. See gen_rust_import_tests() which tests that importing
+    four rust packages in different permutations works correctly.
+    """
+    global IMPORTED_RUST_PACKAGE
+    if sys.version_info >= (3, 13) and IMPORTED_RUST_PACKAGE:
+        yield
+        return
+    IMPORTED_RUST_PACKAGE = True
     with allow_bad_entropy_calls(1):
         yield
 
@@ -265,6 +285,9 @@ def langsmith__internal__constants_context(module):
 
 @contextmanager
 def langchain_openai_chat_models_base_context(module):
-    # Creates an ssl context
-    with allow_bad_entropy_calls(1):
+    if sys.version_info >= (3, 13):
+        # Creates an ssl context in the version used with 3.13
+        with allow_bad_entropy_calls(1):
+            yield
+    else:
         yield
