@@ -25,6 +25,7 @@ export type SessionOptions = {
 
 export type AiOptions = {
   gateway?: GatewayOptions;
+  websocket?: boolean;
   /** If true it will return a Response object */
   returnRawResponse?: boolean;
   prefix?: string;
@@ -146,6 +147,7 @@ export class Ai {
   aiGatewayLogId: string | null = null;
   lastRequestHttpStatusCode: number | null = null;
   lastRequestInternalStatusCode: number | null = null;
+  private readonly endpointURL = 'https://workers-binding.ai';
 
   constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
@@ -153,6 +155,124 @@ export class Ai {
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     return this.fetcher.fetch(input, init);
+  }
+
+  /**
+   * Generate fetch call for JSON inputs
+   * */
+  private async generateFetch(inputs: any, options: AiOptions, model: string) {
+    // Treat inputs as regular JS objects
+    const body = JSON.stringify({
+      inputs,
+      options,
+    });
+
+    const fetchOptions = {
+      method: 'POST',
+      body: body,
+      headers: {
+        ...this.options.sessionOptions?.extraHeaders,
+        ...this.options.extraHeaders,
+        'content-type': 'application/json',
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+      },
+    };
+
+    let endpointUrl = `${this.endpointURL}/run?version=3`;
+    if (options.gateway?.id) {
+      endpointUrl = `${this.endpointURL}/ai-gateway/run?version=3`;
+    }
+
+    return await this.fetcher.fetch(endpointUrl, fetchOptions);
+  }
+
+  /**
+   * Generate fetch call for inputs with ReadableStream
+   * */
+  private async generateStreamFetch(
+    inputs: any,
+    options: AiOptions,
+    model: string,
+    streamKeys: string[]
+  ) {
+    const streamKey = streamKeys[0] ?? '';
+    const stream = streamKey ? inputs[streamKey] : null;
+    const body = (stream as AiInputReadableStream).body;
+    const contentType = (stream as AiInputReadableStream).contentType;
+
+    if (options.gateway?.id) {
+      throw new AiInternalError(
+        'AI Gateway does not support ReadableStreams yet.'
+      );
+    }
+
+    // Make sure user has supplied the Content-Type
+    // This allows AI binding to treat the ReadableStream correctly
+    if (!contentType) {
+      throw new AiInternalError(
+        'Content-Type is required with ReadableStream inputs'
+      );
+    }
+
+    // Pass single ReadableStream in request body
+    const fetchOptions = {
+      method: 'POST',
+      body: body,
+      headers: {
+        ...this.options.sessionOptions?.extraHeaders,
+        ...this.options.extraHeaders,
+        'content-type': contentType,
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+      },
+    };
+
+    // Fetch the additional input params
+    const { [streamKey]: streamInput, ...userInputs } = inputs;
+
+    // Construct query params
+    // Append inputs with ai.run options that are passed to the inference request
+    const query = {
+      ...options,
+      version: '3',
+      userInputs: JSON.stringify({ ...userInputs }),
+    };
+    const aiEndpoint = new URL(`${this.endpointURL}/run`);
+    for (const [key, value] of Object.entries(query)) {
+      aiEndpoint.searchParams.set(key, value as string);
+    }
+
+    return await this.fetcher.fetch(aiEndpoint, fetchOptions);
+  }
+
+  /**
+   * Generate call to open a websocket connection
+   * */
+  private async generateWebsocketFetch(
+    inputs: any,
+    options: AiOptions,
+    model: string
+  ) {
+    // Treat inputs as regular JS objects
+    const body = JSON.stringify({
+      inputs,
+      options,
+    });
+
+    const fetchOptions = {
+      headers: {
+        ...this.options.sessionOptions?.extraHeaders,
+        ...this.options.extraHeaders,
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        Upgrade: 'websocket',
+      },
+    };
+
+    let endpointUrl = `${this.endpointURL}/run?version=3&body=${body}`;
+
+    return await this.fetcher.fetch(endpointUrl, fetchOptions);
   }
 
   async run(
@@ -172,97 +292,37 @@ export class Ai {
     }): object => object)(this.options);
 
     let res: Response;
-    /**
-     * Inputs that contain a ReadableStream which will be sent directly to
-     * the fetcher object along with other keys parsed as a query parameters
-     * */
-    const streamKeys = findReadableStreamKeys(inputs);
 
-    if (streamKeys.length === 0) {
-      // Treat inputs as regular JS objects
-      const body = JSON.stringify({
-        inputs,
-        options: cleanedOptions,
-      });
-
-      const fetchOptions = {
-        method: 'POST',
-        body: body,
-        headers: {
-          ...this.options.sessionOptions?.extraHeaders,
-          ...this.options.extraHeaders,
-          'content-type': 'application/json',
-          'cf-consn-sdk-version': '2.0.0',
-          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
-        },
-      };
-
-      let endpointUrl = 'https://workers-binding.ai/run?version=3';
-      if (options.gateway?.id) {
-        endpointUrl = 'https://workers-binding.ai/ai-gateway/run?version=3';
-      }
-
-      res = await this.fetcher.fetch(endpointUrl, fetchOptions);
-    } else if (streamKeys.length > 1) {
-      throw new AiInternalError(
-        `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
-      );
+    if (this.options?.websocket) {
+      res = await this.generateWebsocketFetch(inputs, options, model);
     } else {
-      const streamKey = streamKeys[0] ?? '';
-      const stream = streamKey ? inputs[streamKey] : null;
-      const body = (stream as AiInputReadableStream).body;
-      const contentType = (stream as AiInputReadableStream).contentType;
+      /**
+       * Inputs that contain a ReadableStream which will be sent directly to
+       * the fetcher object along with other keys parsed as a query parameters
+       * */
+      const streamKeys = findReadableStreamKeys(inputs);
 
-      if (options.gateway?.id) {
+      if (streamKeys.length === 0) {
+        res = await this.generateFetch(inputs, cleanedOptions, model);
+      } else if (streamKeys.length > 1) {
         throw new AiInternalError(
-          'AI Gateway does not support ReadableStreams yet.'
+          `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
+        );
+      } else {
+        res = await this.generateStreamFetch(
+          inputs,
+          options,
+          model,
+          streamKeys
         );
       }
-
-      // Make sure user has supplied the Content-Type
-      // This allows AI binding to treat the ReadableStream correctly
-      if (!contentType) {
-        throw new AiInternalError(
-          'Content-Type is required with ReadableStream inputs'
-        );
-      }
-
-      // Pass single ReadableStream in request body
-      const fetchOptions = {
-        method: 'POST',
-        body: body,
-        headers: {
-          ...this.options.sessionOptions?.extraHeaders,
-          ...this.options.extraHeaders,
-          'content-type': contentType,
-          'cf-consn-sdk-version': '2.0.0',
-          'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
-        },
-      };
-
-      // Fetch the additional input params
-      const { [streamKey]: streamInput, ...userInputs } = inputs;
-
-      // Construct query params
-      // Append inputs with ai.run options that are passed to the inference request
-      const query = {
-        ...cleanedOptions,
-        version: '3',
-        userInputs: JSON.stringify({ ...userInputs }),
-      };
-      const aiEndpoint = new URL('https://workers-binding.ai/run');
-      for (const [key, value] of Object.entries(query)) {
-        aiEndpoint.searchParams.set(key, value);
-      }
-
-      res = await this.fetcher.fetch(aiEndpoint, fetchOptions);
     }
 
     this.lastRequestId = res.headers.get('cf-ai-req-id');
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
 
-    if (this.options.returnRawResponse) {
+    if (this.options.returnRawResponse || this.options?.websocket) {
       return res;
     }
 
@@ -317,7 +377,7 @@ export class Ai {
   async models(
     params: AiModelsSearchParams = {}
   ): Promise<AiModelsSearchObject[]> {
-    const url = new URL('https://workers-binding.ai/ai-api/models/search');
+    const url = new URL(`${this.endpointURL}/ai-api/models/search`);
 
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value.toString());
@@ -376,8 +436,7 @@ export class Ai {
       },
     };
 
-    const endpointUrl =
-      'https://workers-binding.ai/to-everything/markdown/transformer';
+    const endpointUrl = `${this.endpointURL}/to-everything/markdown/transformer`;
 
     const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
 

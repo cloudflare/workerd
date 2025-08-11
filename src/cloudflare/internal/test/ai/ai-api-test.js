@@ -397,5 +397,26 @@ export const tests = {
         },
       ]);
     }
+
+    {
+      // Test websocket option with basic inputs
+      const resp = await env.ai.run(
+        '@cf/test/websocket',
+        { encoding: 'utf8' },
+        { websocket: true }
+      );
+
+      assert.deepStrictEqual(resp, {
+        inputs: { encoding: 'utf8' },
+        options: { websocket: true },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&body={"inputs":{"encoding":"utf8"},"options":{"websocket":true}}',
+        headers: {
+          'cf-consn-sdk-version': '2.0.0',
+          'cf-consn-model-id': '@cf/test/websocket',
+          upgrade: 'websocket',
+        },
+      });
+    }
   },
 };

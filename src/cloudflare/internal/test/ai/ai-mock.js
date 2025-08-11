@@ -93,6 +93,7 @@ export default {
     }
 
     const modelName = request.headers.get('cf-consn-model-id');
+    const isWebsocket = request.headers.get('Upgrade') === 'websocket';
 
     const respHeaders = {
       'cf-ai-req-id': '3a1983d7-1ddd-453a-ab75-c4358c91b582',
@@ -146,6 +147,31 @@ export default {
             'content-type': 'application/json',
             ...respHeaders,
           },
+        }
+      );
+    }
+
+    // Handle websocket requests
+    if (isWebsocket) {
+      // For websocket requests, extract data from URL 'body' parameter
+      const bodyParam = url.searchParams.get('body');
+      let websocketData = {};
+      if (bodyParam) {
+        try {
+          websocketData = JSON.parse(decodeURIComponent(bodyParam));
+        } catch (e) {
+          websocketData = { inputs: {}, options: {} };
+        }
+      }
+
+      return Response.json(
+        {
+          ...websocketData,
+          requestUrl: request.url,
+          headers: Object.fromEntries(request.headers.entries()),
+        },
+        {
+          headers: respHeaders,
         }
       );
     }
