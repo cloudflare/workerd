@@ -129,38 +129,37 @@ function findReadableStreamKeys(
 }
 
 export class Ai {
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private readonly fetcher: Fetcher;
+  #fetcher: Fetcher;
 
   /*
    * @deprecated this option is deprecated, do not use this
    */
-  // TODO(soon): Can we use the # syntax here?
-  // @ts-expect-error this option is deprecated, do not use this
-  // eslint-disable-next-line no-restricted-syntax
-  private logs: Array<string> = [];
-  // TODO(soon): Can we use the # syntax here?
-  // eslint-disable-next-line no-restricted-syntax
-  private options: AiOptions = {};
+  // @ts-expect-error: deprecated var
+  // eslint-disable-next-line no-unused-private-class-members
+  #logs: Array<string> = [];
+  #options: AiOptions = {};
+  #endpointURL = 'https://workers-binding.ai';
   lastRequestId: string | null = null;
   aiGatewayLogId: string | null = null;
   lastRequestHttpStatusCode: number | null = null;
   lastRequestInternalStatusCode: number | null = null;
-  private readonly endpointURL = 'https://workers-binding.ai';
 
   constructor(fetcher: Fetcher) {
-    this.fetcher = fetcher;
+    this.#fetcher = fetcher;
   }
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    return this.fetcher.fetch(input, init);
+    return this.#fetcher.fetch(input, init);
   }
 
   /**
    * Generate fetch call for JSON inputs
    * */
-  private async generateFetch(inputs: any, options: AiOptions, model: string) {
+  async #generateFetch(
+    inputs: object,
+    options: AiOptions,
+    model: string
+  ): Promise<Response> {
     // Treat inputs as regular JS objects
     const body = JSON.stringify({
       inputs,
@@ -171,31 +170,31 @@ export class Ai {
       method: 'POST',
       body: body,
       headers: {
-        ...this.options.sessionOptions?.extraHeaders,
-        ...this.options.extraHeaders,
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
         'content-type': 'application/json',
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
       },
     };
 
-    let endpointUrl = `${this.endpointURL}/run?version=3`;
+    let endpointUrl = `${this.#endpointURL}/run?version=3`;
     if (options.gateway?.id) {
-      endpointUrl = `${this.endpointURL}/ai-gateway/run?version=3`;
+      endpointUrl = `${this.#endpointURL}/ai-gateway/run?version=3`;
     }
 
-    return await this.fetcher.fetch(endpointUrl, fetchOptions);
+    return await this.#fetcher.fetch(endpointUrl, fetchOptions);
   }
 
   /**
    * Generate fetch call for inputs with ReadableStream
    * */
-  private async generateStreamFetch(
-    inputs: any,
+  async #generateStreamFetch(
+    inputs: Record<string, string | AiInputReadableStream>,
     options: AiOptions,
     model: string,
     streamKeys: string[]
-  ) {
+  ): Promise<Response> {
     const streamKey = streamKeys[0] ?? '';
     const stream = streamKey ? inputs[streamKey] : null;
     const body = (stream as AiInputReadableStream).body;
@@ -220,11 +219,11 @@ export class Ai {
       method: 'POST',
       body: body,
       headers: {
-        ...this.options.sessionOptions?.extraHeaders,
-        ...this.options.extraHeaders,
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
         'content-type': contentType,
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
       },
     };
 
@@ -238,22 +237,22 @@ export class Ai {
       version: '3',
       userInputs: JSON.stringify({ ...userInputs }),
     };
-    const aiEndpoint = new URL(`${this.endpointURL}/run`);
+    const aiEndpoint = new URL(`${this.#endpointURL}/run`);
     for (const [key, value] of Object.entries(query)) {
       aiEndpoint.searchParams.set(key, value as string);
     }
 
-    return await this.fetcher.fetch(aiEndpoint, fetchOptions);
+    return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
 
   /**
    * Generate call to open a websocket connection
    * */
-  private async generateWebsocketFetch(
-    inputs: any,
+  async #generateWebsocketFetch(
+    inputs: object,
     options: AiOptions,
     model: string
-  ) {
+  ): Promise<Response> {
     // Treat inputs as regular JS objects
     const body = JSON.stringify({
       inputs,
@@ -262,25 +261,25 @@ export class Ai {
 
     const fetchOptions = {
       headers: {
-        ...this.options.sessionOptions?.extraHeaders,
-        ...this.options.extraHeaders,
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
         'cf-consn-sdk-version': '2.0.0',
-        'cf-consn-model-id': `${this.options.prefix ? `${this.options.prefix}:` : ''}${model}`,
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
         Upgrade: 'websocket',
       },
     };
 
-    let endpointUrl = `${this.endpointURL}/run?version=3&body=${body}`;
+    const endpointUrl = `${this.#endpointURL}/run?version=3&body=${body}`;
 
-    return await this.fetcher.fetch(endpointUrl, fetchOptions);
+    return await this.#fetcher.fetch(endpointUrl, fetchOptions);
   }
 
   async run(
     model: string,
-    inputs: Record<string, unknown>,
+    inputs: Record<string, string | AiInputReadableStream>,
     options: AiOptions = {}
   ): Promise<Response | ReadableStream<Uint8Array> | object | null> {
-    this.options = options;
+    this.#options = options;
     this.lastRequestId = '';
 
     // This removes some unwanted options from getting sent in the body
@@ -289,12 +288,12 @@ export class Ai {
       extraHeaders,
       sessionOptions,
       ...object
-    }): object => object)(this.options);
+    }): object => object)(this.#options);
 
     let res: Response;
 
-    if (this.options?.websocket) {
-      res = await this.generateWebsocketFetch(inputs, options, model);
+    if (this.#options.websocket) {
+      res = await this.#generateWebsocketFetch(inputs, options, model);
     } else {
       /**
        * Inputs that contain a ReadableStream which will be sent directly to
@@ -303,13 +302,13 @@ export class Ai {
       const streamKeys = findReadableStreamKeys(inputs);
 
       if (streamKeys.length === 0) {
-        res = await this.generateFetch(inputs, cleanedOptions, model);
+        res = await this.#generateFetch(inputs, cleanedOptions, model);
       } else if (streamKeys.length > 1) {
         throw new AiInternalError(
           `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
         );
       } else {
-        res = await this.generateStreamFetch(
+        res = await this.#generateStreamFetch(
           inputs,
           options,
           model,
@@ -322,7 +321,7 @@ export class Ai {
     this.aiGatewayLogId = res.headers.get('cf-aig-log-id');
     this.lastRequestHttpStatusCode = res.status;
 
-    if (this.options.returnRawResponse || this.options?.websocket) {
+    if (this.#options.returnRawResponse || this.#options.websocket) {
       return res;
     }
 
@@ -377,13 +376,13 @@ export class Ai {
   async models(
     params: AiModelsSearchParams = {}
   ): Promise<AiModelsSearchObject[]> {
-    const url = new URL(`${this.endpointURL}/ai-api/models/search`);
+    const url = new URL(`${this.#endpointURL}/ai-api/models/search`);
 
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value.toString());
     }
 
-    const res = await this.fetcher.fetch(url, { method: 'GET' });
+    const res = await this.#fetcher.fetch(url, { method: 'GET' });
 
     switch (res.status) {
       case 200: {
@@ -436,9 +435,9 @@ export class Ai {
       },
     };
 
-    const endpointUrl = `${this.endpointURL}/to-everything/markdown/transformer`;
+    const endpointUrl = `${this.#endpointURL}/to-everything/markdown/transformer`;
 
-    const res = await this.fetcher.fetch(endpointUrl, fetchOptions);
+    const res = await this.#fetcher.fetch(endpointUrl, fetchOptions);
 
     if (!res.ok) {
       const content = await res.text();
@@ -481,11 +480,11 @@ export class Ai {
   }
 
   gateway(gatewayId: string): AiGateway {
-    return new AiGateway(this.fetcher, gatewayId);
+    return new AiGateway(this.#fetcher, gatewayId);
   }
 
   autorag(autoragId?: string): AutoRAG {
-    return new AutoRAG(this.fetcher, autoragId);
+    return new AutoRAG(this.#fetcher, autoragId);
   }
 }
 
