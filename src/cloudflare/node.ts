@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { portMapper } from 'cloudflare-internal:http';
+import { portMapper, type Fetcher } from 'cloudflare-internal:http';
 
 interface ServerDescriptor {
   port?: number | null | undefined;
@@ -12,65 +12,47 @@ interface NodeStyleServer {
   address(): { port?: number | null | undefined };
 }
 
-function getInstance<T extends object = object>(
-  constructorOrObject?: (new () => T) | T
-): {
-  returnValue: T;
-  instance: T;
-} {
-  // If the constructorOrObject is a function, we assume it is a class
-  // constructor. Return the prototype of that class.
-  if (typeof constructorOrObject === 'function') {
-    return {
-      returnValue: constructorOrObject as T,
-      instance: constructorOrObject.prototype as T,
-    };
+function validatePort(port: unknown): number {
+  if (
+    !Number.isFinite(port) ||
+    (port as number) < 0 ||
+    (port as number) > 65535
+  ) {
+    throw new Error('Failed to determine port for server');
   }
-  // If it is an object (and not null), we assume it is already an
-  // instance, return it as is.
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (constructorOrObject !== null && typeof constructorOrObject === 'object') {
-    return {
-      returnValue: constructorOrObject,
-      instance: constructorOrObject,
-    };
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  if (constructorOrObject !== undefined) {
-    throw new TypeError(
-      'Expected a constructor function or an object, but received: ' +
-        typeof constructorOrObject
-    );
-  }
-  // Otherwise, return a new basic object.
-  const instance = {} as T;
-  return {
-    returnValue: instance,
-    instance: instance,
-  };
+  return port as number;
 }
 
-type Fetcher = {
-  fetch(request: Request): Promise<Response>;
-};
+export async function handleAsNodeRequest(
+  desc: number | ServerDescriptor,
+  request: RequestInfo | URL
+): Promise<Response> {
+  if (typeof desc === 'number') {
+    desc = { port: desc };
+  }
+  // While TypeScript will complain if `desc` is null or undefined,
+  // JavaScript does not enforce this, so we need to check at runtime.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  const port = validatePort(desc?.port);
+  const instance = portMapper.get(port);
+  if (!instance) {
+    const error = new Error(
+      `Http server with port ${port} not found. This is likely a bug with your code. ` +
+        `You should check if server.listen() was called with the same port (${port})`
+    );
+    // @ts-expect-error TS2339 We're imitating Node.js errors.
+    error.code = 'ERR_INVALID_ARG_VALUE';
+    throw error;
+  }
+  return await instance.fetch(request);
+}
 
 export function httpServerHandler(
-  desc: ServerDescriptor | NodeStyleServer
-): Fetcher;
-export function httpServerHandler(
-  desc: ServerDescriptor | NodeStyleServer,
-  constructor: new (...args: unknown[]) => object
-): Fetcher;
-export function httpServerHandler(
-  desc: ServerDescriptor | NodeStyleServer,
-  object: object
-): Fetcher;
-
-export function httpServerHandler<T extends object = object>(
-  desc: ServerDescriptor | NodeStyleServer,
-  constructorOrObject?: (new (...args: unknown[]) => T) | T
+  desc: number | ServerDescriptor | NodeStyleServer
 ): Fetcher {
+  if (typeof desc === 'number') {
+    desc = { port: desc };
+  }
   // While the TypeScript type system prevents `desc` from being null or undefined,
   // JavaScript does not, so we need to check for it at runtime.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -113,34 +95,11 @@ export function httpServerHandler<T extends object = object>(
     port = (desc as ServerDescriptor).port as number;
   }
 
-  if (port == null) {
-    throw new Error('Failed to determine port for server');
-  }
+  port = validatePort(port);
 
-  // We intentionally omitted ctx and env variables. Users should use
-  // importable equivalents to access those values. For example, using
-  // import { env, waitUntil } from 'cloudflare:workers
-  // `disallow_importable_env` compat flag should not be set if you are using this
-  // and need access to the env since that will prevent access.
-  const fetch = async function (request: Request): Promise<Response> {
-    const instance = portMapper.get(port);
-    // TODO: Investigate supporting automatically assigned ports as being bound without a port configuration.
-    if (!instance) {
-      const error = new Error(
-        `Http server with port ${port} not found. This is likely a bug with your code. You should check if server.listen() was called with the same port (${port})`
-      );
-      // @ts-expect-error TS2339 We're imitating Node.js errors.
-      error.code = 'ERR_INVALID_ARG_VALUE';
-      throw error;
-    }
-    return instance.fetch(request);
+  return {
+    async fetch(req: RequestInfo | URL): Promise<Response> {
+      return await handleAsNodeRequest({ port: validatePort(port) }, req);
+    },
   };
-
-  const { returnValue, instance } = getInstance<T>(constructorOrObject);
-  Object.defineProperty(instance, 'fetch', {
-    value: fetch,
-    configurable: true,
-    writable: true,
-  });
-  return returnValue as Fetcher;
 }
