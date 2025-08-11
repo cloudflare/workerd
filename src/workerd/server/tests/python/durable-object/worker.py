@@ -105,10 +105,12 @@ async def test(ctrl, env, ctx):
     assert third_resp_data == "hello from python 3"
 
     # Wait for alarm to get triggered.
-    while True:
+    for _ in range(20):
         await sleep(0.2)
         resp = await obj.fetch("http://foo.com/alarm")
 
         alarm_triggered = await resp.text() == "True"
         if alarm_triggered:
             break
+    else:
+        raise AssertionError("Alarm never triggered")
