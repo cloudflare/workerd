@@ -49,11 +49,13 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/transpiler/lib.rs.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <kj-rs/kj-rs.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/python-entrypoint.embed.h>
 
@@ -61,6 +63,8 @@
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+
+using namespace kj_rs;
 
 namespace workerd::server {
 
@@ -512,6 +516,7 @@ void WorkerdApi::setIsolateObserver(IsolateObserver&) {};
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
+    CompatibilityFlags::Reader featureFlags,
     Worker::ValidationErrorReporter& errorReporter) {
   TRACE_EVENT("workerd", "WorkerdApi::extractSource()");
   switch (conf.which()) {
@@ -527,7 +532,7 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
         if (module.isPythonModule()) {
           isPython = true;
         }
-        return readModuleConf(module, errorReporter);
+        return readModuleConf(module, featureFlags, errorReporter);
       };
 
       Worker::Script::ModulesSource result{
@@ -600,7 +605,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
     config::Worker::Module::Reader conf,
     jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
-  return tryCompileModule(js, readModuleConf(conf), observer, featureFlags);
+  return tryCompileModule(js, readModuleConf(conf, featureFlags), observer, featureFlags);
 }
 
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
@@ -655,6 +660,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
 }
 
 Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader conf,
+    CompatibilityFlags::Reader featureFlags,
     kj::Maybe<Worker::ValidationErrorReporter&> errorReporter) {
   return {.name = conf.getName(), .content = [&]() -> Worker::Script::ModuleContent {
     switch (conf.which()) {
@@ -667,7 +673,27 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::JSON:
         return Worker::Script::JsonModule{conf.getJson()};
       case config::Worker::Module::ES_MODULE:
-        return Worker::Script::EsModule{conf.getEsModule()};
+        if (featureFlags.getTypescriptStripTypes()) {
+          auto output = rust::transpiler::ts_strip(
+              conf.getName().as<Rust>(), conf.getEsModule().asBytes().as<Rust>());
+
+          if (output.success) {
+            return Worker::Script::EsModule{
+              .body = ::kj_rs::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+          }
+
+          auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);
+          for (auto& diag: output.diagnostics) {
+            description = kj::str(description, "\n    ", diag.message);
+          }
+          KJ_IF_SOME(reporter, errorReporter) {
+            reporter.addError(kj::mv(description));
+            return Worker::Script::TextModule{""};
+          } else {
+            KJ_FAIL_REQUIRE(description);
+          }
+        }
+        return Worker::Script::EsModule{static_cast<kj::StringPtr>(conf.getEsModule())};
       case config::Worker::Module::COMMON_JS_MODULE: {
         Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
         if (conf.hasNamedExports()) {
@@ -1309,7 +1335,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   // service to try resolving.
   KJ_IF_SOME(fallbackService, maybeFallbackService) {
     builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
-        [fallbackService = kj::str(fallbackService)](const jsg::modules::ResolveContext& context)
+        [fallbackService = kj::str(fallbackService), featureFlags](
+            const jsg::modules::ResolveContext& context)
             -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
       auto specifier = kj::str(context.specifier.getHref());
       auto referrer = kj::str(context.referrer.getHref());
@@ -1326,7 +1353,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
           KJ_CASE_ONEOF(def, kj::Own<server::config::Worker::Module::Reader>) {
             // The fallback service returned a module definition.
             // We need to convert that into a Module instance.
-            auto mod = readModuleConf(*def, kj::none);
+            auto mod = readModuleConf(*def, featureFlags, kj::none);
             KJ_IF_SOME(specifier, jsg::Url::tryParse(mod.name)) {
               // Note that unlike the regular case, the module content returned
               // by the fallback service is not guaranteed to be memory-resident.

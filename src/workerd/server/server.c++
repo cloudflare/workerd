@@ -3926,7 +3926,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   // Construct `WorkerDef` from `conf`.
   WorkerDef def{
     .featureFlags = featureFlags.asReader(),
-    .source = WorkerdApi::extractSource(name, conf, errorReporter),
+    .source = WorkerdApi::extractSource(name, conf, featureFlags.asReader(), errorReporter),
     .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
     .localActorConfigs = localActorConfigs,
 

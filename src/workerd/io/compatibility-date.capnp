@@ -962,4 +962,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
   # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
   # top-level execution of the Worker.
+
+  typescriptStripTypes @111 :Bool
+    $compatEnableFlag("typescript_strip_types")
+    $experimental;
+  # Strips all Typescript types from loaded files.
+  # If loaded files contain unsupported typescript construct beyond type annotations (e.g. enums),
+  # or is not a syntactically valid Typescript, the worker will fail to load.
 }
