@@ -27,4 +27,5 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     # tokio is huge, let's enable only features when we actually need them.
     "tokio": crate.spec(version = "1", default_features = False, features = ["net", "rt", "rt-multi-thread", "time"]),
     "tracing": crate.spec(version = "0", default_features = False, features = ["std"]),
+    "swc_core": crate.spec(version = "35", features = ["common", "ecma_ast", "ecma_codegen", "ecma_parser", "ecma_transforms_typescript", "ecma_visit", "swc_ecma_visit", "swc_config"]),
 }
