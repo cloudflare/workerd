@@ -1223,6 +1223,11 @@ kj::Rc<Directory> Directory::newWritable() {
   return kj::rc<WritableDirectory>();
 }
 
+kj::Rc<Directory> Directory::newEmptyReadonly() {
+  Directory::Builder builder;
+  return builder.finish();
+}
+
 kj::Rc<Directory> Directory::newWritable(jsg::Lock& js) {
   auto dir = kj::rc<WritableDirectory>();
   dir->countTowardsIsolateLimit(js);

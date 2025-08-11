@@ -418,6 +418,10 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // when the handle is dropped.
   static kj::Rc<Directory> newWritable() KJ_WARN_UNUSED_RESULT;
 
+  // As a utility in some cases, we need the ability to create empty read-only
+  // directories.
+  static kj::Rc<Directory> newEmptyReadonly() KJ_WARN_UNUSED_RESULT;
+
   // Variation of newWritable that ensures the Directory instance itself is
   // counted towwards the isolate memory limit. This should be the typical
   // case for directories created by user code, such as when creating a
