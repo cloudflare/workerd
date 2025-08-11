@@ -646,6 +646,22 @@ export default {
     }
     // Conditionals
     {
+      try {
+        await env.BUCKET.put('throwOnInvalidEtag', body, {
+          onlyIf: new Headers({
+            'if-match': 'strongEtag',
+          }),
+        });
+        throw new Error('This should have thrown');
+      } catch {}
+      try {
+        await env.BUCKET.put('throwOnInvalidEtag', body, {
+          onlyIf: new Headers({
+            'if-none-match': 'strongEtag',
+          }),
+        });
+        throw new Error('This should have thrown');
+      } catch {}
       await env.BUCKET.put('onlyIfStrongEtag', body, {
         onlyIf: {
           etagMatches: 'strongEtag',
