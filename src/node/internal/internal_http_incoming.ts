@@ -52,11 +52,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   rawHeaders: string[] = [];
   joinDuplicateHeaders = false;
 
-  // Technically, the type should be IncomingRequestCfProperties but
-  // we don't have that type in the workerd runtime at the moment.
+  // The cloudflare property is currently only used on the server-side
+  // to access properties like `req.cf`, and the `env` and `ctx`
+  // objects.
   cloudflare: {
-    cf: Record<string, unknown> | undefined;
-  } = { cf: undefined };
+    // Technically, the type should be IncomingRequestCfProperties but
+    // we don't have that type in the workerd runtime at the moment.
+    cf?: Record<string, unknown> | undefined;
+    env?: unknown;
+    ctx?: unknown;
+  } = { cf: undefined, env: undefined, ctx: undefined };
 
   [kHeaders]: IncomingHttpHeaders | null = null;
   [kHeadersDistinct]: Record<string, string[]> | null = null;

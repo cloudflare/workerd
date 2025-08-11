@@ -1,7 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { portMapper, type Fetcher } from 'cloudflare-internal:http';
+import { portMapper } from 'cloudflare-internal:http';
+
+interface Fetcher {
+  fetch(request: Request, env?: unknown, ctx?: unknown): Promise<Response>;
+}
 
 interface ServerDescriptor {
   port?: number | null | undefined;
@@ -25,7 +29,9 @@ function validatePort(port: unknown): number {
 
 export async function handleAsNodeRequest(
   desc: number | ServerDescriptor,
-  request: RequestInfo | URL
+  request: Request,
+  env?: unknown,
+  ctx?: unknown
 ): Promise<Response> {
   if (typeof desc === 'number') {
     desc = { port: desc };
@@ -44,7 +50,7 @@ export async function handleAsNodeRequest(
     error.code = 'ERR_INVALID_ARG_VALUE';
     throw error;
   }
-  return await instance.fetch(request);
+  return await instance.fetch(request, env, ctx);
 }
 
 export function httpServerHandler(
@@ -98,8 +104,13 @@ export function httpServerHandler(
   port = validatePort(port);
 
   return {
-    async fetch(req: RequestInfo | URL): Promise<Response> {
-      return await handleAsNodeRequest({ port: validatePort(port) }, req);
+    async fetch(req: Request, env?: unknown, ctx?: unknown): Promise<Response> {
+      return await handleAsNodeRequest(
+        { port: validatePort(port) },
+        req,
+        env,
+        ctx
+      );
     },
   };
 }

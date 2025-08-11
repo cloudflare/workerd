@@ -213,8 +213,12 @@ export class Server
     return this;
   }
 
-  async #onRequest(request: Request): Promise<Response> {
-    const { incoming, response } = this.#toReqRes(request);
+  async #onRequest(
+    request: Request,
+    env: unknown,
+    ctx: unknown
+  ): Promise<Response> {
+    const { incoming, response } = this.#toReqRes(request, env, ctx);
     try {
       this.emit('connection', this, incoming);
       this.emit('request', incoming, response);
@@ -225,7 +229,11 @@ export class Server
     }
   }
 
-  #toReqRes(request: Request): {
+  #toReqRes(
+    request: Request,
+    env: unknown,
+    ctx: unknown
+  ): {
     incoming: IncomingMessage;
     response: ServerResponse;
   } {
@@ -255,6 +263,10 @@ export class Server
 
     // We provide a way for users to access to the Cloudflare-specific
     // request properties, such as `cf` for accessing Cloudflare-specific request metadata.
+    incoming.cloudflare = {
+      env,
+      ctx,
+    };
     if ('cf' in request) {
       incoming.cloudflare.cf = request.cf as Record<string, unknown>;
     }
