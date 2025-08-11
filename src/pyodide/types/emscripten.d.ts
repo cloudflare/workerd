@@ -114,4 +114,8 @@ interface Module {
   promise: Promise<void>;
   reportUndefinedSymbols: () => void;
   wasmTable: WebAssembly.Table;
+  // Set snapshotDebug to true to print relocation information when loading dynamic libraries. If
+  // there are crashes involving snapshots this information can be compared between when creating
+  // and using the snapshot and any discrepancy explains the crash.
+  snapshotDebug?: boolean;
 }
