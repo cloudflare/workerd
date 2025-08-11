@@ -135,7 +135,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "backport": "2",
         "integrity": "sha256-vgJw1nTi/1gqPa46J4iOBH3wAE0ziPJd5BjvTHbUI9g=",
         "flag": "pythonWorkers20250116",
-        "enable_flag_name": "python_workers_20250808",
+        "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
         "python_version": "3.13.2",
         "baseline_snapshot": "baseline-188e9dd60.bin",
