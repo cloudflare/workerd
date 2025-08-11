@@ -88,8 +88,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       const connectingIp = headers.get('cf-connecting-ip');
       const isConnectingIpIpv4 = connectingIp ? isIPv4(connectingIp) : true;
       // Return a port number between 2^15 and 2^16.
-      const remotePort =
-        Math.floor(Math.random() * (65535 - 32768 + 1)) + 32768;
+      const remotePort = (Math.random() * 0x8000) | 0x8000;
 
       incoming.#socket = {
         encrypted: headers.get('x-forwarded-proto') === 'https',
