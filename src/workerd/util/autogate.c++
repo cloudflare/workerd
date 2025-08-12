@@ -25,6 +25,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
+    case AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION:
+      return "sql-kv-put-multiple-transaction"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }
