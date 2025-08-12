@@ -1,6 +1,8 @@
 // Enhanced REPRL worker script with all API bindings exposed
 import { default as Stdin } from "workerd:stdin";
 import crypto from 'crypto';
+import * as fs from 'node:fs';
+
 
 // TestDurableObject implementation
 export class TestDurableObject {
@@ -92,6 +94,7 @@ export default {
     // Expose Encoding APIs
     globalThis.atob = atob;
     globalThis.btoa = btoa;
+    globalThis.fs = fs;
     
     // Expose HTML Rewriter
     globalThis.HTMLRewriter = HTMLRewriter;
