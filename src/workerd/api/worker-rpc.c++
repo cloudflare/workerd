@@ -20,12 +20,6 @@ using StreamSinkFulfiller = kj::Own<kj::PromiseFulfiller<rpc::JsValue::StreamSin
 
 }  // namespace
 
-void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
-  // No need to check if IoContext::hasCurrent since current() will throw
-  // if there is no active request.
-  IoContext::current().addWaitUntil(kj::mv(promise));
-}
-
 // Implementation of StreamSink RPC interface. The stream sender calls `startStream()` when
 // serializing each stream, and the recipient calls `setSlot()` when deserializing streams to
 // provide the appropriate destination capability. This class is designed to allow these two
@@ -1992,51 +1986,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
-}
-
-// =======================================================================================
-
-jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<WorkerEntrypoint>();
-}
-
-jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<DurableObjectState> ctx,
-    jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<DurableObjectBase>();
-}
-
-jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<ExecutionContext> ctx,
-    jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<WorkflowEntrypoint>();
 }
 
 };  // namespace workerd::api

@@ -11,7 +11,7 @@
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
-#include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>

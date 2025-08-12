@@ -37,6 +37,7 @@
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
 #include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/rtti.h>
@@ -83,7 +84,8 @@
   F("eventsource", EW_EVENTSOURCE_ISOLATE_TYPES)                                                   \
   F("container", EW_CONTAINER_ISOLATE_TYPES)                                                       \
   F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
-  F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)
+  F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \
+  F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)
 
 namespace workerd::api {
 
