@@ -6403,6 +6403,7 @@ export type AutoRagSearchRequest = {
 };
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
+  system_prompt?: string;
 };
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
