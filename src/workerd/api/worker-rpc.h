@@ -20,6 +20,7 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
+#include <workerd/api/http.h>
 
 namespace workerd::api {
 
@@ -99,6 +100,7 @@ class RpcSerializerExternalHandler final: public jsg::Serializer::ExternalHandle
 
 class RpcStubDisposalGroup;
 class StreamSinkImpl;
+class Fetcher;
 
 // ExternalHandler used when deserializing RPC messages. Deserialization functions with which to
 // handle RPC specially should use this.
@@ -564,6 +566,7 @@ class EntrypointsModule: public jsg::Object {
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
     JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
     JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
+    JSG_NESTED_TYPE_NAMED(Fetcher, Fetcher);
 
     JSG_METHOD(waitUntil);
   }
