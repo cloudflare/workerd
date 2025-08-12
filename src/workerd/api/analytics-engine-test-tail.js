@@ -8,28 +8,27 @@ export default {
     return new Response('');
   },
   async test(ctrl, env, ctx) {
-
     let received = Array.from(spans.values()).filter(
       (span) => span.name !== 'jsRpcSession'
     );
 
     const expected = [
       {
-        "name": "ae_writeDataPoint",
-        "db.namespace": "analytics",
-        "cloudflare.wae.query.index": "testindex",
-        "cloudflare.wae.query.blobs": "1",
-        "cloudflare.wae.query.doubles": "1",
-        "closed": true
+        name: 'ae_writeDataPoint',
+        'db.namespace': 'analytics',
+        'cloudflare.wae.query.index': 'testindex',
+        'cloudflare.wae.query.blobs': '1',
+        'cloudflare.wae.query.doubles': '1',
+        closed: true,
       },
       {
-        "name": "worker",
-        "closed": true
+        name: 'worker',
+        closed: true,
       },
       {
-        "name": "writeLogfwdr",
-        "closed": true
-      }
+        name: 'writeLogfwdr',
+        closed: true,
+      },
     ];
 
     await Promise.allSettled(invocationPromises);
@@ -38,7 +37,7 @@ export default {
     return new Response('');
   },
 
-  tailStream (event, env, ctx) {
+  tailStream(event, env, ctx) {
     let resolveFn;
     invocationPromises.push(
       new Promise((resolve, reject) => {
@@ -71,6 +70,5 @@ export default {
           break;
       }
     };
-  }
-
+  },
 };
