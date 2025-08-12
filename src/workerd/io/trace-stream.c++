@@ -869,7 +869,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // If we already received an outcome event, we will stop processing any
       // further events.
       if (finishing) break;
-      if (event.event.is<tracing::Outcome>()) {
+      if (event.isOutcomeLike()) {
         finishing = true;
         results.setStop(true);
         // We set doFulfill to indicate that the outcome event has been received via RPC and no more
@@ -1066,7 +1066,7 @@ void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
 
   // If we're already closing, no further events should be reported.
   if (closing) return;
-  if (event.event.is<tracing::Outcome>()) {
+  if (event.isOutcomeLike()) {
     closing = true;
   }
 
