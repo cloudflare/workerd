@@ -16,6 +16,13 @@ export type GatewayOptions = {
   retries?: GatewayRetries;
 };
 
+export type UniversalGatewayOptions = Exclude<GatewayOptions, 'id'> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
+};
+
 export type AiGatewayPatchLog = {
   score?: number | null;
   feedback?: -1 | 1 | null;
@@ -109,7 +116,7 @@ export declare abstract class AiGateway {
   getLog(logId: string): Promise<AiGatewayLog>;
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
   ): Promise<Response>;
   getUrl(provider?: AIGatewayProviders | string): Promise<string>; // eslint-disable-line
 }
