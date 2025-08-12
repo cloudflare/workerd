@@ -30,9 +30,12 @@ void AnalyticsEngine::writeDataPoint(
 void AnalyticsEngine::writeDataPointNoOutputLock(
     jsg::Lock& js, jsg::Optional<api::AnalyticsEngine::AnalyticsEngineEvent>&& event) {
   auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("ae_writeDataPoint"_kjc);
 
   context.writeLogfwdr(logfwdrChannel, [&](capnp::AnyPointer::Builder ptr) {
     api::AnalyticsEngineEvent::Builder aeEvent = ptr.initAs<api::AnalyticsEngineEvent>();
+
+    userSpan.setTag("db.namespace"_kjc, kj::str(dataset));
 
     aeEvent.setAccountId(static_cast<int64_t>(ownerId));
     aeEvent.setTimestamp(now());
@@ -45,12 +48,17 @@ void AnalyticsEngine::writeDataPointNoOutputLock(
     kj::StringPtr errorPrefix = "writeDataPoint(): "_kj;
     KJ_IF_SOME(ev, event) {
       KJ_IF_SOME(indexes, ev.indexes) {
+        KJ_IF_SOME(index, indexes[0]) {
+          userSpan.setTag("cloudflare.wae.query.index"_kjc, kj::str(index));
+        }
         setIndexes<api::AnalyticsEngineEvent::Builder>(aeEvent, indexes, errorPrefix);
       }
       KJ_IF_SOME(blobs, ev.blobs) {
+        userSpan.setTag("cloudflare.wae.query.blobs"_kjc, kj::str(blobs.size()));
         setBlobs<api::AnalyticsEngineEvent::Builder>(aeEvent, blobs, errorPrefix);
       }
       KJ_IF_SOME(doubles, ev.doubles) {
+        userSpan.setTag("cloudflare.wae.query.doubles"_kjc, kj::str(doubles.size()));
         setDoubles<api::AnalyticsEngineEvent::Builder>(aeEvent, doubles, errorPrefix);
       }
     }
