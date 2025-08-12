@@ -5,7 +5,7 @@
 // TODO: c++ built-ins do not yet support named exports
 
 import sockets from 'cloudflare-internal:sockets';
-import { type Fetcher } from 'cloudflare-internal:http';
+import { type ServiceStub } from 'cloudflare-internal:workers';
 
 export function connect(
   address: string | sockets.SocketAddress,
@@ -16,6 +16,6 @@ export function connect(
 
 export function internalNewHttpClient(
   socket: sockets.Socket
-): Promise<Fetcher> {
+): Promise<ServiceStub> {
   return sockets.internalNewHttpClient(socket);
 }
