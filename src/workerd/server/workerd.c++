@@ -1877,7 +1877,7 @@ int main(int argc, char* argv[]) {
   char *new_argv[5];
   new_argv[0] = "workerd";
   new_argv[1] = "test";
-  new_argv[2] = "/home/mschwarzl/projects/workerd/samples/reprl/config.capnp";
+  new_argv[2] = "/home/mschwarzl/projects/workerd/samples/reprl/config-full.capnp";
   new_argv[3] = "--experimental";
   new_argv[4] = nullptr;
   argv = new_argv;
