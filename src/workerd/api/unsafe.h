@@ -161,6 +161,19 @@ public:
       }
 
       script_[script_size] = '\0';
+      
+      // Debug: Print global context before executing script
+      printf("=== DEBUG: Global Context Properties ===\n");
+      auto global = js.v8Context()->Global();
+      auto propNames = jsg::check(global->GetOwnPropertyNames(js.v8Context()));
+      uint32_t length = propNames->Length();
+      for (uint32_t i = 0; i < length; i++) {
+        auto key = jsg::check(propNames->Get(js.v8Context(), i));
+         v8::String::Utf8Value keyStr(js.v8Isolate, key);
+        printf("Global property: %s\n", *keyStr);
+      }
+      printf("=== END DEBUG ===\n");
+      fflush(stdout);
 
       int status = 0;
       int32_t res_val = 0;
