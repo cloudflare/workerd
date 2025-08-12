@@ -14,13 +14,13 @@
 //
 // See worker-interface.capnp for the underlying protocol.
 
+#include <workerd/api/http.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/url.h>
-#include <workerd/api/http.h>
 
 namespace workerd::api {
 
