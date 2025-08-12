@@ -539,6 +539,12 @@ wd_test(
     data = ["http-server-nodejs-global-test.js"],
 )
 
+wd_test(
+    src = "constants-test.wd-test",
+    args = ["--experimental"],
+    data = ["constants-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",
