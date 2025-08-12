@@ -11,7 +11,7 @@
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
-#include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
@@ -51,7 +51,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
-  registerRpcModules(registry, featureFlags);
+  registerWorkersModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(

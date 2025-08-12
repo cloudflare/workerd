@@ -7,6 +7,7 @@ import {
   RpcProperty,
   RpcStub,
   RpcTarget,
+  ServiceStub,
 } from 'cloudflare:workers';
 
 try {
@@ -921,6 +922,7 @@ export let loopbackJsRpcTarget = {
       assert.strictEqual(stub instanceof RpcStub, true);
       assert.strictEqual(stub.increment instanceof RpcProperty, true);
       assert.strictEqual(stub.increment(1) instanceof RpcPromise, true);
+      assert.strictEqual(env.MyService instanceof ServiceStub, true);
     }
 
     // In fact, RpcStubs can be created from any old object.
