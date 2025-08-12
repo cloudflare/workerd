@@ -51,7 +51,7 @@ void registerModules(Registry& registry, auto featureFlags) {
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
-  registerRpcModules(registry, featureFlags);
+  registerWorkersModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(

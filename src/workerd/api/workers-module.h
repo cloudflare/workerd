@@ -95,7 +95,7 @@ class EntrypointsModule: public jsg::Object {
   api::WorkerEntrypoint, api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
 
 template <class Registry>
-void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
+void registerWorkersModule(Registry& registry, CompatibilityFlags::Reader flags) {
   registry.template addBuiltinModule<EntrypointsModule>(
       "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
 }
