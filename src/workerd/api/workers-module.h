@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "http.h"
 #include "worker-rpc.h"
 
 namespace workerd::api {
@@ -86,6 +87,7 @@ class EntrypointsModule: public jsg::Object {
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
     JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
     JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
+    JSG_NESTED_TYPE_NAMED(Fetcher, ServiceStub);
 
     JSG_METHOD(waitUntil);
   }

@@ -14,6 +14,7 @@ export const RpcStub = entrypoints.RpcStub;
 export const RpcPromise = entrypoints.RpcPromise;
 export const RpcProperty = entrypoints.RpcProperty;
 export const RpcTarget = entrypoints.RpcTarget;
+export const ServiceStub = entrypoints.ServiceStub;
 export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
 
 export function withEnv(newEnv: unknown, fn: () => unknown): unknown {

@@ -29,4 +29,6 @@ export class RpcProperty {}
 
 export class RpcTarget {}
 
+export class ServiceStub {}
+
 export function waitUntil(promise: Promise<unknown>): void;
