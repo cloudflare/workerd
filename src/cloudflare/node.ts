@@ -1,11 +1,10 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { portMapper } from 'cloudflare-internal:http';
-
-interface Fetcher {
-  fetch(request: Request, env?: unknown, ctx?: unknown): Promise<Response>;
-}
+import {
+  portMapper,
+  type FetchHandler as Fetcher,
+} from 'cloudflare-internal:http';
 
 interface ServerDescriptor {
   port?: number | null | undefined;
