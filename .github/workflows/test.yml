@@ -201,7 +201,6 @@ jobs:
 
       - name: Create and install workers-types package
         run: |
-          cp /tmp/test-types/* /tmp/test-types
           cat > /tmp/test-types/package.json << EOF
           {
               "name": "@cloudflare/workers-types"
