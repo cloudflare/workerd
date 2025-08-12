@@ -50,7 +50,8 @@ class ActorIdFactory {
   virtual kj::Own<ActorId> idFromName(kj::String name) = 0;
   virtual kj::Own<ActorId> idFromString(kj::String str) = 0;
   virtual bool matchesJurisdiction(const ActorId& id) = 0;
-  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) = 0;
+  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(
+      kj::Maybe<kj::StringPtr> maybeJurisdiction) = 0;
 };
 
 }  // namespace workerd

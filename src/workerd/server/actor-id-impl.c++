@@ -36,6 +36,10 @@ ActorIdFactoryImpl::ActorIdFactoryImpl(kj::StringPtr uniqueKey) {
   KJ_ASSERT(SHA256(uniqueKey.asBytes().begin(), uniqueKey.size(), key) == key);
 }
 
+ActorIdFactoryImpl::ActorIdFactoryImpl(const kj::byte keyParam[SHA256_DIGEST_LENGTH]) {
+  memcpy(key, keyParam, sizeof(key));
+}
+
 kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(
     kj::Maybe<kj::StringPtr> jurisdiction) {
   JSG_REQUIRE(
@@ -90,7 +94,12 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::idFromString(kj::String str
   return kj::heap<ActorIdImpl>(id, kj::none);
 }
 
-kj::Own<ActorIdFactory> ActorIdFactoryImpl::cloneWithJurisdiction(kj::StringPtr jurisdiction) {
+kj::Own<ActorIdFactory> ActorIdFactoryImpl::cloneWithJurisdiction(
+    kj::Maybe<kj::StringPtr> maybeJurisdiction) {
+  if (maybeJurisdiction == kj::none) {
+    return kj::heap<ActorIdFactoryImpl>(key);
+  }
+
   JSG_FAIL_REQUIRE(Error, "Jurisdiction restrictions are not implemented in workerd.");
 }
 

@@ -174,8 +174,8 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
-    jsg::Lock& js, kj::String jurisdiction) {
-  auto newIdFactory = idFactory->cloneWithJurisdiction(jurisdiction);
+    jsg::Lock& js, jsg::Optional<kj::String> maybeJurisdiction) {
+  auto newIdFactory = idFactory->cloneWithJurisdiction(maybeJurisdiction);
 
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {
