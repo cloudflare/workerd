@@ -545,6 +545,12 @@ wd_test(
     data = ["constants-test.js"],
 )
 
+wd_test(
+    src = "http2-test.wd-test",
+    args = ["--experimental"],
+    data = ["http2-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",

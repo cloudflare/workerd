@@ -969,4 +969,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Strips all Typescript types from loaded files.
   # If loaded files contain unsupported typescript construct beyond type annotations (e.g. enums),
   # or is not a syntactically valid Typescript, the worker will fail to load.
+
+  enableNodeJsHttp2Module @112 :Bool
+    $compatEnableFlag("enable_nodejs_http2_module")
+    $compatDisableFlag("disable_nodejs_http2_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-01");
+  # Enables the Node.js http2 module stubs.
 }
