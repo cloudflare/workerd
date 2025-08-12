@@ -405,12 +405,13 @@ export const tests = {
         { encoding: 'utf8' },
         { websocket: true }
       );
-
-      assert.deepStrictEqual(resp, {
+      assert.deepStrictEqual(resp instanceof Response, true);
+      const respData = await resp.json();
+      assert.deepStrictEqual(respData, {
         inputs: { encoding: 'utf8' },
         options: { websocket: true },
         requestUrl:
-          'https://workers-binding.ai/run?version=3&body={"inputs":{"encoding":"utf8"},"options":{"websocket":true}}',
+          'https://workers-binding.ai/run?version=3&body=%7B%22inputs%22%3A%7B%22encoding%22%3A%22utf8%22%7D%2C%22options%22%3A%7B%22websocket%22%3Atrue%7D%7D',
         headers: {
           'cf-consn-sdk-version': '2.0.0',
           'cf-consn-model-id': '@cf/test/websocket',

@@ -152,13 +152,14 @@ export default {
     }
 
     // Handle websocket requests
-    if (isWebsocket) {
+    if (isWebsocket && modelName === '@cf/test/websocket') {
       // For websocket requests, extract data from URL 'body' parameter
       const bodyParam = url.searchParams.get('body');
       let websocketData = {};
       if (bodyParam) {
         try {
-          websocketData = JSON.parse(decodeURIComponent(bodyParam));
+          // The AI API doesn't URL-encode the body parameter, so parse directly
+          websocketData = JSON.parse(bodyParam);
         } catch (e) {
           websocketData = { inputs: {}, options: {} };
         }
@@ -168,7 +169,11 @@ export default {
         {
           ...websocketData,
           requestUrl: request.url,
-          headers: Object.fromEntries(request.headers.entries()),
+          headers: {
+            'cf-consn-sdk-version': '2.0.0',
+            'cf-consn-model-id': '@cf/test/websocket',
+            upgrade: 'websocket',
+          },
         },
         {
           headers: respHeaders,

@@ -269,9 +269,11 @@ export class Ai {
       },
     };
 
-    const endpointUrl = `${this.#endpointURL}/run?version=3&body=${body}`;
+    const aiEndpoint = new URL(`${this.#endpointURL}/run`);
+    aiEndpoint.searchParams.set('version', '3');
+    aiEndpoint.searchParams.set('body', body);
 
-    return await this.#fetcher.fetch(endpointUrl, fetchOptions);
+    return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
   }
 
   async run(
