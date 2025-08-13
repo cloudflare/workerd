@@ -2502,9 +2502,10 @@ class Lock {
   // error, this reproduces the original error. If it is not a tunneled error, then it is treated
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
-  Value exceptionToJs(kj::Exception&& exception);
+  Value exceptionToJs(kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
-  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
+  JsRef<JsValue> exceptionToJsValue(
+      kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
@@ -2521,8 +2522,9 @@ class Lock {
   // via JSG understand how to handle this and propagate the exception back to JavaScript.
   [[noreturn]] void throwException(Value&& exception);
 
-  [[noreturn]] void throwException(kj::Exception&& exception) {
-    throwException(exceptionToJs(kj::mv(exception)));
+  [[noreturn]] void throwException(
+      kj::Exception&& exception, MakeInternalErrorOptions options = {}) {
+    throwException(exceptionToJs(kj::mv(exception), options));
   }
 
   [[noreturn]] void throwException(const JsValue& exception);
@@ -2609,11 +2611,11 @@ class Lock {
 
   // Construct an immediately-rejected promise throwing the given exception.
   template <typename T>
-  Promise<T> rejectedPromise(kj::Exception&& exception);
+  Promise<T> rejectedPromise(kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
   // Like above, but return a pure-JS promise, not a typed Promise.
   JsPromise rejectedJsPromise(jsg::JsValue exception);
-  JsPromise rejectedJsPromise(kj::Exception&& exception);
+  JsPromise rejectedJsPromise(kj::Exception&& exception, MakeInternalErrorOptions options = {});
 
   // Like `kj::evalNow()`, but returns a jsg::Promise for the result. Synchronous exceptions are
   // caught and returned as a rejected promise.
