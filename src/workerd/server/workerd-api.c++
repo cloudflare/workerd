@@ -312,6 +312,16 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
   };
 };
 
+kj::String toErrorDescription(
+    kj::StringPtr fileName, const workerd::rust::transpiler::Output& output) {
+  KJ_ASSERT(!output.success);
+  auto description = kj::str("Error transpiling ", fileName, " : ", output.error);
+  for (auto& diag: output.diagnostics) {
+    description = kj::str(description, "\n    ", diag.message);
+  }
+  return description;
+}
+
 }  // namespace
 
 jsg::Bundle::Reader retrievePyodideBundle(
@@ -681,8 +691,6 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::JSON:
         return Worker::Script::JsonModule{conf.getJson()};
       case config::Worker::Module::ES_MODULE:
-        // TODO(soon): Update this to also support full TS transform
-        // with a separate compat flag.
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
               conf.getName().as<Rust>(), conf.getEsModule().asBytes().as<Rust>());
@@ -692,10 +700,27 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
               .body = ::kj_rs::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
           }
 
-          auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);
-          for (auto& diag: output.diagnostics) {
-            description = kj::str(description, "\n    ", diag.message);
+          auto description = toErrorDescription(conf.getName(), output);
+          KJ_IF_SOME(reporter, errorReporter) {
+            reporter.addError(kj::mv(description));
+            return Worker::Script::TextModule{""};
+          } else {
+            KJ_FAIL_REQUIRE(description);
           }
+        } else if (featureFlags.getTypescriptTranspile()) {
+          auto output = rust::transpiler::ts_transpile(conf.getName().as<Rust>(),
+              conf.getEsModule().asBytes().as<Rust>(),
+              rust::transpiler::TranspileOptions{
+                // TODO: pass something here
+                .tsx = false,
+              });
+
+          if (output.success) {
+            return Worker::Script::EsModule{
+              .body = ::kj_rs::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+          }
+
+          auto description = toErrorDescription(conf.getName(), output);
           KJ_IF_SOME(reporter, errorReporter) {
             reporter.addError(kj::mv(description));
             return Worker::Script::TextModule{""};

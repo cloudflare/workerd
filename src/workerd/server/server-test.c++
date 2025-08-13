@@ -5101,7 +5101,7 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 }
 
-KJ_TEST("Server: transpiled typescript") {
+KJ_TEST("Server: stripped typescript") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2025-08-01",
     compatibilityFlags = ["typescript_strip_types"],
@@ -5122,7 +5122,7 @@ KJ_TEST("Server: transpiled typescript") {
   conn.httpGet200("/", "Hello from typescript");
 }
 
-KJ_TEST("Server: transpiled typescript failure") {
+KJ_TEST("Server: stripped typescript failure") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2025-08-01",
     compatibilityFlags = ["typescript_strip_types"],
@@ -5144,6 +5144,28 @@ KJ_TEST("Server: transpiled typescript failure") {
     TypeScript enum is not supported in strip-only mode
 service hello: Uncaught TypeError: Main module must be an ES module.
 )");
+}
+
+KJ_TEST("Server: transpiled typescript") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    compatibilityFlags = ["typescript_transpile"],
+    modules = [
+      ( name = "main.ts",
+        esModule =
+          `enum From { World, TypeScript }
+          `export default {
+          `  async fetch(request): Promise<Response> {
+          `    return new Response(`Hello World from ${From.TypeScript}!`);
+          `  }
+          `} satisfies ExportedHandler<Env>;
+      )
+    ]
+  ))"_kj));
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello World from 1!");
 }
 
 #endif  // __linux__
