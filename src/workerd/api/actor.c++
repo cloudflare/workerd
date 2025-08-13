@@ -112,7 +112,8 @@ kj::String DurableObjectId::toString() {
 
 jsg::Ref<DurableObjectId> DurableObjectNamespace::newUniqueId(
     jsg::Lock& js, jsg::Optional<NewUniqueIdOptions> options) {
-  return js.alloc<DurableObjectId>(idFactory->newUniqueId(options.orDefault({}).jurisdiction));
+  return js.alloc<DurableObjectId>(
+      idFactory->newUniqueId(options.orDefault({}).jurisdiction.orDefault(kj::none)));
 }
 
 jsg::Ref<DurableObjectId> DurableObjectNamespace::idFromName(jsg::Lock& js, kj::String name) {
@@ -174,8 +175,8 @@ jsg::Ref<DurableObject> DurableObjectNamespace::getImpl(jsg::Lock& js,
 }
 
 jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
-    jsg::Lock& js, jsg::Optional<kj::String> maybeJurisdiction) {
-  auto newIdFactory = idFactory->cloneWithJurisdiction(maybeJurisdiction);
+    jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction) {
+  auto newIdFactory = idFactory->cloneWithJurisdiction(maybeJurisdiction.orDefault(kj::none));
 
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(channelId, uint) {

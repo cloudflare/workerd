@@ -39,6 +39,15 @@ async function checkDurableObject(obj) {
   assert.rejects(obj.throw());
 }
 
+function checkNullishJurisdiction(env, jurisdiction) {
+  const id1 = env.ns.jurisdiction(jurisdiction).newUniqueId();
+  const stub1 = env.ns.get(id1);
+  checkDurableObject(stub1);
+  const id2 = env.ns.newUniqueId({ jurisdiction });
+  const stub2 = env.ns.get(id2);
+  checkDurableObject(stub2);
+}
+
 export default {
   async test(_request, env, _ctx) {
     // This test verifies we can still use registered methods like `fetch()`, and also confirms that
@@ -50,10 +59,12 @@ export default {
     const id = env.ns.idFromName('foo');
     assert.equal(id.name, 'foo');
 
-    // Check that no two DurableObjectId created via `newUniqueId()` are equal.
-    const id1 = env.ns.newUniqueId();
-    const id2 = env.ns.newUniqueId();
-    assert.equal(!id1.equals(id2), true);
+    {
+      // Check that no two DurableObjectId created via `newUniqueId()` are equal.
+      const id1 = env.ns.newUniqueId();
+      const id2 = env.ns.newUniqueId();
+      assert.equal(!id1.equals(id2), true);
+    }
 
     // Check round tripping of DurableObjectId to string.
     //
@@ -89,6 +100,12 @@ export default {
       let otherObj = env.ns.getByName('foo', { locationHint: 'wnam' });
       assert.deepStrictEqual(obj, otherObj);
       checkDurableObject(otherObj);
+    }
+
+    {
+      // Check that nullish jurisdictions work in Workerd
+      checkNullishJurisdiction(env, null);
+      checkNullishJurisdiction(env, undefined);
     }
 
     // Check that methods can be defined on DurableObject and are callable.
