@@ -1,3 +1,5 @@
+from workers import WorkerEntrypoint
+
 from pyodide.ffi import to_js
 
 
@@ -48,10 +50,14 @@ class Server:
             )
 
 
-async def on_fetch(request, env):
-    import asgi
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        import asgi
 
-    return await asgi.fetch(app, request, env)
+        return await asgi.fetch(app, request, self.env, self.ctx)
+
+    async def test(self, ctrl):
+        await header_test(self.env)
 
 
 app = Server()
@@ -60,12 +66,8 @@ app = Server()
 async def header_test(env):
     example_hdr = {"Header1": "Value1", "Header2": "Value2"}
     response = await env.SELF.fetch("http://example.com/", headers=to_js(example_hdr))
-    for header in response.headers:
+    for header in response.headers.items():
         assert isinstance(header[0], str) and isinstance(header[1], str)
         expected_hdr = {k.lower(): v.lower() for k, v in example_hdr.items()}
         assert header[0] in expected_hdr.keys()
         assert expected_hdr[header[0]] == header[1].lower()
-
-
-async def test(ctrl, env):
-    await header_test(env)
