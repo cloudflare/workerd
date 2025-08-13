@@ -714,6 +714,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
     case v8::StateTag::IDLE:
       vmState = "idle";
       break;
+    case v8::StateTag::IDLE_EXTERNAL:
+      vmState = "idle_external";
+      break;
     case v8::StateTag::LOGGING:
       vmState = "logging";
       break;
