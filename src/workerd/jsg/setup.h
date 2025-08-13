@@ -134,8 +134,15 @@ class IsolateBase {
   }
 
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
+    if (alwaysAllowEval) return;
     evalAllowed = allow;
   }
+
+  inline void setAllowsAllowEval() {
+    alwaysAllowEval = true;
+    evalAllowed = true;
+  }
+
   inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
     jspiEnabled = enabled;
   }
@@ -290,6 +297,8 @@ class IsolateBase {
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
   v8::Isolate* ptr;
+  // When true, evalAllowed is true and switching it to false is a no-op.
+  bool alwaysAllowEval = false;
   bool evalAllowed = false;
   bool jspiEnabled = false;
 

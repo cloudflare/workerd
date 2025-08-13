@@ -975,4 +975,19 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_nodejs_http2_module")
     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-01");
   # Enables the Node.js http2 module stubs.
+
+  experimentalAllowEvalAlways @113 :Bool
+      $compatEnableFlag("allow_insecure_inefficient_logged_eval")
+      $experimental;
+  # Enables eval() and new Function() always, even during request handling.
+  # ***This flag should *never* be enabled by default.***
+  # The name of the enable flag is intentionally long and scary-sounding to
+  # discourage casual use.
+  #  * "insecure" because code-gen during request handling can lead to security issues.
+  #  * "inefficient" because repeated code-gen during request handling can be slow.
+  #  * "logged" because each use would likely be logged in production for security
+  #    auditing so users should avoid including PII and other sensitive data in dynamically
+  #    generated and evaluated code.
+  # This flag is experimental and may be removed in the future. It is added for
+  # testing purposes.
 }

@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <workerd/util/strong-bool.h>
+
+#include <v8-local-handle.h>
+
 #include <kj/common.h>
 #include <kj/exception.h>
 #include <kj/string.h>
@@ -152,10 +156,20 @@ struct InternalExceptionObserver {
   virtual void reportInternalException(const kj::Exception&, Detail detail) {}
 };
 
+WD_STRONG_BOOL(IsCodeLike);
+
 struct IsolateObserver: public CompilationObserver,
                         public InternalExceptionObserver,
                         public ResolveObserver {
   virtual ~IsolateObserver() noexcept(false) {}
+
+  // Called when eval(), new Function(), or similar dynamic code generation
+  // is performed. Note that the source here may not be a string if isCodeLike
+  // is YES.
+  virtual void onDynamicEval(
+      v8::Local<v8::Context> context, v8::Local<v8::Value> source, IsCodeLike isCodeLike) {
+    // Default is to do nothing.
+  }
 };
 
 }  // namespace workerd::jsg
