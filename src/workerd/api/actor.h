@@ -208,7 +208,8 @@ class DurableObjectNamespace: public jsg::Object {
       jsg::Lock& js, jsg::Ref<DurableObjectId> id, jsg::Optional<GetDurableObjectOptions> options);
 
   // Creates a subnamespace with the jurisdiction hardcoded.
-  jsg::Ref<DurableObjectNamespace> jurisdiction(jsg::Lock& js, kj::String jurisdiction);
+  jsg::Ref<DurableObjectNamespace> jurisdiction(
+      jsg::Lock& js, jsg::Optional<kj::String> maybeJurisdiction);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
