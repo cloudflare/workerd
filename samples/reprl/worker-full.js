@@ -2,6 +2,10 @@
 import { default as Stdin } from "workerd:stdin";
 import crypto from 'crypto';
 import * as fs from 'node:fs';
+import { Buffer } from 'node:buffer';
+import {ok, match, rejects, strictEqual, throws, deepStrictEqual, notStrictEqual } from 'node:assert'; 
+import { mock } from 'node:test';
+import { Writable } from 'node:stream';
 
 // Expose all APIs to the global scope for fuzzing
 export default {
@@ -40,10 +44,22 @@ export default {
     globalThis.atob = atob;
     globalThis.btoa = btoa;
     globalThis.fs = fs;
+    globalThis.Buffer = Buffer;
     
     // Expose HTML Rewriter
     globalThis.HTMLRewriter = HTMLRewriter;
-    
+
+    globalThis.Writable = Writable;
+
+    globalThis.ok = ok;
+    globalThis.match = match;
+    globalThis.rejects = rejects;
+    globalThis.throws = throws;
+    globalThis.strictEqual = deepStrictEqual;
+    globalThis.deepStrictEqual = deepStrictEqual;
+    globalThis.notStrictEqual = notStrictEqual;
+    globalThis.mock = mock;
+
     // Enter the REPRL loop
     Stdin.reprl();
   }
