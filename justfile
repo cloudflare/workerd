@@ -32,6 +32,10 @@ clean:
 build *args="//...":
   bazel build {{args}}
 
+# example: just watch run -- serve $(pwd)/samples/helloworld/config.capnp
+run *args="-- --help":
+  bazel run //src/workerd/server:workerd {{args}} --watch --verbose --experimental
+
 build-asan *args="//...":
   just build {{args}} --config=asan
 
