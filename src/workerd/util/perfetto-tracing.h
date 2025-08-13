@@ -1,13 +1,14 @@
 #pragma once
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
 #include <kj/memory.h>
 #define PERFETTO_ENABLE_LEGACY_TRACE_EVENTS 1
 // Only include a smaller header here to keep include size under control. This approach is
 // recommended in the full perfetto header (perfetto/tracing.h).
 #include "perfetto/tracing/track_event.h"
 
-PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces, perfetto::Category("workerd"));
+PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(
+    workerd::traces, perfetto::Category("workerd"), perfetto::Category("v8"));
 
 namespace kj {
 class StringPtr;

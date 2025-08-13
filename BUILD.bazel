@@ -81,6 +81,16 @@ config_setting(
     flag_values = {"dead_strip": "True"},
 )
 
+bool_flag(
+    name = "use_perfetto",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "enable_v8_perfetto",
+    flag_values = {":use_perfetto": "True"},
+)
+
 # Workaround for bazel not supporting negated conditions (https://github.com/bazelbuild/bazel-skylib/issues/272)
 selects.config_setting_group(
     name = "not_dbg_build",
