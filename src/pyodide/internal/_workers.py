@@ -3,7 +3,6 @@
 # programming language.
 import datetime
 import functools
-import http.client
 import inspect
 import json
 from asyncio import create_task, gather
@@ -682,7 +681,14 @@ class Request:
         return self.js_object.destination
 
     @property
-    def headers(self) -> http.client.HTTPMessage:
+    def headers(self):
+        # This is imported here because it costs a lot of CPU time when imported at the top-level.
+        # At least it does when we do so in our validator tests, doesn't seem to cause trouble in
+        # production. So as a workaround we do the import here.
+        #
+        # TODO(later): when dedicated snapshots are default we can move this import to the top-level.
+        import http.client
+
         result = http.client.HTTPMessage()
 
         for key, val in self.js_object.headers:
