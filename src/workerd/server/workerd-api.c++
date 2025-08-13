@@ -673,6 +673,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::JSON:
         return Worker::Script::JsonModule{conf.getJson()};
       case config::Worker::Module::ES_MODULE:
+        // TODO(soon): Update this to also support full TS transform
+        // with a separate compat flag.
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
               conf.getName().as<Rust>(), conf.getEsModule().asBytes().as<Rust>());
