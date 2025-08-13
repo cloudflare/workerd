@@ -252,7 +252,7 @@ DecodedException decodeTunneledException(
                 jsg::Deserializer::Options{
                   // By default, we do not preserve stacks in deserialized errors because
                   // of trust concerns sharing stack details over potentially untrusted
-                  // boundaries. However, if the caller has explicitly indiciate that the
+                  // boundaries. However, if the caller has explicitly indicated that the
                   // scope it trusted, we will preserve the stack in the deserialized error.
                   .preserveStackInErrors = options.trusted,
                 });
