@@ -954,4 +954,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableDate("2025-09-20");
   # This flag enables additional checks in the control plane to validate that workflows are
   # defined and used correctly
+
+  pythonDedicatedSnapshot @110 :Bool
+      $compatEnableFlag("python_dedicated_snapshot")
+      $impliedByAfterDate(name = "pythonWorkers20250116", date = "2000-01-01")
+      $experimental;
+  # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
+  # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
+  # top-level execution of the Worker.
 }
