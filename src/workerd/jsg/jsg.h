@@ -1024,8 +1024,8 @@ class Optional: public kj::Maybe<T> {
   Optional(Params&&... params): kj::Maybe<T>(kj::fwd<Params>(params)...) {}
 };
 
-//  Identical to Optional, but rather than treating failures to unwrap a JS value to type T as an
-//  error, it just results in an unset LenientOptional.
+// Identical to Optional, but rather than treating failures to unwrap a JS value to type T as an
+// error, it just results in an unset LenientOptional.
 template <typename T>
 class LenientOptional: public kj::Maybe<T> {
  public:
@@ -1033,6 +1033,17 @@ class LenientOptional: public kj::Maybe<T> {
   // constructor instead.
   template <typename... Params>
   LenientOptional(Params&&... params): kj::Maybe<T>(kj::fwd<Params>(params)...) {}
+};
+
+// Identical to Optional, but rather than treating failures to unwrap a JS value to type T as an
+// error, it just results in an unset LenientOptional.
+template <typename T>
+class OptionalNullable: public kj::Maybe<T> {
+ public:
+  // Inheriting constructors does not inherit copy/move constructors, so we declare a forwarding
+  // constructor instead.
+  template <typename... Params>
+  OptionalNullable(Params&&... params): kj::Maybe<T>(kj::fwd<Params>(params)...) {}
 };
 
 // Use this type in a JSG_STRUCT to define a special field that will be filled in with a

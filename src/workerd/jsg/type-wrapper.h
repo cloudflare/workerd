@@ -207,12 +207,7 @@ class UnimplementedWrapper {
 //     template <bool isContext = false>
 //     v8::Local<v8::FunctionTemplate> getTemplate(v8::Isolate* isolate, T*)
 //
-// Note that most mixins do not actually need the last two methods. Unfortunately, due to
-// limitation of the C++ `using` directive, we can't easily make these optional. You can,
-// however, declare them deleted, like:
-//
-//     void newContext() = delete;
-//     void getTemplate() = delete;
+// Note that most mixins do not actually need the last two methods.
 //
 // The mixin's constructor can optionally accept a configuration value as its parameter, which
 // works the same way as the second parameter to `JSG_RESOURCE_TYPE`.
@@ -390,6 +385,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public StringWrapper,
                    public OptionalWrapper<Self>,
                    public LenientOptionalWrapper<Self>,
+                   public OptionalNullableWrapper<Self>,
                    public MaybeWrapper<Self>,
                    public OneOfWrapper<Self>,
                    public ArrayWrapper<Self>,
@@ -454,6 +450,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   USING_WRAPPER(StringWrapper);
   USING_WRAPPER(OptionalWrapper<Self>);
   USING_WRAPPER(LenientOptionalWrapper<Self>);
+  USING_WRAPPER(OptionalNullableWrapper<Self>);
   USING_WRAPPER(MaybeWrapper<Self>);
   USING_WRAPPER(OneOfWrapper<Self>);
   USING_WRAPPER(ArrayWrapper<Self>);

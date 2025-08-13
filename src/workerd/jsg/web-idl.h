@@ -21,6 +21,8 @@ template <typename T>
 constexpr bool isOptional<Optional<T>> = true;
 template <typename T>
 constexpr bool isOptional<LenientOptional<T>> = true;
+template <typename T>
+constexpr bool isOptional<OptionalNullable<T>> = true;
 
 // Counts the number of Web IDL nullable types (modeled with kj::Maybe in JSG) that exist in
 // `T...`. This variable template is designed to accept unflattened OneOfs -- it will recurse

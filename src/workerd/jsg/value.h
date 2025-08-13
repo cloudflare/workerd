@@ -646,6 +646,47 @@ class LenientOptionalWrapper {
   }
 };
 
+// TypeWrapper mixin for nullable optionals.
+template <typename TypeWrapper>
+class OptionalNullableWrapper {
+ public:
+  template <typename U>
+  static constexpr decltype(auto) getName(OptionalNullable<U>*) {
+    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+  }
+
+  template <typename U>
+  v8::Local<v8::Value> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      OptionalNullable<U> ptr) {
+    KJ_IF_SOME(p, ptr) {
+      return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
+    } else {
+      return v8::Null(js.v8Isolate);
+    }
+  }
+
+  template <typename U>
+  kj::Maybe<OptionalNullable<U>> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      OptionalNullable<U>*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsNullOrUndefined()) {
+      return OptionalNullable<U>(kj::none);
+    } else {
+      KJ_IF_SOME(unwrapped,
+          static_cast<TypeWrapper*>(this)->tryUnwrap(
+              js, context, handle, (kj::Decay<U>*)nullptr, parentObject)) {
+        return OptionalNullable<U>(kj::mv(unwrapped));
+      } else {
+        return OptionalNullable<U>(kj::none);
+      }
+    }
+  }
+};
+
 // TypeWrapper mixin for maybes.
 template <typename TypeWrapper>
 class MaybeWrapper {

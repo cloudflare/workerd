@@ -62,6 +62,9 @@ struct OptionalContext: public ContextGlobalObject {
   double takeLenientOptional(jsg::Lock& js, LenientOptional<Ref<NumberBox>> num) {
     return kj::mv(num).orDefault(js.alloc<NumberBox>(321))->value;
   }
+  kj::String takeOptionalNullable(jsg::Lock& js, OptionalNullable<kj::String> arg) {
+    return kj::mv(arg).orDefault(kj::str("(null)"));
+  }
   kj::String takeOptionalMaybe(Optional<kj::Maybe<kj::String>> arg) {
     return kj::mv(arg).orDefault(kj::str("(absent)")).orDefault(kj::str("(null)"));
   }
@@ -99,6 +102,7 @@ struct OptionalContext: public ContextGlobalObject {
     JSG_METHOD(takeOptional);
     JSG_METHOD(takeMaybe);
     JSG_METHOD(takeLenientOptional);
+    JSG_METHOD(takeOptionalNullable);
     JSG_METHOD(takeOptionalMaybe);
     JSG_METHOD(returnOptional);
     JSG_METHOD(returnMaybe);
@@ -139,6 +143,11 @@ KJ_TEST("optionals and maybes") {
   e.expectEval("takeLenientOptional(undefined)", "number", "321");
   e.expectEval("takeLenientOptional(null)", "number", "321");
   e.expectEval("takeLenientOptional((foo) => {})", "number", "321");
+
+  e.expectEval("takeOptionalNullable()", "string", "(null)");
+  e.expectEval("takeOptionalNullable(null)", "string", "(null)");
+  e.expectEval("takeOptionalNullable(undefined)", "string", "(null)");
+  e.expectEval("takeOptionalNullable('a string')", "string", "a string");
 
   e.expectEval("takeOptionalMaybe()", "string", "(absent)");
   e.expectEval("takeOptionalMaybe(null)", "string", "(null)");
