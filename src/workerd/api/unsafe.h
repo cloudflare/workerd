@@ -106,10 +106,6 @@ public:
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
 
-    v8::HandleScope handle_scope(js.v8Isolate);
-    v8::TryCatch try_catch(js.v8Isolate);
-    try_catch.SetVerbose(true);
-
     /*
     cov_init_builtins_edges(static_cast<uint32_t>(
         v8::internal::BasicBlockProfiler::Get()
@@ -128,6 +124,10 @@ public:
     }
 
     do {
+      v8::HandleScope handle_scope(js.v8Isolate);
+      v8::TryCatch try_catch(js.v8Isolate);
+      try_catch.SetVerbose(true);
+
       size_t script_size = 0;
       unsigned action = 0;
       ssize_t nread = read(REPRL_CRFD, &action, 4);
@@ -147,8 +147,8 @@ public:
       char* source_buffer_tail = script_;
       ssize_t remaining = (ssize_t) script_size;
 
-      printf("Reading in script with size: %zu\n",script_size);
-      fflush(stdout);
+      //printf("Reading in script with size: %zu\n",script_size);
+      //fflush(stdout);
 
       while (remaining > 0) {
         ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t) remaining);
@@ -161,9 +161,34 @@ public:
       }
 
       script_[script_size] = '\0';
+
+      // Create a fresh context for this script execution to isolate variable scope
+      // while preserving isolate-level global state (APIs, etc.)
+      /*auto scriptContext = v8::Context::New(js.v8Isolate, nullptr, v8::ObjectTemplate::New(js.v8Isolate));
+      // Set required embedder data slot to prevent fatal errors
+      scriptContext->SetAlignedPointerInEmbedderData(3, nullptr);
+	  {
+        v8::Context::Scope originalScope(js.v8Context());
+        auto originalGlobal = js.v8Context()->Global();
+        v8::Context::Scope scriptScope(scriptContext);
+        auto scriptGlobal = scriptContext->Global();
+        
+        // Get all property names from the original global object
+        auto propNames = jsg::check(originalGlobal->GetOwnPropertyNames(js.v8Context()));
+        uint32_t length = propNames->Length();
+        
+        // Copy each property to the new context's global object
+        for (uint32_t i = 0; i < length; i++) {
+          auto key = jsg::check(propNames->Get(js.v8Context(), i));
+          auto value = jsg::check(originalGlobal->Get(js.v8Context(), key));
+          jsg::check(scriptGlobal->Set(scriptContext, key, value));
+        }
+      }
+      */
+      //fprintf(stderr,"Script content: %s\n",script_);
       
       // Debug: Print global context before executing script
-      printf("=== DEBUG: Global Context Properties ===\n");
+      /*printf("=== DEBUG: Global Context Properties ===\n");
       auto global = js.v8Context()->Global();
       auto propNames = jsg::check(global->GetOwnPropertyNames(js.v8Context()));
       uint32_t length = propNames->Length();
@@ -174,11 +199,34 @@ public:
       }
       printf("=== END DEBUG ===\n");
       fflush(stdout);
+      */
 
       int status = 0;
       int32_t res_val = 0;
+      // Execute script in the fresh context using JSG_WITHIN_CONTEXT_SCOPE
+      // This provides script isolation while maintaining access to global APIs
+      /*JSG_WITHIN_CONTEXT_SCOPE(js, scriptContext, [&](jsg::Lock& contextJs) {
+        const kj::String script = kj::str(script_);
+        auto compiled = jsg::NonModuleScript::compile(contextJs, script, "reprl"_kj);
+        try {
+          auto result = compiled.runAndReturn(contextJs);
+          res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(contextJs.v8Context()));
+          // if we reach that point execution was successful -> return 0
+          res_val = 0;
+        } catch(jsg::JsExceptionThrown&) {
+          if(try_catch.HasCaught()) {
+            res_val = 1;
+            auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(contextJs.v8Context()));
+            v8::String::Utf8Value string(contextJs.v8Isolate, str);
+            printf("%s\n",*string);
+            fflush(stdout);
+          }
+        }
+      });
+      */
       const kj::String script = kj::str(script_);
-      auto compiled = jsg::NonModuleScript::compile(js, script, "reprl"_kj);
+      const kj::String wrapped = kj::str("{",script_,"}");
+      auto compiled = jsg::NonModuleScript::compile(js, wrapped, "reprl"_kj);
       try {
         auto result = compiled.runAndReturn(js);
         res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(js.v8Context()));
@@ -190,8 +238,10 @@ public:
           res_val = 1;
           auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
           v8::String::Utf8Value string(js.v8Isolate, str);
-          printf("%s\n",*string);
-          fflush(stdout);
+          if(string.length() > 0) {
+            printf("%s\n",*string);
+            fflush(stdout); 
+          }
         }
       }
 
@@ -202,6 +252,9 @@ public:
       CHECK(write(REPRL_CWFD, &status, 4) == 4);
       __sanitizer_cov_reset_edgeguards();
       free(script_);
+      //cleanup context
+      
+
     } while(true);
   }
 
