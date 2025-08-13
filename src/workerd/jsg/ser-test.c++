@@ -157,7 +157,7 @@ struct SerTestContext: public ContextGlobalObject {
         });
     ser.write(js, errorObj);
     auto content = ser.release();
-    Deserializer deser(js, content);
+    Deserializer deser(js, content, Deserializer::Options{.preserveStackInErrors = true});
     auto val = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
 
     auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
@@ -188,10 +188,7 @@ struct SerTestContext: public ContextGlobalObject {
 
     ser.write(js, errorObj);
     auto content = ser.release();
-    Deserializer deser(js, content,
-        Deserializer::Options{
-          .preserveStackInErrors = false,
-        });
+    Deserializer deser(js, content);
     auto retObj = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
 
     // Verify that converting to/from kj::Exception works as expected since
