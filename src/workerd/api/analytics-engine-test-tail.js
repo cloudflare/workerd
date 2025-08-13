@@ -17,8 +17,8 @@ export default {
         name: 'ae_writeDataPoint',
         'db.namespace': 'analytics',
         'cloudflare.wae.query.index': 'testindex',
-        'cloudflare.wae.query.blobs': '1',
-        'cloudflare.wae.query.doubles': '1',
+        'cloudflare.wae.query.blobs': 1n,
+        'cloudflare.wae.query.doubles': 1n,
         closed: true,
       },
       {

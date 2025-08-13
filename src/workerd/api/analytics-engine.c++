@@ -54,11 +54,12 @@ void AnalyticsEngine::writeDataPointNoOutputLock(
         setIndexes<api::AnalyticsEngineEvent::Builder>(aeEvent, indexes, errorPrefix);
       }
       KJ_IF_SOME(blobs, ev.blobs) {
-        userSpan.setTag("cloudflare.wae.query.blobs"_kjc, kj::str(blobs.size()));
+        //cast to int64_t
+        userSpan.setTag("cloudflare.wae.query.blobs"_kjc, static_cast<int64_t>(blobs.size()));
         setBlobs<api::AnalyticsEngineEvent::Builder>(aeEvent, blobs, errorPrefix);
       }
       KJ_IF_SOME(doubles, ev.doubles) {
-        userSpan.setTag("cloudflare.wae.query.doubles"_kjc, kj::str(doubles.size()));
+        userSpan.setTag("cloudflare.wae.query.doubles"_kjc, static_cast<int64_t>(doubles.size()));
         setDoubles<api::AnalyticsEngineEvent::Builder>(aeEvent, doubles, errorPrefix);
       }
     }
