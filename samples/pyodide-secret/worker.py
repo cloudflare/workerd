@@ -1,11 +1,12 @@
 from js import Response
+from workers import WorkerEntrypoint
 
 
-def on_fetch(request, env):
-    print(env.secret)
-    return Response.new("hello world")
+class Default(WorkerEntrypoint):
+    def fetch(self, request, env):
+        print(env.secret)
+        return Response.new("hello world")
 
-
-def test(ctx, env):
-    print(env.secret)
-    print("Hi there, this is a test")
+    def test(self, ctx, env):
+        print(env.secret)
+        print("Hi there, this is a test")

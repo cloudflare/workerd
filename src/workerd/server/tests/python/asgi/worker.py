@@ -1,3 +1,5 @@
+from workers import WorkerEntrypoint
+
 from pyodide.ffi import to_js
 
 
@@ -48,10 +50,11 @@ class Server:
             )
 
 
-async def on_fetch(request, env):
-    import asgi
+class Default(WorkerEntrypoint):
+    async def fetch(self, request, env):
+        import asgi
 
-    return await asgi.fetch(app, request, env)
+        return await asgi.fetch(app, request, env)
 
 
 app = Server()
