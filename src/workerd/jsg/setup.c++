@@ -492,8 +492,15 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
+  auto& base = IsolateBase::from(isolate);
+  if (base.evalAllowed) {
+    // If eval is allowed, notify the observer so that it can take any action necessary.
+    // Once possible action is logging the source to be evaluated for auditing purposes.
+    // TODO(cleanup): Consider making it so that `onDynamicEval()` returns true or false
+    // depending on whether eval should be allowed or not.
+    base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
+  }
+  return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {

@@ -397,6 +397,14 @@ struct WorkerdApi::Impl final {
       if (maybeOwnedModuleRegistry != kj::none) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
+
+      // Allows us to begin experimenting with eval/new fuction enabled in
+      // preparation for *possibly* enabling it by default in the future
+      // once v8 sandbox is fully enabled and rolled out.
+      if (featuresParam.getExperimentalAllowEvalAlways() &&
+          featuresParam.getWorkerdExperimental()) {
+        jsgIsolate.setAllowsAllowEval();
+      }
     });
   }
 
