@@ -104,6 +104,7 @@ wd_cc_library(
         ":supported-compatibility-date",
         ":trace",
         ":worker-interface",
+        "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",

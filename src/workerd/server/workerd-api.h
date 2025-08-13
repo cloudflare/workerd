@@ -69,6 +69,7 @@ class WorkerdApi final: public Worker::Api {
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
+      CompatibilityFlags::Reader featureFlags,
       Worker::ValidationErrorReporter& errorReporter);
 
   void compileModules(jsg::Lock& lock,
@@ -286,6 +287,7 @@ class WorkerdApi final: public Worker::Api {
   // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
   // string pointers into the config).
   static Worker::Script::Module readModuleConf(config::Worker::Module::Reader conf,
+      CompatibilityFlags::Reader featureFlags,
       kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none);
 
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;

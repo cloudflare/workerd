@@ -165,6 +165,7 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
 
         return {.name = entry.name, .content = [&]() -> Worker::Script::ModuleContent {
           KJ_IF_SOME(js, module.js) {
+            // TODO: this might need typescript transpilation too.
             return Worker::Script::EsModule{.body = js};
           } else KJ_IF_SOME(cjs, module.cjs) {
             return Worker::Script::CommonJsModule{.body = cjs};

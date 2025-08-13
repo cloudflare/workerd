@@ -5100,6 +5100,52 @@ KJ_TEST("Server: structured logging with console methods") {
     KJ_ASSERT(logline.contains(R"("message":"after await")"), logline);
   });
 }
+
+KJ_TEST("Server: transpiled typescript") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    compatibilityFlags = ["typescript_strip_types"],
+    modules = [
+      ( name = "main.ts",
+        esModule =
+          `export default {
+          `  async fetch(request): Promise<Response> {
+          `    return new Response("Hello from typescript");
+          `  }
+          `} satisfies ExportedHandler<Env>;
+      )
+    ]
+  ))"_kj));
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello from typescript");
+}
+
+KJ_TEST("Server: transpiled typescript failure") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    compatibilityFlags = ["typescript_strip_types"],
+    modules = [
+      ( name = "main.ts",
+        esModule =
+          `enum Foo { A, B }
+          `export default {
+          `  async fetch(request): Promise<Response> {
+          `    return new Response("Hello from typescript");
+          `  }
+          `} satisfies ExportedHandler<Env>;
+      )
+    ]
+  ))"_kj));
+  test.server.allowExperimental();
+
+  test.expectErrors(R"(service hello: Error transpiling main.ts : Unsupported syntax
+    TypeScript enum is not supported in strip-only mode
+service hello: Uncaught TypeError: Main module must be an ES module.
+)");
+}
+
 #endif  // __linux__
 }  // namespace
 }  // namespace workerd::server

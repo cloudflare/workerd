@@ -134,6 +134,7 @@ wd_cc_library(
         "//src/node",
         "//src/pyodide:pyodide_static",
         "//src/pyodide:python-entrypoint",
+        "//src/rust/transpiler",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",

@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "thiserror",
+    name = "psm",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,28 +29,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__thiserror-impl-2.0.13//:thiserror_impl",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=psm",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.13",
+    version = "0.1.26",
     deps = [
-        "@crates_vendor__thiserror-2.0.13//:build_script_build",
+        "@crates_vendor__psm-0.1.26//:build_script_build",
     ],
 )
 
@@ -73,10 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -92,19 +81,22 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "thiserror",
+    pkg_name = "psm",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=psm",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.13",
+    version = "0.1.26",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__cc-1.2.32//:cc",
+    ],
 )
 
 alias(

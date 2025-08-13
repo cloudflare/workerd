@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rust/cxx.h>
+
 #include <capnp/schema.capnp.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -28,7 +30,9 @@ struct WorkerSource {
   // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
   // module types.
   struct EsModule {
-    kj::StringPtr body;
+    kj::ArrayPtr<const char> body;
+    // Owns the body text in case it was transpiled during the load.
+    kj::Maybe<::rust::String> ownBody;
   };
   struct CommonJsModule {
     kj::StringPtr body;

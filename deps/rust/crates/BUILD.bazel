@@ -32,14 +32,14 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "anyhow-1.0.98",
-    actual = "@crates_vendor__anyhow-1.0.98//:anyhow",
+    name = "anyhow-1.0.99",
+    actual = "@crates_vendor__anyhow-1.0.99//:anyhow",
     tags = ["manual"],
 )
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.98//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.99//:anyhow",
     tags = ["manual"],
 )
 
@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.44",
-    actual = "@crates_vendor__clap-4.5.44//:clap",
+    name = "clap-4.5.45",
+    actual = "@crates_vendor__clap-4.5.45//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.44//:clap",
+    actual = "@crates_vendor__clap-4.5.45//:clap",
     tags = ["manual"],
 )
 
@@ -188,14 +188,14 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.96",
-    actual = "@crates_vendor__proc-macro2-1.0.96//:proc_macro2",
+    name = "proc-macro2-1.0.97",
+    actual = "@crates_vendor__proc-macro2-1.0.97//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.96//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.97//:proc_macro2",
     tags = ["manual"],
 )
 
@@ -296,6 +296,30 @@ alias(
 )
 
 alias(
+    name = "swc_core-35.0.0",
+    actual = "@crates_vendor__swc_core-35.0.0//:swc_core",
+    tags = ["manual"],
+)
+
+alias(
+    name = "swc_core",
+    actual = "@crates_vendor__swc_core-35.0.0//:swc_core",
+    tags = ["manual"],
+)
+
+alias(
+    name = "swc_ts_fast_strip-29.0.0",
+    actual = "@crates_vendor__swc_ts_fast_strip-29.0.0//:swc_ts_fast_strip",
+    tags = ["manual"],
+)
+
+alias(
+    name = "swc_ts_fast_strip",
+    actual = "@crates_vendor__swc_ts_fast_strip-29.0.0//:swc_ts_fast_strip",
+    tags = ["manual"],
+)
+
+alias(
     name = "syn-2.0.104",
     actual = "@crates_vendor__syn-2.0.104//:syn",
     tags = ["manual"],
@@ -308,14 +332,14 @@ alias(
 )
 
 alias(
-    name = "thiserror-2.0.13",
-    actual = "@crates_vendor__thiserror-2.0.13//:thiserror",
+    name = "thiserror-2.0.14",
+    actual = "@crates_vendor__thiserror-2.0.14//:thiserror",
     tags = ["manual"],
 )
 
 alias(
     name = "thiserror",
-    actual = "@crates_vendor__thiserror-2.0.13//:thiserror",
+    actual = "@crates_vendor__thiserror-2.0.14//:thiserror",
     tags = ["manual"],
 )
 
@@ -364,7 +388,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.44//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.45//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

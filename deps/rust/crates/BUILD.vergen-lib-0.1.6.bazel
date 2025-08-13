@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "proc_macro2",
+    name = "vergen_lib",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,9 +30,8 @@ rust_library(
         ],
     ),
     crate_features = [
+        "cargo",
         "default",
-        "proc-macro",
-        "span-locations",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -41,15 +40,16 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=vergen-lib",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.96",
+    version = "0.1.6",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.96//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
+        "@crates_vendor__anyhow-1.0.99//:anyhow",
+        "@crates_vendor__derive_builder-0.20.2//:derive_builder",
+        "@crates_vendor__vergen-lib-0.1.6//:build_script_build",
     ],
 )
 
@@ -73,9 +73,8 @@ cargo_build_script(
         ],
     ),
     crate_features = [
+        "cargo",
         "default",
-        "proc-macro",
-        "span-locations",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -92,18 +91,21 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "proc-macro2",
+    pkg_name = "vergen-lib",
+    proc_macro_deps = [
+        "@crates_vendor__rustversion-1.0.22//:rustversion",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=vergen-lib",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.96",
+    version = "0.1.6",
     visibility = ["//visibility:private"],
 )
 

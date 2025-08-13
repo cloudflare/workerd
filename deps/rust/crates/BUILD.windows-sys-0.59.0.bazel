@@ -45,6 +45,7 @@ rust_library(
         "Win32_System",
         "Win32_System_Console",
         "Win32_System_IO",
+        "Win32_System_Memory",
         "Win32_System_Pipes",
         "Win32_System_SystemInformation",
         "Win32_System_SystemServices",
