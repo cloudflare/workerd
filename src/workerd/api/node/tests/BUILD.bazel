@@ -551,6 +551,12 @@ wd_test(
     data = ["http2-test.js"],
 )
 
+wd_test(
+    src = "strip-types-test.wd-test",
+    args = ["--experimental"],
+    data = ["strip-types-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",

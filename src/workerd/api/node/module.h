@@ -19,12 +19,22 @@ class ModuleUtil final: public jsg::Object {
   // for that purpose).
   bool isBuiltin(kj::String specifier);
 
+  struct StripTypesOptions {
+    jsg::Optional<kj::String> mode;  // "strip" or "transform",
+    jsg::Optional<bool> sourceMap;
+    jsg::Optional<kj::String> sourceUrl;
+    JSG_STRUCT(mode, sourceMap, sourceUrl);
+  };
+  kj::String stripTypeScriptTypes(
+      jsg::Lock& js, kj::String source, jsg::Optional<StripTypesOptions> options);
+
   JSG_RESOURCE_TYPE(ModuleUtil) {
     JSG_METHOD(createRequire);
     JSG_METHOD(isBuiltin);
+    JSG_METHOD(stripTypeScriptTypes);
   }
 };
 
-#define EW_NODE_MODULE_ISOLATE_TYPES api::node::ModuleUtil
+#define EW_NODE_MODULE_ISOLATE_TYPES api::node::ModuleUtil, api::node::ModuleUtil::StripTypesOptions
 
 }  // namespace workerd::api::node
