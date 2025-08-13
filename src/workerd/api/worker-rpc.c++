@@ -167,6 +167,7 @@ void serializeJsValue(jsg::Lock& js,
         .version = 15,
         .omitHeader = false,
         .treatClassInstancesAsPlainObjects = false,
+        .treatErrorsAsHostObjects = true,
         .externalHandler = externalHandler,
       });
   serializer.write(js, value);
@@ -212,6 +213,7 @@ DeserializeResult deserializeJsValue(
       jsg::Deserializer::Options{
         .version = 15,
         .readHeader = true,
+        .preserveStackInErrors = false,
         .externalHandler = externalHandler,
       });
 
