@@ -5564,9 +5564,9 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     // HACK: We use DBG log level because INFO logging is optional, and warning/error would confuse
     //   people. Note that server-test.c++ actually tests for this logging, so simply writing to
     //   stderr wouldn't work.
-    KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
+    //KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
     auto req = service.startRequest({});
-    auto start = kj::systemPreciseMonotonicClock().now();
+    //auto start = kj::systemPreciseMonotonicClock().now();
 
     bool result = co_await req->test();
     if (result) {
@@ -5575,10 +5575,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
       ++failCount;
     }
 
-    auto end = kj::systemPreciseMonotonicClock().now();
-    auto duration = end - start;
+    //auto end = kj::systemPreciseMonotonicClock().now();
+    //auto duration = end - start;
 
-    KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name, " (", duration, ")"));
+    //KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name, " (", duration, ")"));
   };
 
   for (auto& service: services) {

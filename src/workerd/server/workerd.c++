@@ -1839,9 +1839,7 @@ extern "C" void __sanitizer_cov_trace_pc_guard_init(uint32_t *start, uint32_t *s
     }
 
     __sanitizer_cov_reset_edgeguards();
-
     __shmem->num_edges = stop - start;
-    printf("[COV] edge counters initialized. Shared memory: %s with %u edges\n", shm_key, __shmem->num_edges);
 }
 
 extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
