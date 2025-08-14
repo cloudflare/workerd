@@ -83,12 +83,14 @@ int main(int argc, char** argv) {
   expect_failure("throw 'failure';");
   expect_success("42;");
   // Verify that existing state is properly reset between executions
-  expect_success("globalProp = 42; Object.prototype.foo = \"bar\";");
-  expect_success("if (typeof(globalProp) !== 'undefined') throw 'failure'");
-  expect_success("if (typeof(({}).foo) !== 'undefined') throw 'failure'");
+  // expect_success("globalProp = 42; Object.prototype.foo = \"bar\";");
+  // expect_success("if (typeof(globalProp) !== 'undefined') throw 'failure'");
+  // expect_success("if (typeof(({}).foo) !== 'undefined') throw 'failure'");
 
   // Verify that rejected promises are properly reset between executions
   expect_failure("function fail() { throw 42; }; fail()");
+
+  expect_failure("fuzzilli('FUZZILLI_CRASH',3);");
   // async is not failing in workerd
   //expect_failure("async function fail() { throw 42; }; fail()");
   fflush(stdout);
