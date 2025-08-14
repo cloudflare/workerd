@@ -215,8 +215,8 @@ class DurableObjectNamespace: public jsg::Object {
     JSG_METHOD(newUniqueId);
     JSG_METHOD(idFromName);
     JSG_METHOD(idFromString);
-    JSG_METHOD(getByName);
     JSG_METHOD(get);
+    JSG_METHOD(getByName);
     if (flags.getDurableObjectGetExisting()) {
       JSG_METHOD(getExisting);
     }
@@ -226,12 +226,14 @@ class DurableObjectNamespace: public jsg::Object {
     if (flags.getDurableObjectGetExisting()) {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
         get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
+        getByName(name: string, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         getExisting(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     } else {
       JSG_TS_OVERRIDE(<T extends Rpc.DurableObjectBranded | undefined = undefined> {
         get(id: DurableObjectId, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
+        getByName(name: string, options?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub<T>;
         jurisdiction(jurisdiction: DurableObjectJurisdiction): DurableObjectNamespace<T>;
       });
     }
