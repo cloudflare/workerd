@@ -8,6 +8,7 @@
 #include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <sqlite3.h>
@@ -473,9 +474,34 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
-
-  for (auto& pair: pairs) {
-    kv.put(pair.key, pair.value);
+  // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
+  if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
+    if (currentTxn.is<NoTxn>()) {
+      // If we are not in a transcation, let's use an ExplicitTxn, which should rollback automatically
+      // if some put fails.
+      auto txn = startTransaction();
+      txn->put(kj::mv(pairs), options);
+      txn->commit();
+    } else {
+      // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
+      db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
+      for (const auto& pair: pairs) {
+        try {
+          kv.put(pair.key, pair.value);
+        } catch (kj::Exception e) {
+          // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
+          db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+          db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+          kj::throwFatalException(kj::mv(e));
+        }
+      }
+      // We're done here. RELEASE the savepoint.
+      db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+    }
+  } else {
+    for (auto& pair: pairs) {
+      kv.put(pair.key, pair.value);
+    }
   }
   return kj::none;
 }
