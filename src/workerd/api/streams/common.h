@@ -70,7 +70,7 @@ struct UnderlyingSource {
   // per the streams spec but our implementation will always enable it. Specifically,
   // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
   // this default.
-  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
+  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4095;
 
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
