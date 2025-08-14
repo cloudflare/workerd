@@ -9,6 +9,8 @@
 
 #include <workerd/jsg/script.h>
 
+#include <csignal>
+
 
 namespace workerd::api {
 
@@ -102,7 +104,7 @@ public:
     std::getline(std::cin, res);
     return kj::heapString(res.c_str());
   }
-  
+
   void reprl(jsg::Lock& js) {
     js.setAllowEval(true);
 
@@ -172,11 +174,11 @@ public:
         auto originalGlobal = js.v8Context()->Global();
         v8::Context::Scope scriptScope(scriptContext);
         auto scriptGlobal = scriptContext->Global();
-        
+
         // Get all property names from the original global object
         auto propNames = jsg::check(originalGlobal->GetOwnPropertyNames(js.v8Context()));
         uint32_t length = propNames->Length();
-        
+
         // Copy each property to the new context's global object
         for (uint32_t i = 0; i < length; i++) {
           auto key = jsg::check(propNames->Get(js.v8Context(), i));
@@ -186,7 +188,7 @@ public:
       }
       */
       //fprintf(stderr,"Script content: %s\n",script_);
-      
+
       // Debug: Print global context before executing script
       /*printf("=== DEBUG: Global Context Properties ===\n");
       auto global = js.v8Context()->Global();
@@ -202,7 +204,7 @@ public:
       */
 
       int status = 0;
-      int32_t res_val = 0;
+      unsigned res_val = 0;
       // Execute script in the fresh context using JSG_WITHIN_CONTEXT_SCOPE
       // This provides script isolation while maintaining access to global APIs
       /*JSG_WITHIN_CONTEXT_SCOPE(js, scriptContext, [&](jsg::Lock& contextJs) {
@@ -230,21 +232,16 @@ public:
       try {
         auto result = compiled.runAndReturn(js);
         res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(js.v8Context()));
-        //fprintf(stderr,"Res val: %d\n",res_val);
         // if we reach that point execution was successful -> return 0
         res_val = 0;
       } catch(jsg::JsExceptionThrown&) {
+        res_val = 11;
         if(try_catch.HasCaught()) {
-          res_val = 1;
           auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
-          v8::String::Utf8Value string(js.v8Isolate, str);
-          if(string.length() > 0) {
-            printf("%s\n",*string);
-            fflush(stdout); 
-          }
+          v8::String::Utf8Value utf8String(js.v8Isolate, str);
+          fflush(stdout);
         }
       }
-
 
       fflush(stdout);
       fflush(stderr);
@@ -253,7 +250,7 @@ public:
       __sanitizer_cov_reset_edgeguards();
       free(script_);
       //cleanup context
-      
+
 
     } while(true);
   }

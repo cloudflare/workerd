@@ -1538,7 +1538,6 @@ void runFuzz() {
                 auto val = workerd::jsg::JsValue(compiled.runAndReturn(js));
             } catch (const std::exception& e) {
                 fprintf(stderr, "Script execution error: %s\n", e.what());
-                _exit(-1);
             }
 
             fflush(stdout);
@@ -1548,8 +1547,6 @@ void runFuzz() {
 
         } while (true);
     });
-
-    _exit(0);
 }
 
 #if _WIN32
@@ -1867,6 +1864,29 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 // END FUZZING CODE
 //
 
+void crashHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl
+  //int32_t status = signo;
+  //CHECK(write(REPRL_CWFD, &status, 4) == 4);
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initCrashSignalHandlers() {
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &crashHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+
+
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
 
@@ -1885,6 +1905,8 @@ int main(int argc, char* argv[]) {
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+  initCrashSignalHandlers();
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }
