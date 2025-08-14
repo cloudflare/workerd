@@ -969,6 +969,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Strips all Typescript types from loaded files.
   # If loaded files contain unsupported typescript construct beyond type annotations (e.g. enums),
   # or is not a syntactically valid Typescript, the worker will fail to load.
+  # This flag is never intended to be used enabled by default and has no effect in production.
 
   enableNodeJsHttp2Module @112 :Bool
     $compatEnableFlag("enable_nodejs_http2_module")
@@ -990,4 +991,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   #    generated and evaluated code.
   # This flag is experimental and may be removed in the future. It is added for
   # testing purposes.
+
+  typescriptTranspile @114 :Bool
+    $compatEnableFlag("typescript_transpile")
+    $experimental;
+  # Transpiles all Typescript files to JavaScript using swc transpiler.
+  # This transpilation results in reformatting all the code and (currently) source map information
+  # is lost. It will result in incorrect line numbers in stack traces.
+  # This flag is never intended to be used enabled by default and has no effect in production.
 }
