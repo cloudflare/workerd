@@ -526,12 +526,12 @@ interface DurableObjectNamespace<
   ): DurableObjectId;
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
-  getByName(
-    name: string,
-    options?: DurableObjectNamespaceGetDurableObjectOptions,
-  ): DurableObjectStub;
   get(
     id: DurableObjectId,
+    options?: DurableObjectNamespaceGetDurableObjectOptions,
+  ): DurableObjectStub<T>;
+  getByName(
+    name: string,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
   jurisdiction(
