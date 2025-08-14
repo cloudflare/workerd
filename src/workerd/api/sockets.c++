@@ -402,7 +402,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 void Socket::handleProxyStatus(
     jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
   auto& context = IoContext::current();
-  auto result = context.awaitIo(js, status.catch_([](kj::Exception&& e) {
+  auto errorHandler = [](kj::Exception&& e) {
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
@@ -410,9 +410,9 @@ void Socket::handleProxyStatus(
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
     return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
-  }),
-      [this, self = JSG_THIS](
-          jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
+  };
+  auto func = [this, self = JSG_THIS](
+                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) -> void {
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
@@ -431,7 +431,8 @@ void Socket::handleProxyStatus(
             .localAddress = kj::none,
           });
     }
-  });
+  };
+  auto result = context.awaitIo(js, status.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
 
@@ -442,12 +443,11 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
   // but we need the lock in our callback here.
   // TODO(cleanup): Extend awaitIo to provide the jsg::Lock in more cases.
   auto& context = IoContext::current();
-  auto result =
-      context.awaitIo(js, connectResult.catch_([](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
+  auto errorHandler = [](kj::Exception&& e) -> kj::Maybe<kj::Exception> {
     LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
-  }),
-          [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
+  };
+  auto func = [this, self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) -> void {
     if (result != kj::none) {
       handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
@@ -459,7 +459,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
             .localAddress = kj::none,
           });
     }
-  });
+  };
+  auto result = context.awaitIo(js, connectResult.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
 
