@@ -4103,17 +4103,17 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
-  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
-      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
-          v8::Local<v8::Object> ctxExports) {
+  auto compileBindings = [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+                             v8::Local<v8::Object> ctxExports) {
     // We can't fill in ctx.exports yet because we need to run the validator first to discover
     // entrypoints, which we cannot do until after the Worker constructor completes. We are
     // permitted to hold a handle until then, though.
     ctxExportsHandle = lock.v8Ref(ctxExports);
 
     return def.compileBindings(lock, api, target);
-  },
-      IsolateObserver::StartType::COLD,
+  };
+  auto worker = kj::atomicRefcounted<Worker>(kj::mv(script), kj::atomicRefcounted<WorkerObserver>(),
+      kj::mv(compileBindings), IsolateObserver::StartType::COLD,
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
