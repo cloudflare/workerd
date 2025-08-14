@@ -58,6 +58,7 @@ export default {
     // Check properties of DurableObjectId.
     const id = env.ns.idFromName('foo');
     assert.equal(id.name, 'foo');
+    assert.equal(id.jurisdiction, undefined);
 
     {
       // Check that no two DurableObjectId created via `newUniqueId()` are equal.
@@ -73,9 +74,12 @@ export default {
 
     // Check properties of DurableObject.
     let obj = env.ns.get(id);
-    assert.equal(Object.keys(obj).length, 2);
+    assert.equal(Object.keys(obj).length, 3);
     assert.equal(obj.name, 'foo');
+    assert.equal(obj.jurisdiction, undefined);
     assert.equal(obj.id, id);
+    assert.equal(obj.id.name, 'foo');
+    assert.equal(obj.id.jurisdiction, undefined);
 
     // Check that we can call methods on a DurableObject.
     checkDurableObject(obj);
@@ -112,7 +116,7 @@ export default {
     obj.baz = () => {
       return 'called baz';
     };
-    assert.equal(Object.keys(obj).length, 3);
+    assert.equal(Object.keys(obj).length, 4);
     assert.equal(typeof obj.baz, 'function');
     assert.equal(obj.baz(), 'called baz');
 

@@ -61,10 +61,15 @@ class DurableObjectId: public jsg::Object {
     return id->getName();
   }
 
+  jsg::Optional<kj::StringPtr> getJurisdiction() {
+    return id->getJurisdiction();
+  }
+
   JSG_RESOURCE_TYPE(DurableObjectId) {
     JSG_METHOD(toString);
     JSG_METHOD(equals);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_READONLY_INSTANCE_PROPERTY(jurisdiction, getJurisdiction);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -88,9 +93,14 @@ class DurableObject final: public Fetcher {
 
   jsg::Ref<DurableObjectId> getId() {
     return id.addRef();
-  };
+  }
+
   jsg::Optional<kj::StringPtr> getName() {
     return id->getName();
+  }
+
+  jsg::Optional<kj::StringPtr> getJurisdiction() {
+    return id->getJurisdiction();
   }
 
   JSG_RESOURCE_TYPE(DurableObject) {
@@ -98,6 +108,7 @@ class DurableObject final: public Fetcher {
 
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
+    JSG_READONLY_INSTANCE_PROPERTY(jurisdiction, getJurisdiction);
 
     JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;
