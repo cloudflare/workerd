@@ -1595,6 +1595,33 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
   }
 
+  if (FeatureFlags::get(js).getStripAuthorizationOnCrossOriginRedirect()) {
+    auto base = urlList.back().toString();
+
+    auto currentUrl = KJ_UNWRAP_OR(jsg::Url::tryParse(base.asPtr()), {
+      auto exception =
+        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid current URL; unable to follow redirect.");
+      return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
+    });
+
+    auto locationUrl = KJ_UNWRAP_OR(jsg::Url::tryParse(location, base.asPtr()), {
+      auto exception =
+        JSG_KJ_EXCEPTION(FAILED, TypeError, "Invalid Location header; unable to follow redirect.");
+      return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(exception));
+    });
+
+    if (currentUrl.getOrigin() != locationUrl.getOrigin()) {
+      // If request’s current URL’s origin is not same origin with locationURL’s origin, then
+      // for each headerName of CORS non-wildcard request-header name, delete headerName from
+      // request’s header list.
+      // -- Fetch spec s. 4.4.13
+      // <https://fetch.spec.whatwg.org/#http-redirect-fetch>
+      //  (NB: "CORS non-wildcard request-header name" consists solely of "Authorization")
+
+      jsRequest->getHeaders(js)->delete_(jsg::ByteString(kj::str("authorization")));
+    }
+  }
+
   urlList.add(kj::mv(KJ_ASSERT_NONNULL(redirectedLocation)));
 
   // "If actualResponse’s status is not 303, request’s body is non-null, and
