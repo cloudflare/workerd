@@ -2109,6 +2109,10 @@ api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
       getContext()->GetAlignedPointerFromEmbedderData(1));
 }
 
+TimeoutId::Generator& Worker::Lock::getTimeoutIdGenerator() {
+  return getGlobalScope().timeoutIdGenerator;
+}
+
 jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
   // const_cast OK because we are a lock on this isolate.
   auto& isolate = const_cast<Isolate&>(worker.getIsolate());
