@@ -155,7 +155,7 @@ class DurableObjectNamespace: public jsg::Object {
 
   struct NewUniqueIdOptions {
     // Restricts the new unique ID to a set of colos within a jurisdiction.
-    jsg::Optional<kj::String> jurisdiction;
+    jsg::Optional<kj::Maybe<kj::String>> jurisdiction;
 
     JSG_STRUCT(jurisdiction);
 
@@ -209,7 +209,7 @@ class DurableObjectNamespace: public jsg::Object {
 
   // Creates a subnamespace with the jurisdiction hardcoded.
   jsg::Ref<DurableObjectNamespace> jurisdiction(
-      jsg::Lock& js, jsg::Optional<kj::String> maybeJurisdiction);
+      jsg::Lock& js, jsg::Optional<kj::Maybe<kj::String>> maybeJurisdiction);
 
   JSG_RESOURCE_TYPE(DurableObjectNamespace, CompatibilityFlags::Reader flags) {
     JSG_METHOD(newUniqueId);
