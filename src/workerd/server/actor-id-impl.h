@@ -16,6 +16,7 @@ class ActorIdFactoryImpl final: public ActorIdFactory {
 
     kj::String toString() const override;
     kj::Maybe<kj::StringPtr> getName() const override;
+    kj::Maybe<kj::StringPtr> getJurisdiction() const override;
     bool equals(const ActorId& other) const override;
     kj::Own<ActorId> clone() const override;
 

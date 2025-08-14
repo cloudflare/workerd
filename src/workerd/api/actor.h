@@ -61,10 +61,21 @@ class DurableObjectId: public jsg::Object {
     return id->getName();
   }
 
-  JSG_RESOURCE_TYPE(DurableObjectId) {
+  jsg::Optional<kj::StringPtr> getJurisdiction() {
+    return id->getJurisdiction();
+  }
+
+  JSG_RESOURCE_TYPE(DurableObjectId, CompatibilityFlags::Reader flags) {
     JSG_METHOD(toString);
     JSG_METHOD(equals);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
+    if (flags.getWorkerdExperimental()) {
+      // `jurisdiction` is marked as experimental because it will be undefined when called on the
+      // `DurableObjectId` stored within a Durable Object class as `this.ctx.id`.
+      //
+      // TODO(soon): Ensure that `jurisdiction` is always available on a `DurableObjectId`.
+      JSG_READONLY_INSTANCE_PROPERTY(jurisdiction, getJurisdiction);
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -88,7 +99,8 @@ class DurableObject final: public Fetcher {
 
   jsg::Ref<DurableObjectId> getId() {
     return id.addRef();
-  };
+  }
+
   jsg::Optional<kj::StringPtr> getName() {
     return id->getName();
   }
