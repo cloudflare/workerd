@@ -685,7 +685,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
         // with a separate compat flag.
         if (featureFlags.getTypescriptStripTypes()) {
           auto output = rust::transpiler::ts_strip(
-              conf.getName().as<Rust>(), conf.getEsModule().asBytes().as<Rust>());
+              // value comes from capnp so it is a valid utf-8
+              conf.getName().as<RustUncheckedUtf8>(), conf.getEsModule().asBytes().as<Rust>());
 
           if (output.success) {
             return Worker::Script::EsModule{
