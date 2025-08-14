@@ -4,6 +4,7 @@ const config :Workerd.Config = (
   services = [
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
+    (name = "tail", worker = .tailWorker),
   ],
 
   v8Flags = [ "--expose-gc" ],
@@ -13,7 +14,7 @@ const mainWorker :Workerd.Worker = (
   compatibilityDate = "2024-03-04",
 
   # "experimental" flag is needed to test `sql.ingest()` and `sql.prepare()`.
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker", "tail_worker_user_spans"],
 
   modules = [
     (name = "worker", esModule = embed "sql-test.js"),
@@ -30,4 +31,15 @@ const mainWorker :Workerd.Worker = (
   bindings = [
     (name = "ns", durableObjectNamespace = "DurableObjectExample"),
   ],
+
+  streamingTails = ["tail"],
+);
+
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "sql-test-tail.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
