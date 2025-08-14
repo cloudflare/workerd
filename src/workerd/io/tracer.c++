@@ -120,9 +120,10 @@ WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel exe
       userRequestSpan(nullptr) {}
 
 WorkerTracer::~WorkerTracer() noexcept(false) {
-  // Report the outcome event, which should have been delivered by now.
+  // Report the outcome event, which should have been delivered by now. Note that this can happen
+  // when there are no tail events delivered to the tracer at all (such as when a worker interface
+  // gets set up without being used for an event), so this may not indicate an error.
   if (trace->outcome == EventOutcome::UNKNOWN) {
-    KJ_LOG(WARNING, "failed to set proper outcome event");
     return;
   }
 
