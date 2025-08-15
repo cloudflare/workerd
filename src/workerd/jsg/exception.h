@@ -113,7 +113,7 @@ namespace workerd::jsg {
 kj::StringPtr stripRemoteExceptionPrefix(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains a tunneled exception that could
-// be converted back to JavaScript via makeInternalError().
+// be converted back to JavaScript via exceptionToJs().
 bool isTunneledException(kj::StringPtr internalMessage);
 
 // Given a KJ exception's description, returns whether it contains the magic constant that indicates

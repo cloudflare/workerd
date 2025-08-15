@@ -151,7 +151,7 @@ struct InternalExceptionObserver {
     kj::Maybe<InternalErrorId> internalErrorId;
   };
 
-  // Called when an internal exception is created (see makeInternalError).
+  // Called when an internal exception is created (see exceptionToJs).
   // Used to collect metrics on various internal error conditions.
   virtual void reportInternalException(const kj::Exception&, Detail detail) {}
 };
