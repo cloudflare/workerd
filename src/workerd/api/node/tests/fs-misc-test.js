@@ -26,6 +26,7 @@ import {
   W_OK,
   X_OK,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 
 strictEqual(typeof openSync, 'function');
@@ -218,5 +219,22 @@ export const otherExportsTest = {
     notStrictEqual(X_OK, undefined);
     notStrictEqual(WriteStream, undefined);
     notStrictEqual(ReadStream, undefined);
+  },
+};
+
+export const oobWriteTest = {
+  test() {
+    const v3 = Buffer.from('Test data for write operations');
+    const fd = openSync('/tmp/write-test.bin');
+    throws(
+      () => {
+        strictEqual(writeSync(fd, v3, 10, 10, 4294967295), 0);
+      },
+      {
+        message: /File size limit exceeded/,
+      }
+    );
+
+    strictEqual(writeSync(fd, v3, 10, 10, 134217718), 10);
   },
 };
