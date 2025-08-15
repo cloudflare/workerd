@@ -2322,7 +2322,10 @@ class Server::WorkerService final: public Service,
             co_await promise;
           }
 
-          start(actorClass, id);
+          // A concurrent request could have started the actor, so check again.
+          if (actor == kj::none) {
+            start(actorClass, id);
+          }
         }
 
         co_return KJ_ASSERT_NONNULL(actor)->addRef();
