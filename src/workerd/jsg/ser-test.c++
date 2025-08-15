@@ -157,7 +157,10 @@ struct SerTestContext: public ContextGlobalObject {
         });
     ser.write(js, errorObj);
     auto content = ser.release();
-    Deserializer deser(js, content);
+    Deserializer deser(js, content,
+        Deserializer::Options{
+          .preserveStackInErrors = true,
+        });
     auto val = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
 
     auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
@@ -180,6 +183,42 @@ struct SerTestContext: public ContextGlobalObject {
     return val;
   }
 
+  JsValue roundTripErrorNoStack(Lock& js, JsObject errorObj) {
+    Serializer ser(js,
+        Serializer::Options{
+          .treatErrorsAsHostObjects = true,
+        });
+
+    ser.write(js, errorObj);
+    auto content = ser.release();
+    Deserializer deser(js, content);
+    auto retObj = KJ_ASSERT_NONNULL(deser.readValue(js).tryCast<JsObject>());
+
+    // Verify that converting to/from kj::Exception works as expected since
+    // that uses the same ser/deser logic.
+    {
+      auto kjEx = js.exceptionToKj(errorObj);
+      auto backToJs = js.exceptionToJsValue(kj::mv(kjEx)).getHandle(js);
+      auto retObj2 = KJ_ASSERT_NONNULL(backToJs.tryCast<JsObject>());
+      // Because the trusted option was not passed, the stack should be different.
+      KJ_ASSERT(!retObj2.get(js, "stack"_kj).strictEquals(errorObj.get(js, "stack"_kj)));
+    }
+    {
+      auto kjEx = js.exceptionToKj(errorObj);
+      auto backToJs = js.exceptionToJsValue(kj::mv(kjEx),
+                            {
+                              .ignoreDetail = false,
+                              .trusted = true,
+                            })
+                          .getHandle(js);
+      auto retObj2 = KJ_ASSERT_NONNULL(backToJs.tryCast<JsObject>());
+      // Because the trusted option is true, the stack should be the same.
+      KJ_ASSERT(retObj2.get(js, "stack"_kj).strictEquals(errorObj.get(js, "stack"_kj)));
+    }
+
+    return retObj.get(js, js.str("stack"_kj));
+  }
+
   JSG_RESOURCE_TYPE(SerTestContext) {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
@@ -187,6 +226,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_NESTED_TYPE(Qux);
     JSG_METHOD(roundTrip);
     JSG_METHOD(roundTripError);
+    JSG_METHOD(roundTripErrorNoStack);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
@@ -353,6 +393,9 @@ KJ_TEST("serialization of errors") {
       "boolean", "true");
   e.expectEval("roundTripError(new SuppressedError('a', 'b', 'c', {cause:'c'})) instanceof "
                "SuppressedError",
+      "boolean", "true");
+
+  e.expectEval("const e = new Error('boom'); e2 = roundTripErrorNoStack(e); e.stack !== e2.stack",
       "boolean", "true");
 }
 

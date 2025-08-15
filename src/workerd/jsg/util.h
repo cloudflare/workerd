@@ -6,6 +6,7 @@
 // INTERNAL IMPLEMENTATION FILE
 //
 // This file contains misc utility functions used elsewhere.
+#include <workerd/jsg/exception.h>
 
 #include <v8-array-buffer.h>
 #include <v8-exception.h>
@@ -26,6 +27,21 @@ namespace workerd::jsg {
 class Lock;
 
 using uint = unsigned int;
+
+#define JS_ERROR_TYPES(V)                                                                          \
+  V("Error", Error)                                                                                \
+  V("RangeError", RangeError)                                                                      \
+  V("TypeError", TypeError)                                                                        \
+  V("SyntaxError", SyntaxError)                                                                    \
+  V("ReferenceError", ReferenceError)                                                              \
+  V("CompileError", WasmCompileError)                                                              \
+  V("LinkError", WasmLinkError)                                                                    \
+  V("RuntimeError", WasmRuntimeError)                                                              \
+  V("SuspendError", WasmSuspendError)                                                              \
+  V("AggregateError", AggregateError)                                                              \
+  V("SuppressedError", SuppressedError)                                                            \
+  V("URIError", URIError)                                                                          \
+  V("EvalError", EvalError)
 
 // When a C++ callback wishes to throw a JavaScript exception, it should first call
 // isolate->ThrowException() to set the JavaScript error value, then it should throw
@@ -61,13 +77,15 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
-v8::Local<v8::Value> exceptionToJs(v8::Isolate* isolate, kj::Exception&& exception);
+v8::Local<v8::Value> exceptionToJs(
+    v8::Isolate* isolate, kj::Exception&& exception, ExceptionToJsOptions options = {});
 
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
 
 // calls makeInternalError() and then tells the isolate to throw it.
-void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+void throwInternalError(
+    v8::Isolate* isolate, kj::Exception&& exception, ExceptionToJsOptions options = {});
 
 constexpr kj::Exception::DetailTypeId TUNNELED_EXCEPTION_DETAIL_ID = 0xe8027292171b1646ull;
 
