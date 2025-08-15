@@ -344,8 +344,8 @@ class Promise {
           [&] { check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception)); });
     }
 
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception)));
+    void reject(Lock& js, kj::Exception exception, ExceptionToJsOptions options = {}) {
+      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
     Resolver addRef(Lock& js) {
@@ -487,8 +487,9 @@ Promise<T> Lock::rejectedPromise(jsg::Value exception) {
 }
 
 template <typename T>
-Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
-  return withinHandleScope([&] { return rejectedPromise<T>(exceptionToJs(kj::mv(exception))); });
+Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options) {
+  return withinHandleScope(
+      [&] { return rejectedPromise<T>(exceptionToJs(kj::mv(exception), options)); });
 }
 
 template <class Func>
