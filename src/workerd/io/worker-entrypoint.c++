@@ -405,7 +405,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // We've already logged it here, the only thing that matters to the client is that we failed
         // due to an internal error. Note that this does not need to be labeled "remote." since jsg
         // will sanitize it as an internal error. Note that we use `setDescription()` to preserve
-        // the exception type for `cjfs::makeInternalError(...)` downstream.
+        // the exception type for `jsg::exceptionToJs(...)` downstream.
         exception.setDescription(
             kj::str("worker_do_not_log; Request failed due to internal error"));
         return kj::mv(exception);

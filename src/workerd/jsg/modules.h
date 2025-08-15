@@ -695,7 +695,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
       }
       return makeRejected(tryCatch.Exception());
     } catch (kj::Exception& ex) {
-      return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+      return makeRejected(js.exceptionToJs(kj::mv(ex)).getHandle(js));
     }
   }
 
@@ -739,7 +739,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
     return makeRejected(tryCatch.Exception());
   } catch (kj::Exception& ex) {
-    return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+    return makeRejected(exceptionToJs(js.v8Isolate, kj::mv(ex)));
   }
   KJ_UNREACHABLE;
 }

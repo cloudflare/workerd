@@ -288,7 +288,7 @@ kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message) {
   }
 }
 
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
+v8::Local<v8::Value> exceptionToJs(v8::Isolate* isolate, kj::Exception&& exception) {
   auto desc = exception.getDescription();
 
   // TODO(someday): Deserialize encoded V8 exception from
@@ -346,12 +346,12 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exc
 
 Value Lock::exceptionToJs(kj::Exception&& exception) {
   return withinHandleScope(
-      [&] { return Value(v8Isolate, makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return Value(v8Isolate, jsg::exceptionToJs(v8Isolate, kj::mv(exception))); });
 }
 
 JsRef<JsValue> Lock::exceptionToJsValue(kj::Exception&& exception) {
   return withinHandleScope([&] {
-    JsValue val = JsValue(makeInternalError(v8Isolate, kj::mv(exception)));
+    JsValue val = JsValue(jsg::exceptionToJs(v8Isolate, kj::mv(exception)));
     return val.addRef(*this);
   });
 }
@@ -372,7 +372,7 @@ void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage) {
 
 void throwInternalError(v8::Isolate* isolate, kj::Exception&& exception) {
   KJ_IF_SOME(renderingError, kj::runCatchingExceptions([&]() {
-    isolate->ThrowException(makeInternalError(isolate, kj::mv(exception)));
+    isolate->ThrowException(exceptionToJs(isolate, kj::mv(exception)));
   })) {
     KJ_LOG(ERROR, "error rendering exception", renderingError);
     KJ_LOG(ERROR, exception);

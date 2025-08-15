@@ -1458,7 +1458,7 @@ class ExceptionWrapper {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::Exception exception) {
-    return makeInternalError(js.v8Isolate, kj::mv(exception));
+    return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
   }
 
   kj::Maybe<kj::Exception> tryUnwrap(Lock& js,

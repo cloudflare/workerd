@@ -61,7 +61,7 @@ v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::StringPtr inter
 // Creates a JavaScript error that obfuscates the exception details, while logging the full details
 // to stderr. If the KJ exception was created using throwTunneledException(), don't log anything
 // but instead return the original reconstructed JavaScript exception.
-v8::Local<v8::Value> makeInternalError(v8::Isolate* isolate, kj::Exception&& exception);
+v8::Local<v8::Value> exceptionToJs(v8::Isolate* isolate, kj::Exception&& exception);
 
 // calls makeInternalError() and then tells the isolate to throw it.
 void throwInternalError(v8::Isolate* isolate, kj::StringPtr internalMessage);
@@ -366,7 +366,7 @@ struct LiftKj_<v8::Local<v8::Promise>> {
         // the v8::Value representing the tunneled error, it itself may cause a JS exception to be
         // thrown. This is the reason for the nested try-catch blocks -- we need to be able to
         // swallow any JsExceptionThrown exceptions that this catch block generates.
-        returnRejectedPromise(info, makeInternalError(isolate, kj::mv(exception)), tryCatch);
+        returnRejectedPromise(info, exceptionToJs(isolate, kj::mv(exception)), tryCatch);
       }
     } catch (JsExceptionThrown&) {
       if (tryCatch.CanContinue()) {
