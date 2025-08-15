@@ -1050,6 +1050,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getNoTopLevelAwaitInRequire()) {
       lock->disableTopLevelAwait();
     }
+    if (features.getEnhancedErrorSerialization()) {
+      lock->setUsingEnhancedErrorSerialization();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
@@ -2211,7 +2214,6 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exce
   try {
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
-          .ignoreDetail = false,
           .trusted = true,
         });
     logUncaughtException(source, jsError.getHandle(js));

@@ -2706,6 +2706,8 @@ class Lock {
   void installJspi();
 
   void setCaptureThrowsAsRejections(bool capture);
+  void setUsingEnhancedErrorSerialization();
+  bool isUsingEnhancedErrorSerialization() const;
 
   void setNodeJsCompatEnabled();
   void setNodeJsProcessV2Enabled();

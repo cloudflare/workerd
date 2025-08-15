@@ -99,6 +99,8 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
           return jsg::JsValue(jsg::check(v8::JSON::Parse(js.v8Context(), js.str(json.json))));
         }
         KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
+          // When enhanced error serialization is enabled, if the serialized data
+          // is an error object, the original stack will not be preserved.
           jsg::Deserializer deser(js, v8Serialized.data);
           return deser.readValue(js);
         }

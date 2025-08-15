@@ -8,6 +8,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 
 #include <capnp/membrane.h>
@@ -212,6 +213,14 @@ DeserializeResult deserializeJsValue(
       jsg::Deserializer::Options{
         .version = 15,
         .readHeader = true,
+        // Previously, while these are passing over an RPC boundary, we preserved stack
+        // traces in errors that happened to get passed through rather than thrown.
+        // This was mainly due, I believe, to a misunderstanding about whether or not
+        // v8 serialization preserved the stacks or not. When enhanced error serialization
+        // is disabled, stacks are preserved and this flag has no effect. When enhanced
+        // error serialization is enabled, then we'll switch to not preserving stacks in
+        // passed-through errors.
+        .preserveStackInErrors = false,
         .externalHandler = externalHandler,
       });
 

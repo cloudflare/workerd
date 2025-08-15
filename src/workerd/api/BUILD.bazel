@@ -336,6 +336,14 @@ kj_test(
 )
 
 kj_test(
+    src = "ser-errors-test.c++",
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
@@ -831,4 +839,13 @@ wd_test(
     src = "tests/fetch-redirect-test.wd-test",
     args = ["--experimental"],
     data = ["tests/fetch-redirect-test.js"],
+)
+
+wd_test(
+    src = "tests/rpc-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/rpc-error-test.js",
+        "tests/rpc-error-test.rpc.js",
+    ],
 )

@@ -232,7 +232,9 @@ export class MyService extends WorkerEntrypoint {
   }
 
   throwingMethod() {
-    throw new Error('METHOD THREW');
+    const err = new Error('METHOD THREW');
+    err.abc = 123;
+    throw err;
   }
 
   async neverReturn() {
@@ -1696,7 +1698,9 @@ export let testAsyncStackTrace = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
-      // verify stack trace was produced
+      // check that the custom property made it through
+      assert.strictEqual(e.abc, 123);
+      // verify a local stack trace was produced
       assert.strictEqual(e.stack.includes('at async Object.test'), true);
     }
   },
@@ -1708,6 +1712,7 @@ export let testExceptionProperties = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
+      assert.strictEqual(e.abc, 123);
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.message, 'METHOD THREW');
     }
@@ -1740,8 +1745,7 @@ export let domExceptionClone = {
   test() {
     const de1 = new DOMException('hello', 'NotAllowedError');
 
-    // custom own properties on the instance are not preserved...
-    de1.foo = 'ignored';
+    de1.foo = 'abc';
 
     const de2 = structuredClone(de1);
     assert.strictEqual(de1.name, de2.name);
@@ -1749,8 +1753,8 @@ export let domExceptionClone = {
     assert.strictEqual(de1.stack, de2.stack);
     assert.strictEqual(de1.code, de2.code);
     assert.notStrictEqual(de1, de2);
-    assert.notStrictEqual(de1.foo, de2.foo);
-    assert.strictEqual(de2.foo, undefined);
+    assert.strictEqual(de1.foo, de2.foo);
+    assert.strictEqual(de2.foo, 'abc');
   },
 };
 
