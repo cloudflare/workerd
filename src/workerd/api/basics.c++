@@ -810,7 +810,12 @@ void AbortSignal::triggerAbort(
   // 1. Dispatch to RPC clients
   if (!rpcClients.empty()) {
     IoContext& ioContext = IoContext::current();
-    jsg::Serializer ser(js);
+    bool treatErrorsAsHostObjects = workerd::util::Autogate::isEnabled(
+        workerd::util::AutogateKey::ENHANCED_TUNNELED_EXCEPTION_SERIALIZATION);
+    jsg::Serializer ser(js,
+        jsg::Serializer::Options{
+          .treatErrorsAsHostObjects = treatErrorsAsHostObjects,
+        });
     KJ_IF_SOME(r, reason) {
       ser.write(js, r.getHandle(js));
     }

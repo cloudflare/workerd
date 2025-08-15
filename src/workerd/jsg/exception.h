@@ -158,8 +158,7 @@ constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e
 struct ExceptionToJsOptions {
   // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
   // exception detail in the kj::Exception.
-  // TODO(soon): Change the default to false
-  bool ignoreDetail = true;
+  bool ignoreDetail = false;
 
   // When trusted is true and the kj::Exception has a serialized exception detail, the
   // stack will be included in the deserialized error if it is available. When false,

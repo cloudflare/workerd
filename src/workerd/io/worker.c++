@@ -2188,7 +2188,6 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exce
   try {
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
-          .ignoreDetail = false,
           .trusted = true,
         });
     logUncaughtException(source, jsError.getHandle(js));

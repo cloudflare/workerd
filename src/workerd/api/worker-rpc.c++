@@ -8,6 +8,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 
 #include <capnp/membrane.h>
@@ -162,11 +163,14 @@ void serializeJsValue(jsg::Lock& js,
     jsg::JsValue value,
     RpcSerializerExternalHandler& externalHandler,
     Func makeBuilder) {
+  bool treatErrorsAsHostObjects = workerd::util::Autogate::isEnabled(
+      workerd::util::AutogateKey::ENHANCED_TUNNELED_EXCEPTION_SERIALIZATION);
   jsg::Serializer serializer(js,
       jsg::Serializer::Options{
         .version = 15,
         .omitHeader = false,
         .treatClassInstancesAsPlainObjects = false,
+        .treatErrorsAsHostObjects = treatErrorsAsHostObjects,
         .externalHandler = externalHandler,
       });
   serializer.write(js, value);

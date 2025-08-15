@@ -6,6 +6,9 @@
 using Workerd = import "/workerd/workerd.capnp";
 
 const unitTests :Workerd.Config = (
+  autogates = [
+    "workerd-autogate-enhanced-tunneled-exception-serialization",
+  ],
   services = [
     ( name = "js-rpc-test",
       worker = (

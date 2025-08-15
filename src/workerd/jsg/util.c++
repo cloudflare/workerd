@@ -7,6 +7,8 @@
 #include "ser.h"
 #include "setup.h"
 
+#include <workerd/util/autogate.h>
+
 #include <openssl/rand.h>
 
 #include <kj/debug.h>
@@ -261,7 +263,10 @@ DecodedException decodeTunneledException(
       }
     }
 
-    if (!options.ignoreDetail) {
+    auto usingEnhancedErrorDetail = workerd::util::Autogate::isEnabled(
+        workerd::util::AutogateKey::ENHANCED_TUNNELED_EXCEPTION_SERIALIZATION);
+
+    if ((options.trusted || usingEnhancedErrorDetail) && !options.ignoreDetail) {
       // If the error was originally converted from a JS error, then we likely have
       // serialized the original error object as a detail, if so, let's try to use
       // that, otherwise, we'll fall back to constructing a new error object. If
@@ -437,12 +442,15 @@ void throwInternalError(
 void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
   v8::TryCatch tryCatch(js.v8Isolate);
   try {
+    // TODO(soon): Once verified to be safe, we can remove the autogate.
+    bool treatErrorsAsHostObjects =
+        util::Autogate::isEnabled(util::AutogateKey::ENHANCED_TUNNELED_EXCEPTION_SERIALIZATION);
+
     Serializer ser(js,
-        {
-          // Make sure we don't break compatibility if V8 introduces a new version. This value can
+        {// Make sure we don't break compatibility if V8 introduces a new version. This value can
           // be bumped to match the new version once all of production is updated to understand it.
           .version = 15,
-        });
+          .treatErrorsAsHostObjects = treatErrorsAsHostObjects});
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
   } catch (JsExceptionThrown&) {

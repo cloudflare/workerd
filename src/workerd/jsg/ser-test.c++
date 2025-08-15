@@ -207,7 +207,6 @@ struct SerTestContext: public ContextGlobalObject {
       auto kjEx = js.exceptionToKj(errorObj);
       auto backToJs = js.exceptionToJsValue(kj::mv(kjEx),
                             {
-                              .ignoreDetail = false,
                               .trusted = true,
                             })
                           .getHandle(js);
