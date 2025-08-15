@@ -704,10 +704,15 @@ class FileImpl final: public File {
     if (buffer.size() > maxSize) {
       return FsError::FILE_SIZE_LIMIT_EXCEEDED;
     }
+
+    size_t end = offset + buffer.size();
+    if (end > maxSize || end < offset /* overflow check */) {
+      return FsError::FILE_SIZE_LIMIT_EXCEEDED;
+    }
     if (!isWritable()) {
       return FsError::READ_ONLY;
     }
-    size_t end = offset + buffer.size();
+
     if (end > writableView().size()) {
       KJ_IF_SOME(err, resize(js, end)) {
         return err;
