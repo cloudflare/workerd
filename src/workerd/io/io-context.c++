@@ -407,6 +407,7 @@ void IoContext::logUncaughtExceptionAsync(
 }
 
 void IoContext::abort(kj::Exception&& e) {
+  KJ_DBG("XXX - IoContext::abort"); // TODO DO NOT COMMIT
   if (abortException != kj::none) {
     return;
   }
@@ -423,6 +424,39 @@ void IoContext::abortWhen(kj::Promise<void> promise) {
   // Unlike addTask(), abortWhen() always uses `tasks`, even in actors, because we do not want
   // these tasks to block hibernation.
   if (abortException == kj::none) {
+
+  // TODO DO NOT COMMIT - Similar to OutputGate::onBroken(), trying to add logging to abortWhen()
+  // by adding an eager promise to the chain seems to cause abort() to be called later?
+#if 1
+    // leaving promise alone works...
+#elif 0
+    // also works...
+    promise = promise.then([]() -> void {
+      KJ_DBG("XXX - abortWhen then (shouldn't happen"); // TODO DO NOT COMMIT
+    }, [](kj::Exception&& e) -> void {
+      KJ_DBG("XXX - abortWhen catch", e); // TODO DO NOT COMMIT
+      kj::throwFatalException(kj::mv(e));
+    });
+#else
+    // fails...
+    promise = promise.then([]() -> kj::Promise<void> {
+      KJ_DBG("XXX - abortWhen then (shouldn't happen"); // TODO DO NOT COMMIT
+      return kj::READY_NOW;
+    }, [](kj::Exception&& e) -> kj::Promise<void> {
+      KJ_DBG("XXX - abortWhen catch", e); // TODO DO NOT COMMIT
+      // Also fails when returning the exception directly:
+      //return kj::mv(e);
+      kj::throwFatalException(kj::mv(e));
+    });
+#endif
+
+    // TODO DO NOT COMMIT - I notice that the lambda passed to to promise.catch_() here does not
+    // return a kj::Promise<T>; async.h says that .catch_() is equivalent to .then(identityFunc,
+    // errorHandler), where identityFunc just returns its input...  I guess that means that since
+    // the input is void, the output is also void, and not kj::Promise<void>, so the promise
+    // returned by .catch_() is not eager by default.  But my expection is that that should
+    // matter, since we're adding the promise to a TaskSet, which should force promise evaluation,
+    // anyway?
     tasks.add(promise.catch_([this](kj::Exception&& e) { abort(kj::mv(e)); }));
   }
 }
