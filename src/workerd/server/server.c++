@@ -1553,6 +1553,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   ~RequestObserverWithTracer() noexcept(false) {
     KJ_IF_SOME(t, tracer) {
+      // for a more precise end time, set the end timestamp now, if available
+      if (IoContext::hasCurrent()) {
+        auto time = IoContext::current().now();
+        t->recordTimestamp(time);
+      }
       if (fetchStatus != 0) {
         t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
       }
