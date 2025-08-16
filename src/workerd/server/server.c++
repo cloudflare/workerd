@@ -1954,6 +1954,10 @@ class Server::WorkerService final: public Service,
     return KJ_MAP(e, namedEntrypoints) -> kj::StringPtr { return e.key; };
   }
 
+  kj::Array<kj::StringPtr> getActorClassNames() {
+    return KJ_MAP(name, actorClassEntrypoints) -> kj::StringPtr { return name; };
+  }
+
   void link(Worker::ValidationErrorReporter& errorReporter) override {
     LinkCallback callback =
         kj::mv(KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkCallback>(), "already called link()"));
@@ -4137,6 +4141,8 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       TraceParentContext(nullptr, nullptr),  // systemTracer -- TODO(beta): factor out
       Worker::Lock::TakeSynchronously(kj::none), errorReporter);
 
+  uint totalActorChannels = 0;
+
   worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& lock) {
     lock.validateHandlers(errorReporter);
 
@@ -4159,24 +4165,41 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
           .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
     }
 
-    // Start numbering loopback channels for actor classes after the last actor channel used by
-    // bindings.
+    // Start numbering loopback channels for actor classes after the last actor channel and actor
+    // class channel used by bindings. Note that every exported actor class will have a ctx.exports
+    // entry, but only the ones that have storage configured will be namespace bindings; the others
+    // will be simply actor class bindings, which can be used with facets. We will iterate over
+    // the exported class names and cross-reference with the storage config. Note that if the
+    // storage config contains a class name that isn't among the exports, we won't create a
+    // ctx.exports entry for it (it wouldn't work anyway).
     uint nextActorChannel = def.actorChannels.size();
-    for (auto& ns: def.localActorConfigs) {
+    uint nextActorClassChannel = def.actorClassChannels.size();
+    for (auto& className: errorReporter.actorClasses) {
+      uint actorClassChannel = nextActorClassChannel++;
+
       decltype(Global::value) value;
-      KJ_SWITCH_ONEOF(ns.value) {
-        KJ_CASE_ONEOF(durable, Durable) {
-          value = Global::DurableActorNamespace{
-            .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
+      KJ_IF_SOME(ns, def.localActorConfigs.find(className)) {
+        // This class has storage attached. We'll create a loopback actor namespace binding.
+        // TODO(now): Currently we don't use actorClassChannel in this branch even though we have
+        //   allocated one. That will change later in this PR.
+        KJ_SWITCH_ONEOF(ns) {
+          KJ_CASE_ONEOF(durable, Durable) {
+            value = Global::DurableActorNamespace{
+              .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
+          }
+          KJ_CASE_ONEOF(ephemeral, Ephemeral) {
+            value = Global::EphemeralActorNamespace{
+              .actorChannel = nextActorChannel++,
+            };
+          }
         }
-        KJ_CASE_ONEOF(ephemeral, Ephemeral) {
-          value = Global::EphemeralActorNamespace{
-            .actorChannel = nextActorChannel++,
-          };
-        }
+      } else {
+        // No storage attached. We'll create an actual class binding (for use with facets).
+        value = Global::ActorClass{.channel = actorClassChannel};
       }
-      ctxExports.add(Global{.name = kj::str(ns.key), .value = kj::mv(value)});
+      ctxExports.add(Global{.name = kj::str(className), .value = kj::mv(value)});
     }
+    totalActorChannels = nextActorChannel;
 
     JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
       WorkerdApi::from(worker->getIsolate().getApi())
@@ -4187,11 +4210,12 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     { auto drop = kj::mv(ctxExportsHandle); }
   });
 
-  auto linkCallback = [this, def = kj::mv(def)](WorkerService& workerService,
+  auto linkCallback = [this, def = kj::mv(def), totalActorChannels](WorkerService& workerService,
                           Worker::ValidationErrorReporter& errorReporter) mutable {
     WorkerService::LinkedIoChannels result{.alarmScheduler = *alarmScheduler};
 
     auto entrypointNames = workerService.getEntrypointNames();
+    auto actorClassNames = workerService.getActorClassNames();
 
     auto services = kj::heapArrayBuilder<kj::Own<IoChannelFactory::SubrequestChannel>>(
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT +
@@ -4222,20 +4246,15 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     result.subrequest = services.finish();
 
     // Set up actor class channels
-    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(def.actorClassChannels.size());
+    auto actorClasses = kj::heapArrayBuilder<kj::Own<ActorClass>>(
+        def.actorClassChannels.size() + actorClassNames.size());
 
     for (auto& channel: def.actorClassChannels) {
       actorClasses.add(lookupActorClass(channel.designator, kj::mv(channel.errorContext)));
     }
 
-    // TODO(facets): Implement self-referential actor classes (i.e. in ctx.exports). What about
-    //   classes that actually have a namespace defined? Can the self-referential namespace binding
-    //   also be used as a class binding?
-
-    result.actorClass = actorClasses.finish();
-
-    auto linkedActorChannels = kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(
-        def.actorChannels.size() + def.localActorConfigs.size());
+    auto linkedActorChannels =
+        kj::heapArrayBuilder<kj::Maybe<WorkerService::ActorNamespace&>>(totalActorChannels);
 
     for (auto& channel: def.actorChannels) {
       WorkerService* targetService = &workerService;
@@ -4260,15 +4279,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // Link the ctx.exports self-referential actor channels. Again, it's important that these
     // be added in the same order as before. kj::HashMap iteration order is deterministic, and
     // is exactly insertion order as long as no entries have been removed, so we can expect that
-    // `workerService.getActorNamespaces()` iterates in the same order as `localActorConfigs` did
-    // earlier.
+    // `workerService.getActorClassNames()` iterates in the same order as
+    // `errorReporter.actorClasses` did earlier. As before, every exported class gets an actor
+    // class channel, but only the ones with configured storage will also get namespace channels.
     auto& selfActorNamespaces = workerService.getActorNamespaces();
-    KJ_ASSERT(selfActorNamespaces.size() == def.localActorConfigs.size());
-    for (auto& ns: selfActorNamespaces) {
-      linkedActorChannels.add(*ns.value);
+    for (auto& className: actorClassNames) {
+      actorClasses.add(KJ_ASSERT_NONNULL(workerService.getActorClass(className, /*props=*/{})));
+      KJ_IF_SOME(ns, selfActorNamespaces.find(className)) {
+        linkedActorChannels.add(*ns);
+      }
     }
 
     result.actor = linkedActorChannels.finish();
+    result.actorClass = actorClasses.finish();
 
     KJ_IF_SOME(out, def.cacheApiOutbound) {
       result.cache = kj::mv(out).lookup(*this);
