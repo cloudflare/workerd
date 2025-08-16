@@ -937,12 +937,14 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId(jsg::Lock&
 DurableObjectState::DurableObjectState(jsg::Lock& js,
     Worker::Actor::Id actorId,
     jsg::JsRef<jsg::JsValue> exports,
+    jsg::JsValue props,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
     kj::Maybe<Worker::Actor::FacetManager&> facetManager)
     : id(kj::mv(actorId)),
       exports(kj::mv(exports)),
+      props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
         return js.alloc<Container>(kj::mv(cap), containerRunning);

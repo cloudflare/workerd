@@ -839,6 +839,7 @@ class Worker::Actor final: public kj::Refcounted {
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
       kj::Maybe<kj::StringPtr> className,
+      Frankenvalue props,
       MakeStorageFunc makeStorage,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,

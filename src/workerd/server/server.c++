@@ -2932,8 +2932,8 @@ class Server::WorkerService final: public Service,
       static constexpr uint16_t hibernationEventTypeId = 8;
 
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
-          kj::mv(makeActorCache), className, kj::mv(makeStorage), kj::mv(loopback), timerChannel,
-          kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
+          kj::mv(makeActorCache), className, props.clone(), kj::mv(makeStorage), kj::mv(loopback),
+          timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
           kj::mv(container), facetManager);
     }
 
