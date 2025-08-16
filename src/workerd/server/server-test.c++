@@ -4383,7 +4383,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      await actor.baz(),
                 `      await ctx.exports.default.corge(555),
                 `      await actor.grault(456),
-                `      "UnconfiguredActor" in ctx.exports,  // should be false
+                `      ctx.exports.UnconfiguredActor.constructor.name,
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4431,7 +4431,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   test.start();
 
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, false");
+  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, DurableObjectClass");
 }
 
 // =======================================================================================
@@ -4715,7 +4715,7 @@ KJ_TEST("Server: Durable Object facets") {
                 `
                 `    if (request.url.endsWith("/part1")) {
                 `      let foo = this.ctx.facets.get("foo",
-                `          () => ({class: this.env.COUNTER, id: "abc"}));
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
                 `      results.push(await foo.increment(true));  // increments foo
                 `      results.push(await foo.increment());  // increments foo
                 `      results.push(await foo.increment());  // increments foo
