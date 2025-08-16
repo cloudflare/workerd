@@ -22,6 +22,8 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Enable wrapping DO SQL KV put multiple in a transaction, fully rolling back if some put fails
   SQL_KV_PUT_MULTIPLE_TRANSACTION,
+  // Enables enhanced tunneled exception JS detail serialization
+  ENHANCED_TUNNELED_EXCEPTION_SERIALIZATION,
   NumOfKeys  // Reserved for iteration.
 };
 

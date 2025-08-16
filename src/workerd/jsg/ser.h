@@ -244,7 +244,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     // whether to include the serialized stack property in the deserialized error.
     // If false, the stack property is not restored and will instead be set to
     // the captured stack at the time of deserialization.
-    bool preserveStackInErrors = true;
+    bool preserveStackInErrors = false;
 
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Deserializer.
@@ -303,7 +303,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
   size_t totalInputSize;
   v8::ValueDeserializer deser;
   kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> sharedBackingStores;
-  bool preserveStackInErrors = true;
+  bool preserveStackInErrors = false;
 };
 
 // Intended for use with v8::ValueSerializer data released into a kj::Array.

@@ -1502,18 +1502,10 @@ class ExceptionWrapper {
       } else {
 
         static const constexpr kj::StringPtr PREFIXES[] = {
-          // JavaScript intrinsic Error Types
-          "Error"_kj,
-          "RangeError"_kj,
-          "TypeError"_kj,
-          "SyntaxError"_kj,
-          "ReferenceError"_kj,
-          // WASM Error Types
-          "CompileError"_kj,
-          "LinkError"_kj,
-          "RuntimeError"_kj,
-          // JSG_RESOURCE_TYPE Error Types
-          "DOMException"_kj,
+#define V(name, _) name##_kj,
+          JS_ERROR_TYPES(V)
+#undef V
+              "DOMException"_kj,
         };
 
         kj::String reason;

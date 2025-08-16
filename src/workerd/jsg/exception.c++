@@ -43,8 +43,11 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   struct Properties {
     bool isFromRemote = false;
     bool isDurableObjectReset = false;
+    bool isDoNotLogException = false;
   };
   Properties properties;
+
+  properties.isDoNotLogException = isDoNotLogException(internalMessage);
 
   // Remove `remote.` (if present). Note that there are cases where we return a tunneled error
   // through multiple workers, so let's be paranoid and allow for multiple "remote." prefixes.
@@ -70,6 +73,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
         .isInternal = false,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
+        .isDoNotLogException = properties.isDoNotLogException,
       };
     }
     if (msg.startsWith(ERROR_INTERNAL_SOURCE_PREFIX_JSG)) {
@@ -79,6 +83,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
         .isInternal = true,
         .isFromRemote = properties.isFromRemote,
         .isDurableObjectReset = properties.isDurableObjectReset,
+        .isDoNotLogException = properties.isDoNotLogException,
       };
     }
 
@@ -92,6 +97,7 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
       .isInternal = true,
       .isFromRemote = properties.isFromRemote,
       .isDurableObjectReset = properties.isDurableObjectReset,
+      .isDoNotLogException = isDoNotLogException(msg),
     };
   };
 

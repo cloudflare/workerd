@@ -832,3 +832,12 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/fetch-redirect-test.js"],
 )
+
+wd_test(
+    src = "tests/rpc-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/rpc-error-test.js",
+        "tests/rpc-error-test.rpc.js",
+    ],
+)

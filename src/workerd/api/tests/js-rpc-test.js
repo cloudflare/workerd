@@ -232,7 +232,9 @@ export class MyService extends WorkerEntrypoint {
   }
 
   throwingMethod() {
-    throw new Error('METHOD THREW');
+    const err = new Error('METHOD THREW');
+    err.abc = 123;
+    throw err;
   }
 
   async neverReturn() {
@@ -1695,7 +1697,9 @@ export let testAsyncStackTrace = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
-      // verify stack trace was produced
+      // check that the custom property made it through
+      assert.strictEqual(e.abc, 123);
+      // verify a local stack trace was produced
       assert.strictEqual(e.stack.includes('at async Object.test'), true);
     }
   },
@@ -1707,6 +1711,7 @@ export let testExceptionProperties = {
     try {
       await env.MyService.throwingMethod();
     } catch (e) {
+      assert.strictEqual(e.abc, 123);
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.message, 'METHOD THREW');
     }
