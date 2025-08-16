@@ -157,14 +157,6 @@ interface Return {
   readonly info?: FetchResponseInfo;
 }
 
-interface Link {
-  readonly type: "link";
-  readonly label?: string;
-  readonly traceId: string;
-  readonly invocationId: string;
-  readonly spanId: string;
-}
-
 interface Attribute {
   readonly name: string;
   readonly value: string | string[] | boolean | boolean[] | number | number[] | bigint | bigint[];
@@ -185,7 +177,6 @@ type EventType =
   | Exception
   | Log
   | Return
-  | Link
   | Attributes;
 
 interface TailEvent<Event extends EventType> {
@@ -209,7 +200,6 @@ type TailEventHandlerObject = {
   exception?: TailEventHandler<Exception>;
   log?: TailEventHandler<Log>;
   return?: TailEventHandler<Return>;
-  link?: TailEventHandler<Link>;
   attributes?: TailEventHandler<Attributes>;
 };
 

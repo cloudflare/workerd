@@ -8424,13 +8424,6 @@ declare namespace TailStream {
     readonly type: "return";
     readonly info?: FetchResponseInfo;
   }
-  interface Link {
-    readonly type: "link";
-    readonly label?: string;
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
-  }
   interface Attribute {
     readonly name: string;
     readonly value:
@@ -8457,7 +8450,6 @@ declare namespace TailStream {
     | Exception
     | Log
     | Return
-    | Link
     | Attributes;
   interface TailEvent<Event extends EventType> {
     readonly invocationId: string;
@@ -8478,7 +8470,6 @@ declare namespace TailStream {
     exception?: TailEventHandler<Exception>;
     log?: TailEventHandler<Log>;
     return?: TailEventHandler<Return>;
-    link?: TailEventHandler<Link>;
     attributes?: TailEventHandler<Attributes>;
   };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;

@@ -45,9 +45,7 @@ namespace {
   V(INVOCATIONID, "invocationId")                                                                  \
   V(JSRPC, "jsrpc")                                                                                \
   V(KILLSWITCH, "killSwitch")                                                                      \
-  V(LABEL, "label")                                                                                \
   V(LEVEL, "level")                                                                                \
-  V(LINK, "link")                                                                                  \
   V(LOADSHED, "loadShed")                                                                          \
   V(LOG, "log")                                                                                    \
   V(MAILFROM, "mailFrom")                                                                          \
@@ -535,18 +533,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Link& link, StringCache& cache) {
-  auto obj = js.obj();
-  obj.set(js, TYPE_STR, cache.get(js, LINK_STR));
-  KJ_IF_SOME(label, link.label) {
-    obj.set(js, LABEL_STR, js.str(label));
-  }
-  obj.set(js, TRACEID_STR, js.str(link.traceId.toGoString()));
-  obj.set(js, INVOCATIONID_STR, js.str(link.invocationId.toGoString()));
-  obj.set(js, SPANID_STR, js.str(link.spanId.toGoString()));
-  return obj;
-}
-
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TRACEID_STR, js.str(event.traceId.toGoString()));
@@ -582,9 +568,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
     }
     KJ_CASE_ONEOF(ret, tracing::Return) {
       obj.set(js, EVENT_STR, ToJs(js, ret, cache));
-    }
-    KJ_CASE_ONEOF(link, tracing::Link) {
-      obj.set(js, EVENT_STR, ToJs(js, link, cache));
     }
     KJ_CASE_ONEOF(attrs, CustomInfo) {
       obj.set(js, EVENT_STR, ToJs(js, attrs, cache));
@@ -624,9 +607,6 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
     }
     KJ_CASE_ONEOF(_, tracing::Return) {
       return RETURN_STR;
-    }
-    KJ_CASE_ONEOF(_, tracing::Link) {
-      return LINK_STR;
     }
     KJ_CASE_ONEOF(_, tracing::CustomInfo) {
       return ATTRIBUTES_STR;
