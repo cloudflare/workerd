@@ -65,8 +65,73 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
   uint channel;
 };
 
+// LoopbackDurableObjectNamespace is similar to LoopbackDurableObjectClass, but used when the
+// class has storage configured. In this case, we want a binding that behaves *both* like a
+// LoopbackDurableObjectClass *and* like a DurableObjectNamespace binding. Easy enough, we'll
+// inherit DurableObjectNamespace, but also make the binding invokable as a function like
+// LoopbackDurableObjectClass.
+class LoopbackDurableObjectNamespace: public DurableObjectNamespace {
+ public:
+  LoopbackDurableObjectNamespace(uint nsChannel,
+      kj::Own<ActorIdFactory> idFactory,
+      jsg::Ref<LoopbackDurableObjectClass> loopbackClass)
+      : DurableObjectNamespace(nsChannel, kj::mv(idFactory)),
+        loopbackClass(kj::mv(loopbackClass)) {}
+
+  // getClass() accessor for use from C++ only.
+  LoopbackDurableObjectClass& getClass() {
+    return *loopbackClass.get();
+  }
+
+  // Invoking the binding creates a specialization of the class -- not the namespace.
+  jsg::Ref<DurableObjectClass> call(jsg::Lock& js, LoopbackDurableObjectClass::Options options) {
+    return loopbackClass->call(js, kj::mv(options));
+  }
+
+  // If `DurableObjectNamespace` ever becomes serializable, we actually don't want to block
+  // serialization here, the way we want to for `LoopbackDurableObjectClass`, because actually
+  // serializing the loopback namespace would mean serializing the namespace stub, *not* the
+  // class stub. They are different things, and you might want to serialize either one.
+
+  JSG_RESOURCE_TYPE(LoopbackDurableObjectNamespace) {
+    JSG_INHERIT(DurableObjectNamespace);
+    JSG_CALLABLE(call);
+  }
+
+ private:
+  jsg::Ref<LoopbackDurableObjectClass> loopbackClass;
+};
+
+// Like LoopbackDurableObjectNamespace, but for colo-local (ephemeral) actor namespaces.
+class LoopbackColoLocalActorNamespace: public ColoLocalActorNamespace {
+ public:
+  LoopbackColoLocalActorNamespace(
+      uint nsChannel, jsg::Ref<LoopbackDurableObjectClass> loopbackClass)
+      : ColoLocalActorNamespace(nsChannel),
+        loopbackClass(kj::mv(loopbackClass)) {}
+
+  // getClass() accessor for use from C++ only.
+  LoopbackDurableObjectClass& getClass() {
+    return *loopbackClass.get();
+  }
+
+  // Invoking the binding creates a specialization of the class -- not the namespace.
+  jsg::Ref<DurableObjectClass> call(jsg::Lock& js, LoopbackDurableObjectClass::Options options) {
+    return loopbackClass->call(js, kj::mv(options));
+  }
+
+  JSG_RESOURCE_TYPE(LoopbackColoLocalActorNamespace) {
+    JSG_INHERIT(ColoLocalActorNamespace);
+    JSG_CALLABLE(call);
+  }
+
+ private:
+  jsg::Ref<LoopbackDurableObjectClass> loopbackClass;
+};
+
 #define EW_EXPORT_LOOPBACK_ISOLATE_TYPES                                                           \
   api::LoopbackServiceStub, api::LoopbackServiceStub::Options, api::LoopbackDurableObjectClass,    \
-      api::LoopbackDurableObjectClass::Options
+      api::LoopbackDurableObjectClass::Options, api::LoopbackDurableObjectNamespace,               \
+      api::LoopbackColoLocalActorNamespace
 
 }  // namespace workerd::api

@@ -4266,16 +4266,18 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       decltype(Global::value) value;
       KJ_IF_SOME(ns, def.localActorConfigs.find(className)) {
         // This class has storage attached. We'll create a loopback actor namespace binding.
-        // TODO(now): Currently we don't use actorClassChannel in this branch even though we have
-        //   allocated one. That will change later in this PR.
         KJ_SWITCH_ONEOF(ns) {
           KJ_CASE_ONEOF(durable, Durable) {
-            value = Global::DurableActorNamespace{
-              .actorChannel = nextActorChannel++, .uniqueKey = durable.uniqueKey};
+            value = Global::LoopbackDurableActorNamespace{
+              .actorChannel = nextActorChannel++,
+              .uniqueKey = durable.uniqueKey,
+              .classChannel = actorClassChannel,
+            };
           }
           KJ_CASE_ONEOF(ephemeral, Ephemeral) {
-            value = Global::EphemeralActorNamespace{
+            value = Global::LoopbackEphemeralActorNamespace{
               .actorChannel = nextActorChannel++,
+              .classChannel = actorClassChannel,
             };
           }
         }

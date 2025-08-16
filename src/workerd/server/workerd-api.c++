@@ -918,11 +918,22 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
       value = lock.wrap(context, lock.alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
     }
+    KJ_CASE_ONEOF(ns, Global::LoopbackEphemeralActorNamespace) {
+      value = lock.wrap(context,
+          lock.alloc<api::LoopbackColoLocalActorNamespace>(
+              ns.actorChannel, lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel)));
+    }
 
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::DurableObjectNamespace>(
               ns.actorChannel, kj::heap<ActorIdFactoryImpl>(ns.uniqueKey)));
+    }
+    KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
+      value = lock.wrap(context,
+          lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
+              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey),
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel)));
     }
 
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
@@ -1062,7 +1073,13 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
       result.value = ns.clone();
     }
+    KJ_CASE_ONEOF(ns, Global::LoopbackEphemeralActorNamespace) {
+      result.value = ns.clone();
+    }
     KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
+      result.value = ns.clone();
+    }
+    KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
       result.value = ns.clone();
     }
     KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {

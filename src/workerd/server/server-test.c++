@@ -4709,8 +4709,8 @@ KJ_TEST("Server: Durable Object facets") {
                 `import { DurableObject } from "cloudflare:workers";
                 `export default {
                 `  async fetch(request, env, ctx) {
-                `    let id = env.NS.idFromName("name");
-                `    let actor = env.NS.get(id);
+                `    let id = ctx.exports.MyActorClass.idFromName("name");
+                `    let actor = ctx.exports.MyActorClass.get(id);
                 `    return await actor.fetch(request);
                 `  }
                 `}
@@ -4794,12 +4794,22 @@ KJ_TEST("Server: Durable Object facets") {
                 `          () => ({class: this.ctx.exports.CounterFacet({props: {bProp: 321}}),
                 `                  id: "abc"}));
                 `      results.push(await prop3.myProps());
+                `
+                `      let prop4 = this.ctx.facets.get("prop4",
+                `          () => ({class: this.ctx.exports.MyActorClass, id: "abc"}));
+                `      results.push(await prop4.mainClassProps());
+                `
+                `      let prop5 = this.ctx.facets.get("prop5",
+                `          () => ({class: this.ctx.exports.MyActorClass({props: {cProp: 555}}),
+                `                  id: "abc"}));
+                `      results.push(await prop5.mainClassProps());
                 `    } else {
                 `      throw new Error(`bad url: ${request.url}`);
                 `    }
                 `
                 `    return new Response(results.join(" "));
                 `  }
+                `  mainClassProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class CounterFacet extends DurableObject {
                 `  async increment(first) {
@@ -4838,7 +4848,6 @@ KJ_TEST("Server: Durable Object facets") {
             )
           ],
           bindings = [
-            (name = "NS", durableObjectNamespace = "MyActorClass"),
             ( name = "COUNTER",
               durableObjectClass = (
                 name = "hello",
@@ -4954,7 +4963,7 @@ KJ_TEST("Server: Durable Object facets") {
     test.server.allowExperimental();
     test.start();
     auto conn = test.connect("test-addr");
-    conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321}");
+    conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321} {} {\"cProp\":555}");
   }
 }
 

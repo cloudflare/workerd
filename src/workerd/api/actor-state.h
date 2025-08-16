@@ -26,6 +26,8 @@ class DurableObject;
 class DurableObjectId;
 class WebSocket;
 class DurableObjectClass;
+class LoopbackDurableObjectNamespace;
+class LoopbackColoLocalActorNamespace;
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 
@@ -393,7 +395,10 @@ class DurableObjectFacets: public jsg::Object {
       : facetManager(kj::mv(facetManager)) {}
 
   struct StartupOptions {
-    jsg::Ref<DurableObjectClass> $class;
+    kj::OneOf<jsg::Ref<DurableObjectClass>,
+        jsg::Ref<LoopbackDurableObjectNamespace>,
+        jsg::Ref<LoopbackColoLocalActorNamespace>>
+        $class;
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
