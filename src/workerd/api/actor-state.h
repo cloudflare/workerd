@@ -514,6 +514,7 @@ class DurableObjectState: public jsg::Object {
   DurableObjectState(jsg::Lock& js,
       Worker::Actor::Id actorId,
       jsg::JsRef<jsg::JsValue> exports,
+      jsg::JsValue props,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
       bool containerRunning,
@@ -523,6 +524,10 @@ class DurableObjectState: public jsg::Object {
 
   jsg::JsValue getExports(jsg::Lock& js) {
     return exports.getHandle(js);
+  }
+
+  jsg::JsValue getProps(jsg::Lock& js) {
+    return props.getHandle(js);
   }
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
@@ -606,6 +611,7 @@ class DurableObjectState: public jsg::Object {
       // this works in production.
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
+    JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
@@ -651,6 +657,7 @@ class DurableObjectState: public jsg::Object {
  private:
   Worker::Actor::Id id;
   jsg::JsRef<jsg::JsValue> exports;
+  jsg::JsRef<jsg::JsValue> props;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
   kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;

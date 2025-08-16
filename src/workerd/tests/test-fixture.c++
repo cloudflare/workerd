@@ -377,8 +377,9 @@ TestFixture::TestFixture(SetupParams&& params)
     };
     actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
         /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, makeStorage, kj::refcounted<MockActorLoopback>(), *timerChannel,
-        kj::refcounted<ActorObserver>(), kj::none, kj::none);
+        /*classname=*/kj::none, /*props=*/Frankenvalue(), makeStorage,
+        kj::refcounted<MockActorLoopback>(), *timerChannel, kj::refcounted<ActorObserver>(),
+        kj::none, kj::none);
   }
 }
 

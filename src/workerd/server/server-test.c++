@@ -4774,6 +4774,16 @@ KJ_TEST("Server: Durable Object facets") {
                 `
                 `      // Delete bar, which recursively deletes its children.
                 `      this.ctx.facets.delete("bar");
+                `    } else if (request.url.endsWith("/props")) {
+                `      results.push(JSON.stringify(this.ctx.props));
+                `
+                `      let prop1 = this.ctx.facets.get("prop1",
+                `          () => ({class: this.env.COUNTER, id: "abc"}));
+                `      results.push(await prop1.myProps());
+                `
+                `      let prop2 = this.ctx.facets.get("prop2",
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
+                `      results.push(await prop2.myProps());
                 `    } else {
                 `      throw new Error(`bad url: ${request.url}`);
                 `    }
@@ -4797,6 +4807,7 @@ KJ_TEST("Server: Durable Object facets") {
                 `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
                 `    }
                 `  }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class NestedFacet extends DurableObject {
                 `  increment(name, first) {
@@ -4818,7 +4829,15 @@ KJ_TEST("Server: Durable Object facets") {
           ],
           bindings = [
             (name = "NS", durableObjectNamespace = "MyActorClass"),
-            (name = "COUNTER", durableObjectClass = (name = "hello", entrypoint = "CounterFacet")),
+            ( name = "COUNTER",
+              durableObjectClass = (
+                name = "hello",
+                entrypoint = "CounterFacet",
+                props = (
+                  json = `{"aProp": 123}
+                )
+              )
+            ),
             (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
             ( name = "EXFILTRATOR",
               durableObjectClass = (name = "hello", entrypoint = "ExfiltrationFacet") )
@@ -4914,6 +4933,19 @@ KJ_TEST("Server: Durable Object facets") {
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
   KJ_EXPECT(!nsDir->exists(
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+
+  // Test facets can have custom ctx.props.
+  {
+    TestServer test(config);
+
+    // We don't need the existing storage but the path does have to exist for the test to work.
+    test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/props", "{} {\"aProp\":123} {}");
+  }
 }
 
 #if __linux__

@@ -213,6 +213,9 @@ export class FacetTestActor extends DurableObject {
                 this.i += j;
                 return this.i;
               }
+              myProps() {
+                return this.ctx.props;
+              }
             }
           `,
         },
@@ -222,7 +225,9 @@ export class FacetTestActor extends DurableObject {
       };
     });
 
-    let cls = worker.getDurableObjectClass('MyActor');
+    let cls = worker.getDurableObjectClass('MyActor', {
+      props: { foo: 123, bar: 456 },
+    });
 
     let facet = this.ctx.facets.get('bar', () => {
       return { class: cls };
@@ -230,6 +235,8 @@ export class FacetTestActor extends DurableObject {
 
     assert.strictEqual(await facet.increment(), 1);
     assert.strictEqual(await facet.increment(4), 5);
+
+    assert.deepEqual(await facet.myProps(), { foo: 123, bar: 456 });
   }
 }
 
