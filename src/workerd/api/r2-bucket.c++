@@ -1021,9 +1021,19 @@ R2Bucket::UnwrappedConditional::UnwrappedConditional(jsg::Lock& js, Headers& h)
     : secondsGranularity(true) {
   KJ_IF_SOME(e, h.getNoChecks(js, "if-match"_kj)) {
     etagMatches = parseConditionalEtagHeader(kj::str(e));
+    KJ_IF_SOME(arr, etagMatches) {
+      if (arr.size() == 0) {
+        JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-match header");
+      }
+    }
   }
   KJ_IF_SOME(e, h.getNoChecks(js, "if-none-match"_kj)) {
     etagDoesNotMatch = parseConditionalEtagHeader(kj::str(e));
+    KJ_IF_SOME(arr, etagDoesNotMatch) {
+      if (arr.size() == 0) {
+        JSG_FAIL_REQUIRE(Error, "Invalid ETag in if-none-match header");
+      }
+    }
   }
   KJ_IF_SOME(d, h.getNoChecks(js, "if-modified-since"_kj)) {
     auto date = parseDate(js, d);
