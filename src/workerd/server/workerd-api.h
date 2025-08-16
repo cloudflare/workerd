@@ -188,11 +188,28 @@ class WorkerdApi final: public Worker::Api {
         return *this;
       }
     };
+    struct LoopbackEphemeralActorNamespace {
+      uint actorChannel;
+      uint classChannel;
+
+      LoopbackEphemeralActorNamespace clone() const {
+        return *this;
+      }
+    };
     struct DurableActorNamespace {
       uint actorChannel;
       kj::StringPtr uniqueKey;
 
       DurableActorNamespace clone() const {
+        return *this;
+      }
+    };
+    struct LoopbackDurableActorNamespace {
+      uint actorChannel;
+      kj::StringPtr uniqueKey;
+      uint classChannel;
+
+      LoopbackDurableActorNamespace clone() const {
         return *this;
       }
     };
@@ -269,7 +286,9 @@ class WorkerdApi final: public Worker::Api {
         R2Admin,
         CryptoKey,
         EphemeralActorNamespace,
+        LoopbackEphemeralActorNamespace,
         DurableActorNamespace,
+        LoopbackDurableActorNamespace,
         QueueBinding,
         kj::String,
         kj::Array<byte>,
