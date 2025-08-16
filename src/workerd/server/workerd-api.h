@@ -241,6 +241,14 @@ class WorkerdApi final: public Worker::Api {
       }
     };
 
+    struct LoopbackActorClass {
+      uint channel;
+
+      LoopbackActorClass clone() const {
+        return *this;
+      }
+    };
+
     struct WorkerLoader {
       uint channel;
 
@@ -268,6 +276,7 @@ class WorkerdApi final: public Worker::Api {
         UnsafeEval,
         MemoryCache,
         ActorClass,
+        LoopbackActorClass,
         WorkerLoader>
         value;
 

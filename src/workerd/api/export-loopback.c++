@@ -19,4 +19,15 @@ jsg::Ref<Fetcher> LoopbackServiceStub::call(jsg::Lock& js, Options options) {
   return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channelObj)));
 }
 
+jsg::Ref<DurableObjectClass> LoopbackDurableObjectClass::call(jsg::Lock& js, Options options) {
+  Frankenvalue props;
+  KJ_IF_SOME(p, options.props) {
+    props = Frankenvalue::fromJs(js, p.getHandle(js));
+  }
+
+  IoContext& ioctx = IoContext::current();
+  auto channelObj = ioctx.getIoChannelFactory().getActorClass(channel, kj::mv(props));
+  return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channelObj)));
+}
+
 }  // namespace workerd::api

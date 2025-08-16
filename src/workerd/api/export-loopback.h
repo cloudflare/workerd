@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "actor.h"
 #include "http.h"
 
 namespace workerd::api {
@@ -37,6 +38,35 @@ class LoopbackServiceStub: public Fetcher {
   uint channel;
 };
 
-#define EW_EXPORT_LOOPBACK_ISOLATE_TYPES api::LoopbackServiceStub, api::LoopbackServiceStub::Options
+// Similar to LoopbackServiceStub, but for actor classes.
+//
+// Specifically, this is used for actor classes that do *not* have any storage configured. If you
+// simply export a class extending `DurableObject` but you don't configure storage for it, it shows
+// up in `ctx.exports` as this type. This can be used to create a Durable Object facet.
+class LoopbackDurableObjectClass: public DurableObjectClass {
+ public:
+  LoopbackDurableObjectClass(uint channel): DurableObjectClass(channel), channel(channel) {}
+
+  struct Options {
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
+
+    JSG_STRUCT(props);
+  };
+
+  // Create a specialized DurableObjectClass which can be passed over RPC.
+  jsg::Ref<DurableObjectClass> call(jsg::Lock& js, Options options);
+
+  JSG_RESOURCE_TYPE(LoopbackDurableObjectClass) {
+    JSG_INHERIT(DurableObjectClass);
+    JSG_CALLABLE(call);
+  }
+
+ private:
+  uint channel;
+};
+
+#define EW_EXPORT_LOOPBACK_ISOLATE_TYPES                                                           \
+  api::LoopbackServiceStub, api::LoopbackServiceStub::Options, api::LoopbackDurableObjectClass,    \
+      api::LoopbackDurableObjectClass::Options
 
 }  // namespace workerd::api

@@ -259,6 +259,10 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   // Start a request on the actor. (The actor must have been created using newActor().)
   virtual kj::Own<WorkerInterface> startRequest(
       IoChannelFactory::SubrequestMetadata metadata, kj::Own<Worker::Actor> actor) = 0;
+
+  virtual kj::Own<ActorClass> forProps(Frankenvalue props) {
+    KJ_FAIL_REQUIRE("can't override props for this actor class");
+  }
 };
 
 Server::~Server() noexcept {
@@ -1973,6 +1977,14 @@ class Server::WorkerService final: public Service,
     }
   }
 
+  kj::Own<ActorClass> getLoopbackActorClass(kj::StringPtr name) {
+    // Look up a more permanent class name string. (Also validates this is actually an export.)
+    kj::StringPtr className = KJ_REQUIRE_NONNULL(actorClassEntrypoints.find(name),
+        "getLoopbackActorClass() called for actor class that doesn't exist");
+
+    return kj::refcounted<ActorClassImpl>(*this, className, kj::none);
+  }
+
   bool hasDefaultEntrypoint() {
     return defaultEntrypointHandlers != kj::none;
   }
@@ -2960,7 +2972,7 @@ class Server::WorkerService final: public Service,
 
   class ActorClassImpl final: public ActorClass {
    public:
-    ActorClassImpl(WorkerService& service, kj::StringPtr className, Frankenvalue props)
+    ActorClassImpl(WorkerService& service, kj::StringPtr className, kj::Maybe<Frankenvalue> props)
         : service(kj::addRef(service)),
           className(className),
           props(kj::mv(props)) {}
@@ -2979,8 +2991,15 @@ class Server::WorkerService final: public Service,
       // work for local development we need to pass an event type.
       static constexpr uint16_t hibernationEventTypeId = 8;
 
+      Frankenvalue props;
+      KJ_IF_SOME(p, this->props) {
+        props = p.clone();
+      } else {
+        // Using ctx.exports class loopback without specifying props. Use empty props.
+      }
+
       return kj::refcounted<Worker::Actor>(*service->worker, tracker, kj::mv(actorId), true,
-          kj::mv(makeActorCache), className, props.clone(), kj::mv(makeStorage), kj::mv(loopback),
+          kj::mv(makeActorCache), className, kj::mv(props), kj::mv(makeStorage), kj::mv(loopback),
           timerChannel, kj::refcounted<ActorObserver>(), kj::mv(manager), hibernationEventTypeId,
           kj::mv(container), facetManager);
     }
@@ -2992,10 +3011,20 @@ class Server::WorkerService final: public Service,
       return service->startRequest(kj::mv(metadata), className, {}, kj::mv(actor));
     }
 
+    kj::Own<ActorClass> forProps(Frankenvalue props) override {
+      if (this->props != kj::none) {
+        // This entrypoint is already specialized. Delegate to the default implementation (which
+        // will throw an exception).
+        return ActorClass::forProps(kj::mv(props));
+      }
+
+      return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
+    }
+
    private:
     kj::Own<WorkerService> service;
     kj::StringPtr className;
-    Frankenvalue props;
+    kj::Maybe<Frankenvalue> props;
   };
 
   ThreadContext& threadContext;
@@ -3207,13 +3236,19 @@ class Server::WorkerService final: public Service,
     return ns.getActorChannel(kj::str(id));
   }
 
-  kj::Own<ActorClassChannel> getActorClass(uint channel) override {
+  kj::Own<ActorClassChannel> getActorClass(uint channel, kj::Maybe<Frankenvalue> props) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
     KJ_REQUIRE(channel < channels.actorClass.size(), "invalid actor class channel number");
 
-    return kj::addRef(*channels.actorClass[channel]);
+    ActorClass& cls = *channels.actorClass[channel];
+
+    KJ_IF_SOME(p, props) {
+      return cls.forProps(kj::mv(p));
+    }
+
+    return kj::addRef(cls);
   }
 
   void abortAllActors(kj::Maybe<kj::Exception&> reason) override {
@@ -4246,7 +4281,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         }
       } else {
         // No storage attached. We'll create an actual class binding (for use with facets).
-        value = Global::ActorClass{.channel = actorClassChannel};
+        value = Global::LoopbackActorClass{.channel = actorClassChannel};
       }
       ctxExports.add(Global{.name = kj::str(className), .value = kj::mv(value)});
     }
@@ -4335,7 +4370,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // class channel, but only the ones with configured storage will also get namespace channels.
     auto& selfActorNamespaces = workerService.getActorNamespaces();
     for (auto& className: actorClassNames) {
-      actorClasses.add(KJ_ASSERT_NONNULL(workerService.getActorClass(className, /*props=*/{})));
+      actorClasses.add(workerService.getLoopbackActorClass(className));
       KJ_IF_SOME(ns, selfActorNamespaces.find(className)) {
         linkedActorChannels.add(*ns);
       }

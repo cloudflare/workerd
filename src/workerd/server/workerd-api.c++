@@ -985,6 +985,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       value = lock.wrap(context, lock.alloc<api::DurableObjectClass>(actorClass.channel));
     }
 
+    KJ_CASE_ONEOF(actorClass, Global::LoopbackActorClass) {
+      value = lock.wrap(context, lock.alloc<api::LoopbackDurableObjectClass>(actorClass.channel));
+    }
+
     KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
       value = lock.wrap(context,
           lock.alloc<api::WorkerLoader>(
@@ -1081,6 +1085,9 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     }
 
     KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
+      result.value = actorClass.clone();
+    }
+    KJ_CASE_ONEOF(actorClass, Global::LoopbackActorClass) {
       result.value = actorClass.clone();
     }
     KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
