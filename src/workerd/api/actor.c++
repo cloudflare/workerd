@@ -193,8 +193,9 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
 
 kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoContext& ioctx) {
   KJ_SWITCH_ONEOF(channel) {
-    KJ_CASE_ONEOF(number, uint) {
-      return ioctx.getIoChannelFactory().getActorClass(number);
+    KJ_CASE_ONEOF(staticChannel, StaticChannel) {
+      return ioctx.getIoChannelFactory().getActorClass(staticChannel.channel,
+          staticChannel.props.map([](Frankenvalue& p) { return p.clone(); }));
     }
     KJ_CASE_ONEOF(object, IoOwn<IoChannelFactory::ActorClassChannel>) {
       return kj::addRef(*object);

@@ -205,7 +205,11 @@ class IoChannelFactory {
   };
 
   // Get an actor class binding corresponding to the given channel number.
-  virtual kj::Own<ActorClassChannel> getActorClass(uint channel) {
+  //
+  // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw.
+  virtual kj::Own<ActorClassChannel> getActorClass(
+      uint channel, kj::Maybe<Frankenvalue> props = kj::none) {
     // TODO(cleanup): Remove this once the production runtime has implemented this.
     KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
   }

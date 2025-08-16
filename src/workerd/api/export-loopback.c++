@@ -48,4 +48,13 @@ jsg::Ref<Fetcher> LoopbackServiceStub::call(jsg::Lock& js, Options options) {
       RequiresHostAndProtocol::YES, /*isInHouse=*/true);
 }
 
+jsg::Ref<DurableObjectClass> LoopbackDurableObjectClass::call(jsg::Lock& js, Options options) {
+  Frankenvalue props;
+  KJ_IF_SOME(p, options.props) {
+    props = Frankenvalue::fromJs(js, p.getHandle(js));
+  }
+
+  return jsg::alloc<DurableObjectClass>(channel, kj::mv(props));
+}
+
 }  // namespace workerd::api

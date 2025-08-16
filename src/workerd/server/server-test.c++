@@ -4435,7 +4435,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
 
   auto conn = test.connect("test-addr");
   conn.httpGet200("/",
-      "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, DurableObjectClass, "
+      "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, LoopbackDurableObjectClass, "
       "{}, {\"foo\":123,\"bar\":\"abc\"}");
 }
 
@@ -4789,6 +4789,11 @@ KJ_TEST("Server: Durable Object facets") {
                 `      let prop2 = this.ctx.facets.get("prop2",
                 `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
                 `      results.push(await prop2.myProps());
+                `
+                `      let prop3 = this.ctx.facets.get("prop3",
+                `          () => ({class: this.ctx.exports.CounterFacet({props: {bProp: 321}}),
+                `                  id: "abc"}));
+                `      results.push(await prop3.myProps());
                 `    } else {
                 `      throw new Error(`bad url: ${request.url}`);
                 `    }
@@ -4949,7 +4954,7 @@ KJ_TEST("Server: Durable Object facets") {
     test.server.allowExperimental();
     test.start();
     auto conn = test.connect("test-addr");
-    conn.httpGet200("/props", "{} {\"aProp\":123} {}");
+    conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321}");
   }
 }
 

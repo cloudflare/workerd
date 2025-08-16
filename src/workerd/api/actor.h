@@ -312,7 +312,8 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 // as a facet. The only use of this type is to pass to `ctx.facets.get()`.
 class DurableObjectClass: public jsg::Object {
  public:
-  DurableObjectClass(uint channel): channel(channel) {}
+  DurableObjectClass(uint channel, kj::Maybe<Frankenvalue> props = kj::none)
+      : channel(StaticChannel{channel, kj::mv(props)}) {}
   DurableObjectClass(IoOwn<IoChannelFactory::ActorClassChannel> channel)
       : channel(kj::mv(channel)) {}
 
@@ -323,7 +324,12 @@ class DurableObjectClass: public jsg::Object {
   }
 
  private:
-  kj::OneOf<uint, IoOwn<IoChannelFactory::ActorClassChannel>> channel;
+  struct StaticChannel {
+    uint channel;
+    kj::Maybe<Frankenvalue> props;
+  };
+
+  kj::OneOf<StaticChannel, IoOwn<IoChannelFactory::ActorClassChannel>> channel;
 };
 
 #define EW_ACTOR_ISOLATE_TYPES                                                                     \
