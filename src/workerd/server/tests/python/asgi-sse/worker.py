@@ -52,10 +52,14 @@ class SSEServer:
                 )
 
 
-async def on_fetch(request, env, ctx):
-    import asgi
+from workers import WorkerEntrypoint
 
-    return await asgi.fetch(app, request, env, ctx)
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request, env):
+        import asgi
+
+        return await asgi.fetch(app, request, env)
 
 
 app = SSEServer()

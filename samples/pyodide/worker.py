@@ -1,8 +1,10 @@
 from js import Response
+from workers import WorkerEntrypoint
 
 
-def on_fetch(request):
-    return Response.new("hello world")
+class Default(WorkerEntrypoint):
+    def fetch(self, request):
+        return Response.new("hello world")
 
 
 def test():
