@@ -77,6 +77,11 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
+  kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props) override {
+    KJ_FAIL_ASSERT("no subrequests");
+  }
+
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_ASSERT("no capabilities");
   }

@@ -4384,6 +4384,8 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      await ctx.exports.default.corge(555),
                 `      await actor.grault(456),
                 `      ctx.exports.UnconfiguredActor.constructor.name,
+                `      await ctx.exports.MyEntrypoint.myProps(),
+                `      await ctx.exports.MyEntrypoint({props: {foo: 123, bar: "abc"}}).myProps(),
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4391,6 +4393,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class MyEntrypoint extends WorkerEntrypoint {
                 `  foo(i) { return `foo: ${i}` }
                 `  grault(i) { return `grault: ${i}` }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class AnotherEntrypoint extends WorkerEntrypoint {
                 `  bar(i) { return `bar: ${i}` }
@@ -4431,7 +4434,9 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   test.start();
 
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, DurableObjectClass");
+  conn.httpGet200("/",
+      "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, DurableObjectClass, "
+      "{}, {\"foo\":123,\"bar\":\"abc\"}");
 }
 
 // =======================================================================================

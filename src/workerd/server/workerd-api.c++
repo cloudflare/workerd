@@ -15,6 +15,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
@@ -129,6 +130,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WORKER_LOADER_ISOLATE_TYPES,
     EW_MESSAGECHANNEL_ISOLATE_TYPES,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
+    EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -853,6 +855,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
               pipeline.isInHouse));
     }
 
+    KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
+      value = lock.wrap(context, lock.alloc<api::LoopbackServiceStub>(loopback.channel));
+    }
+
     KJ_CASE_ONEOF(ns, Global::KvNamespace) {
       value = lock.wrap(context,
           lock.alloc<api::KvNamespace>(
@@ -1027,6 +1033,9 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     }
     KJ_CASE_ONEOF(fetcher, Global::Fetcher) {
       result.value = fetcher.clone();
+    }
+    KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
+      result.value = loopback.clone();
     }
     KJ_CASE_ONEOF(kvNamespace, Global::KvNamespace) {
       result.value = kvNamespace.clone();

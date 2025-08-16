@@ -226,6 +226,12 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   virtual Service* service() {
     return this;
   }
+
+  // Implemented by EntrypointService for loopback ctx.exports entrypoints, to allow props to be
+  // specified.
+  virtual kj::Own<Service> forProps(Frankenvalue props) {
+    KJ_FAIL_REQUIRE("can't override props for this service");
+  }
 };
 
 class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
@@ -1938,6 +1944,27 @@ class Server::WorkerService final: public Service,
     return kj::refcounted<EntrypointService>(*this, name, kj::mv(props), *handlers);
   }
 
+  // Like getEntrypoint() but used specifically to get the entrypoint for use in ctx.exports,
+  // where it can be used raw (props are empty), or can be specialized with props.
+  kj::Own<Service> getLoopbackEntrypoint(kj::Maybe<kj::StringPtr> name) {
+    const kj::HashSet<kj::String>* handlers;
+    KJ_IF_SOME(n, name) {
+      KJ_IF_SOME(entry, namedEntrypoints.findEntry(n)) {
+        name = entry.key;  // replace with more-permanent string
+        handlers = &entry.value;
+      } else {
+        KJ_FAIL_REQUIRE("getLoopbackEntrypoint() called for entrypoint that doesn't exist");
+      }
+    } else {
+      KJ_IF_SOME(d, defaultEntrypointHandlers) {
+        handlers = &d;
+      } else {
+        KJ_FAIL_REQUIRE("getLoopbackEntrypoint() called for entrypoint that doesn't exist");
+      }
+    }
+    return kj::refcounted<EntrypointService>(*this, name, kj::none, *handlers);
+  }
+
   kj::Maybe<kj::Own<ActorClass>> getActorClass(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
     KJ_IF_SOME(className, actorClassEntrypoints.find(KJ_UNWRAP_OR(name, return kj::none))) {
       return kj::refcounted<ActorClassImpl>(*this, className, kj::mv(props));
@@ -2883,7 +2910,7 @@ class Server::WorkerService final: public Service,
    public:
     EntrypointService(WorkerService& worker,
         kj::Maybe<kj::StringPtr> entrypoint,
-        Frankenvalue props,
+        kj::Maybe<Frankenvalue> props,
         const kj::HashSet<kj::String>& handlers)
         : worker(kj::addRef(worker)),
           entrypoint(entrypoint),
@@ -2896,7 +2923,13 @@ class Server::WorkerService final: public Service,
 
     kj::Own<WorkerInterface> startRequest(
         IoChannelFactory::SubrequestMetadata metadata, bool isTracer) {
-      return worker->startRequest(kj::mv(metadata), entrypoint, props.clone(), kj::none, isTracer);
+      Frankenvalue props;
+      KJ_IF_SOME(p, this->props) {
+        props = p.clone();
+      } else {
+        // Calling ctx.exports loopback without specifying props. Use empty props.
+      }
+      return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
     }
 
     bool hasHandler(kj::StringPtr handlerName) override {
@@ -2908,11 +2941,21 @@ class Server::WorkerService final: public Service,
       return worker;
     }
 
+    kj::Own<Service> forProps(Frankenvalue props) override {
+      if (this->props != kj::none) {
+        // This entrypoint is already specialized. Delegate to the default implementation (which
+        // will throw an exception).
+        return Service::forProps(kj::mv(props));
+      }
+
+      return kj::refcounted<EntrypointService>(*worker, entrypoint, kj::mv(props), handlers);
+    }
+
    private:
     kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
     const kj::HashSet<kj::String>& handlers;
-    Frankenvalue props;
+    kj::Maybe<Frankenvalue> props;
   };
 
   class ActorClassImpl final: public ActorClass {
@@ -3114,13 +3157,23 @@ class Server::WorkerService final: public Service,
     co_return;
   }
 
-  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) override {
+  kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props) override {
     auto& channels =
         KJ_REQUIRE_NONNULL(ioChannels.tryGet<LinkedIoChannels>(), "link() has not been called");
 
     KJ_REQUIRE(channel < channels.subrequest.size(), "invalid subrequest channel number");
 
-    return kj::addRef(*channels.subrequest[channel]);
+    SubrequestChannel& channelRef = *channels.subrequest[channel];
+
+    KJ_IF_SOME(p, props) {
+      // Requesting specialization of loopback (ctx.exports) entrypoint with props.
+      auto& service = KJ_REQUIRE_NONNULL(kj::dynamicDowncastIfAvailable<Service>(channelRef),
+          "referenced channel is not a loopback channel");
+      return service.forProps(kj::mv(p));
+    }
+
+    return kj::addRef(channelRef);
   }
 
   kj::Own<ActorChannel> getGlobalActor(uint channel,
@@ -4156,13 +4209,11 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         def.subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
     if (errorReporter.defaultEntrypoint != kj::none) {
       ctxExports.add(Global{.name = kj::str("default"),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+        .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
       ctxExports.add(Global{.name = kj::str(ep.key),
-        .value = Global::Fetcher{
-          .channel = nextSubrequestChannel++, .requiresHost = true, .isInHouse = false}});
+        .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
 
     // Start numbering loopback channels for actor classes after the last actor channel and actor
@@ -4237,10 +4288,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // in exactyl the same order as the channels were allocated earlier when we compiled the
     // ctx.exports bindings.
     if (workerService.hasDefaultEntrypoint()) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(/*name=*/kj::none, /*props=*/{})));
+      services.add(workerService.getLoopbackEntrypoint(/*name=*/kj::none));
     }
     for (auto& ep: entrypointNames) {
-      services.add(KJ_ASSERT_NONNULL(workerService.getEntrypoint(ep, /*props=*/{})));
+      services.add(workerService.getLoopbackEntrypoint(ep));
     }
 
     result.subrequest = services.finish();
