@@ -4,3 +4,14 @@
 
 export function createRequire(path: string): (specifier: string) => unknown;
 export function isBuiltin(specifier: string): boolean;
+
+export type StripTypesOptions = {
+  mode?: 'strip' | 'transform';
+  sourceMap?: boolean;
+  sourceUrl?: string;
+};
+
+export function stripTypeScriptTypes(
+  source: string,
+  options?: StripTypesOptions | undefined
+): string;

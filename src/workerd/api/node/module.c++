@@ -6,6 +6,11 @@
 #include <workerd/io/features.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+#include <workerd/rust/transpiler/lib.rs.h>
+
+#include <kj-rs/kj-rs.h>
+
+using namespace kj_rs;
 
 namespace workerd::api::node {
 
@@ -106,6 +111,28 @@ jsg::JsValue ModuleUtil::createRequire(jsg::Lock& js, kj::String path) {
 
     return jsg::ModuleRegistry::requireImpl(js, info, options);
   }));
+}
+
+kj::String ModuleUtil::stripTypeScriptTypes(
+    jsg::Lock& js, kj::String source, jsg::Optional<StripTypesOptions> options) {
+  auto opts = kj::mv(options).orDefault({});
+  auto mode = opts.mode.map([](kj::String& str) { return str.asPtr(); }).orDefault("strip"_kj);
+  // auto sourceMap = opts.sourceMap.orDefault(false);
+  // auto sourceUrl = opts.sourceUrl.map([](kj::String& str) { return str.asPtr(); })
+  //     .orDefault(nullptr);
+  JSG_REQUIRE(mode == "strip"_kj, Error, "The transform mode is not yet implemented");
+
+  auto output = rust::transpiler::ts_strip(kj::String().as<Rust>(), source.asBytes().as<Rust>());
+
+  if (output.success) {
+    return kj::str(output.code);
+  }
+
+  auto description = kj::str("Error transpiling : ", output.error);
+  for (auto& diag: output.diagnostics) {
+    description = kj::str(description, "\n    ", diag.message);
+  }
+  JSG_FAIL_REQUIRE(Error, description);
 }
 
 }  // namespace workerd::api::node

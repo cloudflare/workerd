@@ -3,7 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { default as moduleUtil } from 'node-internal:module';
+import type { StripTypesOptions } from 'node-internal:module';
 import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+
+import { validateString } from 'node-internal:validators';
 
 export function createRequire(
   path: string | URL
@@ -110,8 +113,27 @@ export const builtinModules = [
 ];
 Object.freeze(builtinModules);
 
+export function stripTypeScriptTypes(
+  source: string,
+  options: StripTypesOptions | undefined = {}
+): string {
+  validateString(source, 'source');
+  // Currently only "strip" mode is supported.
+  const mode = options?.mode ?? 'strip';
+  if (mode !== 'strip') {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options.mode',
+      mode,
+      'Only "strip" mode is currently supported.'
+    );
+  }
+
+  return moduleUtil.stripTypeScriptTypes(source, options);
+}
+
 export default {
   createRequire,
   isBuiltin,
   builtinModules,
+  stripTypeScriptTypes,
 };
