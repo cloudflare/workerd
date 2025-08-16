@@ -152,6 +152,9 @@ class IoChannelFactory {
     // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
     // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
     // `dynamicDispatchTarget` do not.
+    //
+    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
+    // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
   };
 
@@ -161,11 +164,12 @@ class IoChannelFactory {
   // The reason to use this instead is when the channel is not necessarily going to be used to
   // start a subrequest immediately, but instead is going to be passed around as a capability.
   //
+  // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw.
+  //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) {
-    // TODO(cleanup): Remove this once the production runtime has implemented this.
-    KJ_UNIMPLEMENTED("This runtime doesn't support getSubrequestChannel().");
-  }
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props = kj::none) = 0;
 
   // Stub for a remote actor. Allows sending requests to the actor.
   class ActorChannel: public SubrequestChannel {

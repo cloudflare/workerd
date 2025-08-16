@@ -103,6 +103,13 @@ class WorkerdApi final: public Worker::Api {
         return *this;
       }
     };
+    struct LoopbackServiceStub {
+      uint channel;
+
+      LoopbackServiceStub clone() const {
+        return *this;
+      }
+    };
     struct KvNamespace {
       uint subrequestChannel;
 
@@ -248,6 +255,7 @@ class WorkerdApi final: public Worker::Api {
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
+        LoopbackServiceStub,
         KvNamespace,
         R2Bucket,
         R2Admin,
