@@ -38,7 +38,7 @@ void TailStreamWriter::report(
   }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
-  // The onset set must be first and most only happen once.
+  // The onset event must be first and must only happen once.
   if (event.is<tracing::Onset>()) {
     KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
     onsetSeen = true;
@@ -327,25 +327,29 @@ void WorkerTracer::setEventInfo(
   trace->eventTimestamp = timestamp;
   this->topLevelInvocationSpanContext = context.clone();
 
-  size_t newSize = trace->bytesUsed;
+  size_t eventSize = 0;
+  bool truncated = false;
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
-      newSize += fetch.url.size();
+      eventSize += fetch.url.size();
       for (const auto& header: fetch.headers) {
-        newSize += header.name.size() + header.value.size();
+        eventSize += header.name.size() + header.value.size();
       }
-      newSize += fetch.cfJson.size();
-      if (newSize > MAX_TRACE_BYTES) {
+      eventSize += fetch.cfJson.size();
+      if (trace->bytesUsed + eventSize > MAX_TRACE_BYTES) {
         trace->truncated = true;
+        truncated = true;
         trace->logs.add(timestamp, LogLevel::WARN,
             kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
         trace->eventInfo = tracing::FetchEventInfo(fetch.method, {}, {}, {});
-        return;
+        // Limit STW onset to MAX_TRACE_BYTES, beyond that dispatch a truncated event too.
+        if (eventSize > MAX_TRACE_BYTES) {
+          info = tracing::FetchEventInfo(fetch.method, {}, {}, {});
+        }
       }
     }
     KJ_CASE_ONEOF_DEFAULT {}
   }
-  trace->bytesUsed = newSize;
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     // Provide WorkerInfo to the streaming tail worker if available. This data is provided when the
@@ -365,7 +369,11 @@ void WorkerTracer::setEventInfo(
 
     writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
   }
-  trace->eventInfo = kj::mv(info);
+
+  if (!truncated) {
+    trace->bytesUsed += eventSize;
+    trace->eventInfo = kj::mv(info);
+  }
 }
 
 void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) {
