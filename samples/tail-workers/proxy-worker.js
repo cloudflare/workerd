@@ -52,14 +52,14 @@ Speedup factor: ${(avgJsonTime / avgCppTime).toFixed(2)}x
 
     // Measure JSON.stringify serialization time
     const jsonStart = performance.now();
-    // const jsonEvents = events.map((event) => JSON.parse(JSON.stringify(event)));
-    await this.env.SERVICE.tail(JSON.parse(JSON.stringify(events)));
+    let jsonEvents = events.map((event) => structuredClone(event.toJSON()));
+    // let tmp1 = structuredClone(JSON.parse(JSON.stringify(events)));
     const jsonEnd = performance.now();
     const jsonTime = jsonEnd - jsonStart;
 
     // Measure C++ serialization time (direct object passing)
     const cppStart = performance.now();
-    await this.env.SERVICE.tail(events);
+    let tmp2 = structuredClone(events);
     const cppEnd = performance.now();
     const cppTime = cppEnd - cppStart;
 

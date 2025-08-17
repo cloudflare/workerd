@@ -623,6 +623,119 @@ jsg::Ref<TraceItem> TraceItem::deserialize(
   return js.alloc<TraceItem>(js, trace);
 }
 
+jsg::JsValue TraceItem::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+
+  // Basic fields
+  obj.set(js, "outcome", js.str(outcome));
+  obj.set(js, "executionModel", js.str(executionModel));
+  obj.set(js, "cpuTime", js.num(cpuTime));
+  obj.set(js, "wallTime", js.num(wallTime));
+  obj.set(js, "truncated", js.boolean(truncated));
+
+  // Optional fields
+  KJ_IF_SOME(et, eventTimestamp) {
+    obj.set(js, "eventTimestamp", js.num(et));
+  }
+  KJ_IF_SOME(sn, scriptName) {
+    obj.set(js, "scriptName", js.str(sn));
+  }
+  KJ_IF_SOME(ep, entrypoint) {
+    obj.set(js, "entrypoint", js.str(ep));
+  }
+  KJ_IF_SOME(dn, dispatchNamespace) {
+    obj.set(js, "dispatchNamespace", js.str(dn));
+  }
+  KJ_IF_SOME(st, scriptTags) {
+    auto tagsArray = js.arr();
+    for (auto i: kj::indices(st)) {
+      tagsArray.add(js, js.str(st[i]));
+    }
+    obj.set(js, "scriptTags", tagsArray);
+  }
+  KJ_IF_SOME(sv, scriptVersion) {
+    auto svObj = js.obj();
+    KJ_IF_SOME(id, sv.id) {
+      svObj.set(js, "id", js.str(id));
+    }
+    KJ_IF_SOME(tag, sv.tag) {
+      svObj.set(js, "tag", js.str(tag));
+    }
+    KJ_IF_SOME(msg, sv.message) {
+      svObj.set(js, "message", js.str(msg));
+    }
+    obj.set(js, "scriptVersion", svObj);
+  }
+
+  // Convert arrays using their toJSON methods
+  if (logs.size() > 0) {
+    auto logsArray = js.arr();
+    for (auto i: kj::indices(logs)) {
+      logsArray.add(js, logs[i]->toJSON(js));
+    }
+    obj.set(js, "logs", logsArray);
+  }
+
+  if (exceptions.size() > 0) {
+    auto exceptionsArray = js.arr();
+    for (auto i: kj::indices(exceptions)) {
+      exceptionsArray.add(js, exceptions[i]->toJSON(js));
+    }
+    obj.set(js, "exceptions", exceptionsArray);
+  }
+
+  if (diagnosticChannelEvents.size() > 0) {
+    auto eventsArray = js.arr();
+    for (auto i: kj::indices(diagnosticChannelEvents)) {
+      eventsArray.add(js, diagnosticChannelEvents[i]->toJSON(js));
+    }
+    obj.set(js, "diagnosticsChannelEvents", eventsArray);
+  }
+
+  if (spans.size() > 0) {
+    auto spansArray = js.arr();
+    for (auto i: kj::indices(spans)) {
+      spansArray.add(js, spans[i]->toJSON(js));
+    }
+    obj.set(js, "spans", spansArray);
+  }
+
+  // Handle eventInfo using their toJSON methods
+  KJ_IF_SOME(ei, eventInfo) {
+    KJ_SWITCH_ONEOF(ei) {
+      KJ_CASE_ONEOF(fetchEvent, jsg::Ref<FetchEventInfo>) {
+        obj.set(js, "event", fetchEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(jsRpcEvent, jsg::Ref<JsRpcEventInfo>) {
+        obj.set(js, "event", jsRpcEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(scheduledEvent, jsg::Ref<ScheduledEventInfo>) {
+        obj.set(js, "event", scheduledEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(alarmEvent, jsg::Ref<AlarmEventInfo>) {
+        obj.set(js, "event", alarmEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(queueEvent, jsg::Ref<QueueEventInfo>) {
+        obj.set(js, "event", queueEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(emailEvent, jsg::Ref<EmailEventInfo>) {
+        obj.set(js, "event", emailEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(tailEvent, jsg::Ref<TailEventInfo>) {
+        obj.set(js, "event", tailEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(customEvent, jsg::Ref<CustomEventInfo>) {
+        obj.set(js, "event", customEvent->toJSON(js));
+      }
+      KJ_CASE_ONEOF(hibernatableWebSocketEvent, jsg::Ref<HibernatableWebSocketEventInfo>) {
+        obj.set(js, "event", hibernatableWebSocketEvent->toJSON(js));
+      }
+    }
+  }
+
+  return jsg::JsValue(obj);
+}
+
 TraceItem::FetchEventInfo::FetchEventInfo(jsg::Lock& js,
     const Trace& trace,
     const tracing::FetchEventInfo& eventInfo,
@@ -809,6 +922,14 @@ double TraceDiagnosticChannelEvent::getTimestamp() {
   return timestamp;
 }
 
+jsg::JsValue TraceDiagnosticChannelEvent::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "timestamp", js.num(timestamp));
+  obj.set(js, "channel", js.str(channel));
+  obj.set(js, "message", getMessage(js));
+  return jsg::JsValue(obj);
+}
+
 ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
     : id{[&]() -> kj::Maybe<kj::String> {
         return UUID::fromUpperLower(version.getId().getUpper(), version.getId().getLower())
@@ -916,6 +1037,42 @@ OTelSpan::OTelSpan(const CompleteSpan& span)
   }
 }
 
+jsg::JsValue OTelSpan::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "spanId", js.str(spanId));
+  obj.set(js, "parentSpanId", js.str(parentSpanId));
+  obj.set(js, "operation", js.str(operation));
+  obj.set(js, "startTime", js.date(startTime));
+  obj.set(js, "endTime", js.date(endTime));
+
+  // Convert tags array
+  auto tagsArray = js.arr();
+  for (auto i: kj::indices(tags)) {
+    auto tagObj = js.obj();
+    tagObj.set(js, "key", js.str(tags[i].key));
+
+    // Handle the TagValue union
+    KJ_SWITCH_ONEOF(tags[i].value) {
+      KJ_CASE_ONEOF(str, kj::String) {
+        tagObj.set(js, "value", js.str(str));
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        tagObj.set(js, "value", js.boolean(b));
+      }
+      KJ_CASE_ONEOF(d, double) {
+        tagObj.set(js, "value", js.num(d));
+      }
+      KJ_CASE_ONEOF(i, int64_t) {
+        tagObj.set(js, "value", js.num(static_cast<double>(i)));
+      }
+    }
+    tagsArray.add(js, tagObj);
+  }
+  obj.set(js, "tags", tagsArray);
+
+  return jsg::JsValue(obj);
+}
+
 TraceLog::TraceLog(jsg::Lock& js, const Trace& trace, const tracing::Log& log)
     : timestamp(getTraceLogTimestamp(log)),
       level(getTraceLogLevel(log)),
@@ -931,6 +1088,14 @@ kj::StringPtr TraceLog::getLevel() {
 
 jsg::V8Ref<v8::Object> TraceLog::getMessage(jsg::Lock& js) {
   return message.addRef(js);
+}
+
+jsg::JsValue TraceLog::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "timestamp", js.num(timestamp));
+  obj.set(js, "level", js.str(level));
+  obj.set(js, "message", jsg::JsValue(message.getHandle(js)));
+  return jsg::JsValue(obj);
 }
 
 TraceException::TraceException(const Trace& trace, const tracing::Exception& exception)
@@ -953,6 +1118,17 @@ kj::StringPtr TraceException::getName() {
 
 jsg::Optional<kj::StringPtr> TraceException::getStack(jsg::Lock& js) {
   return stack;
+}
+
+jsg::JsValue TraceException::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "timestamp", js.num(timestamp));
+  obj.set(js, "name", js.str(name));
+  obj.set(js, "message", js.str(message));
+  KJ_IF_SOME(s, stack) {
+    obj.set(js, "stack", js.str(s));
+  }
+  return jsg::JsValue(obj);
 }
 
 TraceMetrics::TraceMetrics(uint cpuTime, uint wallTime): cpuTime(cpuTime), wallTime(wallTime) {}
@@ -1101,6 +1277,139 @@ void TraceItem::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     }
   }
   tracker.trackField("outcome", outcome);
+}
+
+// toJSON implementations for all EventInfo types
+
+jsg::JsValue TraceItem::FetchEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "request", request->toJSON(js));
+  KJ_IF_SOME(resp, response) {
+    obj.set(js, "response", resp->toJSON(js));
+  }
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::FetchEventInfo::Request::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "method", js.str(getMethod()));
+  obj.set(js, "url", js.str(getUrl()));
+
+  // Convert headers dict to object
+  auto headers = getHeaders(js);
+  auto headersObj = js.obj();
+  for (auto& entry: headers.fields) {
+    headersObj.set(js, entry.name, js.str(entry.value));
+  }
+  obj.set(js, "headers", headersObj);
+
+  KJ_IF_SOME(cf, getCf(js)) {
+    obj.set(js, "cf", jsg::JsValue(cf.getHandle(js)));
+  }
+
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::FetchEventInfo::Response::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "status", js.num(getStatus()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::JsRpcEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "rpcMethod", js.str(getRpcMethod()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::ScheduledEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "scheduledTime", js.num(getScheduledTime()));
+  obj.set(js, "cron", js.str(getCron()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::AlarmEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "scheduledTime", js.date(getScheduledTime()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::QueueEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "queue", js.str(getQueueName()));
+  obj.set(js, "batchSize", js.num(getBatchSize()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::EmailEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "mailFrom", js.str(getMailFrom()));
+  obj.set(js, "rcptTo", js.str(getRcptTo()));
+  obj.set(js, "rawSize", js.num(getRawSize()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::TailEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  auto eventsArray = js.arr();
+  auto consumedEvents = getConsumedEvents();
+  for (auto i: kj::indices(consumedEvents)) {
+    eventsArray.add(js, consumedEvents[i]->toJSON(js));
+  }
+  obj.set(js, "consumedEvents", eventsArray);
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::TailEventInfo::TailItem::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  KJ_IF_SOME(sn, getScriptName()) {
+    obj.set(js, "scriptName", js.str(sn));
+  }
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::HibernatableWebSocketEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  auto event = getEvent();
+  KJ_SWITCH_ONEOF(event) {
+    KJ_CASE_ONEOF(message, jsg::Ref<Message>) {
+      obj.set(js, "getWebSocketEvent", message->toJSON(js));
+    }
+    KJ_CASE_ONEOF(close, jsg::Ref<Close>) {
+      obj.set(js, "getWebSocketEvent", close->toJSON(js));
+    }
+    KJ_CASE_ONEOF(error, jsg::Ref<Error>) {
+      obj.set(js, "getWebSocketEvent", error->toJSON(js));
+    }
+  }
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::HibernatableWebSocketEventInfo::Message::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "webSocketEventType", js.str(getWebSocketEventType()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::HibernatableWebSocketEventInfo::Close::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "webSocketEventType", js.str(getWebSocketEventType()));
+  obj.set(js, "code", js.num(getCode()));
+  obj.set(js, "wasClean", js.boolean(getWasClean()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::HibernatableWebSocketEventInfo::Error::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  obj.set(js, "webSocketEventType", js.str(getWebSocketEventType()));
+  return jsg::JsValue(obj);
+}
+
+jsg::JsValue TraceItem::CustomEventInfo::toJSON(jsg::Lock& js) {
+  auto obj = js.obj();
+  // CustomEventInfo doesn't expose any properties currently
+  return jsg::JsValue(obj);
 }
 
 void TraceItem::FetchEventInfo::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

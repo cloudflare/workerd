@@ -83,6 +83,8 @@ class OTelSpan final: public jsg::Object {
   kj::Date getStartTime();
   kj::Date getEndTime();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(OTelSpan) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(spanId, getSpanID);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(parentSpanId, getParentSpanID);
@@ -90,6 +92,7 @@ class OTelSpan final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(tags, getTags);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(startTime, getStartTime);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(endTime, getEndTime);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -175,6 +178,7 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(truncated, getTruncated);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(cpuTime, getCpuTime);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(wallTime, getWallTime);
+    JSG_METHOD(toJSON);
   }
 
   JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_ITEM);
@@ -183,6 +187,8 @@ class TraceItem final: public jsg::Object {
 
   static jsg::Ref<TraceItem> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  jsg::JsValue toJSON(jsg::Lock& js);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
@@ -235,10 +241,13 @@ class TraceItem::FetchEventInfo final: public jsg::Object {
   jsg::Ref<Request> getRequest();
   jsg::Optional<jsg::Ref<Response>> getResponse();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   // TODO(cleanup) Use struct types more?
   JSG_RESOURCE_TYPE(FetchEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(response, getResponse);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(request, getRequest);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -283,6 +292,8 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
 
   jsg::Ref<Request> getUnredacted(jsg::Lock& js);
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Request) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(cf, getCf);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(headers, getHeaders);
@@ -290,6 +301,7 @@ class TraceItem::FetchEventInfo::Request final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(url, getUrl);
 
     JSG_METHOD(getUnredacted);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -307,8 +319,11 @@ class TraceItem::FetchEventInfo::Response final: public jsg::Object {
 
   uint16_t getStatus();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Response) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(status, getStatus);
+    JSG_METHOD(toJSON);
   }
 
  private:
@@ -326,8 +341,11 @@ class TraceItem::JsRpcEventInfo final: public jsg::Object {
   // TODO(someday): Clearly there should be a better way to distinguish event types?
   kj::StringPtr getRpcMethod();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(JsRpcEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rpcMethod, getRpcMethod);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -345,9 +363,12 @@ class TraceItem::ScheduledEventInfo final: public jsg::Object {
   double getScheduledTime();
   kj::StringPtr getCron();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(ScheduledEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(cron, getCron);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -365,8 +386,11 @@ class TraceItem::AlarmEventInfo final: public jsg::Object {
 
   kj::Date getScheduledTime();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(AlarmEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scheduledTime, getScheduledTime);
+    JSG_METHOD(toJSON);
   }
 
  private:
@@ -381,9 +405,12 @@ class TraceItem::QueueEventInfo final: public jsg::Object {
   uint32_t getBatchSize();
   // TODO(now): Add something about the timestamp(s) of the newest/oldest message(s) in the batch?
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(QueueEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(queue, getQueueName);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(batchSize, getBatchSize);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -403,10 +430,13 @@ class TraceItem::EmailEventInfo final: public jsg::Object {
   kj::StringPtr getRcptTo();
   uint32_t getRawSize();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(EmailEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(mailFrom, getMailFrom);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rcptTo, getRcptTo);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(rawSize, getRawSize);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -429,8 +459,11 @@ class TraceItem::TailEventInfo final: public jsg::Object {
 
   kj::Array<jsg::Ref<TailItem>> getConsumedEvents();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(TailEventInfo) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(consumedEvents, getConsumedEvents);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -445,8 +478,11 @@ class TraceItem::TailEventInfo::TailItem final: public jsg::Object {
 
   kj::Maybe<kj::StringPtr> getScriptName();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(TailItem) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptName, getScriptName);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -477,8 +513,11 @@ class TraceItem::HibernatableWebSocketEventInfo final: public jsg::Object {
 
   Type getEvent();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(HibernatableWebSocketEventInfo) {
     JSG_READONLY_INSTANCE_PROPERTY(getWebSocketEvent, getEvent);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -498,8 +537,11 @@ class TraceItem::HibernatableWebSocketEventInfo::Message final: public jsg::Obje
     return webSocketEventType;
   }
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Message) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
+    JSG_METHOD(toJSON);
   }
 
  private:
@@ -519,10 +561,13 @@ class TraceItem::HibernatableWebSocketEventInfo::Close final: public jsg::Object
   uint16_t getCode();
   bool getWasClean();
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Close) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
     JSG_READONLY_INSTANCE_PROPERTY(code, getCode);
     JSG_READONLY_INSTANCE_PROPERTY(wasClean, getWasClean);
+    JSG_METHOD(toJSON);
   }
 
  private:
@@ -539,8 +584,11 @@ class TraceItem::HibernatableWebSocketEventInfo::Error final: public jsg::Object
     return webSocketEventType;
   }
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(Error) {
     JSG_READONLY_INSTANCE_PROPERTY(webSocketEventType, getWebSocketEventType);
+    JSG_METHOD(toJSON);
   }
 
  private:
@@ -551,7 +599,11 @@ class TraceItem::CustomEventInfo final: public jsg::Object {
  public:
   explicit CustomEventInfo(const Trace& trace, const tracing::CustomEventInfo& eventInfo);
 
-  JSG_RESOURCE_TYPE(CustomEventInfo) {}
+  jsg::JsValue toJSON(jsg::Lock& js);
+
+  JSG_RESOURCE_TYPE(CustomEventInfo) {
+    JSG_METHOD(toJSON);
+  }
 
  private:
   const tracing::CustomEventInfo& eventInfo;
@@ -566,10 +618,13 @@ class TraceDiagnosticChannelEvent final: public jsg::Object {
   kj::StringPtr getChannel();
   jsg::JsValue getMessage(jsg::Lock& js);
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(TraceDiagnosticChannelEvent) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(channel, getChannel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -591,10 +646,13 @@ class TraceLog final: public jsg::Object {
   kj::StringPtr getLevel();
   jsg::V8Ref<v8::Object> getMessage(jsg::Lock& js);
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(TraceLog) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(level, getLevel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
@@ -617,11 +675,14 @@ class TraceException final: public jsg::Object {
   kj::StringPtr getMessage();
   jsg::Optional<kj::StringPtr> getStack(jsg::Lock& js);
 
+  jsg::JsValue toJSON(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(TraceException) {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(timestamp, getTimestamp);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(message, getMessage);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(name, getName);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(stack, getStack);
+    JSG_METHOD(toJSON);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
