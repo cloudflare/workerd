@@ -552,8 +552,7 @@ class StreamWorkerInterface final: public WorkerInterface {
     auto service = kj::newHttpService(*httpClient);
 
     // Forward the request to the service
-    return service->request(method, noHostUrl, newHeaders, requestBody, response)
-        .attach(kj::mv(service), kj::mv(httpClient));
+    co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
