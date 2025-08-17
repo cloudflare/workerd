@@ -3855,7 +3855,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         },
 
         .compileBindings = [env = kj::mv(source.env)](
-            jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
+            jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) mutable {
           env.populateJsObject(js, jsg::JsObject(target));
         },
 

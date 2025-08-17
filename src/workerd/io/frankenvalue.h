@@ -24,21 +24,21 @@ class Frankenvalue {
     return value.is<EmptyObject>() && properties.empty();
   }
 
-  Frankenvalue clone() const;
+  Frankenvalue clone();
 
   // Convert to/from capnp format.
-  void toCapnp(rpc::Frankenvalue::Builder builder) const;
+  void toCapnp(rpc::Frankenvalue::Builder builder);
   static Frankenvalue fromCapnp(rpc::Frankenvalue::Reader reader);
 
   // Convert to/from JavaScript values. Note that round trips here don't produce the exact same
   // Frankenvalue representation: toJs() puts all the contents together into a single value, and
   // fromJs() always returns a Frakenvalue containing a single V8-serialized value.
-  jsg::JsValue toJs(jsg::Lock& js) const;
+  jsg::JsValue toJs(jsg::Lock& js);
   static Frankenvalue fromJs(jsg::Lock& js, jsg::JsValue value);
 
   // Like toJs() but add the properties to an existing object. Throws if the `Frankenvalue` does
   // not represent an object. This is used to populate `env` in particular.
-  void populateJsObject(jsg::Lock& js, jsg::JsObject target) const;
+  void populateJsObject(jsg::Lock& js, jsg::JsObject target);
 
   // Construct a Frakenvalue from JSON.
   //

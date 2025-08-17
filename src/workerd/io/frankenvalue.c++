@@ -4,7 +4,7 @@
 
 namespace workerd {
 
-Frankenvalue Frankenvalue::clone() const {
+Frankenvalue Frankenvalue::clone() {
   Frankenvalue result;
 
   KJ_SWITCH_ONEOF(value) {
@@ -33,7 +33,7 @@ Frankenvalue Frankenvalue::clone() const {
   return result;
 }
 
-void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) const {
+void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(_, EmptyObject) {
       builder.setEmptyObject();
@@ -87,7 +87,7 @@ Frankenvalue Frankenvalue::fromCapnp(rpc::Frankenvalue::Reader reader) {
   return result;
 }
 
-jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
+jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) {
   return js.withinHandleScope([&]() -> jsg::JsValue {
     jsg::JsValue result = [&]() -> jsg::JsValue {
       KJ_SWITCH_ONEOF(value) {
@@ -121,7 +121,7 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
   });
 }
 
-void Frankenvalue::populateJsObject(jsg::Lock& js, jsg::JsObject target) const {
+void Frankenvalue::populateJsObject(jsg::Lock& js, jsg::JsObject target) {
   if (!empty()) {
     js.withinHandleScope([&]() {
       auto sourceObj = KJ_REQUIRE_NONNULL(toJs(js).tryCast<jsg::JsObject>(),
