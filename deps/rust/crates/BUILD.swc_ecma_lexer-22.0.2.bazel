@@ -51,7 +51,7 @@ rust_library(
     version = "22.0.2",
     deps = [
         "@crates_vendor__arrayvec-0.7.6//:arrayvec",
-        "@crates_vendor__bitflags-2.9.1//:bitflags",
+        "@crates_vendor__bitflags-2.9.2//:bitflags",
         "@crates_vendor__either-1.15.0//:either",
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
         "@crates_vendor__phf-0.11.3//:phf",

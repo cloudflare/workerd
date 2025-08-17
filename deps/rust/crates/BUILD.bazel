@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.32",
-    actual = "@crates_vendor__cc-1.2.32//:cc",
+    name = "cc-1.2.33",
+    actual = "@crates_vendor__cc-1.2.33//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.32//:cc",
+    actual = "@crates_vendor__cc-1.2.33//:cc",
     tags = ["manual"],
 )
 
@@ -188,14 +188,14 @@ alias(
 )
 
 alias(
-    name = "proc-macro2-1.0.97",
-    actual = "@crates_vendor__proc-macro2-1.0.97//:proc_macro2",
+    name = "proc-macro2-1.0.101",
+    actual = "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
     tags = ["manual"],
 )
 
 alias(
     name = "proc-macro2",
-    actual = "@crates_vendor__proc-macro2-1.0.97//:proc_macro2",
+    actual = "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
     tags = ["manual"],
 )
 
@@ -320,26 +320,26 @@ alias(
 )
 
 alias(
-    name = "syn-2.0.104",
-    actual = "@crates_vendor__syn-2.0.104//:syn",
+    name = "syn-2.0.106",
+    actual = "@crates_vendor__syn-2.0.106//:syn",
     tags = ["manual"],
 )
 
 alias(
     name = "syn",
-    actual = "@crates_vendor__syn-2.0.104//:syn",
+    actual = "@crates_vendor__syn-2.0.106//:syn",
     tags = ["manual"],
 )
 
 alias(
-    name = "thiserror-2.0.14",
-    actual = "@crates_vendor__thiserror-2.0.14//:thiserror",
+    name = "thiserror-2.0.15",
+    actual = "@crates_vendor__thiserror-2.0.15//:thiserror",
     tags = ["manual"],
 )
 
 alias(
     name = "thiserror",
-    actual = "@crates_vendor__thiserror-2.0.14//:thiserror",
+    actual = "@crates_vendor__thiserror-2.0.15//:thiserror",
     tags = ["manual"],
 )
 
