@@ -712,15 +712,10 @@ export function maybeCollectSnapshot(Module: Module): void {
 
 export function finalizeBootstrap(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
   const customHiwireStateDeserializer = (obj: any): any => {
     if ('pyodide_entrypoint_helper' in obj) {
-      if (!pyodide_entrypoint_helper) {
-        throw new PythonRuntimeError(
-          'pyodide_entrypoint_helper is required for hiwire deserialisation'
-        );
-      }
       return pyodide_entrypoint_helper;
     }
     if ('abort_signal_any' in obj) {

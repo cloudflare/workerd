@@ -41,14 +41,8 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  */
 function prepareWasmLinearMemory(
   Module: Module,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
-  if (!pyodide_entrypoint_helper) {
-    throw new PythonRuntimeError(
-      'pyodide_entrypoint_helper is required to load snapshot'
-    );
-  }
-
   enterJaegerSpan('preload_dynamic_libs', () => {
     preloadDynamicLibs(Module);
   });
@@ -149,7 +143,7 @@ export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
   indexURL: string,
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
