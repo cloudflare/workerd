@@ -501,3 +501,63 @@ export const startTlsEarlySend = {
     assert.equal(text, 'pong');
   },
 };
+
+export const manualProtocolThenFetcher = {
+  async test(ctrl, env, ctx) {
+    const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
+    const writer = socket.writable.getWriter();
+    const reader = socket.readable.getReader();
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    // Manually construct and send HTTP request
+    const httpRequest =
+      'GET /ping HTTP/1.1\r\n' +
+      'Host: example.com\r\n' +
+      'Connection: keep-alive\r\n' +
+      '\r\n';
+
+    await writer.write(encoder.encode(httpRequest));
+
+    // Read the HTTP response manually
+    let responseData = '';
+    let contentLength = 0;
+    let headersParsed = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      responseData += chunk;
+
+      if (!headersParsed && responseData.includes('\r\n\r\n')) {
+        const [headers, body] = responseData.split('\r\n\r\n', 2);
+        const contentLengthMatch = headers.match(/content-length:\s*(\d+)/i);
+        if (contentLengthMatch) {
+          contentLength = parseInt(contentLengthMatch[1]);
+        }
+        headersParsed = true;
+
+        // Check if we have all the content
+        if (body.length >= contentLength) {
+          break;
+        }
+      }
+    }
+
+    // Verify the manual HTTP response
+    assert(responseData.includes('HTTP/1.1 200 OK'));
+    assert(responseData.includes('pong'));
+
+    // Release locks and convert to HTTP client
+    reader.releaseLock();
+    writer.releaseLock();
+
+    const httpClient = await internalNewHttpClient(socket);
+    const response = await httpClient.fetch('https://example.com/json');
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
+  },
+};

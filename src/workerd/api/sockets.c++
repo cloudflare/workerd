@@ -516,8 +516,10 @@ jsg::Ref<Socket> SocketsModule::connect(
 }
 
 kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
+  // We do not care if the socket was disturbed, we require the user to ensure the socket is not
+  // being used.
   writable->detach(js);
-  readable->detach(js);
+  readable->detach(js, true);
 
   closedResolver.resolve(js);
   return connectionStream->addWrappedRef();
