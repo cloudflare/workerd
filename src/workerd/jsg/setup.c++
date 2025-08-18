@@ -380,6 +380,11 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
+    // We also set the global OOM error handler.  This is a bit of
+    // a hack: Later in the run the allocation of a sandbox may fail
+    // due to OOM.  In that case we want our handler to be called
+    // even though there is no current isolate.
+    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
