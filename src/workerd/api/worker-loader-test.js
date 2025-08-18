@@ -13,7 +13,7 @@ export let basics = {
               greet(name) { return "Hello, " + name; }
             }
             export let alternate = {
-              greet(name) { return "Welcome, " + name; }
+              greet(name, env, ctx) { return \`\${ctx.props.greeting}, \${name}\`; }
             }
           `,
         },
@@ -26,8 +26,17 @@ export let basics = {
     }
 
     {
-      let result = await worker.getEntrypoint('alternate').greet('Bob');
+      let result = await worker
+        .getEntrypoint('alternate', { props: { greeting: 'Welcome' } })
+        .greet('Bob');
       assert.strictEqual(result, 'Welcome, Bob');
+    }
+
+    {
+      let result = await worker
+        .getEntrypoint('alternate', { props: { greeting: 'Howdy' } })
+        .greet('Carol');
+      assert.strictEqual(result, 'Howdy, Carol');
     }
   },
 };
