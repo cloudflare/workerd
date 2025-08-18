@@ -34,4 +34,10 @@ struct Frankenvalue {
   # Property name. Used only when this `Frankenvalue` represents a property, that is, it is an
   # element within the `properties` list of some other `Frankenvalue`. If this is the root value,
   # then `name` must be null.
+
+  capTableSize @5 :UInt32 = 0;
+  # How large is this value's cap table, not counting `properties`.
+  #
+  # The final cap table contains this many base caps (referenced by the union above), followed by
+  # the caps for each property, in order.
 }
