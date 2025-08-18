@@ -1305,7 +1305,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         // We need to set the highest used index in every context we create to be a nullptr
         // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
         // a fatal error if the array is smaller than the given index.
-        context->SetAlignedPointerInEmbedderData(3, nullptr);
+        jsg::setAlignedPointerInEmbeddedData(
+            context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
       }
 
       JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
@@ -2105,8 +2106,8 @@ kj::Maybe<kj::Own<api::ExportedHandler>> Worker::Lock::getExportedHandler(
 }
 
 api::ServiceWorkerGlobalScope& Worker::Lock::getGlobalScope() {
-  return *reinterpret_cast<api::ServiceWorkerGlobalScope*>(
-      getContext()->GetAlignedPointerFromEmbedderData(1));
+  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<api::ServiceWorkerGlobalScope>(
+      getContext(), jsg::ContextPointerSlot::GLOBAL_WRAPPER));
 }
 
 jsg::AsyncContextFrame::StorageKey& Worker::Lock::getTraceAsyncContextKey() {
@@ -2750,7 +2751,8 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
           // We need to set the highest used index in every context we create to be a nullptr
           // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
           // a fatal error if the array is smaller than the given index.
-          dummyContext->SetAlignedPointerInEmbedderData(3, nullptr);
+          jsg::setAlignedPointerInEmbeddedData(
+              dummyContext, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
           auto& inspector = *KJ_ASSERT_NONNULL(isolate.impl->inspector);
           inspector.contextCreated(v8_inspector::V8ContextInfo(dummyContext, 1,
               v8_inspector::StringView(reinterpret_cast<const uint8_t*>("Worker"), 6)));

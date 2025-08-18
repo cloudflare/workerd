@@ -118,7 +118,7 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
     lock.withinHandleScope([&] {                                                                   \
       v8::Local<v8::Context> context = lock.newContext<TestContext>().getHandle(lock);             \
       v8::Context::Scope contextScope(context);                                                    \
-      context->SetAlignedPointerInEmbedderData(2, nullptr);                                        \
+      setAlignedPointerInEmbeddedData(context, jsg::ContextPointerSlot::MODULE_REGISTRY, nullptr); \
       fn(lock);                                                                                    \
     });                                                                                            \
   });

@@ -717,7 +717,8 @@ class Isolate: public IsolateBase {
       //   a Ref.
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
-      context.getHandle(v8Isolate)->SetAlignedPointerInEmbedderData(3, wrapper);
+      jsg::setAlignedPointerInEmbeddedData(
+          context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
       return context;
     }
 
@@ -823,13 +824,12 @@ class Isolate: public IsolateBase {
     if (KJ_LIKELY(!hasExtraWrappers)) {
       return wrappers[0].get();
     } else {
-      auto ptr = context->GetAlignedPointerFromEmbedderData(3);
-      if (KJ_LIKELY(ptr != nullptr)) {
-        return static_cast<TypeWrapper*>(ptr);
-      } else {
-        // This can happen when we create dummy contexts such as in worker.c++.
-        return wrappers[0].get();
+      KJ_IF_SOME(data,
+          jsg::getAlignedPointerFromEmbedderData<TypeWrapper>(
+              context, ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER)) {
+        return &data;
       }
+      return wrappers[0].get();
     }
   }
 

@@ -69,7 +69,8 @@ class ModuleRegistry {
   };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistry*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   struct CapnpModuleInfo {
@@ -242,13 +243,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
       v8::Isolate* isolate, v8::Local<v8::Context> context, CompilationObserver& observer) {
     auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
-    context->SetAlignedPointerInEmbedderData(2, registry.get());
+    jsg::setAlignedPointerInEmbeddedData(
+        context, jsg::ContextPointerSlot::MODULE_REGISTRY, registry.get());
     isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
     return kj::mv(registry);
   }
 
   static inline ModuleRegistryImpl* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistryImpl*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistryImpl>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
