@@ -22,11 +22,47 @@ import {
   reportError,
 } from 'pyodide-internal:util';
 
+type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
+
+const waitUntilPatched = new WeakSet();
+
+function patchWaitUntil(ctx: {
+  waitUntil: (p: Promise<void> | PyFuture<void>) => void;
+}): void {
+  let tag;
+  try {
+    tag = Object.prototype.toString.call(ctx);
+  } catch (_e) {}
+  if (tag !== '[object ExecutionContext]') {
+    return;
+  }
+  if (waitUntilPatched.has(ctx)) {
+    return;
+  }
+  const origWaitUntil: (p: Promise<void>) => void = ctx.waitUntil.bind(ctx);
+  function waitUntil(p: Promise<void> | PyFuture<void>): void {
+    origWaitUntil(
+      (async function (): Promise<void> {
+        if ('copy' in p) {
+          p = p.copy();
+        }
+        await p;
+        if ('destroy' in p) {
+          p.destroy();
+        }
+      })()
+    );
+  }
+  ctx.waitUntil = waitUntil;
+  waitUntilPatched.add(ctx);
+}
+
 export type PyodideEntrypointHelper = {
   doAnImport: (mod: string) => Promise<any>;
   cloudflareWorkersModule: any;
   cloudflareSocketsModule: any;
   workerEntrypoint: any;
+  patchWaitUntil: typeof patchWaitUntil;
 };
 import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
@@ -44,15 +80,16 @@ function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
 
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
-  cloudflareWorkers: any,
-  cloudflareSockets: any,
+  cloudflareWorkersModule: any,
+  cloudflareSocketsModule: any,
   workerEntrypoint: any
 ): void {
   _pyodide_entrypoint_helper = {
     doAnImport: func,
-    cloudflareWorkersModule: cloudflareWorkers,
-    cloudflareSocketsModule: cloudflareSockets,
-    workerEntrypoint: workerEntrypoint,
+    cloudflareWorkersModule,
+    cloudflareSocketsModule,
+    workerEntrypoint,
+    patchWaitUntil,
   };
 }
 

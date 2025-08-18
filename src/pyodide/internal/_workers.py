@@ -1066,8 +1066,11 @@ def _wrap_subclass(cls):
     original_init = cls.__init__
 
     def wrapped_init(self, *args, **kwargs):
+        if len(args) > 0:
+            _pyodide_entrypoint_helper.patchWaitUntil(args[0])
         if len(args) > 1:
-            args = (args[0], _EnvWrapper(args[1]), *args[2:])
+            args = list(args)
+            args[1] = _EnvWrapper(args[1])
 
         original_init(self, *args, **kwargs)
 
