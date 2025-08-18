@@ -75,6 +75,32 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
+
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl
+  //int32_t status = signo;
+  //CHECK(write(REPRL_CWFD, &status, 4) == 4);
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  //since kj installs their global signal handlers
+  //and exits with 1 Fuzzilli doesn't realize that an application crashed.
+  //therefore we install a handler before and just raise the signo
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+
 namespace workerd::server {
 namespace {
 
@@ -719,7 +745,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
               "run the server")
           .addSubCommand("compile", KJ_BIND_METHOD(*this, getCompile),
               "create a self-contained binary")
-          .addSubCommand("fuzz", KJ_BIND_METHOD(*this, getFuzz),
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz),
               "run reprl for fuzzing")
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest),
               "run unit tests")
@@ -914,11 +940,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   kj::MainFunc getFuzz() {
-    fprintf(stderr,"Hello from getFuzz...");
-    auto builder = kj::MainBuilder(context, getVersionString(),"Runs fuzz tests based on a config.");
+    fprintf(stderr,"Setting up signal handler");
+    initSignalHandlers();
+    auto builder = kj::MainBuilder(context, getVersionString(),"Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
 
     return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
-        .callAfterParsing(CLI_METHOD(runFuzz))
+        .callAfterParsing(CLI_METHOD(test))
         .build();
   }
 
@@ -1458,97 +1485,6 @@ struct TestContext : public jsg::Object {
 // Define the isolate type with the TestContext
 JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
-void runFuzz() {
-    // Step 1: Initialize the V8 system and platform.
-    jsg::V8System v8System;  // Initializes the V8 engine system with the default platform.
-
-    // Step 2: Set up the Isolate.
-    TestIsolate isolate(v8System, kj::heap<jsg::IsolateObserver>());
-
-    // Step 3: Lock the Isolate and execute the REPRL loop.
-    isolate.runInLockScope([&](TestIsolate::Lock& js) {
-        js.setAllowEval(true);
-
-        // Define the REPRL file descriptors
-        #define REPRL_CRFD 100
-        #define REPRL_CWFD 101
-        #define REPRL_DRFD 102
-        #define REPRL_DWFD 103
-
-        #define CHECK(condition) \
-        do { \
-            if (!(condition)) { \
-                fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition); \
-                exit(EXIT_FAILURE); \
-            } \
-        } while (0)
-
-        char helo[] = "HELO";
-        if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
-            printf("Invalid HELO response from parent\n");
-            fflush(stdout);
-        }
-
-        if (memcmp(helo, "HELO", 4) != 0) {
-            printf("Invalid response from parent\n");
-        }
-
-        printf("Hello REPRL worked\n");
-        fflush(stdout);
-
-        do {
-            size_t script_size = 0;
-            unsigned action = 0;
-            ssize_t nread = read(REPRL_CRFD, &action, 4);
-            fflush(0);
-            fflush(stderr);
-            if (nread != 4 || action != 0x63657865) { // 'exec'
-                fprintf(stderr, "Unknown action: %x\n", action);
-                _exit(-1);
-            }
-
-            CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
-
-            char* script = (char*)malloc(script_size + 1);
-            char* source_buffer_tail = script;
-            ssize_t remaining = (ssize_t) script_size;
-
-            printf("Reading in script with size: %zu\n",script_size);
-            fflush(stdout);
-
-            while (remaining > 0) {
-              ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t) remaining);
-              if (rv <= 0) {
-                fprintf(stderr, "Failed to load script\n");
-                _exit(-1);
-              }
-              remaining -= rv;
-              source_buffer_tail += rv;
-            }
-
-            script[script_size] = '\0';
-
-            printf("Executing script...\n");
-            fflush(stdout);
-
-            // Evaluate the script
-            int status = 0;
-            try {
-                auto compiled = workerd::jsg::NonModuleScript::compile(js, script, "reprl"_kj);
-                auto val = workerd::jsg::JsValue(compiled.runAndReturn(js));
-            } catch (const std::exception& e) {
-                fprintf(stderr, "Script execution error: %s\n", e.what());
-            }
-
-            fflush(stdout);
-            fflush(stderr);
-
-            CHECK(write(REPRL_CWFD, &status, 4) == 4);
-
-        } while (true);
-    });
-}
-
 #if _WIN32
   void reloadFromConfigChange() {
     KJ_UNREACHABLE("Watching is not yet implemented on Windows");
@@ -1864,49 +1800,15 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t *guard) {
 // END FUZZING CODE
 //
 
-void crashHandler(int signo, siginfo_t* info, void* context) noexcept {
-  // inform reprl
-  //int32_t status = signo;
-  //CHECK(write(REPRL_CWFD, &status, 4) == 4);
-  struct sigaction sa = {};
-  sa.sa_handler = SIG_DFL;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_flags = 0;
-  sigaction(signo, &sa, nullptr);
-  raise(signo);
-}
-
-void initCrashSignalHandlers() {
-  struct sigaction action {};
-  action.sa_flags = SA_SIGINFO;
-  action.sa_sigaction = &crashHandler;
-
-  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
-    KJ_SYSCALL(sigaction(signo, &action, nullptr));
-  }
-}
-
 
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
-
-  // TODO: this is reeeeaaally bad
-  argc = 4;
-  char *new_argv[5];
-  new_argv[0] = "workerd";
-  new_argv[1] = "test";
-  new_argv[2] = "/home/mschwarzl/projects/workerd/samples/reprl/config-full.capnp";
-  new_argv[3] = "--experimental";
-  new_argv[4] = nullptr;
-  argv = new_argv;
 
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
-
-  initCrashSignalHandlers();
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }
