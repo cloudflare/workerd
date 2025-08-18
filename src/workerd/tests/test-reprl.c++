@@ -60,14 +60,14 @@ int main(int argc, char** argv) {
   ctx = reprl_create_context();
 
   const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-16",nullptr};
-  const char* workerd_path = argc > 1 ? argv[1] : nullptr;
-
-  if(workerd_path == nullptr) {
-    printf("Please specify the path to the workerd binary");
-    return -1;
+  if(argc < 4) {
+    printf("Usage: %s <workerd_path> <command> <path-to-config> <workerd-flags>",argv[0]);
+    exit(-1);
   }
 
-  const char* args[] = {workerd_path, nullptr};
+  // Forward workerd_path + all remaining args (argv[1..argc-1])
+  const char** args = (const char**)&argv[1];
+
   if (reprl_initialize_context(ctx, args, env, 1, 1) != 0) {
     printf("REPRL initialization failed\n");
     return -1;
