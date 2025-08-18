@@ -4967,6 +4967,54 @@ KJ_TEST("Server: Durable Object facets") {
   }
 }
 
+KJ_TEST("Server: Pass service stubs in ctx.props.") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let props = {
+                `      foo: ctx.exports.FooEntry({props: {greeting: "Hello"}}),
+                `      foo2: ctx.exports.FooEntry({props: {greeting: "Welcome"}}),
+                `    }
+                `    let result = await ctx.exports.BarEntry({props}).run();
+                `    return new Response(result);
+                `  },
+                `}
+                `export class FooEntry extends WorkerEntrypoint {
+                `  greet(name) { return `${this.ctx.props.greeting}, ${name}!` }
+                `}
+                `export class BarEntry extends WorkerEntrypoint {
+                `  async run() {
+                `    let greet1 = await this.ctx.props.foo.greet("Alice");
+                `    let greet2 = await this.ctx.props.foo2.greet("Bob");
+                `    return [greet1, greet2].join("\n");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello, Alice!\nWelcome, Bob!");
+}
+
 #if __linux__
 // This test uses pipe2 and dup2 to capture stdout which is far easier on linux.
 #include <unistd.h>

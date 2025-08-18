@@ -700,6 +700,12 @@ public:
     }
   }
 
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Fetcher> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
  private:
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,

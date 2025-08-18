@@ -145,7 +145,7 @@ class IoChannelFactory {
   // Object representing somehere where generic workers subrequests can be sent. Multiple requests
   // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
   // created.
-  class SubrequestChannel: public kj::Refcounted {
+  class SubrequestChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
     // Start a new request to this target.
     //
@@ -156,6 +156,10 @@ class IoChannelFactory {
     // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
     // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+
+    kj::Own<CapTableEntry> clone() override final {
+      return kj::addRef(*this);
+    }
   };
 
   // Obtain an object representing a particular subrequest channel.

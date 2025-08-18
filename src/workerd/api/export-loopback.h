@@ -29,6 +29,10 @@ class LoopbackServiceStub: public Fetcher {
   // Create a specialized Fetcher which can be passed over RPC.
   jsg::Ref<Fetcher> call(jsg::Lock& js, Options options);
 
+  // Note that `LoopbackServiceStub` is intentionally NOT serializable, unlike its parent class
+  // Fetcher. We want people to explicitly specialize the entrypoint with props before sending
+  // it off to other services.
+
   JSG_RESOURCE_TYPE(LoopbackServiceStub) {
     JSG_INHERIT(Fetcher);
     JSG_CALLABLE(call);

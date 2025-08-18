@@ -2475,6 +2475,35 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
   return result;
 }
 
+void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "ServiceStub cannot be serialized in this context.");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "ServiceStub cannot be serialized in this context.");
+
+  serializer.writeRawUint32(externalHandler->add(getSubrequestChannel(IoContext::current())));
+}
+
+jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got ServiceStub in unexpected context?");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
+  KJ_REQUIRE(externalHandler != nullptr, "got ServiceStub in unexpected context?");
+
+  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
+      "serialized ServiceStub had invalid cap table index");
+
+  auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap);
+  KJ_REQUIRE(channel != nullptr,
+      "ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+
+  return js.alloc<Fetcher>(
+      IoContext::current().addObject(kj::addRef(*channel)),
+      RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+}
+
 static jsg::Promise<void> throwOnError(
     jsg::Lock& js, kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
   return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {

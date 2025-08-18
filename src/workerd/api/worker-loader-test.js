@@ -1,5 +1,11 @@
-import { DurableObject } from 'cloudflare:workers';
+import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
+
+export class GreeterLoopback extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
 
 export let basics = {
   async test(ctrl, env, ctx) {
@@ -9,11 +15,19 @@ export let basics = {
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
             export default {
               greet(name) { return "Hello, " + name; }
             }
             export let alternate = {
               greet(name, env, ctx) { return \`\${ctx.props.greeting}, \${name}\`; }
+            }
+            export class FancyPropsEntrypoint extends WorkerEntrypoint {
+              async run() {
+                let greet1 = await this.ctx.props.greeter.greet("Dave");
+                let greet2 = await this.ctx.props.greeter2.greet("Eve");
+                return [greet1, greet2].join("\\n");
+              }
             }
           `,
         },
@@ -25,19 +39,53 @@ export let basics = {
       assert.strictEqual(result, 'Hello, Alice');
     }
 
+    let greeter = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Welcome' },
+    });
+    let greeter2 = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Howdy' },
+    });
+
     {
-      let result = await worker
-        .getEntrypoint('alternate', { props: { greeting: 'Welcome' } })
-        .greet('Bob');
+      let result = await greeter.greet('Bob');
       assert.strictEqual(result, 'Welcome, Bob');
     }
 
     {
-      let result = await worker
-        .getEntrypoint('alternate', { props: { greeting: 'Howdy' } })
-        .greet('Carol');
+      let result = await greeter2.greet('Carol');
       assert.strictEqual(result, 'Howdy, Carol');
     }
+
+    let fancyProps = await worker.getEntrypoint('FancyPropsEntrypoint', {
+      props: {
+        greeter: ctx.exports.GreeterLoopback({ props: { greeting: "G'day" } }),
+        greeter2: ctx.exports.GreeterLoopback({ props: { greeting: 'Sup' } }),
+      },
+    });
+
+    {
+      let result = await fancyProps.run();
+      assert.strictEqual(result, "G'day, Dave!\nSup, Eve!");
+    }
+
+    // Let's quickly verify that if we use ctx.exports.GreeterLoopback *without* invoking it, then
+    // we get an error that it isn't serializable. (This isn't really testing worker-loader, it's
+    // more testing LoopbackServiceStub and that serializability is not inherited.)
+    assert.rejects(
+      () =>
+        worker.getEntrypoint('FancyPropsEntrypoint', {
+          props: {
+            greeter: ctx.exports.GreeterLoopback,
+            greeter2: ctx.exports.GreeterLoopback,
+          },
+        }),
+      {
+        name: 'DataCloneError',
+        message:
+          'Could not serialize object of type "LoopbackServiceStub". This type does not support ' +
+          'serialization.',
+      }
+    );
   },
 };
 
