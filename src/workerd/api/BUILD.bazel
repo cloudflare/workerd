@@ -874,3 +874,12 @@ wd_test(
         "tests/rpc-error-test.rpc.js",
     ],
 )
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
+    ],
+)
