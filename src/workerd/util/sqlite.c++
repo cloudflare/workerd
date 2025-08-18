@@ -186,11 +186,16 @@ class SqliteCallScope {
 
 // Version of `SQLITE_CALL` that can be called after inspecting the error code, in case some codes
 // aren't really errors.
+//
+// Temporarily marking SQLITE_BUSY as NOSENTRY to reduce sentry volume while debugging issue.
+// TODO(soon): reenable SQLITE_BUSY sentry logging.
 #define SQLITE_CALL_FAILED(code, error, ...)                                                       \
   do {                                                                                             \
     KJ_ASSERT(error != SQLITE_MISUSE, "SQLite misused: " code, ##__VA_ARGS__);                     \
     handleCriticalError(error, dbErrorMessage(error, db), sqliteCallScope.getException());         \
     if (error == SQLITE_IOERR) sqliteCallScope.rethrowVfsError();                                  \
+    SQLITE_REQUIRE(error != SQLITE_BUSY, error, kj::str("NOSENTRY ", dbErrorMessage(error, db)),   \
+        ##__VA_ARGS__);                                                                            \
     SQLITE_REQUIRE(error == SQLITE_OK, error, dbErrorMessage(error, db), ##__VA_ARGS__);           \
   } while (false);
 
