@@ -31,7 +31,16 @@ export type PyodideEntrypointHelper = {
 import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
-let pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
+let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
+
+function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
+  if (!_pyodide_entrypoint_helper) {
+    throw new PythonRuntimeError(
+      'pyodide_entrypoint_helper is not initialized'
+    );
+  }
+  return _pyodide_entrypoint_helper;
+}
 
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
@@ -39,7 +48,7 @@ export function setDoAnImport(
   cloudflareSockets: any,
   workerEntrypoint: any
 ): void {
-  pyodide_entrypoint_helper = {
+  _pyodide_entrypoint_helper = {
     doAnImport: func,
     cloudflareWorkersModule: cloudflareWorkers,
     cloudflareSocketsModule: cloudflareSockets,
@@ -74,7 +83,7 @@ async function getPyodide(): Promise<Pyodide> {
         IS_WORKERD,
         LOCKFILE,
         WORKERD_INDEX_URL,
-        pyodide_entrypoint_helper
+        get_pyodide_entrypoint_helper()
       );
       await setupPatches(pyodide);
       return pyodide;
@@ -121,22 +130,10 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
 
     // install any extra packages into the site-packages directory
     const sitePackages = pyodide.FS.sitePackages;
-
-    if (!pyodide_entrypoint_helper) {
-      throw new PythonRuntimeError(
-        'pyodide_entrypoint_helper is not initialized'
-      );
-    }
-
     // Expose the doAnImport function and global modules to Python globals
-    if (!pyodide_entrypoint_helper) {
-      throw new PythonRuntimeError(
-        'pyodide_entrypoint_helper is not initialized'
-      );
-    }
     pyodide.registerJsModule(
       '_pyodide_entrypoint_helper',
-      pyodide_entrypoint_helper
+      get_pyodide_entrypoint_helper()
     );
 
     // Inject modules that enable JS features to be used idiomatically from Python.
@@ -430,6 +427,32 @@ type PythonInitResult = {
   makeEntrypointClass: typeof makeEntrypointClass;
 };
 
+function handleDefaultClass(
+  handlers: PythonInitResult['handlers'],
+  workerEntrypoints: ExporterClassInfo[]
+): void {
+  const index = workerEntrypoints.findIndex(
+    (cls) => cls.className === 'Default'
+  );
+  if (index === -1) {
+    return;
+  }
+  const cls = workerEntrypoints[index]!;
+
+  // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
+  if (Object.keys(handlers).length > 0) {
+    throw new TypeError('Cannot define multiple default entrypoints');
+  }
+
+  handlers['default'] = makeEntrypointClass(
+    'Default',
+    get_pyodide_entrypoint_helper().workerEntrypoint,
+    cls.methodNames
+  );
+  // Remove the default entrypoint from the list of workerEntrypoints to avoid duplication.
+  workerEntrypoints.splice(index, 1);
+}
+
 export async function initPython(): Promise<PythonInitResult> {
   const handlers: {
     [handlerName: string]: Handler;
@@ -466,35 +489,14 @@ export async function initPython(): Promise<PythonInitResult> {
   const introspectionMod = await getIntrospectionMod();
   pythonEntrypointClasses =
     introspectionMod.collect_entrypoint_classes(mainModule);
-
-  for (const [
-    index,
-    cls,
-  ] of pythonEntrypointClasses.workerEntrypoints.entries()) {
-    if (cls.className == 'Default') {
-      // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
-      if (Object.keys(handlers).length > 0) {
-        throw new TypeError('Cannot define multiple default entrypoints');
-      }
-      if (!pyodide_entrypoint_helper) {
-        throw new PythonRuntimeError(
-          'pyodide_entrypoint_helper is not initialized'
-        );
-      }
-      handlers['default'] = makeEntrypointClass(
-        'Default',
-        pyodide_entrypoint_helper.workerEntrypoint,
-        cls.methodNames
-      );
-      // Remove the default entrypoint from the list of workerEntrypoints to avoid duplication.
-      pythonEntrypointClasses.workerEntrypoints.splice(index, 1);
-      break;
-    }
-  }
+  handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
 
   // Collect a dedicated snapshot at the very end.
   const pyodide = await getPyodide();
-  maybeCollectDedicatedSnapshot(pyodide._module, pyodide_entrypoint_helper);
+  maybeCollectDedicatedSnapshot(
+    pyodide._module,
+    get_pyodide_entrypoint_helper()
+  );
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }
