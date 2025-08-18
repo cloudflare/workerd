@@ -137,6 +137,11 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
   // invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+
+    KJ_IF_SOME(fetchResponseInfo, trace->fetchResponseInfo) {
+      writer->report(spanContext, tracing::Return({fetchResponseInfo.clone()}), completeTime);
+    }
+
     if (isPredictableModeForTest()) {
       writer->report(spanContext,
           tracing::Outcome(trace->outcome, 0 * kj::MILLISECONDS, 0 * kj::MILLISECONDS),
@@ -407,16 +412,10 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
     return;
   }
 
+  // Note: In the streaming model, fetchResponseInfo is dispatched when the tail worker returns.
   KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
   KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
   trace->fetchResponseInfo = kj::mv(info);
-
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-    // TODO: completeTime may not yet be available at this time
-    writer->report(spanContext,
-        tracing::Return({KJ_ASSERT_NONNULL(trace->fetchResponseInfo).clone()}), completeTime);
-  }
 }
 
 void WorkerTracer::setUserRequestSpan(SpanBuilder&& span) {

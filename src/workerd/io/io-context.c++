@@ -244,6 +244,11 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
+kj::Date IoContext::IncomingRequest::now() {
+  metrics->clockRead();
+  return ioChannelFactory->getTimer().now();
+}
+
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
     // Request was never added to context->incomingRequests in the first place.
@@ -254,8 +259,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   // not be available when the outcome event gets reported. Define the outcome event time as the
   // time when the incoming request shuts down.
   KJ_IF_SOME(w, workerTracer) {
-    w->recordTimestamp(ioChannelFactory->getTimer().now());
-    metrics->clockRead();
+    w->recordTimestamp(now());
   }
 
   if (&context->incomingRequests.front() == this) {
@@ -832,8 +836,7 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
-  kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
-  incomingRequest.metrics->clockRead();
+  kj::Date adjustedTime = incomingRequest.now();
 
   KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
