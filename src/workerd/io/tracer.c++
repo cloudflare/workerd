@@ -239,9 +239,6 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     }();
 
     // Compose span events
-    // TODO(o11y): Actually report the spanOpen event at span creation time
-    writer->report(
-        context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)), span.startTime);
     if (span.tags.size()) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
@@ -253,6 +250,39 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   trace->bytesUsed = newSize;
   trace->spans.add(kj::mv(span));
+}
+
+void WorkerTracer::addSpanOpen(kj::ConstString& operationName, tracing::SpanId spanId, kj::Date timestamp) {
+  if (trace->exceededLogLimit) {
+    return;
+  }
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& writer = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+
+  if (topLevelInvocationSpanContext == kj::none) {
+    // TODO: Need to defer dispatching "worker" span.
+    // topLevelInvocationSpanContext = tracing::InvocationSpanContext(tracing::TraceId::nullId, tracing::TraceId::nullId, tracing::SpanId::nullId);
+    return;
+  }
+
+  // TODO(o11y): Provide correct nested spans
+  // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
+  // invocations as indicated by isTrigger
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  tracing::InvocationSpanContext context = [&]() {
+    if (topLevelContext.isTrigger()) {
+      return topLevelContext.clone();
+    } else {
+      return topLevelContext.newChild();
+    }
+  }();
+
+  // Compose span events
+  writer->report(
+      context, tracing::SpanOpen(spanId, kj::str(operationName)), timestamp);
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,

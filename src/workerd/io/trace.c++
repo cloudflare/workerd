@@ -1447,6 +1447,7 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 SpanBuilder::SpanBuilder(
     kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
   KJ_IF_SOME(obs, observer) {
+    obs->reportOpen(operationName);
     span.emplace(kj::mv(operationName), startTime);
     this->observer = kj::mv(obs);
   }

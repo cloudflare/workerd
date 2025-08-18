@@ -1695,6 +1695,12 @@ class WorkerTracerSpanObserver: public SpanObserver,
     }
   }
 
+  void reportOpen(kj::ConstString& operationName) override {
+      KJ_IF_SOME(tracer, this->workerTracer) {
+        tracer->addSpanOpen(operationName, tracing::SpanId::nullId, kj::UNIX_EPOCH);
+      }
+  }
+
  private:
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
 };

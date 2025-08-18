@@ -100,6 +100,7 @@ class BaseTracer: public kj::Refcounted {
       kj::String message) = 0;
   // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
   virtual void addSpan(CompleteSpan&& span) = 0;
+  virtual void addSpanOpen(kj::ConstString& operationName, tracing::SpanId spanId, kj::Date timestamp) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -157,6 +158,7 @@ class WorkerTracer: public BaseTracer {
       LogLevel logLevel,
       kj::String message) override;
   void addSpan(CompleteSpan&& span) override;
+  void addSpanOpen(kj::ConstString& operationName, tracing::SpanId spanId, kj::Date timestamp) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,

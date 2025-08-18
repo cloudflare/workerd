@@ -1082,6 +1082,9 @@ class SpanObserver: public kj::Refcounted {
   //
   // This should always be called exactly once per observer.
   virtual void report(const Span& span) = 0;
+
+  // For the STW model, span onset is reported separately.
+  virtual void reportOpen(kj::ConstString& operationName) {};
 };
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
