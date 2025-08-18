@@ -745,41 +745,43 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
       }
 
       this._headerSent = true;
-
-      // Difference from Node.js -
-      // Parse headers here and trigger _headersSent
       this.writtenHeaderBytes = header.length;
 
-      // Save written headers as object
+      // Difference from Node.js: Parse response headers to emit _headersSent event.
+      // This deviates from Node.js behavior but is required for ServerResponse compatibility.
+      //
+      // The same OutgoingMessage class is used for both:
+      // - Client requests: header starts with request line "POST /path HTTP/1.1"
+      // - Server responses: header starts with status line "HTTP/1.1 200 OK"
+      //
+      // We only parse and emit events for server responses (status lines that match the HTTP response format).
+      // Client requests are ignored to avoid parsing errors when request lines don't match response format.
       const [statusLine, ...headerLines] = header.split('\r\n') as [
         string,
         ...string[],
       ];
 
       const STATUS_LINE_REGEXP =
-        /^HTTP\/1\.1 (?<statusCode>\d+) (?<statusMessage>.*)$/;
+        /^HTTP\/\d+\.\d+ (?<statusCode>\d+) (?<statusMessage>.*)$/;
       const statusLineResult = STATUS_LINE_REGEXP.exec(statusLine);
 
-      if (statusLineResult == null) {
-        throw new Error(`Unexpected! Status line was ${statusLine}`);
-      }
+      if (statusLineResult != null) {
+        const { statusCode: statusCodeText, statusMessage } =
+          statusLineResult.groups ?? {};
+        const headers = new Headers();
 
-      const { statusCode: statusCodeText, statusMessage } =
-        statusLineResult.groups ?? {};
-      const headers = new Headers();
-
-      for (const headerLine of headerLines) {
-        if (headerLine !== '') {
-          const pos = headerLine.indexOf(': ');
-          // Skip the colon and the space on value
-          headers.append(headerLine.slice(0, pos), headerLine.slice(pos + 2));
+        for (const headerLine of headerLines) {
+          if (headerLine !== '') {
+            const pos = headerLine.indexOf(': ');
+            headers.append(headerLine.slice(0, pos), headerLine.slice(pos + 2));
+          }
         }
+        this.emit('_headersSent', {
+          statusCode: Number(statusCodeText as string),
+          statusMessage,
+          headers,
+        } as HeadersSentEvent);
       }
-      this.emit('_headersSent', {
-        statusCode: Number(statusCodeText as string),
-        statusMessage,
-        headers,
-      } as HeadersSentEvent);
     }
     return this._writeRaw(data, encoding, callback, byteLength);
   }
