@@ -492,6 +492,11 @@ ${describeValue(obj)}
   return new PythonUserError(error);
 }
 
+// We need to bind the `AbortSignal` here to satify our linter, but doing this isn't necessary in
+// practice. We store this as a global, so that we can check for the same object that we deserialise
+// with.
+const abortSignalAny = AbortSignal.any.bind(AbortSignal);
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
@@ -506,10 +511,13 @@ function makeLinearMemorySnapshot(
     if (obj === pyodide_entrypoint_helper) {
       return { pyodide_entrypoint_helper: true };
     }
-    if (obj == AbortSignal.any) {
+    // The first branch is required to match when initially generating a dedicated snapshot, i.e.
+    // from a fresh Worker that is loaded without a snapshot. The second branch is required to
+    // generate a dedicated snapshot from a Worker that was loaded with a dedicated snapshot.
+    if (obj === AbortSignal.any || obj === abortSignalAny) {
       return { abort_signal_any: true };
     }
-    if (obj == Module.API) {
+    if (obj === Module.API) {
       return { module_api: true };
     }
 
@@ -724,7 +732,7 @@ export function finalizeBootstrap(
       return pyodide_entrypoint_helper;
     }
     if ('abort_signal_any' in obj) {
-      return AbortSignal.any.bind(AbortSignal);
+      return abortSignalAny;
     }
     if ('module_api' in obj) {
       return Module.API;
