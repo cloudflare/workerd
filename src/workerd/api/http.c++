@@ -2067,8 +2067,16 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
   if (isRedirectStatusCode(response.statusCode) &&
       jsRequest->getRedirectEnum() == Request::Redirect::FOLLOW) {
     KJ_IF_SOME(l, response.headers->get(kj::HttpHeaderId::LOCATION)) {
-      return handleHttpRedirectResponse(
-          js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), response.statusCode, l);
+
+      // Pump the response body to a singleton null stream before following the redirect.
+      auto& ioContext = IoContext::current();
+      return ioContext.awaitIo(js, 
+          response.body->pumpTo(getGlobalNullOutputStream()).ignoreResult().attach(kj::mv(response.body)),
+          [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList), 
+           status = response.statusCode, location = kj::str(l)](jsg::Lock& js) mutable {
+        return handleHttpRedirectResponse(
+            js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), status, kj::mv(location));
+      });
     } else {
       // No Location header. That's OK, we just return the response as is.
       // See https://fetch.spec.whatwg.org/#http-redirect-fetch step 2.

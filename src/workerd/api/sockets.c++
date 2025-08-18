@@ -78,6 +78,9 @@ kj::Maybe<uint64_t> getWritableHighWaterMark(jsg::Optional<SocketOptions>& opts)
 
 }  // namespace
 
+// Forward declarations
+class StreamWorkerInterface;
+
 jsg::Ref<Socket> setupSocket(jsg::Lock& js,
     kj::Own<kj::AsyncIoStream> connection,
     kj::String remoteAddress,
@@ -525,12 +528,25 @@ kj::Own<kj::AsyncIoStream> Socket::takeConnectionStream(jsg::Lock& js) {
   return connectionStream->addWrappedRef();
 }
 
+// Implementation of the custom factory for creating WorkerInterface instances from a socket
+class StreamOutgoingFactory final: public Fetcher::OutgoingFactory, public kj::Refcounted {
+ public:
+  StreamOutgoingFactory(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
+      : stream(kj::mv(stream)),
+        httpClient(kj::newHttpClient(headerTable, *this->stream)) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override;
+
+ private:
+  kj::Own<kj::AsyncIoStream> stream;
+  kj::Own<kj::HttpClient> httpClient;
+  friend class StreamWorkerInterface;
+};
+
 // Definition of the StreamWorkerInterface class
 class StreamWorkerInterface final: public WorkerInterface {
  public:
-  StreamWorkerInterface(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
-      : stream(kj::mv(stream)),
-        headerTable(headerTable) {}
+  StreamWorkerInterface(kj::Own<StreamOutgoingFactory> factory): factory(kj::mv(factory)) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
@@ -547,11 +563,9 @@ class StreamWorkerInterface final: public WorkerInterface {
     auto newHeaders = headers.cloneShallow();
     newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
-    // Create a new HTTP client using our stream
-    auto httpClient = kj::newHttpClient(headerTable, *stream);
 
     // Create a new HTTP service from the client
-    auto service = kj::newHttpService(*httpClient);
+    auto service = kj::newHttpService(*factory->httpClient);
 
     // Forward the request to the service
     co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
@@ -583,28 +597,15 @@ class StreamWorkerInterface final: public WorkerInterface {
   }
 
  private:
-  kj::Own<kj::AsyncIoStream> stream;
-  const kj::HttpHeaderTable& headerTable;
+  kj::Own<StreamOutgoingFactory> factory;
 };
 
-// Implementation of the custom factory for creating WorkerInterface instances from a socket
-class StreamOutgoingFactory final: public Fetcher::OutgoingFactory {
- public:
-  StreamOutgoingFactory(kj::Own<kj::AsyncIoStream> stream, const kj::HttpHeaderTable& headerTable)
-      : stream(kj::mv(stream)),
-        headerTable(headerTable) {}
-
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    JSG_ASSERT(stream.get() != nullptr, Error,
-        "Fetcher created from internalNewHttpClient can only be used once");
-    // Create a WorkerInterface that wraps the stream
-    return kj::heap<StreamWorkerInterface>(kj::mv(stream), headerTable);
-  }
-
- private:
-  kj::Own<kj::AsyncIoStream> stream;
-  const kj::HttpHeaderTable& headerTable;
-};
+kj::Own<WorkerInterface> StreamOutgoingFactory::newSingleUseClient(kj::Maybe<kj::String> cfStr) {
+  JSG_ASSERT(stream.get() != nullptr, Error,
+      "Fetcher created from internalNewHttpClient can only be used once");
+  // Create a WorkerInterface that wraps the stream
+  return kj::heap<StreamWorkerInterface>(kj::addRef(*this));
+}
 
 jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
     jsg::Lock& js, jsg::Ref<Socket> socket) {
@@ -619,7 +620,7 @@ jsg::Promise<jsg::Ref<Fetcher>> SocketsModule::internalNewHttpClient(
         auto& ioctx = IoContext::current();
 
         // Create our custom factory that will create client instances from this socket
-        kj::Own<Fetcher::OutgoingFactory> outgoingFactory = kj::heap<StreamOutgoingFactory>(
+        kj::Own<Fetcher::OutgoingFactory> outgoingFactory = kj::refcounted<StreamOutgoingFactory>(
             socket->takeConnectionStream(js), ioctx.getHeaderTable());
 
         // Create a Fetcher that uses our custom factory

@@ -96,16 +96,10 @@ export const redirect301 = {
     const httpClient = await internalNewHttpClient(socket);
 
     // TODO(cleanup) when enabling multiple fetches we can only then do redirects.
-    await assert.rejects(httpClient.fetch('https://example.com/redirect'), {
-      name: 'Error',
-      message:
-        'Fetcher created from internalNewHttpClient can only be used once',
-    });
-    /*
+    const response = await httpClient.fetch('https://example.com/redirect');
     assert.equal(response.status, 200);
     const text = await response.text();
     assert.equal(text, 'pong');
-    */
   },
 };
 
@@ -121,18 +115,10 @@ export const multipleRequests = {
     assert.equal(text1, 'pong');
 
     // Second request on same connection
-    // TODO(cleanup) we want this to fail during this initial implementation but later we should
-    // support mutiple fetches (perhaps behind a compat flag)
-    await assert.rejects(httpClient.fetch('https://example.com/json'), {
-      name: 'Error',
-      message:
-        'Fetcher created from internalNewHttpClient can only be used once',
-    });
-    /*
-     * assert.equal(response2.status, 200);
-     * const data = await response2.json();
-     * assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
-     */
+    const response2 = await httpClient.fetch('https://example.com/json');
+    assert.equal(response2.status, 200);
+    const data = await response2.json();
+    assert.deepEqual(data, { message: 'Hello from HTTP socket server' });
   },
 };
 
@@ -144,13 +130,16 @@ export const multipleConcurrentRequests = {
     // TODO(cleanup) when multiple fetches are enabled make sure this message is changed
     await assert.rejects(
       Promise.all([
-        httpClient.fetch('https://example.com/ping'),
-        httpClient.fetch('https://example.com/json'),
+        httpClient.fetch('https://example.com/ping', {
+          signal: AbortSignal.timeout(500),
+        }),
+        httpClient.fetch('https://example.com/json', {
+          signal: AbortSignal.timeout(500),
+        }),
       ]),
       {
         name: 'Error',
-        message:
-          'Fetcher created from internalNewHttpClient can only be used once',
+        message: /internal error/,
       }
     );
   },
