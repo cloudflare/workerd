@@ -10,7 +10,7 @@ const config :Workerd.Config = (
 const pyWorker :Workerd.Worker = (
   compatibilityDate = "2025-03-04",
 
-  compatibilityFlags = ["experimental", %PYTHON_FEATURE_FLAGS, "python_workflows"],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_workflows"],
 
   modules = [
     (name = "workflow.py", pythonModule = embed "workflow.py"),
