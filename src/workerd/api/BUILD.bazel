@@ -832,3 +832,12 @@ wd_test(
     args = ["--experimental"],
     data = ["tests/fetch-redirect-test.js"],
 )
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
+    ],
+)
