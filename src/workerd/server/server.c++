@@ -3660,6 +3660,10 @@ struct Server::WorkerDef {
   // constructed in a vastly different way for dynamically-loaded workers.
   kj::Function<void(jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target)>
       compileBindings;
+
+  // If the WorkerDef was created from a DymamicWorkerSource and that
+  // source contains a clone of the source bundle, this will take ownership.
+  kj::Maybe<kj::Own<void>> maybeOwnedSourceCode;
 };
 
 class Server::WorkerLoaderNamespace: public kj::Refcounted {
@@ -3757,6 +3761,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) {
           env.populateJsObject(js, jsg::JsObject(target));
         },
+
+        .maybeOwnedSourceCode = !source.ownContentIsRpcResponse
+            ? kj::Maybe<kj::Own<void>>(kj::mv(source.ownContent))
+            : kj::Maybe<kj::Own<void>>(kj::none),
         // clang-format on
       };
 
@@ -4102,7 +4110,8 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       : ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
-      SpanParent(nullptr), kj::mv(workerFs), false, errorReporter, kj::mv(artifactBundler));
+      SpanParent(nullptr), workerFs.attach(kj::mv(def.maybeOwnedSourceCode)), false, errorReporter,
+      kj::mv(artifactBundler));
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;
