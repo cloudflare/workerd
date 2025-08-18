@@ -1044,30 +1044,41 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     return kj::heap<FdHandle>(weakThis.addRef(), fd);
   }
 
+  // While held, holds a lock on the given locator url. While locked,
+  // certain operations on the identified node are not allowed.
   struct Lock {
-    const VirtualFileSystemImpl& vfs;
+    // Because we can't guarantee that the the lock will certainly be destroyed
+    // before the VFS, we hold a weak reference to the VFS. If the VFS is destroyed
+    // first, the lock essentially becomes a no-op.
+    kj::Rc<WeakRef<VirtualFileSystemImpl>> vfs;
     const jsg::Url& url;
 
     void lock(const jsg::Url& locator) const {
-      KJ_IF_SOME(locked, vfs.locks.find(locator)) {
-        locked++;
-      } else {
-        vfs.locks.insert(locator.clone(), 1);
-      }
+      vfs->runIfAlive([&locator](auto& vfs) {
+        KJ_IF_SOME(locked, vfs.locks.find(locator)) {
+          locked++;
+        } else {
+          vfs.locks.insert(locator.clone(), 1);
+        }
+      });
     }
 
     void unlock(const jsg::Url& locator) const {
-      KJ_IF_SOME(locked, vfs.locks.find(locator)) {
-        if (locked == 1) {
-          vfs.locks.erase(locator);
-        } else {
-          KJ_ASSERT(locked > 0);
-          --locked;
+      vfs->runIfAlive([&locator](auto& vfs) {
+        KJ_IF_SOME(locked, vfs.locks.find(locator)) {
+          if (locked == 1) {
+            vfs.locks.erase(locator);
+          } else {
+            KJ_ASSERT(locked > 0);
+            --locked;
+          }
         }
-      }
+      });
     }
 
-    Lock(const VirtualFileSystemImpl& vfs, const jsg::Url& url): vfs(vfs), url(url) {
+    Lock(kj::Rc<WeakRef<VirtualFileSystemImpl>> vfs, const jsg::Url& url)
+        : vfs(kj::mv(vfs)),
+          url(url) {
       lock(url);
 
       // This is fun... per the webfs spec, we need to prevent directories from
@@ -1092,7 +1103,7 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
   };
 
   kj::Own<void> lock(jsg::Lock& js, const jsg::Url& locator) const override {
-    return kj::heap<Lock>(*this, locator);
+    return kj::heap<Lock>(weakThis.addRef(), locator);
   }
   bool isLocked(jsg::Lock& js, const jsg::Url& locator) const override {
     KJ_IF_SOME(locked, locks.find(locator)) {
