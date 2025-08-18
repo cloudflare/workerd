@@ -43,13 +43,10 @@ class WorkerdApi final: public Worker::Api {
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-      kj::Own<VirtualFileSystem> vfs);
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
-
-  const VirtualFileSystem& getVirtualFileSystem() const override;
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;

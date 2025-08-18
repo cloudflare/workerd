@@ -247,6 +247,8 @@ class Worker::Script: public kj::AtomicRefcounted {
     return mapAddRef(dynamicEnvBuilder);
   }
 
+  void installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const;
+
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
     jsg::V8Ref<v8::Value> value;
@@ -291,7 +293,8 @@ class Worker::Script: public kj::AtomicRefcounted {
       bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
-      SpanParent parentSpan);
+      SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -357,6 +360,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       const Script::Source& source,
       IsolateObserver::StartType startType,
       SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs,
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
@@ -608,9 +612,6 @@ class Worker::Api {
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
   }
-
-  // Return the virtual file system for this worker.
-  virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
 };
 
 // A Worker may bounce between threads as it handles multiple requests, but can only actually

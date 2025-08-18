@@ -757,7 +757,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
-  setAlignedPointerInEmbeddedData(context, ContextPointerSlot::MODULE_REGISTRY, this);
+  setAlignedPointerInEmbedderData(context, ContextPointerSlot::MODULE_REGISTRY, this);
   isolate->SetHostImportModuleDynamicallyCallback(&dynamicImport);
   isolate->SetHostInitializeImportMetaObjectCallback(&importMeta);
 }

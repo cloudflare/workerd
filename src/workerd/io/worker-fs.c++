@@ -1371,12 +1371,12 @@ kj::Rc<Directory> getLazyDirectoryImpl(kj::Function<kj::Rc<Directory>()> func) {
   return kj::rc<LazyDirectory>(kj::mv(func));
 }
 
-const VirtualFileSystem& VirtualFileSystem::current(jsg::Lock&) {
-  // Note that the jsg::Lock& argument here is not actually used. We require
-  // that a jsg::Lock reference is passed in as proof that current() is called
-  // from within a valid isolate lock so that the Worker::Api::current()
-  // call below will work as expected.
-  return Worker::Api::current().getVirtualFileSystem();
+const VirtualFileSystem& VirtualFileSystem::current(jsg::Lock& js) {
+  // The VFS is stored in an embedder data slot in the v8::Context associated with
+  // the current jsg::Lock. The actual instance is kept alive using a kj::Own held
+  // by the Worker::Script.
+  return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<VirtualFileSystem>(
+      js.v8Context(), jsg::ContextPointerSlot::VIRTUAL_FILE_SYSTEM));
 }
 
 kj::Maybe<FsNodeWithError> VirtualFileSystem::resolve(

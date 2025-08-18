@@ -31,16 +31,17 @@ enum class ContextPointerSlot : int {
   GLOBAL_WRAPPER = 1,
   MODULE_REGISTRY = 2,
   EXTENDED_CONTEXT_WRAPPER = 3,
+  VIRTUAL_FILE_SYSTEM = 4,
   // Keep the MAX_POINTER_SLOT as the last entry and always set to
   // to the highest value of the other entries. We use this to
   // ensure that the highest used index is always initialized in
   // every context we create without having to update the specific
   // callsites whenever we add a new slot. We can just make the
   // change here.
-  MAX_POINTER_SLOT = EXTENDED_CONTEXT_WRAPPER,
+  MAX_POINTER_SLOT = VIRTUAL_FILE_SYSTEM,
 };
 
-inline void setAlignedPointerInEmbeddedData(
+inline void setAlignedPointerInEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot, void* ptr) {
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
   context->SetAlignedPointerInEmbedderData(static_cast<int>(slot), ptr);
