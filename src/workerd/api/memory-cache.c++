@@ -504,7 +504,6 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
     KJ_SWITCH_ONEOF(cacheUse.getWithFallback(key.value, readSpan)) {
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
         // Optimization: Don't even release the isolate lock if the value is already in cache.
-        readSpan.setTag("cache_hit"_kjc, true);
         readSpan.setTag("entry_size"_kjc, static_cast<double>(result->bytes.size()));
 
         jsg::Deserializer deserializer(js, result->bytes.asPtr());
