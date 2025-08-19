@@ -513,6 +513,18 @@ public:
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName);
 
+  // Result of getClient call that includes optional trace context
+  struct ClientWithTracing {
+    kj::Own<WorkerInterface> client;
+    kj::Maybe<TraceContext> traceContext;
+  };
+
+  // Get client and optionally create trace context, all in one call
+  ClientWithTracing getClientWithTracing(
+    IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName);
+
   // Get a SubrequestChannel representing this Fetcher.
   kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
 

@@ -3,7 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
 
-let resposeMap = new Map();
+let responseMap = new Map();
+
+// JSON.stringify() does not support BigInt by default - manually add that here.
+BigInt.prototype.toJSON = function () {
+  return this.toString();
+};
 
 export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
@@ -18,10 +23,10 @@ export default {
       event.event.info.scheduledTime = '1970-01-01T00:00:00.000Z';
     }
 
-    resposeMap.set(event.traceId, JSON.stringify(event.event));
+    responseMap.set(event.traceId, JSON.stringify(event.event));
     return (event) => {
-      let cons = resposeMap.get(event.traceId);
-      resposeMap.set(event.traceId, cons + JSON.stringify(event.event));
+      let cons = responseMap.get(event.traceId);
+      responseMap.set(event.traceId, cons + JSON.stringify(event.event));
     };
   },
 };
@@ -34,12 +39,12 @@ export const test = {
     // This test verifies that we're able to receive tail stream events for various handlers.
 
     // Recorded streaming tail worker events, in insertion order.
-    let response = Array.from(resposeMap.values());
+    let response = Array.from(responseMap.values());
 
     let expected = [
       // http-test.js: fetch and scheduled events get reported correctly.
       // First event is emitted by the test() event, which allows us to get some coverage for span tracing.
-      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"worker","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","parentSpanId":"0"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"worker","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"http://placeholder/body-length","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"spanOpen","name":"worker","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"http://placeholder/body-length","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"spanOpen","name":"worker","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"scheduled","scheduledTime":"1970-01-01T00:00:00.000Z","cron":""}}{"type":"spanOpen","name":"worker","parentSpanId":"0"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
