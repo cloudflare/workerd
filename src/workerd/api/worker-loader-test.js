@@ -165,6 +165,39 @@ export let passEnv = {
   },
 };
 
+export let passEnvCaps = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('passEnvCaps', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              async fetch(req, env, ctx) {
+                let greet1 = await env.greeter.greet("Alice");
+                let greet2 = await env.greeter2.greet("Bob");
+                return new Response([greet1, greet2].join("\\n"));
+              },
+            }
+          `,
+        },
+        env: {
+          greeter: ctx.exports.GreeterLoopback({
+            props: { greeting: 'Hello' },
+          }),
+          greeter2: ctx.exports.GreeterLoopback({
+            props: { greeting: 'Welcome' },
+          }),
+        },
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'Hello, Alice!\nWelcome, Bob!');
+  },
+};
+
 export let testOutbound = {
   async fetch(req, env, ctx) {
     return new Response('hello from testOutbound');

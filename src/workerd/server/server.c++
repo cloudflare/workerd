@@ -3880,6 +3880,28 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
       auto source = co_await fetchSource();
       static const kj::HashMap<kj::String, ActorConfig> EMPTY_ACTOR_CONFIGS;
+
+      // Rewrite the capabilities in `env` in order to build the I/O channel table.
+      kj::Vector<FutureSubrequestChannel> subrequestChannels;
+      source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
+        if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(entry.get())) {
+          uint channelNumber =
+              subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+          subrequestChannels.add(FutureSubrequestChannel{
+            .designator = kj::addRef(*channel),
+            .errorContext = kj::str("Worker's env"),
+          });
+          return kj::heap<IoChannelCapTableEntry>(
+              IoChannelCapTableEntry::SUBREQUEST, channelNumber);
+        } else {
+          // Generally, it shouldn't be possible to get here, but just in case, let's at least
+          // provide some sort of error, although it's a vague one.
+          JSG_FAIL_REQUIRE(DOMDataCloneError,
+              "Dynamic 'env' contains one or more objects that are not supported for use in "
+              "'env', although they would be supported in 'props'.");
+        }
+      });
+
       WorkerDef def{
         .featureFlags = source.compatibilityFlags,
         .source = kj::mv(source.source),
@@ -3893,6 +3915,8 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
               .orDefault([]() { return kj::refcounted<NullGlobalOutboundChannel>(); }),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
+
+        .subrequestChannels = kj::mv(subrequestChannels),
 
         .compileBindings = [env = kj::mv(source.env)](
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) mutable {

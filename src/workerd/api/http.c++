@@ -2497,13 +2497,17 @@ jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
   auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
       "serialized ServiceStub had invalid cap table index");
 
-  auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap);
-  KJ_REQUIRE(channel != nullptr,
-      "ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
-
-  return js.alloc<Fetcher>(
-      IoContext::current().addObject(kj::addRef(*channel)),
-      RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+  if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap)) {
+    return js.alloc<Fetcher>(
+        IoContext::current().addObject(kj::addRef(*channel)),
+        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
+    return js.alloc<Fetcher>(
+        channel->getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
+        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+  } else {
+    KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+  }
 }
 
 static jsg::Promise<void> throwOnError(

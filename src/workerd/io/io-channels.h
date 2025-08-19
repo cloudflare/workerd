@@ -286,4 +286,28 @@ struct DynamicWorkerSource {
   bool ownContentIsRpcResponse = true;
 };
 
+// A Frakenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
+// valid to use when the `Frankenvalue` is being deserialized as the `env` object of an isolate.
+// The caller should use frankenvalue.rewriteCaps() to rewrite the cap table entries into
+// IoChannelCapTableEntry, building the I/O channel table as it goes.
+class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
+ public:
+  enum Type {
+    SUBREQUEST,
+    // TODO(now): ACTOR_CLASS_CHANNEL
+    // TODO(someday): Other channel types, maybe.
+  };
+
+  IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}
+
+  // Throws if type doesn't match.
+  uint getChannelNumber(Type expectedType);
+
+  kj::Own<CapTableEntry> clone() override;
+
+ private:
+  Type type;
+  uint channel;
+};
+
 }  // namespace workerd
