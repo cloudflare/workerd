@@ -15,12 +15,14 @@ pub enum DnsParserError {
 #[cxx::bridge(namespace = "workerd::rust::dns")]
 mod ffi {
     /// CAA record representation
+    #[derive(JsgStruct)]
     struct CaaRecord {
         critical: u8,
         field: String,
         value: String,
     }
     /// NAPTR record representation
+    #[derive(JsgStruct)]
     struct NaptrRecord {
         flags: String,
         service: String,

@@ -71,7 +71,6 @@ wd_cc_library(
     ],
     implementation_deps = [
         "//src/rust/cxx-integration",
-        "//src/rust/dns",
         "//src/rust/net",
         "@ada-url",
         "@nbytes",
@@ -81,6 +80,7 @@ wd_cc_library(
     deps = [
         # Do not add the io target here – this target is intended for code that does not depend on
         # it, move files to the main node target if needed.
+        "//src/rust/dns",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/io",

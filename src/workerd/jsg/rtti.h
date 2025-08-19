@@ -249,7 +249,8 @@ FOR_EACH_NUMBER_TYPE(DECLARE_NUMBER_TYPE)
   F(ByteString)                                                                                    \
   F(USVString)                                                                                     \
   F(DOMString)                                                                                     \
-  F(jsg::JsString)
+  F(jsg::JsString)                                                                                 \
+  F(::rust::String)
 
 FOR_EACH_STRING_TYPE(DECLARE_STRING_TYPE)
 

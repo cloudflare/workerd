@@ -7,21 +7,39 @@ def rust_cxx_bridge(
         deps = [],
         visibility = [],
         strip_include_prefix = None,
-        include_prefix = None):
+        include_prefix = None,
+        needs_jsg = False):
+    # Prepare outputs and sources
+    outs = [src + ".h", src + ".cc"]
+    srcs = [src]
+
+    # If JSG is needed, add jsg.h to outputs and copy it from the generic header
+    if needs_jsg:
+        outs.append("jsg.h")
+        srcs.append("//src/rust/cxx-integration:headers/jsg.h")
+
+    # Prepare command
+    cmd_parts = ["$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src)]
+
+    # If JSG is needed, copy the generic jsg.h header
+    if needs_jsg:
+        cmd_parts.append("&& cp $(location //src/rust/cxx-integration:headers/jsg.h) $(location jsg.h)")
+
     native.genrule(
         name = "%s/generated" % name,
-        srcs = [src],
-        outs = [
-            src + ".h",
-            src + ".cc",
-        ],
-        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        srcs = srcs,
+        outs = outs,
+        cmd = " ".join(cmd_parts),
         tools = ["@workerd-cxx//:codegen"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
     )
+
+    # Add jsg.h to hdrs if needed
+    if needs_jsg:
+        hdrs = hdrs + ["jsg.h"]
 
     native.cc_library(
         name = name,
@@ -75,12 +93,16 @@ def wd_rust_crate(
     if cxx_bridge_src:
         hdrs = native.glob(["**/*.h"], allow_empty = True)
 
+        # Check if JSG integration is needed by looking for JSG dependencies
+        needs_jsg = any([dep.endswith(":jsg") or "jsg" in dep for dep in cxx_bridge_deps])
+
         rust_cxx_bridge(
             name = name + "@cxx",
             src = cxx_bridge_src,
             hdrs = hdrs,
             include_prefix = "workerd/rust/" + name,
             strip_include_prefix = "",
+            needs_jsg = needs_jsg,
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [

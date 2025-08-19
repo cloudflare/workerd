@@ -12,24 +12,14 @@ using namespace kj_rs;
 
 namespace workerd::api::node {
 
-DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
+rust::dns::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
   // value comes from js so it is always valid utf-8
-  auto parsed = rust::dns::parse_caa_record(record.as<RustUncheckedUtf8>());
-  return CaaRecord{
-    .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
+  return rust::dns::parse_caa_record(record.as<RustUncheckedUtf8>());
 }
 
-DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
+rust::dns::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
   // value comes from js so it is always valid utf-8
-  auto parsed = rust::dns::parse_naptr_record(record.as<RustUncheckedUtf8>());
-  return NaptrRecord{
-    .flags = kj::str(parsed.flags),
-    .service = kj::str(parsed.service),
-    .regexp = kj::str(parsed.regexp),
-    .replacement = kj::str(parsed.replacement),
-    .order = parsed.order,
-    .preference = parsed.preference,
-  };
+  return rust::dns::parse_naptr_record(record.as<RustUncheckedUtf8>());
 }
 
 }  // namespace workerd::api::node

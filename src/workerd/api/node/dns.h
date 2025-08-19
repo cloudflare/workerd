@@ -4,10 +4,9 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/rust/dns/lib.rs.h>
 
 #include <kj/string.h>
-
-#include <cstdint>
 
 namespace workerd::api::node {
 
@@ -16,28 +15,8 @@ class DnsUtil final: public jsg::Object {
   DnsUtil() = default;
   DnsUtil(jsg::Lock&, const jsg::Url&) {}
 
-  // TODO: Remove this once we can expose Rust structs
-  struct CaaRecord {
-    uint8_t critical;
-    kj::String field;
-    kj::String value;
-
-    JSG_STRUCT(critical, field, value);
-  };
-
-  struct NaptrRecord {
-    kj::String flags;
-    kj::String service;
-    kj::String regexp;
-    kj::String replacement;
-    uint32_t order;
-    uint32_t preference;
-
-    JSG_STRUCT(flags, service, regexp, replacement, order, preference);
-  };
-
-  CaaRecord parseCaaRecord(kj::String record);
-  NaptrRecord parseNaptrRecord(kj::String record);
+  rust::dns::CaaRecord parseCaaRecord(kj::String record);
+  rust::dns::NaptrRecord parseNaptrRecord(kj::String record);
 
   JSG_RESOURCE_TYPE(DnsUtil) {
     JSG_METHOD(parseCaaRecord);
@@ -45,7 +24,6 @@ class DnsUtil final: public jsg::Object {
   }
 };
 
-#define EW_NODE_DNS_ISOLATE_TYPES                                                                  \
-  api::node::DnsUtil, api::node::DnsUtil::CaaRecord, api::node::DnsUtil::NaptrRecord
+#define EW_NODE_DNS_ISOLATE_TYPES api::node::DnsUtil, rust::dns::CaaRecord, rust::dns::NaptrRecord
 
 }  // namespace workerd::api::node

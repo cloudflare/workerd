@@ -15,12 +15,16 @@
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
 
+#include <kj-rs/kj-rs.h>
+#include <rust/cxx.h>
 #include <v8-container.h>
 #include <v8-date.h>
 
 #include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/time.h>
+
+#include <type_traits>
 
 namespace workerd::jsg {
 
@@ -456,7 +460,12 @@ class StringWrapper {
   static constexpr const char* getName(kj::ArrayPtr<const char>*) {
     return "string";
   }
+
   static constexpr const char* getName(kj::Array<const char>*) {
+    return "string";
+  }
+
+  static constexpr const char* getName(::rust::String*) {
     return "string";
   }
 
@@ -486,6 +495,16 @@ class StringWrapper {
     return wrap(js, context, creator, value.asPtr());
   }
 
+  // TODO(soon): Find a better way to get rid of "std::enable_if" usage here.
+  // Removing std::enable_if will cause "ambiguous" build errors.
+  template <typename T>
+  std::enable_if_t<std::is_same_v<T, ::rust::String>, v8::Local<v8::String>> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const T& value) {
+    return v8Str(js.v8Isolate, kj::str(value));
+  }
+
   v8::Local<v8::String> wrap(
       v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::StringPtr value) {
     return v8Str(isolate, value);
@@ -496,21 +515,21 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const USVString& value) {
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const DOMString& value) {
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   kj::Maybe<kj::String> tryUnwrap(Lock& js,

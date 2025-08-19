@@ -1,5 +1,10 @@
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
+# JSG header wrapper for Rust CXX bridge integration
+exports_files([
+    "headers/jsg.h",
+])
+
 wd_rust_crate(
     name = "cxx-integration",
     cxx_bridge_deps = [
