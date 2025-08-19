@@ -388,6 +388,12 @@ enum SerializationTag {
   #
   # Also because of all this, service stubs can be embedded in the `env` and `ctx.props` of other
   # Workers. Regular RPC stubs cannot.
+
+  actorClass @12;
+  # An actor class reference, aka DurableObjectClass. Can be used to instantiate a facet.
+  #
+  # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
+  # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
 }
 
 enum StreamEncoding {

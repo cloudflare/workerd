@@ -217,9 +217,17 @@ class IoChannelFactory {
   // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
   // token which can be passed into other interfaces that might use the actor class, particularly
   // Worker::Actor::FacetManager.
-  class ActorClassChannel: public kj::Refcounted {
+  class ActorClassChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
-    // This class has no actual methods!
+    kj::Own<CapTableEntry> clone() override final {
+      return kj::addRef(*this);
+    }
+
+    // Same as SubrequestChannel::requireAllowsTransfer().
+    virtual void requireAllowsTransfer() = 0;
+
+    // This class has no functional methods, since it serves as a token to be passed to other
+    // interfaces (namely the facets API).
   };
 
   // Get an actor class binding corresponding to the given channel number.
@@ -294,7 +302,7 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
  public:
   enum Type {
     SUBREQUEST,
-    // TODO(now): ACTOR_CLASS_CHANNEL
+    ACTOR_CLASS,
     // TODO(someday): Other channel types, maybe.
   };
 

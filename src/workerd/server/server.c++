@@ -553,6 +553,11 @@ class Server::InvalidConfigService final: public Service {
 
 class Server::InvalidConfigActorClass final: public ActorClass {
  public:
+  void requireAllowsTransfer() override {
+    // Can't get here because workerd would have failed to start.
+    KJ_UNREACHABLE;
+  }
+
   kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
       Worker::Actor::Id actorId,
       Worker::Actor::MakeActorCacheFunc makeActorCache,
@@ -3001,6 +3006,10 @@ class Server::WorkerService final: public Service,
           className(className),
           props(kj::mv(props)) {}
 
+    void requireAllowsTransfer() override {
+      service->requireAllowsTransfer();
+    }
+
     kj::Own<Worker::Actor> newActor(kj::Maybe<RequestTracker&> tracker,
         Worker::Actor::Id actorId,
         Worker::Actor::MakeActorCacheFunc makeActorCache,
@@ -3364,8 +3373,20 @@ struct FutureActorChannel {
 };
 
 struct FutureActorClassChannel {
-  config::ServiceDesignator::Reader designator;
+  kj::OneOf<config::ServiceDesignator::Reader, kj::Own<Server::ActorClass>> designator;
   kj::String errorContext;
+
+  kj::Own<Server::ActorClass> lookup(Server& server) && {
+    KJ_SWITCH_ONEOF(designator) {
+      KJ_CASE_ONEOF(conf, config::ServiceDesignator::Reader) {
+        return server.lookupActorClass(conf, kj::mv(errorContext));
+      }
+      KJ_CASE_ONEOF(channel, kj::Own<Server::ActorClass>) {
+        return kj::mv(channel);
+      }
+    }
+    KJ_UNREACHABLE;
+  }
 };
 
 struct FutureWorkerLoaderChannel {
@@ -3883,6 +3904,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
 
       // Rewrite the capabilities in `env` in order to build the I/O channel table.
       kj::Vector<FutureSubrequestChannel> subrequestChannels;
+      kj::Vector<FutureActorClassChannel> actorClassChannels;
       source.env.rewriteCaps([&](kj::Own<Frankenvalue::CapTableEntry> entry) {
         if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(entry.get())) {
           uint channelNumber =
@@ -3893,6 +3915,14 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           });
           return kj::heap<IoChannelCapTableEntry>(
               IoChannelCapTableEntry::SUBREQUEST, channelNumber);
+        } else if (auto channel = dynamic_cast<ActorClass*>(entry.get())) {
+          uint channelNumber = subrequestChannels.size();
+          actorClassChannels.add(FutureActorClassChannel{
+            .designator = kj::addRef(*channel),
+            .errorContext = kj::str("Worker's env"),
+          });
+          return kj::heap<IoChannelCapTableEntry>(
+              IoChannelCapTableEntry::ACTOR_CLASS, channelNumber);
         } else {
           // Generally, it shouldn't be possible to get here, but just in case, let's at least
           // provide some sort of error, although it's a vague one.
@@ -3917,6 +3947,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         },
 
         .subrequestChannels = kj::mv(subrequestChannels),
+        .actorClassChannels = kj::mv(actorClassChannels),
 
         .compileBindings = [env = kj::mv(source.env)](
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) mutable {
@@ -3998,6 +4029,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           : isolate(kj::mv(isolate)),
             entrypointName(kj::mv(entrypointName)),
             props(kj::mv(props)) {}
+
+      void requireAllowsTransfer() override {
+        throwDynamicEntrypointTransferError();
+      }
 
       kj::Maybe<kj::Promise<void>> whenReady() override {
         if (inner != kj::none) return kj::none;
@@ -4407,7 +4442,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         def.actorClassChannels.size() + actorClassNames.size());
 
     for (auto& channel: def.actorClassChannels) {
-      actorClasses.add(lookupActorClass(channel.designator, kj::mv(channel.errorContext)));
+      actorClasses.add(kj::mv(channel).lookup(*this));
     }
 
     auto linkedActorChannels =

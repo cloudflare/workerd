@@ -294,11 +294,19 @@ export let nullGlobalOutbound = {
   },
 };
 
+export class GreeterFacet extends DurableObject {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}?`;
+  }
+}
+
 export class FacetTestActor extends DurableObject {
   async doTest() {
     let worker = this.env.loader.get('facets', () => {
       return {
         compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -311,7 +319,20 @@ export class FacetTestActor extends DurableObject {
                 return this.i;
               }
               myProps() {
-                return this.ctx.props;
+                let result = {...this.ctx.props};
+                delete result.propsGreeter;
+                return result;
+              }
+              async greets() {
+                let greeter1 = this.ctx.facets.get("greeter1", () => {
+                  return { class: this.env.envGreeter };
+                });
+                let greeter2 = this.ctx.facets.get("greeter2", () => {
+                  return { class: this.ctx.props.propsGreeter };
+                });
+                let greet1 = await greeter1.greet("Alice");
+                let greet2 = await greeter2.greet("Bob");
+                return [greet1, greet2].join("\\n");
               }
             }
           `,
@@ -319,11 +340,23 @@ export class FacetTestActor extends DurableObject {
 
         // Set globalOutbound to redirect to our own `testOutbound` entrypoint.
         globalOutbound: this.ctx.exports.testOutbound,
+
+        env: {
+          envGreeter: this.ctx.exports.GreeterFacet({
+            props: { greeting: 'Hello' },
+          }),
+        },
       };
     });
 
     let cls = worker.getDurableObjectClass('MyActor', {
-      props: { foo: 123, bar: 456 },
+      props: {
+        foo: 123,
+        bar: 456,
+        propsGreeter: this.ctx.exports.GreeterFacet({
+          props: { greeting: 'Welcome' },
+        }),
+      },
     });
 
     let facet = this.ctx.facets.get('bar', () => {
@@ -334,6 +367,8 @@ export class FacetTestActor extends DurableObject {
     assert.strictEqual(await facet.increment(4), 5);
 
     assert.deepEqual(await facet.myProps(), { foo: 123, bar: 456 });
+
+    assert.strictEqual(await facet.greets(), 'Hello, Alice?\nWelcome, Bob?');
   }
 }
 
