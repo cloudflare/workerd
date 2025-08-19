@@ -3211,7 +3211,7 @@ kj::Promise<void> Worker::Isolate::attachInspector(kj::Timer& timer,
   KJ_REQUIRE(impl->inspector != kj::none);
 
   kj::HttpHeaders headers(headerTable);
-  headers.set(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
+  headers.setPtr(controlHeaderId, "{\"ewLog\":{\"status\":\"ok\"}}");
   auto webSocket = response.acceptWebSocket(headers);
 
   // This `attachInspector()` overload is used by the internal Cloudflare Workers runtime, which has

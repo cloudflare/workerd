@@ -179,10 +179,10 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
   auto connection = co_await address->connect();
   auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
   kj::HttpHeaders headers(headerTable);
-  headers.set(kj::HttpHeaderId::HOST, "localhost");
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
 
   KJ_IF_SOME(requestBody, body) {
-    headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
     headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
 
     auto req = httpClient->request(method, endpoint, headers, requestBody.size());

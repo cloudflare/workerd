@@ -4649,8 +4649,8 @@ KJ_TEST("Server: Catch websocket server errors") {
   kj::HttpHeaderTable headerTable;
   NotVeryGoodEntropySource entropySource;
   kj::HttpHeaders headers(headerTable);
-  headers.set(kj::HttpHeaderId::HOST, "foo");
-  headers.set(kj::HttpHeaderId::UPGRADE, "websocket");
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
   {
     auto wsConn = test.connect("test-addr");
     auto client = kj::newHttpClient(
@@ -4673,8 +4673,8 @@ KJ_TEST("Server: Catch websocket server errors") {
   }
   {
     auto wsConn = test.connect("test-addr");
-    headers.set(kj::HttpHeaderId::HOST, "foo");
-    headers.set(kj::HttpHeaderId::UPGRADE, "websocket");
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+    headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
     auto client = kj::newHttpClient(
         headerTable, wsConn.getStream(), kj::HttpClientSettings{.entropySource = entropySource});
     auto res = client->openWebSocket("/", headers).wait(waitScope);

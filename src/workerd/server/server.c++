@@ -410,7 +410,7 @@ class Server::HttpRewriter {
 
     KJ_IF_SOME(h, cfBlobHeader) {
       KJ_IF_SOME(b, cfBlobJson) {
-        result.headers->set(h, b);
+        result.headers->setPtr(h, b);
       } else {
         result.headers->unset(h);
       }
@@ -494,7 +494,7 @@ class Server::HttpRewriter {
     void apply(kj::HttpHeaders& headers) {
       for (auto& header: injectedHeaders) {
         KJ_IF_SOME(v, header.value) {
-          headers.set(header.id, v);
+          headers.setPtr(header.id, v);
         } else {
           headers.unset(header.id);
         }
@@ -3050,7 +3050,7 @@ class Server::WorkerService final: public Service,
         const kj::HttpHeaders& headers, kj::Maybe<kj::StringPtr> cacheName) {
       auto headersCopy = headers.cloneShallow();
       KJ_IF_SOME(name, cacheName) {
-        headersCopy.set(cacheNamespaceHeader, name);
+        headersCopy.setPtr(cacheNamespaceHeader, name);
       }
 
       return headersCopy;

@@ -178,7 +178,7 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
   for (auto& entry: headers) {
     for (auto& value: entry.second.values) {
-      out.add(entry.second.name, value);
+      out.addPtrPtr(entry.second.name, value);
     }
   }
 }
@@ -1669,7 +1669,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
         // requested, so we'll just use the client's requested headers.
         KJ_IF_SOME(reqHeaders, maybeReqHeaders) {
           KJ_IF_SOME(value, reqHeaders.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS)) {
-            outHeaders.set(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, value);
+            outHeaders.setPtr(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS, value);
           }
         }
       }
@@ -1907,10 +1907,10 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       KJ_FALLTHROUGH;
     case Request::CacheMode::NOCACHE:
       if (headers.get(headerIds.cacheControl) == kj::none) {
-        headers.set(headerIds.cacheControl, "no-cache");
+        headers.setPtr(headerIds.cacheControl, "no-cache");
       }
       if (headers.get(headerIds.pragma) == kj::none) {
-        headers.set(headerIds.pragma, "no-cache");
+        headers.setPtr(headerIds.pragma, "no-cache");
       }
       KJ_FALLTHROUGH;
     case Request::CacheMode::NONE:
@@ -1976,7 +1976,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         // the code in global-scope.c++ on the receiving end will decide the body should be null.
         // We'd like to avoid this weird discontinuity, so let's set Content-Length explicitly to
         // 0.
-        headers.set(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
+        headers.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
       }
 
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
