@@ -835,8 +835,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # enabled, the original module registry implementation will follow the recommended behavior.
 
   pythonWorkflows @95 :Bool
-      $compatEnableFlag("python_workflows")
-      $experimental;
+    $compatEnableFlag("python_workflows")
+    $compatDisableFlag("disable_python_workflows")
+    $impliedByAfterDate(name = "pythonWorkers", date = "2025-09-20");
   # Enables support for Python workflows.
   # This is still in development and may change in the future.
 
