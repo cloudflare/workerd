@@ -344,7 +344,6 @@ kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource&
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
-  kj::Own<VirtualFileSystem> vfs;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
@@ -378,12 +377,10 @@ struct WorkerdApi::Impl final {
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
-      kj::Own<VirtualFileSystem> vfs,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
         extensions(extensionsParam),
-        vfs(kj::mv(vfs)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(
@@ -454,8 +451,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
-    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-    kj::Own<VirtualFileSystem> vfs)
+    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -463,7 +459,6 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           group,
           kj::mv(observer),
           memoryCacheProvider,
-          kj::mv(vfs),
           pythonConfig,
           kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
@@ -1458,10 +1453,6 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
 
   // All done!
   return builder.finish();
-}
-
-const VirtualFileSystem& WorkerdApi::getVirtualFileSystem() const {
-  return *impl->vfs;
 }
 
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {

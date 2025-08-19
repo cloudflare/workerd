@@ -284,10 +284,8 @@ class SyntheticModule final: public Module {
 class IsolateModuleRegistry final {
  public:
   static IsolateModuleRegistry& from(v8::Isolate* isolate) {
-    auto context = isolate->GetCurrentContext();
-    void* ptr = context->GetAlignedPointerFromEmbedderData(2);
-    KJ_ASSERT(ptr != nullptr);
-    return *static_cast<IsolateModuleRegistry*>(ptr);
+    return KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<IsolateModuleRegistry>(
+        isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   struct SpecifierContext final {
@@ -759,7 +757,7 @@ IsolateModuleRegistry::IsolateModuleRegistry(
   auto isolate = js.v8Isolate;
   auto context = isolate->GetCurrentContext();
   KJ_ASSERT(!context.IsEmpty());
-  context->SetAlignedPointerInEmbedderData(2, this);
+  setAlignedPointerInEmbedderData(context, ContextPointerSlot::MODULE_REGISTRY, this);
   isolate->SetHostImportModuleDynamicallyCallback(&dynamicImport);
   isolate->SetHostInitializeImportMetaObjectCallback(&importMeta);
 }

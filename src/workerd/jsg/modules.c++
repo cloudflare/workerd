@@ -249,8 +249,8 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
-  return static_cast<ModuleRegistry*>(
-      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+  return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
 }
 
 void instantiateModule(
