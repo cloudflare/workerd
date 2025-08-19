@@ -472,3 +472,12 @@ export const statelessDhEc = {
     );
   },
 };
+
+export const helloTest = {
+  test() {
+    const v2 = crypto.createDiffieHellman('hello');
+    assert.throws(() => v2.getPrivateKey(v2, 'hello', v2, v2, 'hello'), {
+      message: /No private key/,
+    });
+  },
+};
