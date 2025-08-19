@@ -502,7 +502,7 @@ class StringWrapper {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const T& value) {
-    return v8Str(js.v8Isolate, kj::str(value));
+    return v8Str(js.v8Isolate, kj_rs::from<kj_rs::Rust>(value));
   }
 
   v8::Local<v8::String> wrap(
