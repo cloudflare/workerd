@@ -96,6 +96,12 @@ wd_test(
     data = ["unknown-import-assertions-test.js"],
 )
 
+wd_test(
+    src = "module-imports-test.wd-test",
+    args = ["--experimental"],
+    data = ["module-imports-test.js"],
+)
+
 filegroup(
     name = "all_benchmarks",
     srcs = [
