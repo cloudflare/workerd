@@ -466,22 +466,6 @@ export async function initPython(): Promise<PythonInitResult> {
 
   const mainModule = await getMainModule();
 
-  if (legacyGlobalHandlers) {
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
-      // We add all handlers when running in workerd, so that we can handle the case where the
-      // handler is not defined in our own code and throw a more helpful error. See
-      // undefined-handler.wd-test.
-      if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
-        handlers[handlerName] = makeHandler(pyHandlerName);
-      }
-    }
-
-    if (typeof mainModule.test === 'function') {
-      handlers.test = makeHandler('test');
-    }
-  }
-
   // In order to get the entrypoint classes exported by the worker, we use a Python module
   // to introspect the user's main module. So we are effectively using Python to analyse the
   // classes exported by the user worker here. The class names are then exported from here and
@@ -490,6 +474,23 @@ export async function initPython(): Promise<PythonInitResult> {
   pythonEntrypointClasses =
     introspectionMod.collect_entrypoint_classes(mainModule);
   handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
+
+  if (legacyGlobalHandlers) {
+    // We add all handlers when running in workerd, so that we can handle the case where the
+    // handler is not defined in our own code and throw a more helpful error. See
+    // undefined-handler.wd-test.
+    const addAllHandlers = IS_WORKERD && !handlers['default'];
+    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+      const pyHandlerName = 'on_' + handlerName;
+      if (addAllHandlers || typeof mainModule[pyHandlerName] === 'function') {
+        handlers[handlerName] = makeHandler(pyHandlerName);
+      }
+    }
+
+    if (typeof mainModule.test === 'function') {
+      handlers.test = makeHandler('test');
+    }
+  }
 
   // Collect a dedicated snapshot at the very end.
   const pyodide = await getPyodide();
