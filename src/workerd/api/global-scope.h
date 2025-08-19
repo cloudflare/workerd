@@ -612,7 +612,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // compat Buffer and process at the global scope in all modules as lazy instance
   // properties.
   jsg::JsValue getBuffer(jsg::Lock& js);
+  void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
+  void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);
@@ -708,8 +710,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     }
 
     if (flags.getNodeJsCompatV2()) {
-      JSG_LAZY_INSTANCE_PROPERTY(Buffer, getBuffer);
-      JSG_LAZY_INSTANCE_PROPERTY(process, getProcess);
+      JSG_INSTANCE_PROPERTY(Buffer, getBuffer, setBuffer);
+      JSG_INSTANCE_PROPERTY(process, getProcess, setProcess);
       JSG_LAZY_INSTANCE_PROPERTY(global, getSelf);
       JSG_METHOD(setImmediate);
       JSG_METHOD(clearImmediate);
@@ -910,6 +912,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
  private:
   jsg::UnhandledRejectionHandler unhandledRejections;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.
