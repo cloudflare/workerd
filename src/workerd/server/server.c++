@@ -164,6 +164,14 @@ static inline kj::Own<T> fakeOwn(T& ref) {
   return kj::Own<T>(&ref, kj::NullDisposer::instance);
 }
 
+void throwDynamicEntrypointTransferError() {
+  JSG_FAIL_REQUIRE(DOMDataCloneError,
+      "Entrypoints to dynamically-loaded workers cannot be transferred to other Workers, "
+      "because the system does not know how to reload this Worker from scratch. Instead, "
+      "have the parent Worker expose an entrypoint which constructs the dynamic worker "
+      "and forwards to it.");
+}
+
 }  // namespace
 
 // =======================================================================================
@@ -216,7 +224,8 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
 
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
-  virtual kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) = 0;
+  virtual kj::Own<WorkerInterface> startRequest(
+      IoChannelFactory::SubrequestMetadata metadata) override = 0;
 
   // Returns true if the service exports the given handler, e.g. `fetch`, `scheduled`, etc.
   virtual bool hasHandler(kj::StringPtr handlerName) = 0;
@@ -231,6 +240,11 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   // specified.
   virtual kj::Own<Service> forProps(Frankenvalue props) {
     KJ_FAIL_REQUIRE("can't override props for this service");
+  }
+
+  void requireAllowsTransfer() override {
+    // We consider all `Service` implementations to be safe to transfer, except for dynamic workers
+    // which we'll handle explicitly.
   }
 };
 
@@ -1872,7 +1886,8 @@ class Server::WorkerService final: public Service,
       kj::HashSet<kj::String> actorClassEntrypointsParam,
       LinkCallback linkCallback,
       AbortActorsCallback abortActorsCallback,
-      kj::Maybe<kj::String> dockerPathParam)
+      kj::Maybe<kj::String> dockerPathParam,
+      bool isDynamic)
       : threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
@@ -1881,7 +1896,8 @@ class Server::WorkerService final: public Service,
         actorClassEntrypoints(kj::mv(actorClassEntrypointsParam)),
         waitUntilTasks(*this),
         abortActorsCallback(kj::mv(abortActorsCallback)),
-        dockerPath(kj::mv(dockerPathParam)) {}
+        dockerPath(kj::mv(dockerPathParam)),
+        isDynamic(isDynamic) {}
 
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
@@ -1906,6 +1922,10 @@ class Server::WorkerService final: public Service,
               threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
+  }
+
+  void requireAllowsTransfer() override {
+    if (isDynamic) throwDynamicEntrypointTransferError();
   }
 
   kj::Maybe<kj::Own<Service>> getEntrypoint(kj::Maybe<kj::StringPtr> name, Frankenvalue props) {
@@ -2963,6 +2983,10 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<EntrypointService>(*worker, entrypoint, kj::mv(props), handlers);
     }
 
+    void requireAllowsTransfer() override {
+      worker->requireAllowsTransfer();
+    }
+
    private:
     kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
@@ -3040,6 +3064,7 @@ class Server::WorkerService final: public Service,
   kj::TaskSet waitUntilTasks;
   AbortActorsCallback abortActorsCallback;
   kj::Maybe<kj::String> dockerPath;
+  bool isDynamic;
 
   class ActorChannelImpl final: public IoChannelFactory::ActorChannel {
    public:
@@ -3736,6 +3761,7 @@ struct Server::WorkerDef {
   WorkerSource source;
   kj::Maybe<kj::StringPtr> moduleFallback;
   const kj::HashMap<kj::String, ActorConfig>& localActorConfigs;
+  bool isDynamic;
 
   FutureSubrequestChannel globalOutbound;
   kj::Maybe<FutureSubrequestChannel> cacheApiOutbound;
@@ -3805,6 +3831,19 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           "This worker is not permitted to access the internet via global functions like fetch(). "
           "It must use capabilities (such as bindings in 'env') to talk to the outside world.");
     }
+
+    void requireAllowsTransfer() override {
+      // It's difficult to get here, because the null outbound is not normally something you can
+      // reference. That said, it is possible to get a `Fetcher` representing the `next` outbound
+      // by pulling it off an incoming `Request` object, and in practice that points to the same
+      // thing as the null outbound. You could then try to transfer it.
+      //
+      // We disallow this for now because it's not clear why it would be needed. That said, if it
+      // is needed for some reason, it wouldn't be hard to support. But we might want to change
+      // the error message it throws from startRequest(), since the error would be somewhat
+      // misleading after the channel has been transferred.
+      JSG_FAIL_REQUIRE(DOMDataCloneError, "The null global outbound is not transferrable.");
+    }
   };
 
   class WorkerStubImpl final: public WorkerStubChannel,
@@ -3846,6 +3885,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         .source = kj::mv(source.source),
         .moduleFallback = kj::none,
         .localActorConfigs = EMPTY_ACTOR_CONFIGS,
+        .isDynamic = true,
 
         // clang-format off
         .globalOutbound{
@@ -3897,6 +3937,10 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         } else {
           return startRequestImpl(kj::mv(metadata));
         }
+      }
+
+      void requireAllowsTransfer() override {
+        throwDynamicEntrypointTransferError();
       }
 
      private:
@@ -4040,6 +4084,7 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .source = WorkerdApi::extractSource(name, conf, featureFlags.asReader(), errorReporter),
     .moduleFallback = conf.hasModuleFallback() ? kj::some(conf.getModuleFallback()) : kj::none,
     .localActorConfigs = localActorConfigs,
+    .isDynamic = false,
 
     .globalOutbound{
       .designator = conf.getGlobalOutbound(),
@@ -4459,7 +4504,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath));
+      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }

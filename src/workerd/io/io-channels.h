@@ -160,6 +160,17 @@ class IoChannelFactory {
     kj::Own<CapTableEntry> clone() override final {
       return kj::addRef(*this);
     }
+
+    // Throws a JSG error if a Fetcher backed by this channel should not be serialized and passed
+    // to other workers. The default implementation throws a generic error, but subclasses may
+    // specialize with better errror messages -- or override to just return in order to permit the
+    // serialization.
+    //
+    // This check is necessary especially in workerd in order to block serialization of types that,
+    // in production, would be difficult or impossible to serialize. In particular,
+    // dynamically-loaded workers cannot be serialized because the system does not know how to
+    // reconstruct a dynamically-loaded worker from scratch.
+    virtual void requireAllowsTransfer() = 0;
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -181,6 +192,9 @@ class IoChannelFactory {
     // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
     // easy to imagine that actor stubs may have more functionality than just sending requests
     // someday, so we keep this as a separate type.
+
+    // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
+    void requireAllowsTransfer() override final;
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.

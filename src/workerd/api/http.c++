@@ -2482,7 +2482,9 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
       "ServiceStub cannot be serialized in this context.");
 
-  serializer.writeRawUint32(externalHandler->add(getSubrequestChannel(IoContext::current())));
+  auto channel = getSubrequestChannel(IoContext::current());
+  channel->requireAllowsTransfer();
+  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,

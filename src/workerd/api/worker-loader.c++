@@ -79,13 +79,18 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
       kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
       KJ_IF_SOME(maybeOut, code.globalOutbound) {
         KJ_IF_SOME(out, maybeOut) {
-          globalOutbound = out->getSubrequestChannel(ioctx);
+          auto channel = out->getSubrequestChannel(ioctx);
+          channel->requireAllowsTransfer();
+          globalOutbound = kj::mv(channel);
         } else {
           // Application passed `null` to disable internet access. Leave `globalOutbound` as
           // `kj::none`.
         }
       } else {
         // Inherit the calling worker's global outbound channel.
+        //
+        // Note we don't need to enforce transferrability in this case because if it was the global
+        // outbound of the parent, it must be OK to be the global outbound of the child.
         globalOutbound =
             ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
       }

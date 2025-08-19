@@ -68,6 +68,22 @@ export let basics = {
       assert.strictEqual(result, "G'day, Dave!\nSup, Eve!");
     }
 
+    // Note that we CANNOT transfer a dynamic worker entrypoint.
+    assert.rejects(
+      () =>
+        worker.getEntrypoint('FancyPropsEntrypoint', {
+          props: { greeter, greeter2 },
+        }),
+      {
+        name: 'DataCloneError',
+        message:
+          'Entrypoints to dynamically-loaded workers cannot be transferred to other Workers, ' +
+          'because the system does not know how to reload this Worker from scratch. Instead, ' +
+          'have the parent Worker expose an entrypoint which constructs the dynamic worker ' +
+          'and forwards to it.',
+      }
+    );
+
     // Let's quickly verify that if we use ctx.exports.GreeterLoopback *without* invoking it, then
     // we get an error that it isn't serializable. (This isn't really testing worker-loader, it's
     // more testing LoopbackServiceStub and that serializability is not inherited.)
