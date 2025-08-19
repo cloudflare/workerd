@@ -364,7 +364,8 @@ void EventSource::start(jsg::Lock& js) {
 
         // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
         // an internal alternative that doesn't require an allocation.
-        KJ_IF_SOME(contentType, response->getHeaders(js)->getNoChecks(js, "content-type"_kj)) {
+        KJ_IF_SOME(contentType,
+            response->getHeaders(js)->get(js, js.accountedByteString("content-type"_kj))) {
         bool invalid = false;
         KJ_IF_SOME(parsed, MimeType::tryParse(contentType)) {
         invalid = parsed != MimeType::EVENT_STREAM;
@@ -420,10 +421,13 @@ void EventSource::start(jsg::Lock& js) {
       });
 
   auto headers = js.alloc<Headers>();
-  headers->setUnguarded(js, "accept"_kj, jsg::ByteString(MimeType::EVENT_STREAM.essence()));
-  headers->setUnguarded(js, "cache-control"_kj, jsg::ByteString(kj::str("no-cache"_kj)));
+  headers->set(js, js.accountedByteString("accept"_kj),
+      js.accountedByteString(MimeType::EVENT_STREAM.essence()));
+  headers->set(
+      js, js.accountedByteString("cache-control"_kj), js.accountedByteString("no-cache"_kj));
   if (lastEventId != ""_kjc) {
-    headers->setValueChecked(js, "last-event-id"_kj, jsg::ByteString(kj::str(lastEventId)));
+    headers->set(
+        js, js.accountedByteString("last-event-id"_kj), js.accountedByteString(lastEventId));
   }
 
   fetchImpl(js, kj::mv(fetcher), kj::str(i.url),
