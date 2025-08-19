@@ -1631,6 +1631,7 @@ export let serializeHttpTypes = {
     {
       let headers = await env.MyService.returnHeaders();
       assert.strictEqual(headers instanceof Headers, true);
+
       // Awkwardly, there's actually no API to get the non-lowercased header names.
       assert.deepEqual(
         [...headers],
