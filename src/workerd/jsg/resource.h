@@ -1378,9 +1378,6 @@ struct ResourceTypeBuilder {
     instance->SetLazyDataProperty(v8Name, &Gcb::callback, v8::Local<v8::Value>(), attributes);
   }
 
-  template <const char* name, const char* moduleName, bool readonly>
-  inline void registerLazyJsInstanceProperty() { /* implemented in second stage */ }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
@@ -1491,36 +1488,6 @@ struct JsSetup {
 
   inline void registerJsBundle(Bundle::Reader bundle) {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
-  }
-
-  template <const char* moduleName>
-  struct LazyJsInstancePropertyCallback {
-    static void callback(
-        v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
-      liftKj(info, [&]() {
-        static const auto path = kj::Path::parse(moduleName);
-
-        auto& js = Lock::from(info.GetIsolate());
-        auto context = js.v8Context();
-        auto& moduleInfo = KJ_REQUIRE_NONNULL(ModuleRegistry::from(js)->resolve(js, path, kj::none,
-                                                  ModuleRegistry::ResolveOption::INTERNAL_ONLY),
-            "Could not resolve bootstrap module", moduleName);
-        auto module = moduleInfo.module.getHandle(js);
-        jsg::instantiateModule(js, module);
-
-        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-        auto result = check(moduleNs->Get(context, property));
-        return result;
-      });
-    }
-  };
-
-  template <const char* propertyName, const char* moduleName, bool readonly>
-  inline void registerLazyJsInstanceProperty() {
-    using Callback = LazyJsInstancePropertyCallback<moduleName>;
-    check(context->Global()->SetLazyDataProperty(context, v8StrIntern(js.v8Isolate, propertyName),
-        Callback::callback, v8::Local<v8::Value>(),
-        readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
   }
 
   // the rest of the callbacks are empty
