@@ -644,11 +644,6 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    ++members;
-  }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() { /* not included */ }
 
@@ -749,17 +744,6 @@ struct MembersBuilder {
     prop.setLazy(true);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
-  }
-
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    auto prop = members[memberIndex++].initProperty();
-    prop.setName(name);
-    prop.setReadonly(readOnly);
-    prop.setLazy(true);
-    auto jsBuiltin = prop.initType().initJsBuiltin();
-    jsBuiltin.setModule(moduleName);
-    jsBuiltin.setExport(name);
   }
 
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
