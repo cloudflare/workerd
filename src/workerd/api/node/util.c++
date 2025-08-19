@@ -193,17 +193,23 @@ kj::Array<UtilModule::CallSiteEntry> UtilModule::getCallSites(
   for (int i = 0; i < frameCount; ++i) {
     auto stack_frame = stack->GetFrame(js.v8Isolate, i);
 
-    objects.add(CallSiteEntry{
-      .functionName = js.toString(stack_frame->GetFunctionName()),
-      .scriptName = js.toString(stack_frame->GetScriptName()),
-      .lineNumber = stack_frame->GetLineNumber(),
-      // Node.js originally implemented the experimental API using the "column" field
-      // then later renamed it to columnNumber. We had already implemented the API
-      // using column. To ensure backwards compat without the complexity of a compat
-      // flag, we just export both.
-      .columnNumber = stack_frame->GetColumn(),
-      .column = stack_frame->GetColumn(),
-    });
+    auto function_name = stack_frame->GetFunctionName();
+    auto script_name = stack_frame->GetScriptName();
+
+    if (!function_name.IsEmpty() && !script_name.IsEmpty()) {
+
+      objects.add(CallSiteEntry{
+        .functionName = js.toString(function_name),
+        .scriptName = js.toString(script_name),
+        .lineNumber = stack_frame->GetLineNumber(),
+        // Node.js originally implemented the experimental API using the "column" field
+        // then later renamed it to columnNumber. We had already implemented the API
+        // using column. To ensure backwards compat without the complexity of a compat
+        // flag, we just export both.
+        .columnNumber = stack_frame->GetColumn(),
+        .column = stack_frame->GetColumn(),
+      });
+    }
   }
 
   return objects.releaseAsArray();
