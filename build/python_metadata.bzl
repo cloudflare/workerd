@@ -97,6 +97,7 @@ def _make_bundle_version_info(versions):
 BUNDLE_VERSION_INFO = _make_bundle_version_info([
     {
         "name": "0.26.0a2",
+        "released": True,
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": PACKAGES_20240829_4,

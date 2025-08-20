@@ -1,3 +1,4 @@
+import argparse
 import json
 import re
 import subprocess
@@ -56,7 +57,7 @@ def bundle_url(**kwds):
 def get_backport(ver):
     info = bundle_version_info()[ver]
     backport = int(info["backport"])
-    for b in range(backport + 1, backport + 10):
+    for b in range(backport + 1, backport + 20):
         info["backport"] = b
         url = bundle_url(**info)
         res = requests.head(url)
@@ -116,10 +117,12 @@ def print_info(info: BundleInfo) -> None:
     print()
 
 
-def make_bundles() -> list[BundleInfo]:
+def make_bundles(update_released: bool) -> list[BundleInfo]:
     result = []
     for ver, info in bundle_version_info().items():
         if ver.startswith("dev"):
+            continue
+        if not update_released and info.get("released", False):
             continue
         path = Path(get_pyodide_bin_path(ver)).resolve()
         b = get_backport(ver)
@@ -151,7 +154,16 @@ def upload_bundles(bundles: list[BundleInfo]):
 
 
 def main():
-    bundles = make_bundles()
+    parser = argparse.ArgumentParser(
+        description="Upload Pyodide bundles and update metadata"
+    )
+    parser.add_argument(
+        "--update-released",
+        action="store_true",
+        help="Update already released versions?",
+    )
+    args = parser.parse_args()
+    bundles = make_bundles(args.update_released)
     for bundle in bundles:
         print_info(bundle)
     update_python_metadata_bzl(bundles)
