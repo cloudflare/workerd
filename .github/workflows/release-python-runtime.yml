@@ -74,7 +74,7 @@ jobs:
 
           # Commit and push the changes
           git add build/python_metadata.bzl
-          git commit -m "Update python_metadata.bzl with new bundle info
+          git commit --fixup HEAD -m "Update python_metadata.bzl with new bundle info
 
           This commit updates the backport and integrity values in python_metadata.bzl
           based on the latest Pyodide bundle upload.
