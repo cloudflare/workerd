@@ -1,13 +1,14 @@
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import cache
 from os import environ
 from pathlib import Path
 
 import requests
-from boto3 import client
 from tool_utils import b64digest
 
 
@@ -64,7 +65,73 @@ def get_backport(ver):
         res.raise_for_status()
 
 
-def main():
+def _get_replacer(backport, integrity):
+    def replace_values(match):
+        prefix = match.group(1)
+        backport_key = match.group(2)
+        middle = match.group(3)
+        integrity_key = match.group(4)
+        return (
+            f'{prefix}{backport_key}"{backport}",{middle}{integrity_key}"{integrity}",'
+        )
+
+    return replace_values
+
+
+@dataclass
+class BundleInfo:
+    version: str
+    backport: int
+    integrity: str
+    path: Path
+
+
+def update_python_metadata_bzl(bundles: list[BundleInfo]) -> None:
+    """Update python_metadata.bzl file with new backport and integrity values."""
+    metadata_path = (
+        Path(__file__).parent.parent.parent / "build" / "python_metadata.bzl"
+    )
+    content = metadata_path.read_text()
+
+    for info in bundles:
+        # Find the version block and update backport and integrity
+        version_pattern = rf'(\s+{{\s*\n\s*"name":\s*"{re.escape(info.version)}",.*?)("backport":\s*)"[^"]*",(.*?)("integrity":\s*)"[^"]*",'
+
+        content = re.sub(
+            version_pattern,
+            _get_replacer(info.backport, info.integrity),
+            content,
+            flags=re.DOTALL,
+        )
+
+    metadata_path.write_text(content)
+
+
+def print_info(info: BundleInfo) -> None:
+    print(f"Uploading version {info.version} backport {info.backport}")
+    i = " " * 8
+    print("Update python_metadata.bzl with:\n")
+    print(i + f'"backport": "{info.backport}",')
+    print(i + f'"integrity": "{info.integrity}",')
+    print()
+
+
+def make_bundles() -> list[BundleInfo]:
+    result = []
+    for ver, info in bundle_version_info().items():
+        if ver.startswith("dev"):
+            continue
+        path = Path(get_pyodide_bin_path(ver)).resolve()
+        b = get_backport(ver)
+        info["backport"] = b
+        integrity = b64digest(path)
+        result.append(BundleInfo(ver, b, integrity, path))
+    return result
+
+
+def upload_bundles(bundles: list[BundleInfo]):
+    from boto3 import client
+
     s3 = client(
         "s3",
         endpoint_url=f"https://{environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
@@ -73,21 +140,22 @@ def main():
         region_name="auto",
     )
 
-    for ver, info in bundle_version_info().items():
-        if ver.startswith("dev"):
-            continue
+    for bundle in bundles:
+        ver = bundle.version
         path = Path(get_pyodide_bin_path(ver)).resolve()
         b = get_backport(ver)
+        info = bundle_version_info()[ver]
         info["backport"] = b
         key = bundle_key(**info)
-        print(f"Uploading version {ver} backport {b}")
-        shasum = b64digest(path)
-        i = " " * 8
-        print("Update python_metadata.bzl with:\n")
-        print(i + f'"backport": "{b}",')
-        print(i + f'"integrity": "{shasum}",')
-        print()
         s3.upload_file(str(path), "pyodide-capnp-bin", key)
+
+
+def main():
+    bundles = make_bundles()
+    for bundle in bundles:
+        print_info(bundle)
+    update_python_metadata_bzl(bundles)
+    upload_bundles(bundles)
     return 0
 
 
