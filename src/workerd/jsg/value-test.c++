@@ -4,6 +4,9 @@
 
 #include "jsg-test.h"
 
+#include <kj-rs/kj-rs.h>
+#include <rust/cxx.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -1302,6 +1305,72 @@ KJ_TEST("jsg::Name works") {
   e.expectEval("forSymbol('foo') !== Symbol.for('foo')", "boolean", "true");
   e.expectEval("forSymbolShared('foo') === Symbol.for('foo')", "boolean", "true");
   e.expectEval("forSymbolShared('foo') !== forSymbolApi('foo')", "boolean", "true");
+}
+
+// ========================================================================================
+
+struct RustContext: public ContextGlobalObject {
+  kj::String getRustString(::rust::String value) {
+    return kj::str(value);
+  }
+
+  rust::String returnRustString(kj::String value) {
+    return value.as<kj_rs::RustUncheckedUtf8>();
+  }
+
+  struct RustStruct {
+    rust::String name;
+
+    JSG_STRUCT(name);
+  };
+
+  RustStruct returnStruct(RustStruct value) {
+    return {.name = value.name};
+  }
+
+  kj::OneOf<::rust::String, uint32_t> returnOneOf() {
+    return static_cast<uint32_t>(42);
+  }
+
+  kj::Maybe<::rust::String> returnMaybeString(kj::Maybe<::rust::String> value) {
+    return value;
+  }
+
+  jsg::Optional<::rust::String> returnOptionalString(jsg::Optional<::rust::String> value) {
+    return value;
+  }
+
+  ::rust::String takeNonCoercibleString(jsg::NonCoercible<::rust::String> value) {
+    return value.value;
+  }
+
+  JSG_RESOURCE_TYPE(RustContext) {
+    JSG_METHOD(getRustString);
+    JSG_METHOD(returnRustString);
+    JSG_METHOD(returnStruct);
+    JSG_METHOD(returnOneOf);
+    JSG_METHOD(returnMaybeString);
+    JSG_METHOD(returnOptionalString);
+    JSG_METHOD(takeNonCoercibleString);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(RustIsolate, RustContext, RustContext::RustStruct);
+
+KJ_TEST("Rust types work") {
+  Evaluator<RustContext, RustIsolate> e(v8System);
+  e.expectEval("getRustString('hello world')", "string", "hello world");
+  e.expectEval("getRustString('Yağız')", "string", "Yağız");
+  e.expectEval("getRustString(null)", "string", "null");
+  e.expectEval("returnRustString('hello world')", "string", "hello world");
+  e.expectEval("returnRustString('Yağız')", "string", "Yağız");
+  e.expectEval("returnRustString(null)", "string", "null");
+  e.expectEval("returnStruct({ name: 'hello' }).name", "string", "hello");
+  e.expectEval("returnOneOf()", "number", "42");
+  e.expectEval("returnMaybeString('hello')", "string", "hello");
+  e.expectEval("returnOptionalString('hello')", "string", "hello");
+  e.expectEval("takeNonCoercibleString(null)", "throws",
+      "TypeError: Failed to execute 'takeNonCoercibleString' on 'RustContext': parameter 1 is not of type 'string'.");
+  e.expectEval("takeNonCoercibleString('hello')", "string", "hello");
 }
 
 }  // namespace
