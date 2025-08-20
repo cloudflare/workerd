@@ -1487,7 +1487,12 @@ void SpanBuilder::setTag(kj::ConstString key, TagValue value) {
       // This is a programming error, but not a serious one. We could alternatively just emit
       // duplicate tags and leave the Jaeger UI in charge of warning about them.
       [[maybe_unused]] static auto logged = [keyPtr]() {
-        KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
+        if (isPredictableModeForTest()) {
+          // Logging in ERROR level to have this fail loudly during testing.
+          KJ_LOG(ERROR, "overwriting previous tag", keyPtr);
+        } else {
+          KJ_LOG(WARNING, "overwriting previous tag", keyPtr);
+        }
         return true;
       }();
       existingValue = kj::mv(newValue);
