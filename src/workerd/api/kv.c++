@@ -82,9 +82,9 @@ kj::Own<kj::HttpClient> KvNamespace::getHttpClient(IoContext& context,
 
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
-  headers.add(FLPROD_405_HEADER, urlStr);
+  headers.addPtrPtr(FLPROD_405_HEADER, urlStr);
   for (const auto& header: additionalHeaders) {
-    headers.add(header.name.asPtr(), header.value.asPtr());
+    headers.addPtrPtr(header.name.asPtr(), header.value.asPtr());
   }
 
   return client;
@@ -544,7 +544,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
 
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
-        headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT_STRING);
+        headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT_STRING);
         expectedBodySize = uint64_t(text.size());
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {

@@ -545,7 +545,7 @@ class StreamWorkerInterface final: public WorkerInterface {
     // We need to convert the URL from proxy format (full URL in request line) to host format
     // (path in request line, hostname in Host header).
     auto newHeaders = headers.cloneShallow();
-    newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
+    newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
     // Create a new HTTP client using our stream
     auto httpClient = kj::newHttpClient(headerTable, *stream);

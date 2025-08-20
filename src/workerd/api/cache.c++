@@ -95,7 +95,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
-    requestHeaders.set(context.getHeaderIds().cacheControl, "only-if-cached");
+    requestHeaders.setPtr(context.getHeaderIds().cacheControl, "only-if-cached");
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
@@ -507,7 +507,7 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     //   your own origin isn't a security flaw. Also, a Worker sending PURGE requests to its own
     //   origin's cache is not a security flaw (that's what this very API is implementing after
     //   all) so it all lines up nicely.
-    requestHeaders.add("X-Real-IP"_kj, "127.0.0.1"_kj);
+    requestHeaders.addPtrPtr("X-Real-IP"_kj, "127.0.0.1"_kj);
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::PURGE, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
