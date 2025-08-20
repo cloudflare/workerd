@@ -62,39 +62,30 @@ export const test = {
 
     // spans emitted by kv-test.js in execution order
     let expected = [
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -102,22 +93,12 @@ export const test = {
         'cloudflare.kv.query.parameter.cacheTtl': 100n,
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
-      {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
-      },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -125,7 +106,13 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'json',
         closed: true,
       },
-      { closed: true, name: 'worker' },
+      {
+        name: 'kv_get_bulk',
+        'db.system': 'cloudflare-kv',
+        'cloudflare.kv.operation.name': 'get_bulk',
+        'cloudflare.kv.query.parameter.type': 'json',
+        closed: true,
+      },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -133,7 +120,6 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'arrayBuffer',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -141,29 +127,18 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'banana',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_getWithMetadata',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'getWithMetadata',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get_bulk',
         closed: true,
       },
-      { closed: true, name: 'worker' },
-      {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
-      },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get_bulk',
         'db.system': 'cloudflare-kv',
@@ -171,9 +146,19 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'json',
         closed: true,
       },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
+      {
+        name: 'kv_get_bulk',
+        'db.system': 'cloudflare-kv',
+        'cloudflare.kv.operation.name': 'get_bulk',
+        'cloudflare.kv.query.parameter.type': 'json',
+        closed: true,
+      },
+      {
+        name: 'kv_get',
+        'db.system': 'cloudflare-kv',
+        'cloudflare.kv.operation.name': 'get',
+        closed: true,
+      },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
@@ -186,21 +171,12 @@ export const test = {
         'cloudflare.kv.operation.name': 'get',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
         'cloudflare.kv.operation.name': 'get',
         closed: true,
       },
-      { closed: true, name: 'worker' },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
-      },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
@@ -208,7 +184,6 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'json',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
@@ -216,7 +191,6 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'stream',
         closed: true,
       },
-      { closed: true, name: 'worker' },
       {
         name: 'kv_get',
         'db.system': 'cloudflare-kv',
@@ -224,9 +198,6 @@ export const test = {
         'cloudflare.kv.query.parameter.type': 'arrayBuffer',
         closed: true,
       },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
     ];
 
     assert.deepStrictEqual(received, expected);
