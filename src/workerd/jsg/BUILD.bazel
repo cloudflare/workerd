@@ -131,6 +131,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@ssl",
+        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )

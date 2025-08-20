@@ -32,8 +32,8 @@ mod ffi {
         preference: u32,
     }
     extern "Rust" {
-        fn parse_caa_record(record: &str) -> Result<CaaRecord>;
-        fn parse_naptr_record(record: &str) -> Result<NaptrRecord>;
+        fn parse_caa_record(record: String) -> Result<CaaRecord>;
+        fn parse_naptr_record(record: String) -> Result<NaptrRecord>;
     }
 }
 
@@ -79,7 +79,7 @@ pub fn decode_hex(input: &[&str]) -> Result<Vec<String>, DnsParserError> {
 /// # Errors
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
-pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> {
+pub fn parse_caa_record(record: String) -> Result<ffi::CaaRecord, DnsParserError> {
     // Let's remove "\\#" and the length of data from the beginning of the record
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
     let critical = data[0].parse::<u8>()?;
@@ -133,7 +133,7 @@ pub fn parse_caa_record(record: &str) -> Result<ffi::CaaRecord, DnsParserError> 
 /// # Errors
 /// `DnsParserError::InvalidHexString`
 /// `DnsParserError::ParseIntError`
-pub fn parse_naptr_record(record: &str) -> Result<ffi::NaptrRecord, DnsParserError> {
+pub fn parse_naptr_record(record: String) -> Result<ffi::NaptrRecord, DnsParserError> {
     let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
     let order_str = data[1..3].to_vec();

@@ -378,6 +378,65 @@ struct MethodCallback<TypeWrapper,
   }
 };
 
+// Specialization for function pointers (free functions like Rust functions)
+template <typename TypeWrapper,
+    const char* methodName,
+    bool isContext,
+    typename T,
+    typename Ret,
+    typename... Args,
+    Ret (*method)(Args...),
+    size_t... indexes>
+struct MethodCallback<TypeWrapper,
+    methodName,
+    isContext,
+    T,
+    Ret (*)(Args...),
+    method,
+    kj::_::Indexes<indexes...>> {
+
+  static void callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.slow++;
+    }
+
+    liftKj(args, [&]() {
+      auto isolate = args.GetIsolate();
+      auto context = isolate->GetCurrentContext();
+      auto& wrapper = TypeWrapper::from(isolate);
+      auto& lock = Lock::from(isolate);
+      if constexpr (isVoid<Ret>()) {
+        method(wrapper.template unwrap<Args>(lock, context, args, indexes,
+            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+      } else {
+        auto obj = args.This();
+        return wrapper.wrap(lock, context, obj,
+            method(wrapper.template unwrap<Args>(lock, context, args, indexes,
+                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...));
+      }
+    });
+  }
+
+  template <typename ReturnType = Ret>
+  static ReturnType fastCallback(v8::Local<v8::Object> receiver,
+      FastApiJSGToV8<Args>::value... fastArgs,
+      v8::FastApiCallbackOptions& options) {
+    if constexpr (TypeWrapper::trackCallCounts) {
+      callCounter.fast++;
+    }
+    auto isolate = options.isolate;
+    v8::HandleScope handleScope(isolate);
+    auto context = isolate->GetCurrentContext();
+    auto& js = Lock::from(isolate);
+    auto& wrapper = TypeWrapper::from(isolate);
+
+    return liftKj<Ret>(isolate, [&]() {
+      return method(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
+          TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+    });
+  }
+};
+
 // Implements the V8 callback function for calling a static method of the C++ class.
 //
 // This is separate from MethodCallback<> because we need to know the interface type, T, and it

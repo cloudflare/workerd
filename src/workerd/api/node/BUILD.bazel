@@ -56,7 +56,6 @@ wd_cc_library(
     srcs = [
         "async-hooks.c++",
         "buffer.c++",
-        "dns.c++",
         "i18n.c++",
         "url.c++",
     ],

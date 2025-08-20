@@ -469,6 +469,10 @@ class StringWrapper {
     return "string";
   }
 
+  static constexpr const char* getName(::rust::Str*) {
+    return "string";
+  }
+
   static constexpr const char* getName(ByteString*) {
     return "ByteString";
   }
@@ -502,7 +506,17 @@ class StringWrapper {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const T& value) {
-    return v8Str(js.v8Isolate, kj_rs::from<kj_rs::Rust>(value));
+    return v8Str(js.v8Isolate, from<Rust>(value));
+  }
+
+  // TODO(soon): Find a better way to get rid of "std::enable_if" usage here.
+  // Removing std::enable_if will cause "ambiguous" build errors.
+  template <typename T>
+  std::enable_if_t<std::is_same_v<T, ::rust::Str>, v8::Local<v8::String>> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const T& value) {
+    return v8Str(js.v8Isolate, from<Rust>(value));
   }
 
   v8::Local<v8::String> wrap(
@@ -530,6 +544,15 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const DOMString& value) {
     return v8Str(js.v8Isolate, value.asPtr());
+  }
+
+  kj::Maybe<::rust::String> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      ::rust::String*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    JsString str(check(handle->ToString(context)));
+    return str.toRust<::rust::String>(js);
   }
 
   kj::Maybe<kj::String> tryUnwrap(Lock& js,

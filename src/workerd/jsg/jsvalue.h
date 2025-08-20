@@ -2,8 +2,11 @@
 
 #include "jsg.h"
 
+#include <kj-rs/kj-rs.h>
 #include <v8-container.h>
 #include <v8-external.h>
+
+using namespace kj_rs;
 
 namespace workerd::jsg {
 
@@ -239,6 +242,12 @@ class JsString final: public JsBase<v8::String, JsString> {
   jsg::USVString toUSVString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::ByteString toByteString(Lock& js) const KJ_WARN_UNUSED_RESULT;
   jsg::DOMString toDOMString(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  template <typename T>
+  T toRust(Lock& js) const KJ_WARN_UNUSED_RESULT {
+    KJ_ASSERT(!inner.IsEmpty());
+    return kj::str(inner).as<RustUncheckedUtf8>();
+  }
 
   int hashCode() const;
 

@@ -15,15 +15,13 @@ class DnsUtil final: public jsg::Object {
   DnsUtil() = default;
   DnsUtil(jsg::Lock&, const jsg::Url&) {}
 
-  rust::dns::CaaRecord parseCaaRecord(kj::String record);
-  rust::dns::NaptrRecord parseNaptrRecord(kj::String record);
-
   JSG_RESOURCE_TYPE(DnsUtil) {
-    JSG_METHOD(parseCaaRecord);
-    JSG_METHOD(parseNaptrRecord);
+    JSG_RUST_METHOD_NAMED(parseCaaRecord, workerd::rust::dns::parse_caa_record);
+    JSG_RUST_METHOD_NAMED(parseNaptrRecord, workerd::rust::dns::parse_naptr_record);
   }
 };
 
-#define EW_NODE_DNS_ISOLATE_TYPES api::node::DnsUtil, rust::dns::CaaRecord, rust::dns::NaptrRecord
+#define EW_NODE_DNS_ISOLATE_TYPES                                                                  \
+  api::node::DnsUtil, workerd::rust::dns::CaaRecord, workerd::rust::dns::NaptrRecord
 
 }  // namespace workerd::api::node
