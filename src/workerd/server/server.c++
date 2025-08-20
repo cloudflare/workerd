@@ -3762,9 +3762,12 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
           env.populateJsObject(js, jsg::JsObject(target));
         },
 
-        .maybeOwnedSourceCode = !source.ownContentIsRpcResponse
-            ? kj::Maybe<kj::Own<void>>(kj::mv(source.ownContent))
-            : kj::Maybe<kj::Own<void>>(kj::none),
+        // Note here that we always keep the ownContent from the source, even if
+        // ownContentIsRpcResponse is true. This is safe in workerd because we
+        // are single-threaded here and we don't need to worry about the cross-thread
+        // ownership issues. For the downstream use, however, we need to be careful
+        // to not copy the ownContent if it is an RPC response.
+        .maybeOwnedSourceCode = kj::mv(source.ownContent),
         // clang-format on
       };
 
