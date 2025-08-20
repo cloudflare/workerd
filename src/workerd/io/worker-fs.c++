@@ -662,6 +662,7 @@ class FileImpl final: public File {
  public:
   // Constructor used to create a read-only file.
   FileImpl(kj::ArrayPtr<const kj::byte> data): ownedOrView(data), lastModified(kj::UNIX_EPOCH) {}
+  FileImpl(kj::Array<kj::byte>&& owned) = delete;
 
   // Constructor used to create a writable file.
   FileImpl(jsg::Lock& js, kj::Array<kj::byte> owned)
@@ -795,7 +796,7 @@ class FileImpl final: public File {
         if (view.size() > maxSize) [[unlikely]] {
           return FsError::FILE_SIZE_LIMIT_EXCEEDED;
         }
-        kj::Rc<File> file = kj::rc<FileImpl>(kj::heapArray<kj::byte>(view));
+        kj::Rc<File> file = kj::rc<FileImpl>(js, kj::heapArray<kj::byte>(view));
         return kj::mv(file);
       }
     }
