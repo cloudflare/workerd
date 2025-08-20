@@ -5,6 +5,8 @@
 
 #include <workerd/jsg/jsg.h>
 
+#include <kj-rs/kj-rs.h>
+
 #include <kj/string.h>
 
 #include <cstdint>
@@ -36,8 +38,8 @@ class DnsUtil final: public jsg::Object {
     JSG_STRUCT(flags, service, regexp, replacement, order, preference);
   };
 
-  CaaRecord parseCaaRecord(kj::String record);
-  NaptrRecord parseNaptrRecord(kj::String record);
+  CaaRecord parseCaaRecord(::rust::String record);
+  NaptrRecord parseNaptrRecord(::rust::String record);
 
   JSG_RESOURCE_TYPE(DnsUtil) {
     JSG_METHOD(parseCaaRecord);

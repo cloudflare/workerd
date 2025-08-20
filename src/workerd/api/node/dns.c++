@@ -12,16 +12,16 @@ using namespace kj_rs;
 
 namespace workerd::api::node {
 
-DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
+DnsUtil::CaaRecord DnsUtil::parseCaaRecord(::rust::String record) {
   // value comes from js so it is always valid utf-8
-  auto parsed = rust::dns::parse_caa_record(record.as<RustUncheckedUtf8>());
+  auto parsed = rust::dns::parse_caa_record(record);
   return CaaRecord{
     .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
-DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
+DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(::rust::String record) {
   // value comes from js so it is always valid utf-8
-  auto parsed = rust::dns::parse_naptr_record(record.as<RustUncheckedUtf8>());
+  auto parsed = rust::dns::parse_naptr_record(record);
   return NaptrRecord{
     .flags = kj::str(parsed.flags),
     .service = kj::str(parsed.service),

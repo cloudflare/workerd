@@ -4,6 +4,12 @@
 
 #include "jsg-test.h"
 #include "jsvalue.h"
+
+#include <kj-rs/kj-rs.h>
+#include <rust/cxx.h>
+
+using namespace kj_rs;
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -87,6 +93,14 @@ struct JsValueContext: public ContextGlobalObject {
     return obj.getPrototype(js);
   }
 
+  kj::String getRustString(::rust::String value) {
+    return kj::str(value);
+  }
+
+  rust::String returnRustString(kj::String value) {
+    return value.as<RustUncheckedUtf8>();
+  }
+
   JSG_RESOURCE_TYPE(JsValueContext) {
     JSG_METHOD(takeJsValue);
     JSG_METHOD(takeJsString);
@@ -103,6 +117,8 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getRef);
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
+    JSG_METHOD(getRustString);
+    JSG_METHOD(returnRustString);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -143,6 +159,8 @@ KJ_TEST("simple") {
   e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return String; } } )) "
                "=== Foo",
       "boolean", "false");
+  e.expectEval("getRustString('hello world')", "string", "hello world");
+  e.expectEval("returnRustString('hello world')", "string", "hello world");
 }
 
 }  // namespace

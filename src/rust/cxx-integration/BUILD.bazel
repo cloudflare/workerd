@@ -1,5 +1,7 @@
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
+exports_files(["jsg.h"])
+
 wd_rust_crate(
     name = "cxx-integration",
     cxx_bridge_deps = [

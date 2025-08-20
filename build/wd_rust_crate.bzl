@@ -1,3 +1,4 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 def rust_cxx_bridge(
@@ -7,15 +8,29 @@ def rust_cxx_bridge(
         deps = [],
         visibility = [],
         strip_include_prefix = None,
-        include_prefix = None):
+        include_prefix = None,
+        needs_jsg = False):
+    # Prepare outputs and sources
+    outs = [src + ".h", src + ".cc"]
+    srcs = [src]
+
+    # If JSG is needed, add jsg.h to outputs and copy it from the generic header
+    if needs_jsg:
+        outs.append("jsg.h")
+        srcs.append("//src/rust/cxx-integration:jsg.h")
+
+    # Prepare command
+    cmd_parts = ["$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src)]
+
+    # If JSG is needed, copy the generic jsg.h header
+    if needs_jsg:
+        cmd_parts.append("&& cp $(location //src/rust/cxx-integration:jsg.h) $(location jsg.h)")
+
     native.genrule(
         name = "%s/generated" % name,
-        srcs = [src],
-        outs = [
-            src + ".h",
-            src + ".cc",
-        ],
-        cmd = "$(location @workerd-cxx//:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
+        srcs = srcs,
+        outs = outs,
+        cmd = " ".join(cmd_parts),
         tools = ["@workerd-cxx//:codegen"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
@@ -23,7 +38,10 @@ def rust_cxx_bridge(
         }),
     )
 
-    native.cc_library(
+    # Add jsg.h to hdrs if needed
+    if needs_jsg:
+        hdrs = hdrs + ["jsg.h"]
+    cc_library(
         name = name,
         srcs = [src + ".cc"],
         hdrs = [src + ".h"] + hdrs,
@@ -52,7 +70,8 @@ def wd_rust_crate(
         test_deps = [],
         test_proc_macro_deps = [],
         cxx_bridge_deps = [],
-        visibility = None):
+        visibility = None,
+        needs_jsg = False):
     """Define rust crate.
 
     Args:
@@ -81,6 +100,7 @@ def wd_rust_crate(
             hdrs = hdrs,
             include_prefix = "workerd/rust/" + name,
             strip_include_prefix = "",
+            needs_jsg = needs_jsg,
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [

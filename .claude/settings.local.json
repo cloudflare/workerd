@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(just node-test:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(just build)",
+      "Bash(grep:*)",
+      "Bash(just b:*)",
+      "Bash(just test:*)",
+      "Bash(bazel test:*)"
+    ],
+    "deny": []
+  }
+}

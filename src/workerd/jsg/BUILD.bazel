@@ -25,6 +25,7 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
+        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )
@@ -128,6 +129,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@ssl",
+        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )
