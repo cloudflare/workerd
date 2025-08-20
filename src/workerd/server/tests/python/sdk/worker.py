@@ -1,3 +1,10 @@
+# The tests in this file are primarily spread across Default.fetch() (in this module) and
+# Default.fetch() (in server.py).
+#
+# The code in `Default.test()` (in this module) is used to actually perform the testing and its
+# behaviour doesn't need to strictly be held consistent. In fact it uses the JS fetch, so it's not
+# going to follow the SDK at all.
+
 from contextlib import asynccontextmanager
 from http import HTTPMethod, HTTPStatus
 
@@ -5,7 +12,7 @@ import js
 from workers import Blob, File, FormData, Request, Response, WorkerEntrypoint, fetch
 
 import pyodide.http
-from pyodide.ffi import to_js
+from pyodide.ffi import JsProxy, to_js
 
 
 @asynccontextmanager
@@ -143,13 +150,40 @@ class Default(WorkerEntrypoint):
             resp = await fetch("https://example.com/sub")
             return resp
 
+    async def test(self):
+        js_env = self.env._env
+        await can_return_custom_fetch_response(js_env)
+        await can_modify_response(js_env)
+        await can_use_duplicate_headers(js_env)
+        await can_use_fetch_opts(js_env)
+        await gets_nice_error_on_jsism(js_env)
+        await can_use_undefined_options_and_redirect(js_env)
+        await can_use_inherited_response_methods(js_env)
+        await errors_on_invalid_input_to_redirect(js_env)
+        await can_use_response_json(js_env)
+        await can_request_form_data(js_env)
+        await form_data_unit_tests(js_env)
+        await blob_unit_tests(js_env)
+        await can_request_form_data_blob(js_env)
+        await replace_body_unit_tests(js_env)
+        await can_use_cf_fetch_opts(js_env)
+        await request_unit_tests(js_env)
+        await can_use_event_decorator(js_env)
+        await response_unit_tests(js_env)
+
 
 # TODO: Right now the `fetch` that's available on a binding is the JS fetch.
 # We may wish to rewrite it to be the same as the `fetch` defined in
 # `cloudflare.workers`. Doing so will require a feature flag.
+#
+# WARNING: Don't expect the below code itself to make use of the features in the SDK, it's mostly
+# calling the JS fetch via the FFI.
 
 
 async def can_return_custom_fetch_response(env):
+    assert isinstance(env, JsProxy), (
+        "Expecting the env for these tests not to be wrapped"
+    )
     response = await env.SELF.fetch(
         "http://example.com/",
     )
@@ -455,24 +489,3 @@ async def response_unit_tests(env):
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
     assert response_ws.status == 201
-
-
-async def test(ctrl, env):
-    await can_return_custom_fetch_response(env)
-    await can_modify_response(env)
-    await can_use_duplicate_headers(env)
-    await can_use_fetch_opts(env)
-    await gets_nice_error_on_jsism(env)
-    await can_use_undefined_options_and_redirect(env)
-    await can_use_inherited_response_methods(env)
-    await errors_on_invalid_input_to_redirect(env)
-    await can_use_response_json(env)
-    await can_request_form_data(env)
-    await form_data_unit_tests(env)
-    await blob_unit_tests(env)
-    await can_request_form_data_blob(env)
-    await replace_body_unit_tests(env)
-    await can_use_cf_fetch_opts(env)
-    await request_unit_tests(env)
-    await can_use_event_decorator(env)
-    await response_unit_tests(env)
