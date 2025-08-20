@@ -239,7 +239,8 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     auto spanComponentContext = tracing::InvocationSpanContext(
         topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
-    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)));
+    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)),
+        span.startTime);
     if (span.tags.size()) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
