@@ -1,6 +1,13 @@
 name: Build Python Runtime
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      update-released:
+        description: 'Update already released versions?'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -32,7 +39,7 @@ jobs:
           # boto3 v1.36.0 fails with:
           # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
           pip install 'boto3<1.36.0' requests
-          python3 src/pyodide/upload_bundles.py
+          python3 src/pyodide/upload_bundles.py ${{ inputs.update-released == true && '--update-released' || '' }}
 
       - name: Check for open PR and commit changes
         env:
