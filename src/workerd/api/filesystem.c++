@@ -1365,7 +1365,7 @@ void handleCpFile(jsg::Lock& js,
             // Ignore the return value, we don't actually care if the thing existed or not.
           }
         }
-        // Now, we can add the symbolic link to the directory.
+        // Now, we can add the file the directory.
         KJ_SWITCH_ONEOF(file->clone(js)) {
           KJ_CASE_ONEOF(err, workerd::FsError) {
             throwFsError(js, err, "cp"_kj);

@@ -2132,3 +2132,15 @@ export const deepDirectoryStructureTestsPromises = {
     ok(existsSync(`${destRoot}/existing_dir`));
   },
 };
+
+export const copyTwiceTest = {
+  test() {
+    cpSync('/bundle/worker', '/tmp/a');
+    cpSync('/tmp/a', '/tmp/b');
+    const a = readFileSync('/bundle/worker');
+    const b = readFileSync('/tmp/a');
+    const c = readFileSync('/tmp/b');
+    deepStrictEqual(a, b);
+    deepStrictEqual(b, c);
+  },
+};
