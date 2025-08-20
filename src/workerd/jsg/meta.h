@@ -51,6 +51,10 @@ template <typename Ret, typename... Args>
 struct ArgumentIndexes_<Ret(const v8::FunctionCallbackInfo<v8::Value>&, Args...)> {
   using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
 };
+template <typename Ret, typename... Args>
+struct ArgumentIndexes_<Ret (*)(Args...)> {
+  using Indexes = kj::_::MakeIndexes<sizeof...(Args)>;
+};
 template <typename T>
 using ArgumentIndexes = typename ArgumentIndexes_<T>::Indexes;
 // ArgumentIndexes<SomeMethodType> expands to kj::_::Indexes<0, 1, 2, 3, ..., n-1>, where n is the

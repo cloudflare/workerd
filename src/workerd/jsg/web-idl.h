@@ -9,6 +9,8 @@
 
 #include <workerd/jsg/jsg.h>
 
+#include <kj-rs/kj-rs.h>
+
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/one-of.h>
@@ -117,7 +119,8 @@ constexpr bool isStringType = kj::isSameType<T, kj::String>() || kj::isSameType<
     kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>() ||
     kj::isSameType<T, v8::Local<v8::String>>() || kj::isSameType<T, jsg::V8Ref<v8::String>>() ||
     kj::isSameType<T, NonCoercible<kj::String>>() || kj::isSameType<T, NonCoercible<USVString>>() ||
-    kj::isSameType<T, NonCoercible<DOMString>>() || kj::isSameType<T, jsg::JsString>();
+    kj::isSameType<T, NonCoercible<DOMString>>() || kj::isSameType<T, jsg::JsString>() ||
+    kj::isSameType<T, ::rust::String>() || kj::isSameType<T, ::rust::Str>();
 
 template <typename T>
 constexpr bool isObjectType =

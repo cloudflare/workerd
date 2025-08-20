@@ -2,6 +2,7 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "dns",
+    cxx_bridge_deps = ["//src/workerd/jsg"],
     cxx_bridge_src = "lib.rs",
     visibility = ["//visibility:public"],
     deps = [
