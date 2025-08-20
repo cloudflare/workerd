@@ -68,6 +68,7 @@ namespace {
   V(SCRIPTVERSION, "scriptVersion")                                                                \
   V(SEQUENCE, "sequence")                                                                          \
   V(SPANCLOSE, "spanClose")                                                                        \
+  V(SPANCONTEXT, "spanContext")                                                                    \
   V(SPANID, "spanId")                                                                              \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
@@ -497,11 +498,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, TRACEID_STR, js.str(event.spanContext.getTraceId().toGoString()));
-  obj.set(js, INVOCATIONID_STR, js.str(event.invocationId.toGoString()));
+
+  // Set SpanContext
+  auto sCObj = js.obj();
+  sCObj.set(js, TRACEID_STR, js.str(event.spanContext.getTraceId().toGoString()));
   KJ_IF_SOME(spanId, event.spanContext.getSpanId()) {
-    obj.set(js, SPANID_STR, js.str(spanId.toGoString()));
+    sCObj.set(js, SPANID_STR, js.str(spanId.toGoString()));
   }
+  obj.set(js, SPANCONTEXT_STR, kj::mv(sCObj));
+
+  obj.set(js, INVOCATIONID_STR, js.str(event.invocationId.toGoString()));
   obj.set(js, TIMESTAMP_STR, js.date(event.timestamp));
   obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 

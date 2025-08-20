@@ -1674,7 +1674,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 class SpanSubmitter final: public kj::Refcounted {
  public:
   SpanSubmitter(kj::Own<WorkerTracer> workerTracer)
-      : predictableSpanId(1),
+      : predictableSpanId(0),
         workerTracer(kj::mv(workerTracer)) {}
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the

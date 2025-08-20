@@ -268,7 +268,8 @@ class InvocationSpanContext final {
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 };
 
-// SpanContext as used for streaming tail worker tail events.
+// SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
+// events that don't inherit context from another invocation.
 struct SpanContext {
   SpanContext(TraceId traceId, kj::Maybe<SpanId> spanId): traceId(traceId), spanId(spanId) {};
   KJ_DISALLOW_COPY(SpanContext);
@@ -719,7 +720,8 @@ struct Onset final {
     WorkerInfo clone() const;
   };
 
-  explicit Onset(tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo, CustomInfo attributes);
+  explicit Onset(
+      tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo, CustomInfo attributes);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;

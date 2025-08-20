@@ -466,7 +466,8 @@ KJ_TEST("Read/Write Onset works") {
   tracing::Onset info(tracing::staticSpanId, tracing::Onset::Info(kj::mv(fetchInfo)),
       {
         .scriptName = kj::str("foo"),
-      }, nullptr);
+      },
+      nullptr);
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();

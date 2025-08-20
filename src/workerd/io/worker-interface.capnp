@@ -17,19 +17,33 @@ using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+# A 128-bit trace ID used to identify traces.
 struct TraceId {
   high @0 :UInt64;
   low @1 :UInt64;
 }
 
+# InvocationSpanContext used to identify the current tracing context. Only used internally so far.
 struct InvocationSpanContext {
+  # The 128-bit ID uniquely identifying a trace.
   traceId @0 :TraceId;
+  # The 128-bit ID identifying a worker stage invocation within a trace.
   invocationId @1 :TraceId;
+  # The 64-bit span ID identifying an individual span within a worker stage invocation.
   spanId @2 :UInt64;
 }
 
+# Span context for a tail event – this is provided for each tail event.
 struct SpanContext {
+  # The 128-bit ID uniquely identifying a trace.
   traceId @0 :TraceId;
+  # spanId in which this event is handled
+  # for Onset and SpanOpen events this would be the parent span id
+  # for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+  # For Hibernate and Mark this would be the span under which they were emitted.
+  # This is only empty if:
+  #  1. This is an Onset event
+  #  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
   info :union {
     empty @1 :Void;
     spanId @2 :UInt64;
@@ -259,9 +273,14 @@ struct Trace @0x8e8d911203762d34 {
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
     # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
     # unless the stream was abruptly terminated.
+    # Inherited spanContext for this event.
     spanContext @0: SpanContext;
+    # invocation id of the currently invoked worker stage.
+    # invocation id will always be unique to every Onset event and will be the same until the Outcome event.
     invocationId @1: TraceId;
+    # time for the tail event. This will be provided as I/O time from the perspective of the tail worker.
     timestampNs @2 :Int64;
+    # unique sequence identifier for this tail event, starting at zero.
     sequence @3 :UInt32;
     event :union {
       onset @4 :Onset;

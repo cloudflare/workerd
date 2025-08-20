@@ -1192,8 +1192,10 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
 }
 }  // namespace
 
-tracing::Onset::Onset(
-    tracing::SpanId spanId, tracing::Onset::Info&& info, tracing::Onset::WorkerInfo&& workerInfo, CustomInfo attributes)
+tracing::Onset::Onset(tracing::SpanId spanId,
+    tracing::Onset::Info&& info,
+    tracing::Onset::WorkerInfo&& workerInfo,
+    CustomInfo attributes)
     : spanId(spanId),
       info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
@@ -1202,8 +1204,8 @@ tracing::Onset::Onset(
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
     : spanId(reader.getSpanId()),
       info(readOnsetInfo(reader.getInfo())),
-      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }),
-      workerInfo(getWorkerInfoFromReader(reader)) {}
+      workerInfo(getWorkerInfoFromReader(reader)),
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   builder.setExecutionModel(workerInfo.executionModel);
@@ -1285,7 +1287,8 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
 }
 
 tracing::Onset tracing::Onset::clone() const {
-  return Onset(spanId, cloneEventInfo(info), workerInfo.clone(), KJ_MAP(attr, attributes) { return attr.clone(); });
+  return Onset(spanId, cloneEventInfo(info), workerInfo.clone(),
+      KJ_MAP(attr, attributes) { return attr.clone(); });
 }
 
 tracing::Outcome::Outcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime)

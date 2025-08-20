@@ -9,10 +9,13 @@ export default {
   // https://developers.cloudflare.com/workers/observability/logs/tail-workers/
   tailStream(event, env, ctx) {
     // Onset event, must be singleton
-    resposeMap.set(event.traceId, JSON.stringify(event.event));
+    resposeMap.set(event.spanContext.traceId, JSON.stringify(event.event));
     return (event) => {
-      let cons = resposeMap.get(event.traceId);
-      resposeMap.set(event.traceId, cons + JSON.stringify(event.event));
+      let cons = resposeMap.get(event.spanContext.traceId);
+      resposeMap.set(
+        event.spanContext.traceId,
+        cons + JSON.stringify(event.event)
+      );
     };
   },
 };

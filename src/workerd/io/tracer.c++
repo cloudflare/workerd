@@ -235,7 +235,8 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     auto spanComponentContext = tracing::InvocationSpanContext(
         topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
-    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)), span.startTime);
+    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)),
+        span.startTime);
     // If a span manages to exceed the size limit, truncate it by not providing span attributes.
     if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
@@ -388,8 +389,10 @@ void WorkerTracer::setEventInfo(
     // TODO(o11y): At this time, the onset spanId is always zero. We could use the invocation span
     // context ID, but we'd need to propagate it to the top-level span as its parent span ID and
     // would have to still use a fixed ID in tests.
-    writer->report(
-        context, tracing::Onset(tracing::SpanId::nullId, cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray(), kj::none), timestamp);
+    writer->report(context,
+        tracing::Onset(tracing::SpanId::nullId, cloneEventInfo(info), kj::mv(workerInfo),
+            attributes.releaseAsArray()),
+        timestamp);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
