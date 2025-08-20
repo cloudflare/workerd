@@ -35,7 +35,7 @@ py_wd_test("seek-metadatafs")
 
 gen_import_tests(
     pkg_skip_versions = {
-        "0.28.0": [
+        "0.28.2": [
             "micropip",  # missing lockfile
             "soupsieve",  # Circular dependency with beautifulsoup4
         ],
