@@ -238,6 +238,7 @@ struct Trace @0x8e8d911203762d34 {
     }
     }
     info @8: Info;
+    attributes @9 :List(Attribute);
   }
 
   struct Outcome {

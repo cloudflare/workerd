@@ -381,8 +381,10 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
-    writer->report(
-        context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none), timestamp);
+    writer->report(context,
+        tracing::Onset(
+            cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray(), kj::none),
+        timestamp);
   }
 
   // truncation should only be needed for fetch events, since we only set eventSize there.
@@ -403,9 +405,8 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   trace->cpuTime = cpuTime;
   trace->wallTime = wallTime;
 
-  // All spans must have wrapped up before the outcome is reported. Report the top-level "worker"
-  // span by deallocating its span builder. (Note exceptions to this explained in the next comment –
-  // we still report the "worker" span here as the worker will have returned at this point)
+  // Free the userRequestSpan – no more traces should come after this point (and thus the observer
+  // and the reference to WorkerTracer it holds, unless there are more open spans)
   userRequestSpan = nullptr;
 
   // Defer reporting the actual outcome event to the WorkerTracer destructor: The outcome is
@@ -431,13 +432,17 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
   trace->fetchResponseInfo = kj::mv(info);
 }
 
-void WorkerTracer::setUserRequestSpan(SpanBuilder&& span) {
+void WorkerTracer::setUserRequestSpan(SpanParent&& span) {
   KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
   userRequestSpan = kj::mv(span);
 }
 
+void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value) {
+  attributes.add(tracing::Attribute{kj::mv(key), kj::mv(value)});
+}
+
 SpanParent WorkerTracer::getUserRequestSpan() {
-  return userRequestSpan;
+  return userRequestSpan.addRef();
 }
 
 }  // namespace workerd

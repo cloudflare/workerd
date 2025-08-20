@@ -215,9 +215,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, String
   if (isPredictableModeForTest()) {
     obj.set(js, SCHEDULEDTIME_STR, js.date(kj::UNIX_EPOCH));
   } else {
-    // TODO(streaming-tail): Depending on if the schedule handler is invoked with a scheduledTime
-    // argument or not, the value in the trace can be either the current time or the scheduledTime
-    // parameter. Is this the correct behavior?
     obj.set(js, SCHEDULEDTIME_STR, js.date(info.scheduledTime));
   }
   obj.set(js, CRON_STR, js.str(info.cron));
@@ -405,6 +402,12 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
     KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }
+  }
+
+  if (onset.attributes.size() > 0) {
+    obj.set(js, ATTRIBUTES_STR,
+        js.arr(onset.attributes.asPtr(),
+            [&cache](jsg::Lock& js, const auto& attr) { return ToJs(js, attr, cache); }));
   }
 
   return obj;

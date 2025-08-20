@@ -448,7 +448,7 @@ KJ_TEST("Read/Write Onset works") {
       {
         .scriptName = kj::str("foo"),
       },
-      tracing::Onset::TriggerContext(trigger));
+      nullptr, tracing::Onset::TriggerContext(trigger));
   info.copyTo(infoBuilder);
 
   auto reader = infoBuilder.asReader();

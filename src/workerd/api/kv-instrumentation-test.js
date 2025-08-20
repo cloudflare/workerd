@@ -57,7 +57,7 @@ export const test = {
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with KV
     let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession' && span.name !== 'worker'
+      (span) => span.name !== 'jsRpcSession'
     );
 
     // spans emitted by kv-test.js in execution order
