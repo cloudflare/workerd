@@ -33,3 +33,48 @@ jobs:
           # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
           pip install 'boto3<1.36.0' requests
           python3 src/pyodide/upload_bundles.py
+
+      - name: Check for open PR and commit changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Commit changes to python_metadata.bzl and push to branch
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "release-python-runtime.yml GitHub Action"
+
+          # Get current branch name
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $BRANCH_NAME"
+
+          # Check if there are changes to python_metadata.bzl
+          if git diff --quiet build/python_metadata.bzl; then
+            echo "No changes to python_metadata.bzl"
+            exit 0
+          fi
+
+          echo "Changes detected in python_metadata.bzl"
+
+          # Check if there's an open PR for this branch
+          PR_COUNT=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq length)
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+            echo "No open PR found for branch $BRANCH_NAME, skipping commit"
+            exit 0
+          fi
+
+          echo "Found open PR for branch $BRANCH_NAME"
+
+          # Commit and push the changes
+          git add build/python_metadata.bzl
+          git commit -m "Update python_metadata.bzl with new bundle info
+
+          This commit updates the backport and integrity values in python_metadata.bzl
+          based on the latest Pyodide bundle upload.
+
+          🤖 Generated automatically by release-python-runtime workflow"
+
+          # --no-verify because 'git merge-base origin/main HEAD' fails in pre-commit.
+          # There shouldn't be formatting errors anyways and if there are CI will catch it.
+          git push origin "$BRANCH_NAME" --no-verify
+          echo "Changes committed and pushed to $BRANCH_NAME"
