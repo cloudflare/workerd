@@ -2080,7 +2080,8 @@ class Server::WorkerService final: public Service,
       workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,
-          mapCopyString(entrypointName) /* entrypoint */, kj::mv(tailStreamWriter));
+          mapCopyString(entrypointName) /* entrypoint */, kj::none /* durableObjectId */,
+          kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver the traces to both the parent
       // and the legacy tail workers. We do NOT want to attach the tracer to the

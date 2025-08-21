@@ -551,5 +551,21 @@ KJ_TEST("Read/Write TailEvent with Multiple Attributes") {
   KJ_ASSERT(attrs2[1].name == "bar"_kj);
 }
 
+KJ_TEST("Trace with Durable Object ID") {
+  auto trace = kj::refcounted<Trace>(kj::str("test-stable-id"), kj::str("test-script"),
+      kj::none,  // scriptVersion
+      kj::str("test-namespace"), kj::str("test-script-id"),
+      kj::Array<kj::String>(),  // scriptTags
+      kj::str("test-entrypoint"), ExecutionModel::DURABLE_OBJECT,
+      kj::str("abc123def456")  // durableObjectId
+  );
+
+  capnp::MallocMessageBuilder builder;
+  auto traceBuilder = builder.initRoot<rpc::Trace>();
+  trace->copyTo(traceBuilder);
+
+  auto trace2 = kj::refcounted<Trace>(traceBuilder.asReader());
+  KJ_ASSERT(KJ_REQUIRE_NONNULL(trace2->durableObjectId) == "abc123def456"_kj);
+}
 }  // namespace
 }  // namespace workerd::tracing

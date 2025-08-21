@@ -142,6 +142,7 @@ struct Trace @0x8e8d911203762d34 {
   scriptTags @14 :List(Text);
 
   entrypoint @22 :Text;
+  durableObjectId @27 :Text;
 
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {
