@@ -1772,14 +1772,10 @@ class ContextGlobal {
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
-  ModuleRegistry& getModuleRegistry() {
-    return *moduleRegistry;
-  }
-
  private:
-  kj::Own<ModuleRegistry> moduleRegistry;
+  kj::Own<void> moduleRegistry;
 
-  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
+  void setModuleRegistry(kj::Own<void> registry) {
     moduleRegistry = kj::mv(registry);
   }
 
@@ -1796,12 +1792,9 @@ class JsContext {
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle,
-      Ref<T> object,
-      kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(v8::Isolate::GetCurrent(), handle),
-        object(kj::mv(object)),
-        maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
+        object(kj::mv(object)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1821,7 +1814,6 @@ class JsContext {
  private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
-  kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
 };
 
 class BufferSource;
