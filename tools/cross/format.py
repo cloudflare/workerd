@@ -10,6 +10,13 @@ from pathlib import Path
 from sys import exit
 from typing import Optional
 
+# This file is symlinked into the internal repo as tools/format.py, so the root may be two levels up
+# or three.
+ROOT = Path(__file__).parents[1]
+if not (ROOT / ".git").exists():
+    ROOT = ROOT.parent
+BAZEL_BIN = ROOT / "bazel-bin"
+
 
 def parse_args() -> Namespace:
     parser = ArgumentParser()
@@ -82,15 +89,14 @@ def matches_any_glob(globs: tuple[str, ...], file: Path) -> bool:
 
 def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProcess:
     # Use the formatter executable from bazel-bin
-    bazel_bin = Path("bazel-bin")
     tool_suffix = Path("build") / "deps" / "formatters" / tool_name
-    internal_tool_path = bazel_bin / "external" / "workerd" / tool_suffix
-    workerd_tool_path = bazel_bin / tool_suffix
+    internal_tool_path = BAZEL_BIN / "external" / "workerd" / tool_suffix
+    workerd_tool_path = BAZEL_BIN / tool_suffix
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args])
+        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
     if workerd_tool_path.exists():
-        return subprocess.run([workerd_tool_path, *args])
+        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
 
     # Use the new formatter targets in build/deps/formatters
     build_target = f"@workerd//build/deps/formatters:{tool_name}@rule"
@@ -100,9 +106,9 @@ def run_bazel_tool(tool_name: str, args: list[str]) -> subprocess.CompletedProce
         return download_result
 
     if internal_tool_path.exists():
-        return subprocess.run([internal_tool_path, *args])
+        return subprocess.run([internal_tool_path, *args], cwd=ROOT)
     else:
-        return subprocess.run([workerd_tool_path, *args])
+        return subprocess.run([workerd_tool_path, *args], cwd=ROOT)
 
 
 def clang_format(files: list[Path], check: bool = False) -> bool:
@@ -115,13 +121,12 @@ def clang_format(files: list[Path], check: bool = False) -> bool:
 
 
 def prettier(files: list[Path], check: bool = False) -> bool:
-    PRETTIER = "bazel-bin/node_modules/prettier/bin/prettier.cjs"
+    PRETTIER = BAZEL_BIN / "node_modules/prettier/bin/prettier.cjs"
 
-    if not Path(PRETTIER).exists():
+    if not PRETTIER.exists():
         subprocess.run(["bazel", "build", "//:node_modules/prettier"])
-
     cmd = [PRETTIER, "--log-level=warn", "--check" if check else "--write"]
-    result = subprocess.run(cmd + files)
+    result = subprocess.run(cmd + files, cwd=ROOT)
     return result.returncode == 0
 
 
@@ -156,16 +161,20 @@ def git_get_modified_files(
         files_in_diff = subprocess.check_output(
             ["git", "diff", "--diff-filter=d", "--name-only", "--cached"],
             encoding="utf-8",
+            cwd=ROOT,
         ).splitlines()
         return [Path(file) for file in files_in_diff]
     else:
         merge_base = subprocess.check_output(
-            ["git", "merge-base", target, source or "HEAD"], encoding="utf-8"
+            ["git", "merge-base", target, source or "HEAD"],
+            encoding="utf-8",
+            cwd=ROOT,
         ).strip()
         files_in_diff = subprocess.check_output(
             ["git", "diff", "--diff-filter=d", "--name-only", merge_base]
             + ([source] if source else []),
             encoding="utf-8",
+            cwd=ROOT,
         ).splitlines()
         return [Path(file) for file in files_in_diff]
 
@@ -174,6 +183,7 @@ def git_get_all_files() -> list[Path]:
     files = subprocess.check_output(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         encoding="utf-8",
+        cwd=ROOT,
     ).splitlines()
     return [Path(file) for file in files]
 
