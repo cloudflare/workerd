@@ -226,6 +226,8 @@ void FileSystemModule::setLastModified(
             throwFsError(js, err, "futimes"_kj);
           }
         }
+      } else {
+        node::THROW_ERR_UV_ENOENT(js, "utimes"_kj);
       }
     }
     KJ_CASE_ONEOF(fd, int) {
