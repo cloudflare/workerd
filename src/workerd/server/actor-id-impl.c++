@@ -24,6 +24,10 @@ kj::Maybe<kj::StringPtr> ActorIdFactoryImpl::ActorIdImpl::getName() const {
   return name;
 }
 
+kj::Maybe<kj::StringPtr> ActorIdFactoryImpl::ActorIdImpl::getJurisdiction() const {
+  return kj::none;
+}
+
 bool ActorIdFactoryImpl::ActorIdImpl::equals(const ActorId& other) const {
   return kj::arrayPtr(id) == kj::arrayPtr(kj::downcast<const ActorIdImpl>(other).id);
 }

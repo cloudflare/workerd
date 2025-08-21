@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -137,6 +138,9 @@ def make_fastapi_snapshot(
 
 
 def main() -> int:
+    subprocess.run(
+        ["bazel", "build", "@workerd//src/workerd/server:workerd"], check=True
+    )
     compat_flags = ["python_workers_20250116"]
     with TemporaryDirectory() as package_cache:
         cache = Path(package_cache)

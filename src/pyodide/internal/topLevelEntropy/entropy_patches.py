@@ -22,51 +22,30 @@ Steps 1, part of 4, and 5 are handled here, steps 2, 3, and part of 4 are
 handled in _cloudflare_random_overlays.
 """
 
-import _random
 import os
-import sys
 from functools import wraps
 
-from .entropy_import_context import (
-    get_entropy_import_context,
-    is_bad_entropy_enabled,
-    tempfile_restore_random_name_sequence,
-)
+# Import entropy_import_context for side effects
+from . import entropy_import_context  # noqa: F401
+from .allow_entropy import _set_in_request_context, raise_unless_entropy_allowed
 from .import_patch_manager import (
+    before_first_request_handlers,
     install_import_patch_manager,
     remove_import_patch_manager,
 )
 
-IN_REQUEST_CONTEXT = False
-
-
-def should_allow_entropy_call():
-    """This helps us raise Python errors rather than fatal errors in some cases.
-
-    It doesn't really matter that much since we're not likely to recover from
-    these anyways but it feels better.
-    """
-    # Allow if we've either entered request context or if we've temporarily
-    # enabled entropy.
-    return IN_REQUEST_CONTEXT or is_bad_entropy_enabled()
-
-
-# Step 1.
-#
 # Prevent calls to getentropy(). The intended way for `getentropy()` to fail is
 # to set an EIO error, which turns into a Python OSError, so we raise this same
 # error so that if we patch `getentropy` from the Emscripten C stdlib we can
 # remove these patches without changing the behavior.
 
-EIO = 29
 
 orig_urandom = os.urandom
 
 
 @wraps(orig_urandom)
 def patch_urandom(*args):
-    if not should_allow_entropy_call():
-        raise OSError(EIO, "Cannot get entropy outside of request context")
+    raise_unless_entropy_allowed()
     return orig_urandom(*args)
 
 
@@ -86,57 +65,14 @@ def restore_urandom():
     os.urandom = orig_urandom
 
 
-orig_Random_seed = _random.Random.seed
-
-
-@wraps(orig_Random_seed)
-def patched_seed(self, val):
-    """
-    Random.seed calls _PyOs_URandom which will fatally fail in top level.
-    Prevent this by raising a RuntimeError instead.
-    """
-    if val is None and not should_allow_entropy_call():
-        raise OSError(EIO, "Cannot get entropy outside of request context")
-    return orig_Random_seed(self, val)
-
-
-def disable_random_seed():
-    # Install patch to block calls to PyOs_URandom
-    _random.Random.seed = patched_seed
-
-
-def restore_random_seed():
-    # Restore original random seed behavior
-    _random.Random.seed = orig_Random_seed
-
-
-def reseed_rng():
-    """
-    Step 5: Have to reseed randomness in the IoContext of the first request
-    since we gave a low quality seed when it was seeded at top level.
-    """
-    from random import seed
-
-    seed()
-
-    if "numpy.random" in sys.modules:
-        from numpy.random import seed
-
-        seed()
-
-
 def before_top_level():
     disable_urandom()
-    disable_random_seed()
-    install_import_patch_manager(get_entropy_import_context)
+    install_import_patch_manager()
 
 
 def before_first_request():
-    global IN_REQUEST_CONTEXT
-
-    IN_REQUEST_CONTEXT = True
+    _set_in_request_context()
     restore_urandom()
-    restore_random_seed()
     remove_import_patch_manager()
-    reseed_rng()
-    tempfile_restore_random_name_sequence()
+    for cb in before_first_request_handlers:
+        cb()

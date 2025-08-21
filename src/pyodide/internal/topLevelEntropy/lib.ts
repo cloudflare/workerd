@@ -9,6 +9,7 @@
 import { default as entropyPatches } from 'pyodide-internal:topLevelEntropy/entropy_patches.py';
 import { default as entropyImportContext } from 'pyodide-internal:topLevelEntropy/entropy_import_context.py';
 import { default as importPatchManager } from 'pyodide-internal:topLevelEntropy/import_patch_manager.py';
+import { default as allowEntropy } from 'pyodide-internal:topLevelEntropy/allow_entropy.py';
 import { simpleRunPython, PythonUserError } from 'pyodide-internal:util';
 
 let allowed_entropy_calls_addr: number;
@@ -96,6 +97,11 @@ export function entropyMountFiles(Module: Module): void {
   Module.FS.writeFile(
     cloudflareDir + '/import_patch_manager.py',
     new Uint8Array(importPatchManager),
+    { canOwn: true }
+  );
+  Module.FS.writeFile(
+    cloudflareDir + '/allow_entropy.py',
+    new Uint8Array(allowEntropy),
     { canOwn: true }
   );
 }
