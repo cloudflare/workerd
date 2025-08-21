@@ -15,6 +15,7 @@
 
 #include <v8.h>
 
+#include <capnp/schema-loader.h>
 #include <kj/common.h>
 #include <kj/function.h>
 #include <kj/map.h>
@@ -613,6 +614,10 @@ class ModuleRegistry final: public ModuleRegistryBase {
 
     Builder& setEvalCallback(EvalCallback callback) KJ_LIFETIMEBOUND;
 
+    capnp::SchemaLoader& getSchemaLoader() {
+      return *schemaLoader;
+    }
+
    private:
     bool allowsFallback() const;
 
@@ -623,6 +628,7 @@ class ModuleRegistry final: public ModuleRegistryBase {
     const Options options;
     kj::Vector<kj::Own<ModuleBundle>> bundles_[ModuleRegistry::kBundleCount];
     kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
+    kj::Own<capnp::SchemaLoader> schemaLoader;
     friend class ModuleRegistry;
   };
 
@@ -668,6 +674,10 @@ class ModuleRegistry final: public ModuleRegistryBase {
     return bundleBase;
   }
 
+  const capnp::SchemaLoader& getSchemaLoader() const override {
+    return *schemaLoader;
+  }
+
  private:
   const ResolveObserver& observer;
   const jsg::Url& bundleBase;
@@ -675,6 +685,7 @@ class ModuleRegistry final: public ModuleRegistryBase {
   // One slot for each of ModuleBundle::Type
   kj::Array<kj::Own<ModuleBundle>> bundles_[kBundleCount];
   kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
+  kj::Own<capnp::SchemaLoader> schemaLoader;
 };
 
 constexpr ModuleRegistry::Builder::Options operator|(
