@@ -8,6 +8,9 @@ kj::Own<kj::AsyncIoStream> newNullIoStream();
 kj::Own<kj::AsyncInputStream> newNullInputStream();
 kj::Own<kj::AsyncOutputStream> newNullOutputStream();
 
+// Get a shared global null output stream (singleton, thread-safe)
+kj::AsyncOutputStream& getGlobalNullOutputStream();
+
 kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::ArrayPtr<const kj::byte>);
 kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::StringPtr);
 

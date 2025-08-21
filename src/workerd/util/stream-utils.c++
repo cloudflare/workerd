@@ -189,6 +189,11 @@ kj::Own<kj::AsyncOutputStream> newNullOutputStream() {
   return kj::heap<NullIoStream>();
 }
 
+kj::AsyncOutputStream& getGlobalNullOutputStream() {
+  static NullIoStream globalNullStream;
+  return globalNullStream;
+}
+
 kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::ArrayPtr<const kj::byte> data) {
   return kj::heap<MemoryInputStream>(data);
 }
