@@ -710,7 +710,7 @@ class FileImpl final: public File {
     if (end > maxSize || end < offset /* overflow check */) {
       return FsError::FILE_SIZE_LIMIT_EXCEEDED;
     }
-    if (!isWritable()) {
+    if (!isWritable()) {  
       return FsError::READ_ONLY;
     }
 
