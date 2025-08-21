@@ -6,6 +6,7 @@ import { Buffer } from 'node:buffer';
 import {ok, match, rejects, strictEqual, throws, deepStrictEqual, notStrictEqual } from 'node:assert'; 
 import { mock } from 'node:test';
 import { Writable } from 'node:stream';
+import { EventEmitter } from 'node:events';
 
 // Expose all APIs to the global scope for fuzzing
 export default {
@@ -14,6 +15,9 @@ export default {
   },
   
   async test() {
+    // Expose bindings
+    //globalThis.CONSUMER_FETCH = env.CONSUMER.fetch;
+
     // Expose Web Crypto API
     globalThis.crypto = crypto;
     
@@ -37,28 +41,76 @@ export default {
     // Expose fetch API
     globalThis.fetch = fetch;
     
-    // Expose WebSocket API
+    // Expose WebSocket and EventSource APIs
     globalThis.WebSocket = WebSocket;
+    globalThis.EventSource = EventSource;
     
     // Expose Encoding APIs
     globalThis.atob = atob;
     globalThis.btoa = btoa;
-    globalThis.fs = fs;
-    globalThis.Buffer = Buffer;
+    
+    // Expose Blob and FormData APIs
+    globalThis.Blob = Blob;
+    globalThis.File = File;
+    globalThis.FormData = FormData;
     
     // Expose HTML Rewriter
     globalThis.HTMLRewriter = HTMLRewriter;
-
+    
+    // Expose MessageChannel APIs
+    globalThis.MessageChannel = MessageChannel;
+    globalThis.MessagePort = MessagePort;
+    
+    // Expose AbortController for fetch
+    globalThis.AbortController = AbortController;
+    globalThis.AbortSignal = AbortSignal;
+    
+    // Expose Node.js APIs
+    globalThis.fs = fs;
+    globalThis.Buffer = Buffer;
     globalThis.Writable = Writable;
-
+    globalThis.EventEmitter = EventEmitter;
+    
+    // Expose testing APIs
     globalThis.ok = ok;
     globalThis.match = match;
     globalThis.rejects = rejects;
     globalThis.throws = throws;
-    globalThis.strictEqual = deepStrictEqual;
+    globalThis.strictEqual = strictEqual;
     globalThis.deepStrictEqual = deepStrictEqual;
     globalThis.notStrictEqual = notStrictEqual;
     globalThis.mock = mock;
+    
+    // Mock Cloudflare APIs for fuzzing
+    globalThis.MOCK_KV = {
+      get: (key, options) => Promise.resolve(options?.type === 'json' ? { test: 'value' } : 'test-value'),
+      put: (key, value, options) => Promise.resolve(),
+      delete: (key) => Promise.resolve(),
+      list: (options) => Promise.resolve({ keys: [{ name: 'key1' }], list_complete: true })
+    };
+    
+    globalThis.MOCK_D1 = {
+      prepare: (query) => ({
+        bind: (...params) => ({
+          first: () => Promise.resolve({ id: 1, name: 'test' }),
+          all: () => Promise.resolve({ results: [{ id: 1 }], meta: {} }),
+          run: () => Promise.resolve({ success: true, meta: { changes: 1 } })
+        })
+      }),
+      batch: (stmts) => Promise.resolve(stmts.map(() => ({ success: true })))
+    };
+    
+    globalThis.MOCK_R2 = {
+      get: (key) => Promise.resolve({
+        body: new ReadableStream(),
+        text: () => Promise.resolve('content'),
+        json: () => Promise.resolve({ data: 'test' }),
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(8))
+      }),
+      put: (key, value, options) => Promise.resolve({ etag: 'test-etag' }),
+      delete: (keys) => Promise.resolve({ deleted: Array.isArray(keys) ? keys.map(k => ({ key: k })) : [{ key: keys }] }),
+      list: (options) => Promise.resolve({ objects: [{ key: 'test.txt', size: 100 }] })
+    };
 
     // Enter the REPRL loop
     Stdin.reprl();

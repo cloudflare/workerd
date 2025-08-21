@@ -32,5 +32,9 @@
     "filesToWatch": [
       "BUILD.bazel"
     ]
+  },
+  "files.associations": {
+    "*.inc": "cpp",
+    "chrono": "cpp"
   }
 }
