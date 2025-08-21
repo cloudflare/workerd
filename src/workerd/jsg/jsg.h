@@ -21,6 +21,7 @@
 #include <v8-profiler.h>
 #include <v8-regexp.h>
 
+#include <capnp/schema-loader.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
@@ -1705,15 +1706,19 @@ class ContextGlobal {
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
+  const capnp::SchemaLoader& getSchemaLoader();
+
  private:
   // This opaque owner is used to keep the ModuleRegistry alive as long as the ContextGlobal
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
+  kj::Maybe<kj::Own<const capnp::SchemaLoader>> maybeSchemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
     moduleRegistryBackingOwner = kj::mv(registry);
   }
+  void setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader);
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -2819,6 +2824,15 @@ class Lock {
   // This variation includes modules from the worker bundle.
   kj::Maybe<JsObject> resolveModule(
       kj::StringPtr specifier, RequireEsm requireEsm = RequireEsm::NO);
+
+  // Returns the capnp::SchemaLoader for this isolate/context
+  template <typename T>
+  const capnp::SchemaLoader& getCapnpSchemaLoader() const {
+    return KJ_ASSERT_NONNULL(
+        jsg::getAlignedPointerFromEmbedderData<T>(
+            v8Isolate->GetCurrentContext(), ContextPointerSlot::GLOBAL_WRAPPER))
+        .getSchemaLoader();
+  }
 
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into

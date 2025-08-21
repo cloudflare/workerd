@@ -1136,7 +1136,8 @@ ModuleRegistry::Builder::Builder(
     const ResolveObserver& observer, const jsg::Url& bundleBase, Options options)
     : observer(observer),
       bundleBase(bundleBase),
-      options(options) {}
+      options(options),
+      schemaLoader(kj::heap<capnp::SchemaLoader>()) {}
 
 bool ModuleRegistry::Builder::allowsFallback() const {
   return (options & Options::ALLOW_FALLBACK) == Options::ALLOW_FALLBACK;
@@ -1168,7 +1169,8 @@ kj::Own<ModuleRegistry> ModuleRegistry::Builder::finish() {
 ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
     : observer(builder->observer),
       bundleBase(builder->bundleBase),
-      maybeParent(builder->maybeParent) {
+      maybeParent(builder->maybeParent),
+      schemaLoader(kj::mv(builder->schemaLoader)) {
   bundles_[kBundle] = builder->bundles_[kBundle].releaseAsArray();
   bundles_[kBuiltin] = builder->bundles_[kBuiltin].releaseAsArray();
   bundles_[kBuiltinOnly] = builder->bundles_[kBuiltinOnly].releaseAsArray();

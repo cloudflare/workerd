@@ -335,9 +335,8 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requ
   auto spec = kj::Path::parse(specifier);
   auto& info = JSG_REQUIRE_NONNULL(
       moduleRegistry->resolve(*this, spec), Error, kj::str("No such module: ", specifier));
-  if (requireEsm) {
-    JSG_REQUIRE(info.maybeSynthetic == kj::none, TypeError, "Main module must be an ES module.");
-  }
+  JSG_REQUIRE(!requireEsm || info.maybeSynthetic == kj::none, TypeError,
+      "Main module must be an ES module.");
   auto module = info.module.getHandle(*this);
   jsg::instantiateModule(*this, module);
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
@@ -566,4 +565,17 @@ std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOpti
   return kj::mv(store);
 }
 
+const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
+  KJ_IF_SOME(loader, maybeSchemaLoader) {
+    return *loader;
+  }
+  auto loader = kj::heap<capnp::SchemaLoader>();
+  auto& ret = *loader;
+  setSchemaLoader(kj::mv(loader));
+  return ret;
+}
+
+void ContextGlobal::setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader) {
+  maybeSchemaLoader = kj::mv(schemaLoader);
+}
 }  // namespace workerd::jsg

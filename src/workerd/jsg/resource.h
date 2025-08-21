@@ -1558,6 +1558,8 @@ class ModuleRegistryBase {
   virtual ~ModuleRegistryBase() noexcept(false) {}
   virtual kj::Own<void> attachToIsolate(
       Lock& js, const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT = 0;
+
+  virtual const capnp::SchemaLoader& getSchemaLoader() const = 0;
 };
 
 struct NewContextOptions {
@@ -1733,6 +1735,12 @@ class ResourceWrapper {
     ptr->setModuleRegistryBackingOwner(([&]() -> kj::Own<void> {
       KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
         return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+          // The new module registry actually owns the schema loader here and
+          // will keep it alive for the necessay lifetime. We can pass a fake
+          // own here that does not actually own the loader in this case.
+          ptr->setSchemaLoader(kj::Own<const capnp::SchemaLoader>(
+              &newModuleRegistry.getSchemaLoader(), kj::NullDisposer::instance));
+
           // The context must be current for attachToIsolate to succeed.
           return newModuleRegistry.attachToIsolate(js, compilationObserver);
         });
