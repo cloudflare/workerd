@@ -884,22 +884,43 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
+  KJ_IF_SOME(p, bufferValue) {
+    return p.getHandle(js);
+  }
   constexpr auto kSpecifier = "node:buffer"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    KJ_IF_SOME(p, bufferValue) {
+      // There's a chance that resolving the module caused side-effects
+      // that set the bufferValue, we let's check again.
+      return p.getHandle(js);
+    }
     auto def = module.get(js, "default"_kj);
     auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
     auto buffer = obj.get(js, "Buffer"_kj);
     JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
+    bufferValue = jsg::JsRef(js, buffer);
     return buffer;
   } else {
     // If we are unable to resolve the node:buffer module here, it likely
     // means that we don't actually have a module registry installed. Just
     // return undefined in this case.
+    bufferValue = jsg::JsRef(js, js.undefined());
     return js.undefined();
   }
 }
 
+void ServiceWorkerGlobalScope::setProcess(jsg::Lock& js, jsg::JsValue newProcess) {
+  processValue = jsg::JsRef(js, newProcess);
+}
+
+void ServiceWorkerGlobalScope::setBuffer(jsg::Lock& js, jsg::JsValue newBuffer) {
+  bufferValue = jsg::JsRef(js, newBuffer);
+}
+
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
+  KJ_IF_SOME(p, processValue) {
+    return p.getHandle(js);
+  }
   // Handle process module redirection based on enable_nodejs_process_v2 flag
   auto specifier = ([&]() -> kj::StringPtr {
     if (FeatureFlags::get(js).getEnableNodeJsProcessV2()) {
@@ -910,13 +931,20 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   })();
 
   KJ_IF_SOME(module, js.resolveInternalModule(specifier)) {
+    KJ_IF_SOME(p, processValue) {
+      // There's a chance that resolving the module caused side-effects
+      // that set the processValue, we let's check again.
+      return p.getHandle(js);
+    }
     auto def = module.get(js, "default"_kj);
     JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
+    processValue = jsg::JsRef(js, def);
     return def;
   } else {
     // If we are unable to resolve the internal module here, it likely
     // means that we don't actually have a module registry installed. Just
     // return undefined in this case.
+    processValue = jsg::JsRef(js, js.undefined());
     return js.undefined();
   }
 }

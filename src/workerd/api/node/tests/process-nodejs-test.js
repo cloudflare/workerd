@@ -2,14 +2,29 @@ import assert from 'node:assert';
 import { readdirSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
 
+// -------------------------------------------------------
+// Ensures the globalThis process and Buffer properties are handled correctly.
+// Placement of these at the top level scope before any thing else runs is
+// intentional. Do not move these elsewhere in the test.
+queueMicrotask(() => process);
+queueMicrotask(() => Buffer);
+process.env.QUX = 1;
+Buffer;
+
+const originalProcess = process;
+globalThis.process = 123;
+assert.strictEqual(globalThis.process, 123);
+globalThis.process = originalProcess;
+assert.strictEqual(globalThis.process, process);
+// -------------------------------------------------------
+
+const pEnv = { ...process.env };
+
 export const processPlatform = {
   test() {
     assert.ok(['darwin', 'win32', 'linux'].includes(process.platform));
   },
 };
-
-process.env.QUX = 1;
-const pEnv = { ...process.env };
 
 // Verify process keys match default keys and features
 const keys = [
