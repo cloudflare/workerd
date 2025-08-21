@@ -42,14 +42,18 @@ if __name__ == "__main__":
         resp = requests.post(args.URL, headers=headers, json=payload)
         resp.raise_for_status()
 
-        workflow_id = resp.json()["workflow_id"]
+        resp_json = resp.json()
+        workflow_id = resp_json["workflow_id"]
     except Exception as err:
         print(f"Unexpected error {err=}, {type(err)=}, exiting.")
         sys.exit(1)
 
     print("Internal build submitted.")
+    print(resp_json)
+    print("If you are a Cloudflare employee, you can check the build job here:")
+    print(f"https://gitlab.cfdata.org/cloudflare/ew/edgeworker/-/pipelines/{workflow_id}")
 
-    time.sleep(30)
+    time.sleep(2)
 
     # Poll build status
     failed_requests = 0
@@ -60,10 +64,12 @@ if __name__ == "__main__":
             resp = requests.get(args.URL, headers=headers, params={"id": workflow_id})
             resp.raise_for_status()
 
-            status = resp.json()["status"]
+            resp_json = resp.json()
+            print(resp_json)
+            status = resp_json["status"]
             if status == "errored":
                 print("Internal build failed.")
-                print(resp.json()["error"]["message"])
+                print(resp_json["error"]["message"])
                 print(
                     "If you are a Cloudflare employee, please check your internal"
                     " branch and refer this doc for further details:"
