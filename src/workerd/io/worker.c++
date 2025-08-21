@@ -1388,8 +1388,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   } else {
                     limitScope = isolate->getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
                   }
-                  auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-                  impl->configureDynamicImports(lock, modules);
+                  impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
                   isolate->getApi().compileModules(
                       lock, modulesSource, *isolate, kj::mv(artifacts), kj::mv(parentSpan));
                 }

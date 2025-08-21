@@ -1730,20 +1730,20 @@ class ResourceWrapper {
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    kj::Maybe<kj::Own<void>> maybeNewModuleRegistry;
-    KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
-      JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-        // The context must be current for attachToIsolate to succeed.
-        maybeNewModuleRegistry = newModuleRegistry.attachToIsolate(js, compilationObserver);
-      });
-    } else {
-      ptr->setModuleRegistry(
-          ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver));
-    }
+    ptr->setModuleRegistryBackingOwner(([&]() -> kj::Own<void> {
+      KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
+        return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+          // The context must be current for attachToIsolate to succeed.
+          return newModuleRegistry.attachToIsolate(js, compilationObserver);
+        });
+      } else {
+        return ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+      }
+    })());
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
+      return JsContext<T>(context, kj::mv(ptr));
     });
   }
 

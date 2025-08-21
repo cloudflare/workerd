@@ -1705,15 +1705,14 @@ class ContextGlobal {
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
-  ModuleRegistry& getModuleRegistry() {
-    return *moduleRegistry;
-  }
-
  private:
-  kj::Own<ModuleRegistry> moduleRegistry;
+  // This opaque owner is used to keep the ModuleRegistry alive as long as the ContextGlobal
+  // object is alive. This may be the legacy or new module registry, depending which one is
+  // in use. We don't care about the actual type here, just that it is kept alive.
+  kj::Own<void> moduleRegistryBackingOwner;
 
-  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
-    moduleRegistry = kj::mv(registry);
+  void setModuleRegistryBackingOwner(kj::Own<void> registry) {
+    moduleRegistryBackingOwner = kj::mv(registry);
   }
 
   template <typename, typename>
@@ -1729,12 +1728,9 @@ class JsContext {
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle,
-      Ref<T> object,
-      kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(v8::Isolate::GetCurrent(), handle),
-        object(kj::mv(object)),
-        maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
+        object(kj::mv(object)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1754,7 +1750,6 @@ class JsContext {
  private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
-  kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
 };
 
 class BufferSource;

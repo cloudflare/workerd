@@ -335,7 +335,7 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requ
   auto spec = kj::Path::parse(specifier);
   auto& info = JSG_REQUIRE_NONNULL(
       moduleRegistry->resolve(*this, spec), Error, kj::str("No such module: ", specifier));
-  if (!!requireEsm) {
+  if (requireEsm) {
     JSG_REQUIRE(info.maybeSynthetic == kj::none, TypeError, "Main module must be an ES module.");
   }
   auto module = info.module.getHandle(*this);
