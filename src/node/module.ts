@@ -19,13 +19,13 @@ export function getCompileCacheDir(): void {
 }
 
 export const _extensions = {
-  '.js': () => {
+  '.js': (): void => {
     throw new ERR_METHOD_NOT_IMPLEMENTED('module._extensions.js');
   },
-  '.json': () => {
+  '.json': (): void => {
     throw new ERR_METHOD_NOT_IMPLEMENTED('module._extensions.json');
   },
-  '.node': () => {
+  '.node': (): void => {
     throw new ERR_METHOD_NOT_IMPLEMENTED('module._extensions.node');
   },
 };
@@ -63,6 +63,7 @@ export const createRequire = Object.assign(
         },
       }
     ),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     cache: Object.create(null),
     extensions: _extensions,
     main: undefined,
@@ -269,7 +270,7 @@ export function SourceMap(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.SourceMap');
 }
 
-export function Module() {
+export function Module(): void {
   // TODO(soon): Investigate implementing Module class fully.
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.Module');
 }
