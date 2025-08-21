@@ -9,15 +9,17 @@ import {
 } from 'node-internal:internal_errors';
 
 export function enableCompileCache(): void {
-  // TODO: Investigate the possibility of how to implement this in the future
-  throw new ERR_METHOD_NOT_IMPLEMENTED('module.enableCompileCache');
-}
-
-export function getCompileCacheDir(): void {
   // We don't plan to support this in the future.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('module.getCompileCacheDir');
+  // Since, this method shouldn't throw an error, we just act like a no-op.
 }
 
+export function getCompileCacheDir(): undefined {
+  // We don't plan to support this in the future.
+  // Since, compile cache acts as a no-op, we just return undefined.
+  return undefined;
+}
+
+// We are unlikely to implement this in the future.
 export const _extensions = {
   '.js': (): void => {
     throw new ERR_METHOD_NOT_IMPLEMENTED('module._extensions.js');
@@ -30,45 +32,59 @@ export const _extensions = {
   },
 };
 
-export const createRequire = Object.assign(
-  function createRequire(path: string | URL): (specifier: string) => unknown {
-    // Note that per Node.js' requirements, path must be one of either
-    // an absolute file path or a file URL. We do not currently handle
-    // module specifiers as URLs yet, but we'll try to get close.
+export function createRequire(
+  path: string | URL
+): (specifier: string) => unknown {
+  // Note that per Node.js' requirements, path must be one of either
+  // an absolute file path or a file URL. We do not currently handle
+  // module specifiers as URLs yet, but we'll try to get close.
 
-    const normalizedPath = `${path}`;
-    if (
-      !normalizedPath.startsWith('/') &&
-      !normalizedPath.startsWith('file:')
-    ) {
-      throw new ERR_INVALID_ARG_VALUE(
-        'path',
-        normalizedPath,
-        'The argument must be a file URL object, a file URL string, or an absolute path string.'
-      );
-    }
-
-    return moduleUtil.createRequire(normalizedPath);
-  },
-  {
-    resolve: Object.assign(
-      () => {
-        throw new ERR_METHOD_NOT_IMPLEMENTED('module.createRequire.resolve');
-      },
-      {
-        paths(): void {
-          throw new ERR_METHOD_NOT_IMPLEMENTED(
-            'module.createRequire.resolve.paths'
-          );
-        },
-      }
-    ),
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    cache: Object.create(null),
-    extensions: _extensions,
-    main: undefined,
+  const normalizedPath = `${path}`;
+  if (!normalizedPath.startsWith('/') && !normalizedPath.startsWith('file:')) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'path',
+      normalizedPath,
+      'The argument must be a file URL object, a file URL string, or an absolute path string.'
+    );
   }
-);
+
+  return moduleUtil.createRequire(normalizedPath);
+}
+
+Object.defineProperties(createRequire, {
+  resolve: {
+    value: (): void => {
+      // TODO(soon): We could support this in the future.
+      throw new ERR_METHOD_NOT_IMPLEMENTED('module.createRequire.resolve');
+    },
+    enumerable: true,
+    writable: true,
+  },
+  paths: {
+    value: (): void => {
+      throw new ERR_METHOD_NOT_IMPLEMENTED(
+        'module.createRequire.resolve.paths'
+      );
+    },
+    enumerable: true,
+    writable: true,
+  },
+  cache: {
+    value: { __proto__: null },
+    enumerable: true,
+    writable: true,
+  },
+  extensions: {
+    value: _extensions,
+    enumerable: true,
+    writable: true,
+  },
+  main: {
+    value: undefined,
+    enumerable: true,
+    writable: true,
+  },
+});
 
 // Indicates only that the given specifier is known to be a
 // Node.js built-in module specifier with or with the the
@@ -167,26 +183,29 @@ export function runMain(): void {
 }
 
 export function syncBuiltinESMExports(): void {
-  // TODO(soon): Investigate the possibility of supporting this in the future.
+  // We are unlikely to ever support this.
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.syncBuiltinESMExports');
 }
 
 export function wrap(): void {
-  // TODO(soon): Investigate the possibility of supporting this in the future.
+  // TODO(soon): Implement this feature.
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.wrap');
 }
 
 export const globalPaths: string[] = [];
 
-export const constants = {
-  compileCacheStatus: {
-    __proto__: null,
-    FAILED: 0,
-    ENABLED: 1,
-    ALREADY_ENABLED: 2,
-    DISABLED: 3,
-  },
-};
+const compileCacheStatus = Object.freeze({
+  __proto__: null,
+  FAILED: 0,
+  ENABLED: 1,
+  ALREADY_ENABLED: 2,
+  DISABLED: 3,
+});
+
+export const constants = Object.freeze({
+  __proto__: null,
+  compileCacheStatus,
+});
 
 export const _cache = { __proto__: null };
 export const _pathCache = { __proto__: null };
@@ -242,8 +261,7 @@ export function findPackageJSON(): void {
 }
 
 export function flushCompileCache(): void {
-  // We don't implement compile cache.
-  throw new ERR_METHOD_NOT_IMPLEMENTED('module.flushCompileCache');
+  // We don't implement compile cache. This acts as a no-op.
 }
 
 export function getSourceMapsSupport(): Record<string, boolean | null> {
@@ -275,49 +293,157 @@ export function Module(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.Module');
 }
 
-Module.register = register;
-Module.constants = constants;
-Module.enableCompileCache = enableCompileCache;
-Module.findPackageJSON = findPackageJSON;
-Module.flushCompileCache = flushCompileCache;
-Module.getCompileCacheDir = getCompileCacheDir;
-Module.stripTypeScriptTypes = stripTypeScriptTypes;
+Object.defineProperties(Module, {
+  register: {
+    value: register,
+    writable: true,
+    enumerable: true,
+  },
+  constants: {
+    value: constants,
+    writable: true,
+    enumerable: true,
+  },
+  enableCompileCache: {
+    value: enableCompileCache,
+    writable: true,
+    enumerable: true,
+  },
+  findPackageJSON: {
+    value: findPackageJSON,
+    writable: true,
+    enumerable: true,
+  },
+  flushCompileCache: {
+    value: flushCompileCache,
+    writable: true,
+    enumerable: true,
+  },
+  getCompileCacheDir: {
+    value: getCompileCacheDir,
+    writable: true,
+    enumerable: true,
+  },
+  stripTypeScriptTypes: {
+    value: stripTypeScriptTypes,
+    writable: true,
+    enumerable: true,
+  },
+  findSourceMap: {
+    value: findSourceMap,
+    writable: true,
+    enumerable: true,
+  },
+  SourceMap: {
+    value: SourceMap,
+    writable: true,
+    enumerable: true,
+  },
+  getSourceMapsSupport: {
+    value: getSourceMapsSupport,
+    writable: true,
+    enumerable: true,
+  },
+  setSourceMapsSupport: {
+    value: setSourceMapsSupport,
+    writable: true,
+    enumerable: true,
+  },
+  createRequire: {
+    value: createRequire,
+    writable: true,
+    enumerable: true,
+  },
+  builtinModules: {
+    value: builtinModules,
+    writable: true,
+    enumerable: true,
+  },
+  globalPaths: {
+    value: globalPaths,
+    writable: true,
+    enumerable: true,
+  },
+  isBuiltin: {
+    value: isBuiltin,
+    writable: true,
+    enumerable: true,
+  },
+  runMain: {
+    value: runMain,
+    writable: true,
+    enumerable: true,
+  },
+  syncBuiltinESMExports: {
+    value: syncBuiltinESMExports,
+    writable: true,
+    enumerable: true,
+  },
+  wrap: {
+    value: wrap,
+    writable: true,
+    enumerable: true,
+  },
+  _cache: {
+    value: _cache,
+    writable: true,
+    enumerable: true,
+  },
+  _debug: {
+    value: _debug,
+    writable: true,
+    enumerable: true,
+  },
+  _extensions: {
+    value: _extensions,
+    writable: true,
+    enumerable: true,
+  },
+  _findPath: {
+    value: _findPath,
+    writable: true,
+    enumerable: true,
+  },
+  _initPaths: {
+    value: _initPaths,
+    writable: true,
+    enumerable: true,
+  },
+  _load: {
+    value: _load,
+    writable: true,
+    enumerable: true,
+  },
+  _pathCache: {
+    value: _pathCache,
+    writable: true,
+    enumerable: true,
+  },
+  _preloadModules: {
+    value: _preloadModules,
+    writable: true,
+    enumerable: true,
+  },
+  _resolveFilename: {
+    value: _resolveFilename,
+    writable: true,
+    enumerable: true,
+  },
+  _resolveLookupPaths: {
+    value: _resolveLookupPaths,
+    writable: true,
+    enumerable: true,
+  },
+  _nodeModulePaths: {
+    value: _nodeModulePaths,
+    writable: true,
+    enumerable: true,
+  },
+  Module: {
+    value: Module,
+    writable: true,
+    enumerable: true,
+  },
+});
 
-// SourceMap APIs
-Module.findSourceMap = findSourceMap;
-Module.SourceMap = SourceMap;
-Module.getSourceMapsSupport = getSourceMapsSupport;
-Module.setSourceMapsSupport = setSourceMapsSupport;
-
-export default {
-  builtinModules,
-  constants,
-  createRequire,
-  enableCompileCache,
-  findSourceMap,
-  getCompileCacheDir,
-  getSourceMapsSupport,
-  globalPaths,
-  isBuiltin,
-  register,
-  runMain,
-  setSourceMapsSupport,
-  stripTypeScriptTypes,
-  syncBuiltinESMExports,
-  wrap,
-  flushCompileCache,
-  findPackageJSON,
-  _cache,
-  _debug,
-  _extensions,
-  _findPath,
-  _initPaths,
-  _load,
-  _pathCache,
-  _preloadModules,
-  _resolveFilename,
-  _resolveLookupPaths,
-  _nodeModulePaths,
-  Module,
-  SourceMap,
-};
+export default Module;
