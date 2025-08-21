@@ -164,68 +164,8 @@ public:
 
       script_[script_size] = '\0';
 
-      // Create a fresh context for this script execution to isolate variable scope
-      // while preserving isolate-level global state (APIs, etc.)
-      /*auto scriptContext = v8::Context::New(js.v8Isolate, nullptr, v8::ObjectTemplate::New(js.v8Isolate));
-      // Set required embedder data slot to prevent fatal errors
-      scriptContext->SetAlignedPointerInEmbedderData(3, nullptr);
-	  {
-        v8::Context::Scope originalScope(js.v8Context());
-        auto originalGlobal = js.v8Context()->Global();
-        v8::Context::Scope scriptScope(scriptContext);
-        auto scriptGlobal = scriptContext->Global();
-
-        // Get all property names from the original global object
-        auto propNames = jsg::check(originalGlobal->GetOwnPropertyNames(js.v8Context()));
-        uint32_t length = propNames->Length();
-
-        // Copy each property to the new context's global object
-        for (uint32_t i = 0; i < length; i++) {
-          auto key = jsg::check(propNames->Get(js.v8Context(), i));
-          auto value = jsg::check(originalGlobal->Get(js.v8Context(), key));
-          jsg::check(scriptGlobal->Set(scriptContext, key, value));
-        }
-      }
-      */
-      //fprintf(stderr,"Script content: %s\n",script_);
-
-      // Debug: Print global context before executing script
-      /*printf("=== DEBUG: Global Context Properties ===\n");
-      auto global = js.v8Context()->Global();
-      auto propNames = jsg::check(global->GetOwnPropertyNames(js.v8Context()));
-      uint32_t length = propNames->Length();
-      for (uint32_t i = 0; i < length; i++) {
-        auto key = jsg::check(propNames->Get(js.v8Context(), i));
-         v8::String::Utf8Value keyStr(js.v8Isolate, key);
-        printf("Global property: %s\n", *keyStr);
-      }
-      printf("=== END DEBUG ===\n");
-      fflush(stdout);
-      */
-
       int status = 0;
       unsigned res_val = 0;
-      // Execute script in the fresh context using JSG_WITHIN_CONTEXT_SCOPE
-      // This provides script isolation while maintaining access to global APIs
-      /*JSG_WITHIN_CONTEXT_SCOPE(js, scriptContext, [&](jsg::Lock& contextJs) {
-        const kj::String script = kj::str(script_);
-        auto compiled = jsg::NonModuleScript::compile(contextJs, script, "reprl"_kj);
-        try {
-          auto result = compiled.runAndReturn(contextJs);
-          res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(contextJs.v8Context()));
-          // if we reach that point execution was successful -> return 0
-          res_val = 0;
-        } catch(jsg::JsExceptionThrown&) {
-          if(try_catch.HasCaught()) {
-            res_val = 1;
-            auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(contextJs.v8Context()));
-            v8::String::Utf8Value string(contextJs.v8Isolate, str);
-            printf("%s\n",*string);
-            fflush(stdout);
-          }
-        }
-      });
-      */
       const kj::String script = kj::str(script_);
       const kj::String wrapped = kj::str("{",script_,"}");
       auto compiled = jsg::NonModuleScript::compile(js, wrapped, "reprl"_kj);
