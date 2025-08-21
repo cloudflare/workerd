@@ -160,8 +160,19 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
+  // TODO(soon): Remove this. This is temporary logging while investigating an issue.
+  static const auto logIfInvalidHeaderValue = [](kj::StringPtr name, kj::StringPtr value) {
+    for (char c: value) {
+      if (c == '\0' || c == '\r' || c == '\n') {
+        LOG_NOSENTRY(WARNING, "Invalid header value received from request", name, value.asBytes())
+      }
+    }
+  };
+
   other.forEach([this, &js](auto name, auto value) {
-    append(js, js.accountedByteString(name), js.accountedByteString(value));
+    auto val = js.accountedByteString(value);
+    logIfInvalidHeaderValue(name, value);
+    append(js, js.accountedByteString(name), kj::mv(val));
   });
 
   this->guard = guard;
