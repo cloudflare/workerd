@@ -1,5 +1,5 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "FEATURE_FLAGS", "py_wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
 
 def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
