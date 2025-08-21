@@ -611,7 +611,8 @@ Trace::Trace(kj::Maybe<kj::String> stableId,
     kj::Maybe<kj::String> scriptId,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint,
-    ExecutionModel executionModel)
+    ExecutionModel executionModel,
+    kj::Maybe<kj::String> durableObjectId)
     : stableId(kj::mv(stableId)),
       scriptName(kj::mv(scriptName)),
       scriptVersion(kj::mv(scriptVersion)),
@@ -619,6 +620,7 @@ Trace::Trace(kj::Maybe<kj::String> stableId,
       scriptId(kj::mv(scriptId)),
       scriptTags(kj::mv(scriptTags)),
       entrypoint(kj::mv(entrypoint)),
+      durableObjectId(kj::mv(durableObjectId)),
       executionModel(executionModel) {}
 Trace::Trace(rpc::Trace::Reader reader) {
   mergeFrom(reader, PipelineLogLevel::FULL);
@@ -676,6 +678,10 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
 
   KJ_IF_SOME(e, entrypoint) {
     builder.setEntrypoint(e);
+  }
+
+  KJ_IF_SOME(id, durableObjectId) {
+    builder.setDurableObjectId(id);
   }
 
   builder.setEventTimestampNs((eventTimestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
@@ -802,6 +808,10 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 
   if (reader.hasEntrypoint()) {
     entrypoint = kj::str(reader.getEntrypoint());
+  }
+
+  if (reader.hasDurableObjectId()) {
+    durableObjectId = kj::str(reader.getDurableObjectId());
   }
 
   eventTimestamp = kj::UNIX_EPOCH + reader.getEventTimestampNs() * kj::NANOSECONDS;
