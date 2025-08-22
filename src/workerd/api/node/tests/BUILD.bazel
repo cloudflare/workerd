@@ -256,13 +256,12 @@ wd_test(
     }),
 )
 
-# TODO: Fix this and reenable it.
-# wd_test(
-#     src = "dns-nodejs-test.wd-test",
-#     args = ["--experimental"],
-#     data = ["dns-nodejs-test.js"],
-#     tags = ["requires-network"],
-# )
+wd_test(
+    src = "dns-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["dns-nodejs-test.js"],
+    tags = ["requires-network"],
+)
 
 js_binary(
     name = "net-nodejs-tcp-server",
