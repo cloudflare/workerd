@@ -533,6 +533,30 @@ Object.defineProperties(constants, {
   },
 });
 
+// Deprecated but required for backwards compatibility.
+export const pseudoRandomBytes = randomBytes;
+
+export const CryptoKey = globalThis.CryptoKey;
+
+export let createCipher: (() => void) | undefined = undefined;
+export let createDecipher: (() => void) | undefined = undefined;
+export let Cipher: (() => void) | undefined = undefined;
+export let Decipher: (() => void) | undefined = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
+  createCipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createCipher');
+  };
+  createDecipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('createDecipher');
+  };
+  Cipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Cipher');
+  };
+  Decipher = (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Decipher');
+  };
+}
 export default {
   constants,
   // DH
@@ -557,6 +581,7 @@ export default {
   createSecretKey,
   // Random
   getRandomValues,
+  pseudoRandomBytes,
   randomBytes,
   randomFillSync,
   randomFill,
@@ -621,6 +646,13 @@ export default {
   privateDecrypt,
   privateEncrypt,
   getCipherInfo,
+  CryptoKey,
+
+  // EOL
+  createCipher,
+  createDecipher,
+  Cipher,
+  Decipher,
 };
 
 // Classes
@@ -652,6 +684,8 @@ export default {
 //   * [x] crypto.privateEncrypt(privateKey, buffer)
 //   * [x] crypto.publicDecrypt(key, buffer)
 //   * [x] crypto.publicEncrypt(key, buffer)
+//   * [x] crypto.Decipher
+//   * [x] crypto.Cipher
 // * DiffieHellman
 //   * [x] crypto.createDiffieHellman(prime[, primeEncoding][, generator][, generatorEncoding])
 //   * [x] crypto.createDiffieHellman(primeLength[, generator])
@@ -705,3 +739,4 @@ export default {
 // * WebCrypto
 //   * [x] crypto.subtle
 //   * [x] crypto.webcrypto
+//   * [x] crypto.CryptoKey
