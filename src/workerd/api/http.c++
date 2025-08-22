@@ -160,19 +160,10 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  // TODO(soon): Remove this. This is temporary logging while investigating an issue.
-  static const auto logIfInvalidHeaderValue = [](kj::StringPtr name, kj::StringPtr value) {
-    for (char c: value) {
-      if (c == '\0' || c == '\r' || c == '\n') {
-        LOG_NOSENTRY(WARNING, "Invalid header value received from request", name, value.asBytes())
-      }
-    }
-  };
-
+  // TODO(soon): Remove this. Throw if the any header values are invalid.
+  throwIfInvalidHeaderValue(other);
   other.forEach([this, &js](auto name, auto value) {
-    auto val = js.accountedByteString(value);
-    logIfInvalidHeaderValue(name, value);
-    append(js, js.accountedByteString(name), kj::mv(val));
+    append(js, js.accountedByteString(name), js.accountedByteString(value));
   });
 
   this->guard = guard;
@@ -2081,9 +2072,9 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
 
       // Pump the response body to a singleton null stream before following the redirect.
       auto& ioContext = IoContext::current();
-      return ioContext.awaitIo(js, 
+      return ioContext.awaitIo(js,
           response.body->pumpTo(getGlobalNullOutputStream()).ignoreResult().attach(kj::mv(response.body)),
-          [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList), 
+          [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
            status = response.statusCode, location = kj::str(l)](jsg::Lock& js) mutable {
         return handleHttpRedirectResponse(
             js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), status, kj::mv(location));

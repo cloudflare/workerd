@@ -247,6 +247,7 @@ wd_cc_library(
     deps = [
         ":frankenvalue_capnp",
         ":worker-interface_capnp",
+        "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
