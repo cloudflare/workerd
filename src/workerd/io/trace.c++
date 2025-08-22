@@ -1472,10 +1472,13 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 
 // ======================================================================================
 
-SpanBuilder::SpanBuilder(
-    kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
+SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+    kj::ConstString operationName,
+    kj::Maybe<kj::Date> startTime) {
   KJ_IF_SOME(obs, observer) {
-    span.emplace(kj::mv(operationName), startTime);
+    // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
+    // should be able to fold this virtual call and just get the timestamp directly.
+    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
     this->observer = kj::mv(obs);
   }
 }
@@ -1494,6 +1497,8 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 void SpanBuilder::end() {
   KJ_IF_SOME(o, observer) {
     KJ_IF_SOME(s, span) {
+      // TODO(performance): Fold this timer call if we are using I/O time, where we will look up
+      // I/O time later.
       s.endTime = kj::systemPreciseCalendarClock().now();
       o->report(s);
       span = kj::none;
