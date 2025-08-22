@@ -1,4 +1,3 @@
-# ruff: noqa: F401
 from _workers import (
     Blob,
     BlobEnding,
@@ -23,3 +22,28 @@ from _workers import (
     python_from_rpc,
     python_to_rpc,
 )
+
+__all__ = [
+    "Blob",
+    "BlobEnding",
+    "BlobValue",
+    "Body",
+    "DurableObject",
+    "FetchKwargs",
+    "FetchResponse",
+    "File",
+    "FormData",
+    "FormDataValue",
+    "Headers",
+    "JSBody",
+    "Request",
+    "RequestInitCfProperties",
+    "Response",
+    "WorkerEntrypoint",
+    "WorkflowEntrypoint",
+    "fetch",
+    "handler",
+    "import_from_javascript",
+    "python_from_rpc",
+    "python_to_rpc",
+]
