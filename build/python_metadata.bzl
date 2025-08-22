@@ -138,6 +138,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
     },
     {
         "name": "0.28.2",
+        "released": True,
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
