@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include "kj/common.h"
 #include <workerd/api/actor-state.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/worker-rpc.h>
@@ -1922,17 +1923,22 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
 
     // `donePromise` resolves once there are no longer any capabilities pointing between the client
     // and server as part of this session.
+    kj::Maybe<kj::Exception> exp;
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
-
-    co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
     // throwing, rather than some generic revocation exception.
-    auto e = kj::getCaughtExceptionAsKj();
+    exp = kj::getCaughtExceptionAsKj();
+  }
+
+  KJ_IF_SOME(e, exp) {
+    co_await incomingRequest->finishScheduled();
     revcableTarget.revoke(kj::cp(e));
-    incomingRequest->finishScheduled();
     kj::throwFatalException(kj::mv(e));
   }
+
+  co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
+
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(
