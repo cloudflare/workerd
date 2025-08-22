@@ -439,6 +439,35 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
+  // Attach the objects to the promise by creating a continuation that holds them.
+  // This ensures the attachments stay alive until the promise resolves.
+  // This should ONLY be used with TraceContext or SpanBuilder objects.
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpans(jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments)
+    requires(... &&
+        (kj::isSameType<Attachments, SpanBuilder>() || kj::isSameType<Attachments, TraceContext>()))
+  {
+    return attachSpansInternalOnly(js, kj::mv(promise), kj::fwd<Attachments>(attachments)...);
+  }
+
+  // public for tests
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpansInternalOnly(
+      jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments) {
+    auto attachmentTuple = addObject(kj::heap(kj::tuple(kj::fwd<Attachments>(attachments)...)));
+
+    if constexpr (kj::isSameType<T, void>()) {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&) {
+        // The attachments are kept alive in this lambda's capture
+      });
+    } else {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&, T result) {
+        // The attachments are kept alive in this lambda's capture
+        return result;
+      });
+    }
+  }
+
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
   // applied.
