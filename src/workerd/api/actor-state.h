@@ -527,7 +527,7 @@ class DurableObjectState: public jsg::Object {
  public:
   DurableObjectState(jsg::Lock& js,
       Worker::Actor::Id actorId,
-      jsg::JsRef<jsg::JsValue> exports,
+      jsg::JsValue exports,
       jsg::JsValue props,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,

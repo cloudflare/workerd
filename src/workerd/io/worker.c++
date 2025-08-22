@@ -3607,8 +3607,7 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       }
 
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
-          jsg::JsRef<jsg::JsValue>(
-              js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
+          jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
           impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
           impl->facetManager);
 
