@@ -1175,14 +1175,17 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
 
 tracing::Onset::Onset(tracing::Onset::Info&& info,
     tracing::Onset::WorkerInfo&& workerInfo,
+    CustomInfo attributes,
     kj::Maybe<TriggerContext> maybeTrigger)
     : info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
+      attributes(kj::mv(attributes)),
       trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
     : info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }),
       trigger(getTriggerContextFromReader(reader)) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
@@ -1216,6 +1219,11 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
+
+  auto attributeBuilder = builder.initAttributes(attributes.size());
+  for (size_t n = 0; n < attributes.size(); n++) {
+    attributes[n].copyTo(attributeBuilder[n]);
+  }
 }
 
 tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
@@ -1265,7 +1273,8 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
 }
 
 tracing::Onset tracing::Onset::clone() const {
-  return Onset(cloneEventInfo(info), workerInfo.clone(), trigger.map([](const TriggerContext& ctx) {
+  return Onset(cloneEventInfo(info), workerInfo.clone(),
+      KJ_MAP(attr, attributes) { return attr.clone(); }, trigger.map([](const TriggerContext& ctx) {
     return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
   }));
 }
@@ -1444,10 +1453,11 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 
 // ======================================================================================
 
-SpanBuilder::SpanBuilder(
-    kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
+SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+    kj::ConstString operationName,
+    kj::Maybe<kj::Date> startTime) {
   KJ_IF_SOME(obs, observer) {
-    span.emplace(kj::mv(operationName), startTime);
+    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
     this->observer = kj::mv(obs);
   }
 }
@@ -1466,7 +1476,7 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 void SpanBuilder::end() {
   KJ_IF_SOME(o, observer) {
     KJ_IF_SOME(s, span) {
-      s.endTime = kj::systemPreciseCalendarClock().now();
+      s.endTime = o->getTime();
       o->report(s);
       span = kj::none;
     }

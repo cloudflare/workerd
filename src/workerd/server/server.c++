@@ -1690,6 +1690,11 @@ class WorkerTracerSpanObserver: public SpanObserver,
     }
   }
 
+  // Provide user time to the tracing system.
+  kj::Date getTime() override {
+    return IoContext::current().now();
+  }
+
  private:
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
 };
@@ -2103,8 +2108,7 @@ class Server::WorkerService final: public Service,
     KJ_IF_SOME(w, workerTracer) {
       if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
         auto tracerSpanObserver = kj::refcounted<WorkerTracerSpanObserver>(mapAddRef(workerTracer));
-        SpanBuilder userSpanParent(kj::mv(tracerSpanObserver), "worker"_kjc);
-        w->setUserRequestSpan(kj::mv(userSpanParent));
+        w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
       }
     }
     observer = kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
