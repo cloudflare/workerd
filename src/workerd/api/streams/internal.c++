@@ -1577,6 +1577,9 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     return false;
   };
 
+  // Do we have anything left to do?
+  if (queue.empty()) return js.resolvedPromise();
+
   KJ_SWITCH_ONEOF(queue.front().event) {
     KJ_CASE_ONEOF(request, Write) {
       if (request.bytes.size() == 0) {
