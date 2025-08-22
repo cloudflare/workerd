@@ -209,7 +209,8 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     // invoke a fallback but it does not call the fallback directly. The caller
     // is responsible for passing the returned task and fulfiller to the
     // respective I/O context in which the fallback will run.
-    FallbackDoneCallback prepareFallback(InProgress& inProgress) const;
+    FallbackDoneCallback prepareFallback(
+        InProgress& inProgress, bool handleFailureOnDestruction) const;
 
     // Called whenever a fallback has failed. The fallback might have thrown an
     // error or it might have returned a Promise that rejected, or the I/O
