@@ -40,4 +40,12 @@ struct Frankenvalue {
   #
   # The final cap table contains this many base caps (referenced by the union above), followed by
   # the caps for each property, in order.
+
+  capTable @6 :AnyPointer;
+  # Some sort of representation of the cap table. The exact format is different for different
+  # contexts. Frakenvalue::toCapnp() and fromCapnp() don't handle this at all -- the caller is
+  # expected to deal with it.
+  #
+  # TODO(cleanup): Consider making `Frakenvalue` a generic over the capTable type? Maybe even make
+  #   the C++ class a template over the CapTableEntry type?
 }
