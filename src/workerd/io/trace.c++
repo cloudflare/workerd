@@ -1175,14 +1175,17 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
 
 tracing::Onset::Onset(tracing::Onset::Info&& info,
     tracing::Onset::WorkerInfo&& workerInfo,
+    CustomInfo attributes,
     kj::Maybe<TriggerContext> maybeTrigger)
     : info(kj::mv(info)),
       workerInfo(kj::mv(workerInfo)),
+      attributes(kj::mv(attributes)),
       trigger(kj::mv(maybeTrigger)) {}
 
 tracing::Onset::Onset(rpc::Trace::Onset::Reader reader)
     : info(readOnsetInfo(reader.getInfo())),
       workerInfo(getWorkerInfoFromReader(reader)),
+      attributes(KJ_MAP(attr, reader.getAttributes()) { return tracing::Attribute(attr); }),
       trigger(getTriggerContextFromReader(reader)) {}
 
 void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
@@ -1216,6 +1219,11 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
+
+  auto attributeBuilder = builder.initAttributes(attributes.size());
+  for (size_t n = 0; n < attributes.size(); n++) {
+    attributes[n].copyTo(attributeBuilder[n]);
+  }
 }
 
 tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
@@ -1265,7 +1273,8 @@ tracing::EventInfo tracing::cloneEventInfo(const tracing::EventInfo& info) {
 }
 
 tracing::Onset tracing::Onset::clone() const {
-  return Onset(cloneEventInfo(info), workerInfo.clone(), trigger.map([](const TriggerContext& ctx) {
+  return Onset(cloneEventInfo(info), workerInfo.clone(),
+      KJ_MAP(attr, attributes) { return attr.clone(); }, trigger.map([](const TriggerContext& ctx) {
     return TriggerContext(ctx.traceId, ctx.invocationId, ctx.spanId);
   }));
 }
