@@ -297,6 +297,13 @@ function makeEntrypointProxyHandler(
         prop = 'on_' + prop;
       }
 
+      if (!legacyGlobalHandlers && prop === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+        return async function () {
+          await getPyodide();
+          console.log('Stored snapshot to disk; quitting without running test');
+        };
+      }
+
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
