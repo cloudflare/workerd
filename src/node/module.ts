@@ -283,6 +283,11 @@ export function stripTypeScriptTypes(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.stripTypeScriptTypes');
 }
 
+export function registerHooks(): void {
+  // We don't implement hooks registration.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('module.registerHooks');
+}
+
 export function SourceMap(): void {
   // We don't support source maps.
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.SourceMap');
@@ -441,6 +446,11 @@ Object.defineProperties(Module, {
   },
   Module: {
     value: Module,
+    writable: true,
+    enumerable: true,
+  },
+  registerHooks: {
+    value: registerHooks,
     writable: true,
     enumerable: true,
   },
