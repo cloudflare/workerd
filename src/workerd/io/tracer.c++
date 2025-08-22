@@ -203,6 +203,35 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     return;
   }
 
+  // To report I/O time, we need the IOContext to still be alive.
+  // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
+  // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on
+  // missing topLevelInvocationSpanContext right after).
+  if (weakIoContext != kj::none) {
+    auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
+    weakIoCtx->runIfAlive([&span](IoContext& context) { span.endTime = context.now(); });
+    if (!weakIoCtx->isValid()) {
+      // This can happen if we start a customEvent from this event and cancel it after this IoContext
+      // gets destroyed. In that case we no longer have an IoContext available and can't get the
+      // current time, but the outcome timestamp will have already been set. Since the outcome
+      // timestamp is "late enough", simply use that.
+      // TODO(o11y): fix this – spans should not be outliving the IoContext.
+      if (completeTime != kj::UNIX_EPOCH) {
+        span.endTime = completeTime;
+      } else {
+        // Otherwise, we can't actually get an end timestamp that makes sense. Report a zero-duration
+        // span and log a warning (or fail assert in test mode).
+        span.endTime = span.startTime;
+        if (isPredictableModeForTest()) {
+          KJ_FAIL_ASSERT("reported span after IoContext was deallocated", span.operationName);
+        } else {
+          LOG_WARNING_PERIODICALLY(
+              "reported span after IoContext was deallocated", span.operationName);
+        }
+      }
+    }
+  }
+
   // 48B for traceID, spanID, parentSpanID, start & end time.
   const int fixedSpanOverhead = 48;
   size_t messageSize = fixedSpanOverhead + span.operationName.size();
@@ -343,7 +372,14 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
   }
 }
 
-void WorkerTracer::setEventInfo(
+void WorkerTracer::setEventInfo(IoContext& ioContext, tracing::EventInfo&& info) {
+  // IoContext is available at this time, capture weakRef.
+  KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
+  weakIoContext = ioContext.getWeakRef();
+  setEventInfoInternal(ioContext.getInvocationSpanContext(), ioContext.now(), kj::mv(info));
+}
+
+void WorkerTracer::setEventInfoInternal(
     const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 

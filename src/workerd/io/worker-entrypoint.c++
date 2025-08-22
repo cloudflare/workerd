@@ -265,7 +265,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   kj::Maybe<BaseTracer&> workerTracer;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    auto timestamp = context.now();
     kj::String cfJson;
     KJ_IF_SOME(c, cfBlobJson) {
       cfJson = kj::str(c);
@@ -288,7 +287,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       return tracing::FetchEventInfo::Header(kj::mv(entry.key), kj::strArray(entry.value, ", "));
     };
 
-    t.setEventInfo(context.getInvocationSpanContext(), timestamp,
+    t.setEventInfo(context,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
     workerTracer = t;
   }
@@ -578,8 +577,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
   double eventTime = (scheduledTime - kj::UNIX_EPOCH) / kj::MILLISECONDS;
 
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
+    t.setEventInfo(context, tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
   // Scheduled handlers run entirely in waitUntil() tasks.
@@ -639,8 +637,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
   incomingRequest->delivered();
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::AlarmEventInfo(scheduledTime));
+    t.setEventInfo(context, tracing::AlarmEventInfo(scheduledTime));
   }
 
   auto scheduleAlarmResult = co_await actor.scheduleAlarm(scheduledTime);
@@ -730,7 +727,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
 
   auto& context = incomingRequest->getContext();
   KJ_IF_SOME(t, context.getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(), tracing::CustomEventInfo());
+    t.setEventInfo(context, tracing::CustomEventInfo());
   }
 
   context.addWaitUntil(context.run([entrypointName = entrypointName, props = kj::mv(props),
@@ -785,8 +782,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   // during delivered()).
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     KJ_IF_SOME(eventInfo, event->getEventInfo()) {
-      t.setEventInfo(
-          incomingRequest->getInvocationSpanContext(), incomingRequest->now(), kj::mv(eventInfo));
+      t.setEventInfo(context, kj::mv(eventInfo));
     }
   }
 

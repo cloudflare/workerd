@@ -57,10 +57,8 @@ export const test = {
     // Wait for all the tailStream executions to finish
     await Promise.allSettled(invocationPromises);
 
-    // Recorded streaming tail worker events, in insertion order,
+    // Recorded streaming tail worker events, in insertion order.
     let received = Array.from(spans.values());
-
-    console.log(received);
 
     // spans emitted by r2-test.js in execution order
     let expected = [
