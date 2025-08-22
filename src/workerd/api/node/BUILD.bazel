@@ -44,9 +44,11 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/rust/transpiler",
         "//src/workerd/io",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
+        "@workerd-cxx//kj-rs",
     ],
 )
 
