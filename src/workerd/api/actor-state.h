@@ -394,11 +394,20 @@ class DurableObjectFacets: public jsg::Object {
   DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
       : facetManager(kj::mv(facetManager)) {}
 
+  // Describes how to run a facet. The app provides this when first accessing a facet that isn't
+  // already running.
   struct StartupOptions {
+    // The actor class to use to implement the facet.
+    //
+    // Note that the $ is needed only because `class` is a keyword in C++. JSG removes the $ from
+    // the name in the JS API. C++ does not officially recognize the existence of a $ symbol but
+    // all major compilers support using it as if it were a letter.
     kj::OneOf<jsg::Ref<DurableObjectClass>,
         jsg::Ref<LoopbackDurableObjectNamespace>,
         jsg::Ref<LoopbackColoLocalActorNamespace>>
         $class;
+
+    // Value to expose as `ctx.id` in the facet.
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
