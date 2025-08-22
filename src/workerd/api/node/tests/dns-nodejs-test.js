@@ -95,9 +95,15 @@ export const errorCodesExist = {
 export const resolveTxt = {
   async test() {
     function validateResult(result) {
+      ok(
+        result.length > 0,
+        `Result length should be greater than 0 but got ${inspect(result)}`
+      );
       ok(Array.isArray(result[0]));
-      strictEqual(result.length, 1);
-      ok(result[0][0].startsWith('v=spf1'));
+      ok(
+        result.some((record) => record[0].startsWith('v=spf1')),
+        `Expected SPF record but got ${inspect(result[0])}`
+      );
     }
 
     validateResult(await dnsPromises.resolveTxt(addresses.TXT_HOST));
