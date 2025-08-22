@@ -21,4 +21,8 @@ kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::clone() {
   return kj::heap<IoChannelCapTableEntry>(type, channel);
 }
 
+kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::threadSafeClone() const {
+  return kj::heap<IoChannelCapTableEntry>(type, channel);
+}
+
 }  // namespace workerd

@@ -4,7 +4,7 @@
 
 namespace workerd {
 
-Frankenvalue Frankenvalue::clone() {
+Frankenvalue Frankenvalue::cloneImpl() const {
   Frankenvalue result;
 
   KJ_SWITCH_ONEOF(value) {
@@ -23,14 +23,21 @@ Frankenvalue Frankenvalue::clone() {
     result.properties.reserve(properties.size());
 
     for (auto& property: properties) {
+      KJ_ASSERT(property.value.capTable.empty());
       result.properties.add(Property{
         .name = kj::str(property.name),
-        .value = property.value.clone(),
+        .value = property.value.cloneImpl(),
         .capTableOffset = property.capTableOffset,
         .capTableSize = property.capTableSize,
       });
     }
   }
+
+  return result;
+}
+
+Frankenvalue Frankenvalue::clone() {
+  auto result = cloneImpl();
 
   if (!capTable.empty()) {
     result.capTable.reserve(capTable.size());
@@ -40,6 +47,23 @@ Frankenvalue Frankenvalue::clone() {
   }
 
   return result;
+}
+
+Frankenvalue Frankenvalue::threadSafeClone() const {
+  auto result = cloneImpl();
+
+  if (!capTable.empty()) {
+    result.capTable.reserve(capTable.size());
+    for (auto& entry: capTable) {
+      result.capTable.add(entry->threadSafeClone());
+    }
+  }
+
+  return result;
+}
+
+kj::Own<Frankenvalue::CapTableEntry> Frankenvalue::CapTableEntry::threadSafeClone() const {
+  KJ_FAIL_REQUIRE("a capability in the Frankenvalue does not implement threadSafeClone()");
 }
 
 void Frankenvalue::toCapnp(rpc::Frankenvalue::Builder builder) {

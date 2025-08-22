@@ -26,6 +26,10 @@ class Frankenvalue {
 
   Frankenvalue clone();
 
+  // This method only works if the `CapTableEntry`s in this `Frankenvalue` all implement
+  // `threadSafeClone()`.
+  Frankenvalue threadSafeClone() const;
+
   class CapTableEntry;
 
   // Convert to/from capnp format.
@@ -82,6 +86,10 @@ class Frankenvalue {
     // Clone the entry, used when `Frakenvalue::clone()` is called. Many implementations may
     // implement this using addRef().
     virtual kj::Own<CapTableEntry> clone() = 0;
+
+    // Like `clone()` but works on const values. Used only when `Frakenvalue::threadSafeClone()`
+    // is called. The default implementation throws an exception.
+    virtual kj::Own<CapTableEntry> threadSafeClone() const;
   };
 
   kj::ArrayPtr<kj::Own<CapTableEntry>> getCapTable() {
@@ -143,6 +151,7 @@ class Frankenvalue {
 
   kj::Vector<kj::Own<CapTableEntry>> capTable;
 
+  Frankenvalue cloneImpl() const;
   void fromCapnpImpl(rpc::Frankenvalue::Reader reader, uint& capTablePos);
   void toCapnpImpl(rpc::Frankenvalue::Builder builder, uint capTableSize);
   jsg::JsValue toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTableEntry>> capTable);

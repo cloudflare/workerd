@@ -312,6 +312,7 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
   uint getChannelNumber(Type expectedType);
 
   kj::Own<CapTableEntry> clone() override;
+  kj::Own<CapTableEntry> threadSafeClone() const override;
 
  private:
   Type type;
