@@ -1,5 +1,5 @@
 import module from 'node:module';
-import { ok } from 'node:assert';
+import { ok, deepStrictEqual } from 'node:assert';
 
 export const testUnimplemented = {
   async test() {
@@ -40,5 +40,11 @@ export const testUnimplemented = {
       ok(field in module, `${field} is not in module`);
       ok(module[field] != null, `${field} is ${typeof module[field]}`);
     }
+
+    deepStrictEqual(Object.keys(module.Module.prototype), [
+      'load',
+      'require',
+      '_compile',
+    ]);
   },
 };

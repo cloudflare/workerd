@@ -298,6 +298,21 @@ export function Module(): void {
   throw new ERR_METHOD_NOT_IMPLEMENTED('module.Module');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+Module.prototype.load = function load(): void {
+  // Acts as a no-op.
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+Module.prototype.require = function require(): void {
+  // Acts as a no-op.
+};
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+Module.prototype._compile = function _compile(): void {
+  // Acts as a no-op.
+};
+
 Object.defineProperties(Module, {
   register: {
     value: register,
