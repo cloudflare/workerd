@@ -233,7 +233,9 @@ kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsM
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
       traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
       traceContext.userSpan.setTag("cloudflare.kv.operation.name"_kjc, kj::str("get_bulk"_kjc));
-      return getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), false);
+      return context.attachSpans(js,
+          getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), false),
+          kj::mv(traceContext));
     }
     KJ_CASE_ONEOF(str, kj::String) {
       auto traceSpan = context.makeTraceSpan("kv_get"_kjc);
@@ -241,7 +243,8 @@ kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsM
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
       traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
       traceContext.userSpan.setTag("cloudflare.kv.operation.name"_kjc, kj::str("get"_kjc));
-      return getSingle(js, context, traceContext, kj::mv(str), kj::mv(options));
+      return context.attachSpans(js,
+          getSingle(js, context, traceContext, kj::mv(str), kj::mv(options)), kj::mv(traceContext));
     }
   }
   KJ_UNREACHABLE;
@@ -268,7 +271,9 @@ KvNamespace::getWithMetadata(jsg::Lock& js,
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
       traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
       traceContext.userSpan.setTag("cloudflare.kv.operation.name"_kjc, kj::str("get_bulk"_kjc));
-      return getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), true);
+      return context.attachSpans(js,
+          getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), true),
+          kj::mv(traceContext));
     }
     KJ_CASE_ONEOF(str, kj::String) {
       auto traceSpan = context.makeTraceSpan("kv_getWithMetadata"_kjc);
@@ -277,7 +282,9 @@ KvNamespace::getWithMetadata(jsg::Lock& js,
       traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
       traceContext.userSpan.setTag(
           "cloudflare.kv.operation.name"_kjc, kj::str("getWithMetadata"_kjc));
-      return getWithMetadataSingle(js, context, traceContext, kj::mv(str), kj::mv(options));
+      return context.attachSpans(js,
+          getWithMetadataSingle(js, context, traceContext, kj::mv(str), kj::mv(options)),
+          kj::mv(traceContext));
     }
   }
   KJ_UNREACHABLE;
@@ -447,9 +454,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
         getHttpClient(context, headers, LimitEnforcer::KvOpType::LIST, urlStr, traceContext);
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
-    return context.awaitIo(js, kj::mv(request.response),
-        [&context, client = kj::mv(client)](jsg::Lock& js,
-            kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
+    return context.attachSpans(js,
+        context.awaitIo(js, kj::mv(request.response),
+            [&context, client = kj::mv(client)](
+                jsg::Lock& js, kj::HttpClient::Response&& response) mutable
+            -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
@@ -474,7 +483,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
                 [&](jsg::JsRef<jsg::JsValue>& cs) -> jsg::JsValue { return cs.getHandle(js); }));
         return jsg::JsRef(js, result);
       });
-    });
+    }),
+        kj::mv(traceContext));
   });
 }
 
@@ -600,7 +610,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
       });
     });
 
-    return context.awaitIo(js, kj::mv(promise));
+    return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
   });
 }
 
@@ -632,7 +642,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
       }).attach(kj::mv(client));
     });
 
-    return context.awaitIo(js, kj::mv(promise));
+    return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
   });
 }
 
