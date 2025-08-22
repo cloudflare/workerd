@@ -1188,4 +1188,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableCtxExports @139 :Bool
     $compatEnableFlag("enable_ctx_exports");
   # Enable the ctx.exports API.
+
+  cacheReload @140 :Bool
+      $compatEnableFlag("cache_reload_enabled")
+      $compatDisableFlag("cache_reload_disabled")
+      $experimental;
+  # Enables the use of cache: reload in the fetch api.
 }
