@@ -15,10 +15,8 @@ namespace {
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
 // DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
 // streaming tail worker, this is the maximum size per tail event.
-// TODO(streaming-tail): Add an indicator for events being dropped/truncated based on
-// MAX_TRACE_BYTES. For truncation this is easy to spot (FetchEventInfo being empty for Onset event,
-// spans missing attributes), but if e.g. large exceptions are dropped that should be indicated
-// clearly.
+// TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
+// so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 }  // namespace
 
@@ -157,22 +155,22 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
-  size_t messageSize = sizeof(tracing::Log) + message.size();
 
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // If message is too big on its own, exclude from STW too.
-    if (messageSize <= MAX_TRACE_BYTES) {
-      writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))});
-    }
+    // If message is too big on its own, truncate it.
+    writer->report(context,
+        {(tracing::Log(timestamp, logLevel,
+            kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES)))))});
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
 
+  size_t messageSize = sizeof(tracing::Log) + message.size();
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     // We use a JSON encoded array/string to match other console.log() recordings:
     trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
@@ -264,10 +262,17 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    if (messageSize <= MAX_TRACE_BYTES) {
-      writer->report(context,
-          {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))});
+    auto maybeTruncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
+    auto maybeTruncatedMessage =
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
+    kj::Maybe<kj::String> maybeTruncatedStack;
+    KJ_IF_SOME(s, stack) {
+      maybeTruncatedStack = kj::heapString(s.first(kj::min(
+          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size())));
     }
+    writer->report(context,
+        {tracing::Exception(timestamp, kj::str(maybeTruncatedName), kj::str(maybeTruncatedMessage),
+            kj::mv(maybeTruncatedStack))});
   }
 
   if (trace->exceededExceptionLimit) {
@@ -293,19 +298,20 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
     return;
   }
 
-  size_t messageSize = sizeof(tracing::DiagnosticChannelEvent) + channel.size() + message.size();
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    if (messageSize <= MAX_TRACE_BYTES) {
-      writer->report(context,
-          {tracing::DiagnosticChannelEvent(
-              timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))});
-    }
+    auto maybeTruncatedChannel = channel.first(kj::min(channel.size(), MAX_TRACE_BYTES));
+    auto maybeTruncatedMessage =
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedChannel.size()));
+    writer->report(context,
+        {tracing::DiagnosticChannelEvent(timestamp, kj::str(maybeTruncatedChannel),
+            kj::heapArray<kj::byte>(maybeTruncatedMessage))});
   }
 
   if (trace->exceededDiagnosticChannelEventLimit) {
     return;
   }
 
+  size_t messageSize = sizeof(tracing::DiagnosticChannelEvent) + channel.size() + message.size();
   if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     trace->exceededDiagnosticChannelEventLimit = true;
     trace->truncated = true;
