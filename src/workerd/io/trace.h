@@ -970,7 +970,7 @@ class SpanParent {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
@@ -1007,7 +1007,7 @@ class SpanBuilder {
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
       kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::Maybe<kj::Date> startTime = kj::none);
 
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
   SpanBuilder(decltype(nullptr)) {}
@@ -1041,7 +1041,7 @@ class SpanBuilder {
   //
   // `operationName` should be a string literal with infinite lifetime.
   [[nodiscard]] SpanBuilder newChild(
-      kj::ConstString operationName, kj::Date startTime = kj::systemPreciseCalendarClock().now());
+      kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
   // Change the operation name from what was specified at span creation.
   //
@@ -1085,6 +1085,20 @@ class SpanObserver: public kj::Refcounted {
   //
   // This should always be called exactly once per observer.
   virtual void report(const Span& span) = 0;
+
+  // The current time to be provided for the span. For user tracing, we will override this to
+  // provide I/O time. This *requires* that spans are only created when an IOContext is available
+  // (usually it is difficult to violate this assumption, but care must be taken that the observer
+  // isn't used directly to create a span before the IoContext has been constructed, and that spans
+  // spans are not owned by structures that outlive the IOContext (previously this was a case with a
+  // top-level span owned by the WorkerTracer itself).
+  // Note that we do not attempt to be clever and gather I/O time directly in SpanBuilder to avoid
+  // having trace depend on io-context.
+  // TODO(o11y): Add a test for this actually being I/O time by confirming that time stamps don't
+  // progress much when spinning for some time.
+  virtual kj::Date getTime() {
+    return kj::systemPreciseCalendarClock().now();
+  }
 };
 
 inline SpanParent::SpanParent(SpanBuilder& builder): observer(mapAddRef(builder.observer)) {}
@@ -1093,12 +1107,14 @@ inline SpanParent SpanParent::addRef() {
   return SpanParent(mapAddRef(observer));
 }
 
-inline SpanBuilder SpanParent::newChild(kj::ConstString operationName, kj::Date startTime) {
+inline SpanBuilder SpanParent::newChild(
+    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
       kj::mv(operationName), startTime);
 }
 
-inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date startTime) {
+inline SpanBuilder SpanBuilder::newChild(
+    kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   return SpanBuilder(observer.map([](kj::Own<SpanObserver>& obs) { return obs->newChild(); }),
       kj::mv(operationName), startTime);
 }
