@@ -1695,6 +1695,11 @@ class WorkerTracerSpanObserver: public SpanObserver,
     }
   }
 
+  // Provide user time to the tracing system.
+  kj::Date getTime() override {
+    return IoContext::current().now();
+  }
+
  private:
   kj::Maybe<kj::Own<WorkerTracer>> workerTracer;
 };

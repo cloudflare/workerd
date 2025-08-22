@@ -2456,6 +2456,8 @@ kj::Maybe<jsg::Ref<JsRpcProperty>> Fetcher::getRpcMethodInternal(jsg::Lock& js, 
 rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
     jsg::Lock& js, kj::Vector<kj::StringPtr>& path) {
   auto& ioContext = IoContext::current();
+  // TODO: jsRpcSession span is attached to worker which gets attached to customEvent, resulting in
+  // the IOContext being unavailable when the span wraps up.
   auto worker = getClient(ioContext, kj::none, "jsRpcSession"_kjc);
   auto event = kj::heap<api::JsRpcSessionCustomEventImpl>(
       JsRpcSessionCustomEventImpl::WORKER_RPC_EVENT_TYPE);
