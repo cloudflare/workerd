@@ -5909,7 +5909,17 @@ export const testParseEnv = {
   },
 };
 
-export const supportEOLMethods = {
+export const testNotImplemented = {
+  async test() {
+    for (const method of ['_errnoException', '_exceptionWithHostPort']) {
+      assert.throws(() => util[method](), {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      });
+    }
+  },
+};
+
+export const testEndOfLife = {
   async test() {
     assert.strictEqual(typeof util.isArray, 'function');
     assert.strictEqual(typeof util.isBoolean, 'function');

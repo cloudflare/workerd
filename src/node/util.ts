@@ -21,7 +21,10 @@ import { debuglog } from 'node-internal:debuglog';
 export const debug = debuglog;
 export { debuglog };
 
-import { ERR_INVALID_ARG_TYPE } from 'node-internal:internal_errors';
+import {
+  ERR_INVALID_ARG_TYPE,
+  ERR_METHOD_NOT_IMPLEMENTED,
+} from 'node-internal:internal_errors';
 
 import {
   inspect,
@@ -388,6 +391,16 @@ export function styleText(
   return skipColorize ? text : `${left}${text}${right}`;
 }
 
+export function _errnoException(): void {
+  // TODO(soon): We might support this in the future.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('_errnoException');
+}
+
+export function _exceptionWithHostPort(): void {
+  // TODO(soon): We might support this in the future.
+  throw new ERR_METHOD_NOT_IMPLEMENTED('_exceptionWithHostPort');
+}
+
 export default {
   types,
   callbackify,
@@ -421,6 +434,8 @@ export default {
   getCallSite,
   getCallSites,
   isDeepStrictEqual,
+  _errnoException,
+  _exceptionWithHostPort,
 
   isArray,
   // EOL methods
