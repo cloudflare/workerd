@@ -4271,6 +4271,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
+  throwIfInvalidHeaderValue(headers);
   using InspectorLock = InspectorChannelImpl::InspectorLock;
 
   auto signalRequest = [this, method, urlCopy = kj::str(url),
@@ -4457,6 +4458,9 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   // the request until a later turn of the event loop.
   auto maybeRequestId = co_await kj::evalLater(kj::mv(signalRequest));
 
+  // While we checked above that the headers are valid, let's check again
+  // after the co_await...
+  throwIfInvalidHeaderValue(headers);
   KJ_IF_SOME(rid, maybeRequestId) {
     ResponseWrapper wrapper(response, kj::mv(rid), kj::mv(signalResponse));
     co_await inner->request(method, url, headers, requestBody, wrapper);
