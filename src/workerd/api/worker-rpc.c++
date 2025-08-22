@@ -1930,6 +1930,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     // throwing, rather than some generic revocation exception.
     auto e = kj::getCaughtExceptionAsKj();
     revcableTarget.revoke(kj::cp(e));
+    incomingRequest->finishScheduled();
     kj::throwFatalException(kj::mv(e));
   }
 }
