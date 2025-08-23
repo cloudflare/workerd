@@ -1646,9 +1646,9 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
       s.consumer->read(js,
-          ValueQueue::ReadRequest{
+          kj::heap<ValueQueue::ReadRequest>({
             .resolver = kj::mv(prp.resolver),
-          });
+          }));
       return kj::mv(prp.promise);
     }
 
@@ -1777,8 +1777,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
         auto atLeast = kj::max(source.getElementSize(), byob.atLeast.orDefault(1));
         atLeast = kj::max(1, atLeast - (atLeast % source.getElementSize()));
         s.consumer->read(js,
-            ByteQueue::ReadRequest(kj::mv(prp.resolver),
-                {
+            kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+                ByteQueue::ReadRequest::PullInto{
                   .store = jsg::BufferSource(js, source.detach(js)),
                   .atLeast = atLeast,
                   .type = ByteQueue::ReadRequest::Type::BYOB,
@@ -1788,8 +1788,8 @@ struct ByteReadable final: private api::ByteQueue::ConsumerImpl::StateListener {
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
-              ByteQueue::ReadRequest(kj::mv(prp.resolver),
-                  {
+              kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+                  ByteQueue::ReadRequest::PullInto{
                     .store = kj::mv(store),
                     .type = ByteQueue::ReadRequest::Type::BYOB,
                   }));
