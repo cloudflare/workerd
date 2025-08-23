@@ -999,9 +999,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     // We will try to get the function, if we can't we'll throw an error to the client.
     auto [propHandle, thisArg, methodNameForTrace] =
-        tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
-
-    addTrace(js, ctx, methodNameForTrace);
+        tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties, ctx);
 
     auto op = params.getOperation();
 
@@ -1178,7 +1176,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   GetPropResult tryGetProperty(jsg::Lock& js,
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
-      bool allowInstanceProperties) {
+      bool allowInstanceProperties,
+      IoContext& ctx) {
     auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
 
     // Get the named property of `object`.
@@ -1218,6 +1217,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     switch (callParams.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
         kj::StringPtr methodName = callParams.getMethodName();
+        addTrace(js, ctx, methodName);
         result = getProperty(methodName);
         methodNameForTrace = methodName.attach();
         break;
@@ -1231,8 +1231,11 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // Call the target itself as a function.
           result = object;
           methodNameForTrace = "(this)"_kjc;
+          addTrace(js, ctx, methodNameForTrace);
         } else {
           bool inStub = false;
+          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
+          addTrace(js, ctx, methodNameForTrace);
           for (auto i: kj::zeroTo(n - 1)) {
             // For each property name except the last, look up the property and replace `object`
             // with it.
@@ -1297,7 +1300,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           }
 
           result = getProperty(path[n - 1]);
-          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
         }
 
         break;
@@ -1542,7 +1544,9 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   }
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
-    // TODO(someday): Trace non-top-level calls?
+    // TODO(someday): Trace non-top-level calls? Note that this would have to be done differently
+    // than with EntrypointJsRpcTarget since we will already have an onset event set here – creating
+    // a span might be the right approach, but we'd have to end it at the right time too.
   }
 };
 
@@ -1836,6 +1840,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
+  bool addedTracer = false;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
@@ -1859,6 +1864,13 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 
   void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
     KJ_IF_SOME(t, tracer) {
+      // TODO(felix): This should not be necessary, still check since we now add traces in a
+      // different place. Remove after a few days if it proves stable.
+      if (addedTracer) {
+        LOG_WARNING_PERIODICALLY("NOSENTRY tried to add JsRpc trace onset twice"_kj);
+        return;
+      }
+      addedTracer = true;
       t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
           tracing::JsRpcEventInfo(kj::str(methodName)));
     }
