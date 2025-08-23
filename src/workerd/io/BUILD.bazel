@@ -33,6 +33,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":io",
+        "//src/workerd/util:checked-queue",
         "//src/workerd/util:completion-membrane",
     ],
 )
