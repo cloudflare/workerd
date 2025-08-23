@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.9.205.1"
+VERSION = "14.0.365.4"
 
-INTEGRITY = "sha256-+/weqtRFD5U7tzYbfTybc8InXpHbH4lsQfVPMv0tCNQ="
+INTEGRITY = "sha256-rw6N1X1qhhGlhYpUyvkuQ9dDRuoSPXCn0tuYq6uJSbw="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -33,7 +33,7 @@ PATCHES = [
     "0025-Disable-slow-handle-check.patch",
     "0026-Workaround-for-builtin-can-allocate-issue.patch",
     "0027-Implement-additional-Exception-construction-methods.patch",
-    "0028-build-Export-icudata-file-to-facilitate-embedding-it.patch",
+    "0028-Export-icudata-file-to-facilitate-embedding-it.patch",
 ]
 
 # V8 and its dependencies

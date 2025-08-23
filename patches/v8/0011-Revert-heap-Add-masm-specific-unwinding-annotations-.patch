@@ -14,12 +14,12 @@ of getting our V8 upgrade unblocked.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.gn b/BUILD.gn
-index ea4eddb93336b511d1007ab9f3853c5429f2dbff..5f1f4873d12bf179f04be50d15c4d81a1d581059 100644
+index 8dda88f8ad8c20256bafb94f221e4a6bde86a98b..32c3a0201c4ea29e14a08dacfdc59e5d8e2b5dc1 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4365,8 +4365,8 @@ v8_header_set("v8_internal_headers") {
-     "src/temporal/temporal-parser.h",
-     "src/third_party/rapidhash-v8/rapidhash.h",
+@@ -4340,8 +4340,8 @@ v8_header_set("v8_internal_headers") {
+     "src/tasks/operations-barrier.h",
+     "src/tasks/task-utils.h",
      "src/torque/runtime-macro-shims.h",
 -    "src/tracing/trace-event-no-perfetto.h",
      "src/tracing/trace-event.h",
@@ -27,7 +27,7 @@ index ea4eddb93336b511d1007ab9f3853c5429f2dbff..5f1f4873d12bf179f04be50d15c4d81a
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -7069,12 +7069,7 @@ v8_source_set("v8_heap_base") {
+@@ -7078,12 +7078,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {

@@ -6,10 +6,10 @@ Subject: Disable slow handle check
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/src/handles/handles.h b/src/handles/handles.h
-index 042af5b6517ccfa9a4a38cbd09700fc7cc4a7179..d1e08abc51421f452b4c793e2cff8600f0828173 100644
+index c71f6b286102e80f0969e73c86514f21ae15b1e2..4c7193eb17e234469b501d35716dbe0dabecee6e 100644
 --- a/src/handles/handles.h
 +++ b/src/handles/handles.h
-@@ -652,11 +652,7 @@ IndirectHandle<T> indirect_handle(DirectHandle<T> handle,
+@@ -635,11 +635,7 @@ IndirectHandle<T> indirect_handle(DirectHandle<T> handle,
  // does not implicitly convert to an IndirectHandle.
  template <typename T>
  class V8_TRIVIAL_ABI DirectHandle :

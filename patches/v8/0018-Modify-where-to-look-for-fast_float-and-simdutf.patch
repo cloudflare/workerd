@@ -8,10 +8,10 @@ Similar to fp16, these dependencies now needs to be downloaded by bazel.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 1305a90ee5933f5eb86991c847e82d580f7f5d39..1b880df6060175c74c9640a5cced54998d405733 100644
+index 5506a9de22c128e3d97df1187752a58c8aec176a..d41ac90b41b04171c2a6cc3c4636000658796fca 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4409,17 +4409,19 @@ cc_library(
+@@ -4466,17 +4466,19 @@ cc_library(
      ],
  )
  
@@ -42,7 +42,7 @@ index 1305a90ee5933f5eb86991c847e82d580f7f5d39..1b880df6060175c74c9640a5cced5499
  
  v8_library(
      name = "v8_libshared",
-@@ -4450,15 +4452,15 @@ v8_library(
+@@ -4507,15 +4509,15 @@ v8_library(
      ],
      deps = [
          ":lib_dragonbox",
@@ -61,7 +61,7 @@ index 1305a90ee5933f5eb86991c847e82d580f7f5d39..1b880df6060175c74c9640a5cced5499
  )
  
 diff --git a/src/builtins/builtins-typed-array.cc b/src/builtins/builtins-typed-array.cc
-index 189d424835ababe424dfade41f392466d65218fb..3713cff4219efc65e62fb005d5c6070db1e66356 100644
+index 5637012bc8d391e31672f07c67144f66b22c4c5f..af3f3bcaab2a7b914c61701778ac4aaec9285d23 100644
 --- a/src/builtins/builtins-typed-array.cc
 +++ b/src/builtins/builtins-typed-array.cc
 @@ -2,6 +2,7 @@
@@ -72,16 +72,16 @@ index 189d424835ababe424dfade41f392466d65218fb..3713cff4219efc65e62fb005d5c6070d
  #include "src/base/logging.h"
  #include "src/builtins/builtins-utils-inl.h"
  #include "src/builtins/builtins.h"
-@@ -12,7 +13,6 @@
- #include "src/objects/js-array-buffer-inl.h"
+@@ -13,7 +14,6 @@
  #include "src/objects/objects-inl.h"
+ #include "src/objects/option-utils.h"
  #include "src/objects/simd.h"
 -#include "third_party/simdutf/simdutf.h"
  
  namespace v8 {
  namespace internal {
 diff --git a/src/objects/string-inl.h b/src/objects/string-inl.h
-index c1bbd1ead74ba42d571452c722a96864fba0a5c2..80e365b8f350527437beef36546d0f8d947e00be 100644
+index edca8fb23d446ab75f2ea8439f80d4d608e3957f..3f261565ecf075a6aad08b03ec4bc5dd7df7a1a2 100644
 --- a/src/objects/string-inl.h
 +++ b/src/objects/string-inl.h
 @@ -12,6 +12,8 @@

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Felix Hanau <felix@cloudflare.com>
 Date: Fri, 8 Aug 2025 16:48:06 -0400
-Subject: [build] Export icudata file to facilitate embedding it
+Subject: Export icudata file to facilitate embedding it
 
 Change-Id: Ie8ccf14aa86bae3c3c7ff1d3c2b507e19c6178be
 
