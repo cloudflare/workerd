@@ -7,9 +7,9 @@
 #include "nbytes.h"
 
 #include <workerd/io/features.h>
+#include <workerd/util/checked-queue.h>
 
 #include <iterator>
-#include <list>
 #include <vector>
 
 namespace workerd::api {
@@ -330,13 +330,12 @@ class CompressionStreamImpl: public kj::Refcounted,
   void cancelInternal(kj::Exception reason) {
     output.clear();
 
-    while (!pendingReads.empty()) {
-      auto pending = kj::mv(pendingReads.front());
-      pendingReads.pop_front();
+    pendingReads.drainTo([&](PendingRead&& pending) {
       if (pending.promise->isWaiting()) {
         pending.promise->reject(kj::cp(reason));
       }
-    }
+    });
+    KJ_DASSERT(pendingReads.empty());
 
     canceler.cancel(kj::cp(reason));
     state = kj::mv(reason);
@@ -373,7 +372,7 @@ class CompressionStreamImpl: public kj::Refcounted,
       pendingRead.filled = copyIntoBuffer(dest);
     }
 
-    pendingReads.push_back(kj::mv(pendingRead));
+    pendingReads.push(kj::mv(pendingRead));
 
     return canceler.wrap(kj::mv(promise.promise));
   }
@@ -413,7 +412,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     // If there are pending reads and data to be read, we'll loop through
     // the pending reads and fulfill them as much as possible.
     while (!pendingReads.empty() && output.size() > 0) {
-      auto& pending = pendingReads.front();
+      auto& pending = KJ_ASSERT_NONNULL(pendingReads.peek());
 
       if (!pending.promise->isWaiting()) {
         // The pending read was canceled!
@@ -444,9 +443,10 @@ class CompressionStreamImpl: public kj::Refcounted,
       // If we've met the minimum bytes requirement for the pending read, fulfill
       // the read promise.
       if (pending.filled >= pending.minBytes) {
-        auto p = kj::mv(pending);
-        pendingReads.pop_front();
-        p.promise->fulfill(kj::mv(p.filled));
+        auto p = KJ_ASSERT_NONNULL(pendingReads.pop());
+        if (p.promise->isWaiting()) {
+          p.promise->fulfill(kj::mv(p.filled));
+        }
         continue;
       }
 
@@ -461,14 +461,13 @@ class CompressionStreamImpl: public kj::Refcounted,
       // far, output.empty() must be true. Let's check.
       KJ_ASSERT(output.empty());
       // We need to flush any remaining reads.
-      while (!pendingReads.empty()) {
-        auto pending = kj::mv(pendingReads.front());
-        pendingReads.pop_front();
-        if (pending.promise->isWaiting()) {
+      pendingReads.drainTo([&](PendingRead&& p) {
+        if (p.promise->isWaiting()) {
           // Fulfill the pending read promise only if it hasn't already been canceled.
-          pending.promise->fulfill(kj::mv(pending.filled));
+          p.promise->fulfill(kj::mv(p.filled));
         }
-      }
+      });
+      KJ_DASSERT(pendingReads.empty());
     }
 
     return kj::READY_NOW;
@@ -482,9 +481,7 @@ class CompressionStreamImpl: public kj::Refcounted,
 
   kj::Canceler canceler;
   LazyBuffer output;
-  // We use std::list to keep memory overhead low when there are many streams with no or few pending
-  // reads.
-  std::list<PendingRead> pendingReads;
+  workerd::util::Queue<PendingRead> pendingReads;
 };
 }  // namespace
 
