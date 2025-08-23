@@ -75,6 +75,10 @@ export const test = {
       '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"http://example.com/hibernation","headers":[{"name":"upgrade","value":"websocket"}]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"message"}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"durableObject","scriptTags":[],"info":{"type":"hibernatableWebSocket","info":{"type":"close","code":1000,"wasClean":true}}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+
+      // tests/js-rpc-test.js: JsRpcSessionCustomEventImpl
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"jsrpc","methodName":"nonFunctionProperty"}}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
     assert.deepStrictEqual(response, expected);
