@@ -376,6 +376,7 @@ wd_test(
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
         "tail-worker-test-invalid.js",
+        "tail-worker-test-jsrpc.js",
         "tests/websocket-hibernation.js",
     ],
 )
