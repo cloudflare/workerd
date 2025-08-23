@@ -10,6 +10,7 @@
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/checked-queue.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -557,16 +558,15 @@ class WebSocket: public EventTarget {
   // between regular websocket messages, and auto-responses.
   struct AutoResponse {
     kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
-    std::list<kj::String> pendingAutoResponseDeque;
+    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
 
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
-      for (const auto& message: pendingAutoResponseDeque) {
-        tracker.trackField(nullptr, message);
-      }
+      pendingAutoResponseDeque.forEach(
+          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
     }
   };
 
