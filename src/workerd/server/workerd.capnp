@@ -225,10 +225,28 @@ struct ServiceDesignator {
 
     json @3 :Text;
     # A JSON-encoded value.
+
+    frankenvalue @4 :AnyStruct;
+    # TODO(now): This is a hack so we can serialize a ServiceStub as a `ServiceDesignator`. Later
+    #   we should have a more specialized type, probably.
   }
 
   # TODO(someday): Options to specify which event types are allowed.
   # TODO(someday): Allow adding an outgoing middleware stack here (see TODO in Service, above).
+
+  struct FrankenvalueCapTable {
+    caps @0 :List(Cap);
+
+    struct Cap {
+      union {
+        unknown @0 :Void;
+        # Dummy default value, never appears in practice.
+
+        subrequestChannel @1 :ServiceDesignator;
+        actorClassChannel @2 :ServiceDesignator;
+      }
+    }
+  }
 }
 
 struct Worker {

@@ -241,6 +241,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<ActorClass> lookupActorClass(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
+  Frankenvalue frankenvalueFromPersistentCapnp(rpc::Frankenvalue::Reader reader);
+  void frankenvalueToPersistentCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder);
+
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::StringPtr physicalProtocol,
