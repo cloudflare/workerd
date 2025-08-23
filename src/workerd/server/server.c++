@@ -246,6 +246,13 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
     // We consider all `Service` implementations to be safe to transfer, except for dynamic workers
     // which we'll handle explicitly.
   }
+
+  void forRpc(capnp::AnyPointer::Builder builder) override {
+    forRpc(builder.initAs<config::ServiceDesignator>());
+  }
+  virtual void forRpc(config::ServiceDesignator::Builder builder) {
+    JSG_FAIL_REQUIRE(TypeError, "This stub can't be sent over RPC.");
+  }
 };
 
 class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
@@ -276,6 +283,13 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
 
   virtual kj::Own<ActorClass> forProps(Frankenvalue props) {
     KJ_FAIL_REQUIRE("can't override props for this actor class");
+  }
+
+  void forRpc(capnp::AnyPointer::Builder builder) override {
+    forRpc(builder.initAs<config::ServiceDesignator>());
+  }
+  virtual void forRpc(config::ServiceDesignator::Builder builder) {
+    JSG_FAIL_REQUIRE(TypeError, "This stub can't be sent over RPC.");
   }
 };
 
@@ -1915,7 +1929,9 @@ class Server::WorkerService final: public Service,
       kj::Function<LinkedIoChannels(WorkerService&, Worker::ValidationErrorReporter&)>;
   using AbortActorsCallback = kj::Function<void(kj::Maybe<const kj::Exception&> reason)>;
 
-  WorkerService(ThreadContext& threadContext,
+  WorkerService(Server& server,
+      kj::Maybe<kj::StringPtr> serviceName,
+      ThreadContext& threadContext,
       kj::Own<const Worker> worker,
       kj::Maybe<kj::HashSet<kj::String>> defaultEntrypointHandlers,
       kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints,
@@ -1924,7 +1940,9 @@ class Server::WorkerService final: public Service,
       AbortActorsCallback abortActorsCallback,
       kj::Maybe<kj::String> dockerPathParam,
       bool isDynamic)
-      : threadContext(threadContext),
+      : server(server),
+        serviceName(serviceName),
+        threadContext(threadContext),
         ioChannels(kj::mv(linkCallback)),
         worker(kj::mv(worker)),
         defaultEntrypointHandlers(kj::mv(defaultEntrypointHandlers)),
@@ -3025,6 +3043,21 @@ class Server::WorkerService final: public Service,
       worker->requireAllowsTransfer();
     }
 
+    void forRpc(config::ServiceDesignator::Builder builder) override {
+      worker->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      builder.setName(KJ_ASSERT_NONNULL(worker->serviceName));
+
+      KJ_IF_SOME(e, entrypoint) {
+        builder.setEntrypoint(e);
+      }
+
+      // Unspecialized loopback entrypoints are not serializable, so we must have props.
+      worker->server.frankenvalueToPersistentCapnp(KJ_ASSERT_NONNULL(props),
+          builder.getProps().initFrankenvalueAs<rpc::Frankenvalue>());
+    }
+
    private:
     kj::Own<WorkerService> worker;
     kj::Maybe<kj::StringPtr> entrypoint;
@@ -3087,11 +3120,29 @@ class Server::WorkerService final: public Service,
       return kj::refcounted<ActorClassImpl>(*service, className, kj::mv(props));
     }
 
+    void forRpc(config::ServiceDesignator::Builder builder) override {
+      service->requireAllowsTransfer();
+
+      // If requireAllowsTransfer() passed, then we are not dynamic so should have a service name.
+      builder.setName(KJ_ASSERT_NONNULL(service->serviceName));
+
+      builder.setEntrypoint(className);
+
+      // Unspecialized loopback entrypoints are not serializable, so we must have props.
+      service->server.frankenvalueToPersistentCapnp(KJ_ASSERT_NONNULL(props),
+          builder.getProps().initFrankenvalueAs<rpc::Frankenvalue>());
+    }
+
    private:
     kj::Own<WorkerService> service;
     kj::StringPtr className;
     kj::Maybe<Frankenvalue> props;
   };
+
+  // `server` and `serviceName` are here only for serialization purposes.
+  // TODO(now): Restrict this interface to just support serialization.
+  Server& server;
+  kj::Maybe<kj::StringPtr> serviceName;
 
   ThreadContext& threadContext;
 
@@ -3325,6 +3376,16 @@ class Server::WorkerService final: public Service,
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::String name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override;
+
+  kj::Own<SubrequestChannel> subrequestChannelFromRpc(capnp::AnyPointer::Reader ptr) override {
+    auto designator = ptr.getAs<config::ServiceDesignator>();
+    return server.lookupService(designator, kj::str("Deserialized service designator"));
+  }
+
+  kj::Own<ActorClassChannel> actorClassFromRpc(capnp::AnyPointer::Reader ptr) override {
+    auto designator = ptr.getAs<config::ServiceDesignator>();
+    return server.lookupActorClass(designator, kj::str("Deserialized class designator"));
+  }
 
   // ---------------------------------------------------------------------------
   // implements TimerChannel
@@ -4632,10 +4693,14 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       break;
   }
 
-  auto result = kj::refcounted<WorkerService>(globalContext->threadContext, kj::mv(worker),
-      kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
-      kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
-      KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
+  kj::Maybe<kj::StringPtr> serviceName;
+  if (!def.isDynamic) serviceName = name;
+
+  auto result = kj::refcounted<WorkerService>(*this, serviceName, globalContext->threadContext,
+      kj::mv(worker), kj::mv(errorReporter.defaultEntrypoint),
+      kj::mv(errorReporter.namedEntrypoints), kj::mv(errorReporter.actorClasses),
+      kj::mv(linkCallback), KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath),
+      def.isDynamic);
   result->initActorNamespaces(def.localActorConfigs, network);
   co_return result;
 }
@@ -4696,6 +4761,8 @@ kj::Own<Server::Service> Server::lookupService(
         return {};
       case config::ServiceDesignator::Props::JSON:
         return Frankenvalue::fromJson(kj::str(props.getJson()));
+      case config::ServiceDesignator::Props::FRANKENVALUE:
+        return frankenvalueFromPersistentCapnp(props.getFrankenvalue().as<rpc::Frankenvalue>());
     }
     reportConfigError(kj::str(errorContext,
         " has unrecognized props type. Was the config compiled with a "
@@ -4755,6 +4822,8 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
         return {};
       case config::ServiceDesignator::Props::JSON:
         return Frankenvalue::fromJson(kj::str(props.getJson()));
+      case config::ServiceDesignator::Props::FRANKENVALUE:
+        return frankenvalueFromPersistentCapnp(props.getFrankenvalue().as<rpc::Frankenvalue>());
     }
     reportConfigError(kj::str(errorContext,
         " has unrecognized props type. Was the config compiled with a "
@@ -4788,6 +4857,56 @@ kj::Own<Server::ActorClass> Server::lookupActorClass(
     }
 
     return kj::addRef(*invalidConfigActorClassSingleton);
+  }
+}
+
+Frankenvalue Server::frankenvalueFromPersistentCapnp(rpc::Frankenvalue::Reader reader) {
+  auto tableReader = reader.getCapTable().getAs<config::ServiceDesignator::FrankenvalueCapTable>();
+
+  kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> capTable;
+  if (tableReader.hasCaps()) {
+    auto caps = tableReader.getCaps();
+    capTable.reserve(caps.size());
+
+    for (auto cap: caps) {
+      switch (cap.which()) {
+        case config::ServiceDesignator::FrankenvalueCapTable::Cap::UNKNOWN:
+          break;
+        case config::ServiceDesignator::FrankenvalueCapTable::Cap::SUBREQUEST_CHANNEL:
+          capTable.add(lookupService(cap.getSubrequestChannel(),
+              kj::str("Deserialized service designator")));
+          continue;
+        case config::ServiceDesignator::FrankenvalueCapTable::Cap::ACTOR_CLASS_CHANNEL:
+          capTable.add(lookupActorClass(cap.getActorClassChannel(),
+              kj::str("Deserialized service designator")));
+          continue;
+      }
+      KJ_FAIL_REQUIRE("unknown cap table type", cap.which());
+    }
+  }
+
+  return Frankenvalue::fromCapnp(reader, kj::mv(capTable));
+}
+
+void Server::frankenvalueToPersistentCapnp(Frankenvalue& value, rpc::Frankenvalue::Builder builder) {
+  value.toCapnp(builder);
+
+  auto capTable = value.getCapTable();
+  if (capTable.size() > 0) {
+    auto tableBuilder = builder.initCapTable()
+        .initAs<config::ServiceDesignator::FrankenvalueCapTable>();
+
+    auto caps = tableBuilder.initCaps(capTable.size());
+
+    for (auto i: kj::indices(capTable)) {
+      if (auto subreq = dynamic_cast<Service*>(capTable[i].get())) {
+        subreq->forRpc(caps[i].initSubrequestChannel());
+      } else if (auto actorClass = dynamic_cast<ActorClass*>(capTable[i].get())) {
+        actorClass->forRpc(caps[i].initActorClassChannel());
+      } else {
+        KJ_FAIL_REQUIRE("unknown type in props");
+      }
+    }
   }
 }
 

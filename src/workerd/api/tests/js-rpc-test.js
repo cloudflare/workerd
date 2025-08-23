@@ -563,6 +563,23 @@ export class MyActor extends DurableObject {
   makePostAbortCallTester() {
     return new PostAbortCallTester(this.ctx);
   }
+
+  get(name) {
+    return this.ctx.storage.get(name);
+  }
+  put(name, value) {
+    return this.ctx.storage.put(name, value);
+  }
+
+  async useFacet(name) {
+    let facet = this.ctx.facets.get(name, async () => {
+      let cls = await this.ctx.storage.get(name);
+      return { class: cls, id: name };
+    });
+
+    await facet.setName("Bob");
+    return await facet.greet();
+  }
 }
 
 export class ActorNoExtends {
@@ -2044,6 +2061,42 @@ export let portAbortCall = {
         name: 'Error',
         message: 'test broken critical section',
       });
+    }
+  },
+};
+
+export class Greeter extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
+
+export class MyFacet extends DurableObject {
+  setName(name) {
+    this.ctx.storage.put("name", name);
+  }
+
+  async greet() {
+    let name = await this.ctx.storage.get("name");
+    return `${this.ctx.props.greeting}, ${name}?`;
+  }
+}
+
+export let storeServiceBinding = {
+  async test(controller, env, ctx) {
+    let id = env.MyActor.idFromName('foo');
+    let stub = env.MyActor.get(id);
+
+    {
+      await stub.put("foo", ctx.exports.Greeter({props: {greeting: "Yo"}}));
+      let greeter = await stub.get("foo");
+      assert.strictEqual(await greeter.greet("Alice"), "Yo, Alice!");
+    }
+
+    {
+      await stub.put("bar", ctx.exports.MyFacet({props: {greeting: "Hiya"}}));
+
+      assert.strictEqual(await stub.useFacet("bar"), "Hiya, Bob?");
     }
   },
 };

@@ -171,6 +171,10 @@ class IoChannelFactory {
     // dynamically-loaded workers cannot be serialized because the system does not know how to
     // reconstruct a dynamically-loaded worker from scratch.
     virtual void requireAllowsTransfer() = 0;
+
+    virtual void forRpc(capnp::AnyPointer::Builder builder) {
+      JSG_FAIL_REQUIRE(TypeError, "This stub can't be sent over RPC.");
+    }
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -226,6 +230,10 @@ class IoChannelFactory {
     // Same as SubrequestChannel::requireAllowsTransfer().
     virtual void requireAllowsTransfer() = 0;
 
+    virtual void forRpc(capnp::AnyPointer::Builder builder) {
+      JSG_FAIL_REQUIRE(TypeError, "This class can't be sent over RPC.");
+    }
+
     // This class has no functional methods, since it serves as a token to be passed to other
     // interfaces (namely the facets API).
   };
@@ -253,6 +261,9 @@ class IoChannelFactory {
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
   }
+
+  virtual kj::Own<SubrequestChannel> subrequestChannelFromRpc(capnp::AnyPointer::Reader ptr) = 0;
+  virtual kj::Own<ActorClassChannel> actorClassFromRpc(capnp::AnyPointer::Reader ptr) = 0;
 };
 
 // Represents a dynamically-loaded Worker to which requests can be sent.

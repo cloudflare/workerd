@@ -25,6 +25,7 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <capnp/compat/http-over-capnp.capnp.h>
+#include <capnp/serialize.h>
 #include <kj/compat/url.h>
 #include <kj/encoding.h>
 #include <kj/memory.h>
@@ -2597,38 +2598,53 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
 }
 
 void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "ServiceStub cannot be serialized in this context.");
-
   auto channel = getSubrequestChannel(IoContext::current());
   channel->requireAllowsTransfer();
-  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+
+  KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    if (auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler)) {
+      serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+      return;
+    }
+  }
+
+  capnp::MallocMessageBuilder message(128);
+  channel->forRpc(message.initRoot<capnp::AnyPointer>());
+  auto words = capnp::messageToFlatArray(message);
+  serializer.writeLengthDelimited(words.asBytes());
 }
 
 jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
     rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(
-      deserializer.getExternalHandler(), "got ServiceStub in unexpected context?");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
-  KJ_REQUIRE(externalHandler != nullptr, "got ServiceStub in unexpected context?");
+  KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
+    if (auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler)) {
+      auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
+          "serialized ServiceStub had invalid cap table index");
 
-  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
-      "serialized ServiceStub had invalid cap table index");
-
-  if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap)) {
-    return js.alloc<Fetcher>(
-        IoContext::current().addObject(kj::addRef(*channel)),
-        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
-  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
-    return js.alloc<Fetcher>(
-        channel->getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
-        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
-  } else {
-    KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+      if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap)) {
+        return js.alloc<Fetcher>(
+            IoContext::current().addObject(kj::addRef(*channel)),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+      } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
+        return js.alloc<Fetcher>(
+            channel->getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
+            RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+      } else {
+        KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+      }
+    }
   }
+
+  auto bytes = deserializer.readLengthDelimitedBytes();
+  auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+  words.asBytes().copyFrom(bytes);
+
+  capnp::FlatArrayMessageReader reader(words);
+  auto& ioctx = IoContext::current();
+  auto channel = ioctx.getIoChannelFactory().subrequestChannelFromRpc(
+      reader.getRoot<capnp::AnyPointer>());
+
+  return js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
 }
 
 static jsg::Promise<void> throwOnError(

@@ -10,6 +10,7 @@
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/message.h>
 #include <capnp/schema.h>
+#include <capnp/serialize.h>
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
 
@@ -204,35 +205,50 @@ kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoCo
 }
 
 void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
-      "DurableObjectClass cannot be serialized in this context.");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
-  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
-      "DurableObjectClass cannot be serialized in this context.");
-
   auto channel = getChannel(IoContext::current());
   channel->requireAllowsTransfer();
-  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+
+  KJ_IF_SOME(handler, serializer.getExternalHandler()) {
+    if (auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler)) {
+      serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+      return;
+    }
+  }
+
+  capnp::MallocMessageBuilder message(128);
+  channel->forRpc(message.initRoot<capnp::AnyPointer>());
+  auto words = capnp::messageToFlatArray(message);
+  serializer.writeLengthDelimited(words.asBytes());
 }
 
 jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
     jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
-  auto& handler = KJ_REQUIRE_NONNULL(
-      deserializer.getExternalHandler(), "got DurableObjectClass in unexpected context?");
-  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
-  KJ_REQUIRE(externalHandler != nullptr, "got DurableObjectClass in unexpected context?");
+  KJ_IF_SOME(handler, deserializer.getExternalHandler()) {
+    if (auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler)) {
+      auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
+          "serialized DurableObjectClass had invalid cap table index");
 
-  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
-      "serialized DurableObjectClass had invalid cap table index");
-
-  if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(&cap)) {
-    return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(*channel)));
-  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
-    return js.alloc<DurableObjectClass>(
-        channel->getChannelNumber(IoChannelCapTableEntry::Type::ACTOR_CLASS));
-  } else {
-    KJ_FAIL_REQUIRE("DurableObjectClass capability in Frankenvalue is not an ActorClassChannel?");
+      if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(&cap)) {
+        return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(*channel)));
+      } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
+        return js.alloc<DurableObjectClass>(
+            channel->getChannelNumber(IoChannelCapTableEntry::Type::ACTOR_CLASS));
+      } else {
+        KJ_FAIL_REQUIRE("DurableObjectClass capability in Frankenvalue is not an ActorClassChannel?");
+      }
+    }
   }
+
+  auto bytes = deserializer.readLengthDelimitedBytes();
+  auto words = kj::heapArray<capnp::word>(bytes.size() / sizeof(capnp::word));
+  words.asBytes().copyFrom(bytes);
+
+  capnp::FlatArrayMessageReader reader(words);
+  auto& ioctx = IoContext::current();
+  auto channel = ioctx.getIoChannelFactory().actorClassFromRpc(
+      reader.getRoot<capnp::AnyPointer>());
+
+  return js.alloc<DurableObjectClass>(ioctx.addObject(kj::mv(channel)));
 }
 
 }  // namespace workerd::api
