@@ -97,6 +97,8 @@ jobs:
           # Enable lld identical code folding to significantly reduce binary size.
           echo "build:macos --config=macos_lld_icf" >> .bazelrc
       - name: Configure download mirrors
+        # Temporarily disabled because it is currently causing 404s for packages
+        if: false
         shell: bash
         run: |
           if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
@@ -148,6 +150,14 @@ jobs:
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
 
+      - name: Upload generated types snapshot
+        if: inputs.upload_types
+        uses: actions/upload-artifact@v4
+        id: upload-generated-snapshot
+        with:
+          name: generated-snapshot
+          path: bazel-bin/types/definitions/
+
       - name: Drop large Bazel cache files
         if: always()
         # Github has a nominal 10GB of storage for all cached builds associated with a project.
@@ -168,3 +178,5 @@ jobs:
       - name: Bazel shutdown
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
+    outputs:
+      generated-snapshot-url: ${{ steps.upload-generated-snapshot.outputs.artifact-url }}
