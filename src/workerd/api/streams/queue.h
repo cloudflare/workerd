@@ -8,6 +8,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/checked-queue.h>
+#include <workerd/util/weak-refs.h>
 
 #include <set>
 
@@ -774,11 +775,8 @@ class ByteQueue final {
 
   struct ReadRequest final {
     enum class Type { DEFAULT, BYOB };
+    kj::Own<WeakRef<ReadRequest>> selfRef;
     jsg::Promise<ReadResult>::Resolver resolver;
-    // The reference here should be cleared when the ByobRequest is invalidated,
-    // which happens either when respond(), respondWithNewView(), or invalidate()
-    // is called, or when the ByobRequest is destroyed, whichever comes first.
-    kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
       jsg::BufferSource store;
@@ -799,7 +797,6 @@ class ByteQueue final {
     void reject(jsg::Lock& js, jsg::Value& value);
 
     kj::Own<ByobRequest> makeByobReadRequest(ConsumerImpl& consumer, QueueImpl& queue);
-    void maybeInvalidateByobRequest();
 
     JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
       tracker.trackField("resolver", resolver);
@@ -811,33 +808,23 @@ class ByteQueue final {
   // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
   //
   // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
-  // the BYOB read request. Once either of those are called, or once invalidate() is called,
-  // the ByobRequest is no longer usable and should be discarded.
+  // the BYOB read request. Once either of those are called the ByobRequest is no longer usable
+  // and should be discarded.
   class ByobRequest final {
    public:
-    ByobRequest(ReadRequest& request, ConsumerImpl& consumer, QueueImpl& queue)
-        : request(request),
+    ByobRequest(kj::Own<WeakRef<ReadRequest>> request, ConsumerImpl& consumer, QueueImpl& queue)
+        : request(kj::mv(request)),
           consumer(consumer),
           queue(queue) {}
 
     KJ_DISALLOW_COPY_AND_MOVE(ByobRequest);
 
-    ~ByobRequest() noexcept(false);
-
-    inline ReadRequest& getRequest() {
-      return KJ_ASSERT_NONNULL(request);
-    }
-
     bool respond(jsg::Lock& js, size_t amount);
 
     bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
-    // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
-    // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
-    void invalidate();
-
     inline bool isInvalidated() const {
-      return request == kj::none;
+      return !request->isValid();
     }
 
     bool isPartiallyFulfilled();
@@ -849,9 +836,13 @@ class ByteQueue final {
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
    private:
-    kj::Maybe<ReadRequest&> request;
+    kj::Own<WeakRef<ReadRequest>> request;
     ConsumerImpl& consumer;
     QueueImpl& queue;
+
+    inline ReadRequest& getRequest() {
+      return KJ_ASSERT_NONNULL(request->tryGet(), "The ByobRequest has been invalidated.");
+    }
   };
 
   struct State {
