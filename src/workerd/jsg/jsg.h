@@ -200,7 +200,7 @@ namespace workerd::jsg {
 #define JSG_METHOD(name)                                                                           \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
-    registry.template registerMethod<NAME, decltype(&Self::name), &Self::name>();                  \
+    registry.template registerMethod<NAME, &Self::name>();                                         \
   } while (false)
 
 // Like JSG_METHOD but allows you to specify a different name to use in JavaScript. This is
@@ -211,7 +211,7 @@ namespace workerd::jsg {
 #define JSG_METHOD_NAMED(name, method)                                                             \
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
-    registry.template registerMethod<NAME, decltype(&Self::method), &Self::method>();              \
+    registry.template registerMethod<NAME, &Self::method>();                                       \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from

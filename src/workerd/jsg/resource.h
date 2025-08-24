@@ -1264,15 +1264,15 @@ struct ResourceTypeBuilder {
                                        method, ArgumentIndexes<Method>>::callback);
   }
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto method>
   inline void registerMethod() {
-    if constexpr (isFastApiCompatible<Method>) {
+    if constexpr (isFastApiCompatible<decltype(method)>) {
       if (typeWrapper.isFastApiEnabled()) {
         auto cFunction = v8::CFunction::Make(MethodCallback<TypeWrapper, name, isContext, Self,
-            Method, method, ArgumentIndexes<Method>>::template fastCallback<>);
+            decltype(method), method, ArgumentIndexes<decltype(method)>>::template fastCallback<>);
         auto functionTemplate = v8::FunctionTemplate::NewWithCFunctionOverloads(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
+            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
+                ArgumentIndexes<decltype(method)>>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow,
             v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
 
@@ -1283,8 +1283,8 @@ struct ResourceTypeBuilder {
 
     prototype->Set(isolate, name,
         v8::FunctionTemplate::New(isolate,
-            &MethodCallback<TypeWrapper, name, isContext, Self, Method, method,
-                ArgumentIndexes<Method>>::callback,
+            &MethodCallback<TypeWrapper, name, isContext, Self, decltype(method), method,
+                ArgumentIndexes<decltype(method)>>::callback,
             v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow));
   }
 
@@ -1563,7 +1563,7 @@ struct JsSetup {
   template <typename Method, Method method>
   inline void registerCallable() {}
 
-  template <const char* name, typename Method, Method method>
+  template <const char* name, auto method>
   inline void registerMethod() {}
 
   template <const char* name, typename Method, Method method>
