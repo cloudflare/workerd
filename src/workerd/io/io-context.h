@@ -522,17 +522,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T>
   jsg::Promise<T> awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise);
 
-  // DEPRECATED: Like awaitIo() but:
-  // - Does not have a continuation function, so suffers from the problems described in
-  //   `awaitIo()`'s doc comment.
-  // - Does not automatically register a pending event.
-  //
-  // This is used to implement the historical KJ-oriented PromiseWrapper behavior in terms of the
-  // new `awaitIo()` implementation. This should go away once all API implementations are
-  // refactored to use `awaitIo()`.
-  template <typename T>
-  jsg::Promise<T> awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise);
-
   // Returns a KJ promise that resolves when a particular JavaScript promise completes.
   //
   // The JS promise must complete within this IoContext. The KJ promise will reject
@@ -1249,11 +1238,6 @@ jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> pr
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoLegacy(jsg::Lock& js, kj::Promise<T> promise) {
   return awaitIoImpl(js, kj::mv(promise), getCriticalSection(), IdentityFunc<T>());
-}
-
-template <typename T>
-jsg::Promise<T> IoContext::awaitIoLegacyWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl(js, kj::mv(promise), getInputLock(), IdentityFunc<T>());
 }
 
 // To reduce the code size impact of awaitIoImpl, move promise continuation code out of
