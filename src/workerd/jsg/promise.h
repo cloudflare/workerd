@@ -268,7 +268,7 @@ class Promise: public PromiseBase {
   // is fulfilled. It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func, typename ErrorFunc>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
+  auto then(Lock& js, Func&& func, ErrorFunc&& errorFunc) {
     using Output = ReturnType<Func, T, true>;
     static_assert(kj::isSameType<Output, ReturnType<ErrorFunc, Value, true>>(),
         "functions passed to .then() must return exactly the same type");
@@ -283,7 +283,7 @@ class Promise: public PromiseBase {
   // It is important to remember that then(...) can synchronously throw
   // a JavaScript exception (and jsg::JsExceptionThrown) in certain cases.
   template <typename Func>
-  PromiseForResult<Func, T, true> then(Lock& js, Func&& func) {
+  auto then(Lock& js, Func&& func) {
     using Output = ReturnType<Func, T, true>;
 
     // HACK: The error function is never called, so it need not actually be a functor.
@@ -441,7 +441,7 @@ class Promise: public PromiseBase {
   }
 
   template <typename Result, typename FuncPair>
-  MaintainPromise<Result> thenImpl(Lock& js,
+  auto thenImpl(Lock& js,
       FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
@@ -524,7 +524,7 @@ Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions
 }
 
 template <class Func>
-PromiseForResult<Func, void, false> Lock::evalNow(Func&& func) {
+auto Lock::evalNow(Func&& func) {
   using Result = RemovePromise<ReturnType<Func, void>>;
   v8::TryCatch tryCatch(v8Isolate);
   try {
