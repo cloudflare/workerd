@@ -1708,6 +1708,21 @@ struct RemovePromise_<Promise<T>> {
 template <typename T>
 using RemovePromise = typename RemovePromise_<T>::Type;
 
+template <typename T>
+struct MaintainPromise_ {
+  using Type = Promise<T>;
+};
+
+// Convenience template to add `jsg::Promise` if it is not present.
+template <typename T>
+struct MaintainPromise_<Promise<T>> {
+  using Type = Promise<T>;
+};
+
+// Convenience template to add `jsg::Promise` if it is not present.
+template <typename T>
+using MaintainPromise = typename MaintainPromise_<T>::Type;
+
 // Convenience template to calculate the return type of a function when passed parameter type T.
 // `T = void` is understood to mean no parameters.
 template <typename Func, typename T, bool passLock>
@@ -1752,7 +1767,7 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 // TODO(cleanup): The passLock = false variation is currently only used for js.evalNow().
 // It would be nice to refactor that a bit so we can clean up this template and simplify.
 template <typename Func, typename Param, bool passLock>
-using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
+using PromiseForResult = MaintainPromise<ReturnType<Func, Param, passLock>>;
 
 class ModuleRegistry;
 namespace modules {

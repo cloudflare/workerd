@@ -409,7 +409,7 @@ class Promise {
   }
 
   template <typename Result, typename FuncPair>
-  Promise<RemovePromise<Result>> thenImpl(Lock& js,
+  MaintainPromise<Result> thenImpl(Lock& js,
       FuncPair&& funcPair,
       v8::FunctionCallback thenCallback,
       v8::FunctionCallback errCallback) {
@@ -424,9 +424,8 @@ class Promise {
       auto errThen = check(v8::Function::New(
           context, errCallback, funcPairHandle, 1, v8::ConstructorBehavior::kThrow));
 
-      using Type = RemovePromise<Result>;
-
-      return Promise<Type>(js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
+      return MaintainPromise<Result>(
+          js.v8Isolate, check(consumeHandle(js)->Then(context, then, errThen)));
     });
   }
 
