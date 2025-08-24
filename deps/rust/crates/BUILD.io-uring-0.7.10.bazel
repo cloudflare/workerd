@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_json",
+    name = "io_uring",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,12 +29,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -42,18 +36,17 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=io-uring",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.142",
+    version = "0.7.10",
     deps = [
-        "@crates_vendor__itoa-1.0.15//:itoa",
-        "@crates_vendor__memchr-2.7.5//:memchr",
-        "@crates_vendor__ryu-1.0.20//:ryu",
-        "@crates_vendor__serde-1.0.219//:serde",
-        "@crates_vendor__serde_json-1.0.142//:build_script_build",
+        "@crates_vendor__bitflags-2.9.3//:bitflags",
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__io-uring-0.7.10//:build_script_build",
+        "@crates_vendor__libc-0.2.175//:libc",
     ],
 )
 
@@ -76,12 +69,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "raw_value",
-        "std",
-        "unbounded_depth",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -97,18 +84,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "serde_json",
+    pkg_name = "io-uring",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_json",
+        "crate-name=io-uring",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.142",
+    version = "0.7.10",
     visibility = ["//visibility:private"],
 )
 

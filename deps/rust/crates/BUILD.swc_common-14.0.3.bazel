@@ -49,7 +49,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "14.0.2",
+    version = "14.0.3",
     deps = [
         "@crates_vendor__anyhow-1.0.99//:anyhow",
         "@crates_vendor__better_scoped_tls-1.0.1//:better_scoped_tls",
@@ -66,6 +66,6 @@ rust_library(
         "@crates_vendor__swc_visit-2.0.1//:swc_visit",
         "@crates_vendor__tracing-0.1.41//:tracing",
         "@crates_vendor__unicode-width-0.1.14//:unicode_width",
-        "@crates_vendor__url-2.5.4//:url",
+        "@crates_vendor__url-2.5.7//:url",
     ],
 )
