@@ -7,24 +7,19 @@
 namespace workerd::jsg {
 
 kj::Maybe<jsg::Promise<void>&> AsyncIteratorImpl::maybeCurrent() {
-  if (!pendingStack.empty()) {
-    return pendingStack.back();
-  }
-  return kj::none;
+  return pendingStack.peekBack();
 }
 
 void AsyncIteratorImpl::pushCurrent(Promise<void> promise) {
-  pendingStack.push_back(kj::mv(promise));
+  pendingStack.push(kj::mv(promise));
 }
 
 void AsyncIteratorImpl::popCurrent() {
-  if (!pendingStack.empty()) {
-    pendingStack.pop_front();
-  }
+  auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(pendingStack.pop());
 }
 
 void AsyncIteratorImpl::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visitAll(pendingStack);
+  pendingStack.forEach([&](auto& p) { visitor.visit(p); });
 }
 
 }  // namespace workerd::jsg

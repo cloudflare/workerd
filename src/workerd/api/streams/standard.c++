@@ -1556,11 +1556,7 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
   }
-  writeRequests.forEach([&](const WriteRequest& write) {
-    // const_cast is ugly here but GcVisitor only supports non-const references.
-    auto& w = const_cast<WriteRequest&>(write);
-    visitor.visit(w.resolver, w.value);
-  });
+  writeRequests.forEach([&](auto& write) { visitor.visit(write.resolver, write.value); });
 }
 
 template <typename Self>
@@ -3971,7 +3967,7 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("writeAlgorithm", algorithms.write);
   tracker.trackField("sizeAlgorithm", algorithms.size);
 
-  writeRequests.forEach([&](const auto& req) { tracker.trackField("writeRequest", req); });
+  writeRequests.forEach([&](auto& req) { tracker.trackField("writeRequest", req); });
 
   tracker.trackField("inFlightWrite", inFlightWrite);
   tracker.trackField("inFlightClose", inFlightClose);

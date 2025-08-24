@@ -835,14 +835,14 @@ class ByteQueue final {
 
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
+    inline ReadRequest& getRequest() {
+      return KJ_ASSERT_NONNULL(request->tryGet(), "The ByobRequest has been invalidated.");
+    }
+
    private:
     kj::Own<WeakRef<ReadRequest>> request;
     ConsumerImpl& consumer;
     QueueImpl& queue;
-
-    inline ReadRequest& getRequest() {
-      return KJ_ASSERT_NONNULL(request->tryGet(), "The ByobRequest has been invalidated.");
-    }
   };
 
   struct State {
