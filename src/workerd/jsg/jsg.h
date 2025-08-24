@@ -2621,7 +2621,7 @@ class Lock {
   // that captures `[&]`, so will capture the caller's lock reference. Capturing the lock here is
   // allowed since `func` is invoked synchronously.
   template <class Func>
-  PromiseForResult<Func, void, false> evalNow(Func&& func);
+  auto evalNow(Func&& func);
 
   // ---------------------------------------------------------------------------
   // Name/Symbol stuff
