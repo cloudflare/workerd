@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "io_uring",
+    name = "thiserror",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,24 +29,28 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__thiserror-impl-2.0.16//:thiserror_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=io-uring",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.9",
+    version = "2.0.16",
     deps = [
-        "@crates_vendor__bitflags-2.9.2//:bitflags",
-        "@crates_vendor__cfg-if-1.0.1//:cfg_if",
-        "@crates_vendor__io-uring-0.7.9//:build_script_build",
-        "@crates_vendor__libc-0.2.175//:libc",
+        "@crates_vendor__thiserror-2.0.16//:build_script_build",
     ],
 )
 
@@ -69,6 +73,10 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -84,18 +92,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "io-uring",
+    pkg_name = "thiserror",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=io-uring",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.9",
+    version = "2.0.16",
     visibility = ["//visibility:private"],
 )
 

@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "stacker",
+    name = "target_triple",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -36,23 +36,15 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=stacker",
+        "crate-name=target-triple",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.21",
+    version = "0.1.4",
     deps = [
-        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
-        "@crates_vendor__libc-0.2.175//:libc",
-        "@crates_vendor__psm-0.1.26//:psm",
-        "@crates_vendor__stacker-0.1.21//:build_script_build",
-    ] + select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
-        ],
-        "//conditions:default": [],
-    }),
+        "@crates_vendor__target-triple-0.1.4//:build_script_build",
+    ],
 )
 
 cargo_build_script(
@@ -89,22 +81,19 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "stacker",
+    pkg_name = "target-triple",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=stacker",
+        "crate-name=target-triple",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.21",
+    version = "0.1.4",
     visibility = ["//visibility:private"],
-    deps = [
-        "@crates_vendor__cc-1.2.34//:cc",
-    ],
 )
 
 alias(

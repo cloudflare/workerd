@@ -50,7 +50,7 @@ rust_library(
     version = "0.9.0",
     deps = [
         "@crates_vendor__castaway-0.2.4//:castaway",
-        "@crates_vendor__cfg-if-1.0.1//:cfg_if",
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
         "@crates_vendor__itoa-1.0.15//:itoa",
         "@crates_vendor__ryu-1.0.20//:ryu",
         "@crates_vendor__static_assertions-1.1.0//:static_assertions",

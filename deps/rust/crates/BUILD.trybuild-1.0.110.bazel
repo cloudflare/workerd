@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "idna",
+    name = "trybuild",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,27 +28,28 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "compiled_data",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__serde_derive-1.0.219//:serde_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=idna",
+        "crate-name=trybuild",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.3",
+    version = "1.0.110",
     deps = [
-        "@crates_vendor__idna_adapter-1.2.1//:idna_adapter",
-        "@crates_vendor__smallvec-1.15.1//:smallvec",
-        "@crates_vendor__utf8_iter-1.0.4//:utf8_iter",
+        "@crates_vendor__glob-0.3.3//:glob",
+        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde_json-1.0.143//:serde_json",
+        "@crates_vendor__target-triple-0.1.4//:target_triple",
+        "@crates_vendor__termcolor-1.4.1//:termcolor",
+        "@crates_vendor__toml-0.9.5//:toml",
     ],
 )

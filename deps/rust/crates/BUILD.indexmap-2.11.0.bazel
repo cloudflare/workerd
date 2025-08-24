@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "winapi_util",
+    name = "indexmap",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,16 +39,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=winapi-util",
+        "crate-name=indexmap",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.9",
-    deps = select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(windows)
-        ],
-        "//conditions:default": [],
-    }),
+    version = "2.11.0",
+    deps = [
+        "@crates_vendor__equivalent-1.0.2//:equivalent",
+        "@crates_vendor__hashbrown-0.15.5//:hashbrown",
+    ],
 )

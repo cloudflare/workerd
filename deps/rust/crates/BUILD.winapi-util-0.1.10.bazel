@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "percent_encoding",
+    name = "winapi_util",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,21 +28,23 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "std",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=percent-encoding",
+        "crate-name=winapi-util",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.3.1",
+    version = "0.1.10",
+    deps = select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.60.2//:windows_sys",  # cfg(windows)
+        ],
+        "//conditions:default": [],
+    }),
 )
