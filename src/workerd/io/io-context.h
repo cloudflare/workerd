@@ -281,7 +281,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   //
   // This can only be called when I/O gates are active, i.e. in an actor.
   template <typename Func>
-  jsg::PromiseForResult<Func, void, true> blockConcurrencyWhile(jsg::Lock& js, Func&& callback);
+  auto blockConcurrencyWhile(jsg::Lock& js, Func&& callback);
 
   // Returns true if output lock gating is necessary.
   // Can be used in optimizations to bypass wait* calls altogether.
@@ -376,14 +376,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   //
   // If `inputLock` is not provided, and this is an actor context, an input lock will be obtained
   // before executing the callback.
-  template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> run(
-      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT;
+  template <typename Func, typename Return = kj::PromiseForResult<Func, Worker::Lock&>>
+  Return run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT;
 
   // Like run() but executes within the given critical section, if it is non-null. If
   // `criticalSection` is null, then this just forwards to the other run() (with null inputLock).
   template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> run(Func&& func,
+  auto run(Func&& func,
       kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT;
 
   // Returns the current IoContext for the thread.
@@ -437,7 +436,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void addTask(kj::Promise<void> promise);
 
   template <typename T, typename Func>
-  jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
+  auto awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
   // Attach the objects to the promise by creating a continuation that holds them.
   // This ensures the attachments stay alive until the promise resolves.
@@ -535,7 +534,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `kj::Promise<V>`, then the promises will be chained as usual, so the final result is
   // `kj::Promise<V>`.
   template <typename T>
-  kj::_::ReducePromises<RemoveIoOwn<T>> awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
+  auto awaitJs(jsg::Lock& js, jsg::Promise<T> promise);
 
   enum TopUpFlag { NO_TOP_UP, TOP_UP };
 
@@ -1077,7 +1076,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   using ExceptionOr = typename ExceptionOr_<T>::Type;
 
   template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
-  jsg::PromiseForResult<Func, T, true> awaitIoImpl(
+  auto awaitIoImpl(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
   // The IncomingRequest that is currently considered "current". This is always the
@@ -1137,8 +1136,7 @@ kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
 }
 
 template <typename Func>
-kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
-    Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
+auto IoContext::run(Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
     return cs.get()->wait().then(
         [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
@@ -1149,9 +1147,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   }
 }
 
-template <typename Func>
-kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
-    Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
+template <typename Func, typename Return>
+Return IoContext::run(Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
@@ -1211,8 +1208,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 }
 
 template <typename T, typename Func>
-jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
-    jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
+auto IoContext::awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
   return awaitIoImpl(
       js, promise.attach(registerPendingEvent()), getCriticalSection(), kj::fwd<Func>(func));
 }
@@ -1278,7 +1274,7 @@ Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& excep
 };
 
 template <typename T, typename InputLockOrMaybeCriticalSection, typename Func>
-jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
+auto IoContext::awaitIoImpl(
     jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func) {
   // WARNING: The fact that `promise` has been passed by value whereas `func` is by reference is
   // actually important, because this means that if we throw an exception here in the function
@@ -1395,7 +1391,7 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
 }
 
 template <typename T>
-kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
+auto IoContext::awaitJs(jsg::Lock& js, jsg::Promise<T> jsPromise) {
   auto paf = kj::newPromiseAndFulfiller<RemoveIoOwn<T>>();
   struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
@@ -1555,8 +1551,7 @@ inline ReverseIoOwn<T> IoContext::addObjectReverse(kj::Own<T> obj) {
 }
 
 template <typename Func>
-jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
-    jsg::Lock& js, Func&& callback) {
+auto IoContext::blockConcurrencyWhile(jsg::Lock& js, Func&& callback) {
   auto lock = getInputLock();
   auto cs = lock.startCriticalSection();
   auto cs2 = kj::addRef(*cs);
