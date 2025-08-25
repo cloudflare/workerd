@@ -437,6 +437,12 @@ async def response_unit_tests(env):
     response_json = Response.json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
 
+    response_json = Response.from_json([1, 2, 3])
+    assert await response_json.text() == "[1, 2, 3]"
+
+    response_json = Response("[1, 2, 3]")
+    assert await response_json.json() == [1, 2, 3]
+
     response_json = Response.json("test")
     assert await response_json.text() == '"test"'
 

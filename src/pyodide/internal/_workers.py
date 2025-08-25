@@ -11,7 +11,7 @@ from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
 from types import LambdaType
-from typing import Any, TypedDict, Unpack
+from typing import Any, Never, TypedDict, Unpack
 
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
@@ -159,14 +159,14 @@ class FetchResponse(pyodide.http.FetchResponse):
         except JsException as exc:
             raise _to_python_exception(exc) from exc
 
-    def replace_body(self, body: Body) -> "FetchResponse":
+    def replace_body(self, body: Body) -> "Response":
         """
         Returns a new Response object with the same options (status, headers, etc) as
         the original but with an updated body.
         """
         b = body.js_object if isinstance(body, FormData) else body
         js_resp = js.Response.new(b, self.js_response)
-        return FetchResponse(js_resp.url, js_resp)
+        return Response(js_resp)
 
     async def blob(self) -> "Blob":
         self._raise_if_failed()
@@ -175,13 +175,12 @@ class FetchResponse(pyodide.http.FetchResponse):
 
 if pyodide_version == "0.26.0a2":
 
-    async def _pyfetch_patched(url: str, **kwargs: Any) -> FetchResponse:
+    async def _pyfetch_patched(url: str, **kwargs: Any) -> "Response":
         # This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
         custom_fetch = kwargs["fetcher"] if "fetcher" in kwargs else js.fetch
         kwargs["fetcher"] = None
         try:
-            return FetchResponse(
-                url,
+            return Response(
                 await custom_fetch(
                     url, to_js(kwargs, dict_converter=Object.fromEntries)
                 ),
@@ -195,11 +194,11 @@ else:
 async def fetch(
     resource: str,
     **other_options: Unpack[FetchKwargs],
-) -> FetchResponse:
+) -> "Response":
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
     resp = await _pyfetch_patched(resource, **other_options)
-    return FetchResponse(resp.url, resp.js_response)
+    return Response(resp.js_response)
 
 
 def _to_python_exception(exc: JsException) -> Exception:
@@ -258,10 +257,6 @@ class Response(FetchResponse):
     """
     This class represents the response to an HTTP request, with a similar API to that of the web
     `Response` API: https://developer.mozilla.org/en-US/docs/Web/API/Response.
-
-    This is a static class to enable defining `FetchResponse` using a constructor more similar to
-    JS. All non-static methods for this class should be defined on the `FetchResponse` class it
-    extends.
     """
 
     def __init__(
@@ -348,7 +343,7 @@ class Response(FetchResponse):
             raise _to_python_exception(exc) from exc
 
     @staticmethod
-    def json(
+    def from_json(
         data: str | dict[str, Any] | list[Any] | JsProxy,
         status: HTTPStatus | int = HTTPStatus.OK,
         status_text="",
@@ -370,7 +365,14 @@ class Response(FetchResponse):
         except JsException as exc:
             raise _to_python_exception(exc) from exc
 
-        return FetchResponse(js_resp.url, js_resp)
+        return Response(js_resp)
+
+    def json(self, *args: Never, **kwargs: Never):
+        if isinstance(self, Response):
+            return super().json()
+        # For compatibility, allow static use of Response.json() to mean Response.from_json().
+        data = self
+        return Response.from_json(data, *args, **kwargs)
 
 
 FormDataValue = "str | js.Blob | Blob"
