@@ -10,27 +10,6 @@
 
 namespace workerd::api {
 
-class WorkerStubEntrypointOutgoingFactory final: public Fetcher::OutgoingFactory {
- public:
-  WorkerStubEntrypointOutgoingFactory(kj::Own<IoChannelFactory::SubrequestChannel> channel)
-      : channel(kj::mv(channel)) {}
-
-  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
-    auto& context = IoContext::current();
-
-    return context.getMetrics().wrapSubrequestClient(context.getSubrequest(
-        [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-      return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
-    },
-        {.inHouse = true,
-          .wrapMetrics = true,
-          .operationName = kj::ConstString("dynamic_worker_subrequest"_kjc)}));
-  }
-
- private:
-  kj::Own<IoChannelFactory::SubrequestChannel> channel;
-};
-
 jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
@@ -38,7 +17,7 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
   }
 
@@ -51,11 +30,8 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     }
   }
 
-  kj::Own<Fetcher::OutgoingFactory> factory = kj::heap<WorkerStubEntrypointOutgoingFactory>(
-      channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props)));
-
-  return js.alloc<Fetcher>(
-      IoContext::current().addObject(kj::mv(factory)), Fetcher::RequiresHostAndProtocol::YES, true);
+  auto subreqChannel = channel->getEntrypoint(kj::mv(entrypointName), kj::mv(props));
+  return js.alloc<Fetcher>(IoContext::current().addObject(kj::mv(subreqChannel)));
 }
 
 jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
@@ -65,7 +41,7 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
   }
 
@@ -103,13 +79,18 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
       kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
       KJ_IF_SOME(maybeOut, code.globalOutbound) {
         KJ_IF_SOME(out, maybeOut) {
-          globalOutbound = out->getSubrequestChannel(ioctx);
+          auto channel = out->getSubrequestChannel(ioctx);
+          channel->requireAllowsTransfer();
+          globalOutbound = kj::mv(channel);
         } else {
           // Application passed `null` to disable internet access. Leave `globalOutbound` as
           // `kj::none`.
         }
       } else {
         // Inherit the calling worker's global outbound channel.
+        //
+        // Note we don't need to enforce transferrability in this case because if it was the global
+        // outbound of the parent, it must be OK to be the global outbound of the child.
         globalOutbound =
             ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
       }

@@ -49,6 +49,7 @@ wd_cc_library(
         "compatibility-date.c++",
         "features.c++",
         "hibernation-manager.c++",
+        "io-channels.c++",
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",

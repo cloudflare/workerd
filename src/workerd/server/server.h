@@ -285,6 +285,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);
 
   friend struct FutureSubrequestChannel;
+  friend struct FutureActorClassChannel;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

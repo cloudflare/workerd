@@ -147,7 +147,7 @@ class Evaluator {
         v8::TryCatch tryCatch(js.v8Isolate);
 
         try {
-          func(js);
+          func(lock);
         } catch (JsExceptionThrown&) {
           if (tryCatch.HasTerminated()) {
             KJ_FAIL_ASSERT("TerminateExecution() was called");

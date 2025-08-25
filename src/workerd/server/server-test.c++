@@ -4383,7 +4383,9 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      await actor.baz(),
                 `      await ctx.exports.default.corge(555),
                 `      await actor.grault(456),
-                `      "UnconfiguredActor" in ctx.exports,  // should be false
+                `      ctx.exports.UnconfiguredActor.constructor.name,
+                `      await ctx.exports.MyEntrypoint.myProps(),
+                `      await ctx.exports.MyEntrypoint({props: {foo: 123, bar: "abc"}}).myProps(),
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4391,6 +4393,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class MyEntrypoint extends WorkerEntrypoint {
                 `  foo(i) { return `foo: ${i}` }
                 `  grault(i) { return `grault: ${i}` }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class AnotherEntrypoint extends WorkerEntrypoint {
                 `  bar(i) { return `bar: ${i}` }
@@ -4431,7 +4434,9 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   test.start();
 
   auto conn = test.connect("test-addr");
-  conn.httpGet200("/", "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, false");
+  conn.httpGet200("/",
+      "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, LoopbackDurableObjectClass, "
+      "{}, {\"foo\":123,\"bar\":\"abc\"}");
 }
 
 // =======================================================================================
@@ -4704,8 +4709,8 @@ KJ_TEST("Server: Durable Object facets") {
                 `import { DurableObject } from "cloudflare:workers";
                 `export default {
                 `  async fetch(request, env, ctx) {
-                `    let id = env.NS.idFromName("name");
-                `    let actor = env.NS.get(id);
+                `    let id = ctx.exports.MyActorClass.idFromName("name");
+                `    let actor = ctx.exports.MyActorClass.get(id);
                 `    return await actor.fetch(request);
                 `  }
                 `}
@@ -4715,7 +4720,7 @@ KJ_TEST("Server: Durable Object facets") {
                 `
                 `    if (request.url.endsWith("/part1")) {
                 `      let foo = this.ctx.facets.get("foo",
-                `          () => ({class: this.env.COUNTER, id: "abc"}));
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
                 `      results.push(await foo.increment(true));  // increments foo
                 `      results.push(await foo.increment());  // increments foo
                 `      results.push(await foo.increment());  // increments foo
@@ -4774,12 +4779,37 @@ KJ_TEST("Server: Durable Object facets") {
                 `
                 `      // Delete bar, which recursively deletes its children.
                 `      this.ctx.facets.delete("bar");
+                `    } else if (request.url.endsWith("/props")) {
+                `      results.push(JSON.stringify(this.ctx.props));
+                `
+                `      let prop1 = this.ctx.facets.get("prop1",
+                `          () => ({class: this.env.COUNTER, id: "abc"}));
+                `      results.push(await prop1.myProps());
+                `
+                `      let prop2 = this.ctx.facets.get("prop2",
+                `          () => ({class: this.ctx.exports.CounterFacet, id: "abc"}));
+                `      results.push(await prop2.myProps());
+                `
+                `      let prop3 = this.ctx.facets.get("prop3",
+                `          () => ({class: this.ctx.exports.CounterFacet({props: {bProp: 321}}),
+                `                  id: "abc"}));
+                `      results.push(await prop3.myProps());
+                `
+                `      let prop4 = this.ctx.facets.get("prop4",
+                `          () => ({class: this.ctx.exports.MyActorClass, id: "abc"}));
+                `      results.push(await prop4.mainClassProps());
+                `
+                `      let prop5 = this.ctx.facets.get("prop5",
+                `          () => ({class: this.ctx.exports.MyActorClass({props: {cProp: 555}}),
+                `                  id: "abc"}));
+                `      results.push(await prop5.mainClassProps());
                 `    } else {
                 `      throw new Error(`bad url: ${request.url}`);
                 `    }
                 `
                 `    return new Response(results.join(" "));
                 `  }
+                `  mainClassProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class CounterFacet extends DurableObject {
                 `  async increment(first) {
@@ -4797,6 +4827,7 @@ KJ_TEST("Server: Durable Object facets") {
                 `      throw new Error(`Wrong ID, expected ${id}, got ${this.ctx.id}`);
                 `    }
                 `  }
+                `  myProps() { return JSON.stringify(this.ctx.props) }
                 `}
                 `export class NestedFacet extends DurableObject {
                 `  increment(name, first) {
@@ -4817,8 +4848,15 @@ KJ_TEST("Server: Durable Object facets") {
             )
           ],
           bindings = [
-            (name = "NS", durableObjectNamespace = "MyActorClass"),
-            (name = "COUNTER", durableObjectClass = (name = "hello", entrypoint = "CounterFacet")),
+            ( name = "COUNTER",
+              durableObjectClass = (
+                name = "hello",
+                entrypoint = "CounterFacet",
+                props = (
+                  json = `{"aProp": 123}
+                )
+              )
+            ),
             (name = "NESTED", durableObjectClass = (name = "hello", entrypoint = "NestedFacet")),
             ( name = "EXFILTRATOR",
               durableObjectClass = (name = "hello", entrypoint = "ExfiltrationFacet") )
@@ -4914,6 +4952,67 @@ KJ_TEST("Server: Durable Object facets") {
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.3.sqlite"})));
   KJ_EXPECT(!nsDir->exists(
       kj::Path({"3652ef6221834806dc8df802d1d216e27b7d07e0a6b7adf6cfdaeec90f06459a.4.sqlite"})));
+
+  // Test facets can have custom ctx.props.
+  {
+    TestServer test(config);
+
+    // We don't need the existing storage but the path does have to exist for the test to work.
+    test.root->openSubdir(kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE);
+
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/props", "{} {\"aProp\":123} {} {\"bProp\":321} {} {\"cProp\":555}");
+  }
+}
+
+KJ_TEST("Server: Pass service stubs in ctx.props.") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          compatibilityFlags = ["experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import { WorkerEntrypoint } from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    let props = {
+                `      foo: ctx.exports.FooEntry({props: {greeting: "Hello"}}),
+                `      foo2: ctx.exports.FooEntry({props: {greeting: "Welcome"}}),
+                `    }
+                `    let result = await ctx.exports.BarEntry({props}).run();
+                `    return new Response(result);
+                `  },
+                `}
+                `export class FooEntry extends WorkerEntrypoint {
+                `  greet(name) { return `${this.ctx.props.greeting}, ${name}!` }
+                `}
+                `export class BarEntry extends WorkerEntrypoint {
+                `  async run() {
+                `    let greet1 = await this.ctx.props.foo.greet("Alice");
+                `    let greet2 = await this.ctx.props.foo2.greet("Bob");
+                `    return [greet1, greet2].join("\n");
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "Hello, Alice!\nWelcome, Bob!");
 }
 
 #if __linux__

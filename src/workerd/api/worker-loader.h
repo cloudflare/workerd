@@ -20,7 +20,7 @@ class WorkerStub: public jsg::Object {
   WorkerStub(IoOwn<WorkerStubChannel> channel): channel(kj::mv(channel)) {}
 
   struct EntrypointOptions {
-    jsg::Optional<jsg::JsObject> props;
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
 
     JSG_STRUCT(props);
   };
