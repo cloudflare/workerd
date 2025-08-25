@@ -496,7 +496,6 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
   F(jsg::Name, JsgImplType::Type::JSG_NAME)                                                        \
   F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF)                                                 \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED)                                      \
-  F(jsg::Varargs, JsgImplType::Type::JSG_VARARGS)                                                  \
   F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE)                                                   \
   F(v8::FunctionCallbackInfo<v8::Value>, JsgImplType::Type::V8_FUNCTION_CALLBACK_INFO)             \
   F(v8::PropertyCallbackInfo<v8::Value>, JsgImplType::Type::V8_PROPERTY_CALLBACK_INFO)

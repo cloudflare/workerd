@@ -543,9 +543,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
     using V = kj::Decay<U>;
 
-    if constexpr (kj::isSameType<V, Varargs>()) {
-      return Varargs(parameterIndex, args);
-    } else if constexpr (isArguments<V>()) {
+    if constexpr (isArguments<V>()) {
       using E = typename V::ElementType;
       size_t size = args.Length() >= parameterIndex ? args.Length() - parameterIndex : 0;
       auto builder = kj::heapArrayBuilder<E>(size);

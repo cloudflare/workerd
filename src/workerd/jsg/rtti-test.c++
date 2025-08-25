@@ -157,7 +157,6 @@ KJ_TEST("jsgImpl") {
   KJ_EXPECT(tType<jsg::Lock>() == "(jsgImpl = (type = jsgLock))");
   KJ_EXPECT(tType<jsg::SelfRef>() == "(jsgImpl = (type = jsgSelfRef))");
   KJ_EXPECT(tType<jsg::Unimplemented>() == "(jsgImpl = (type = jsgUnimplemented))");
-  KJ_EXPECT(tType<jsg::Varargs>() == "(jsgImpl = (type = jsgVarargs))");
   KJ_EXPECT(tType<v8::Isolate*>() == "(jsgImpl = (type = v8Isolate))");
   KJ_EXPECT(tType<MockConfig>() == "(jsgImpl = (type = configuration))");
   KJ_EXPECT(tType<jsg::TypeHandler<kj::Date>>() == "(jsgImpl = (type = jsgTypeHandler))");
