@@ -43,6 +43,10 @@ class Queue final {
     }
     T value = kj::mv(inner.front());
     inner.pop_front();
+    // While the kj::mv below is not strictly necessary, I've
+    // included it intentionally to make it absolutely clear
+    // that value is being moved and not copied. It's ok to
+    // refactor that out if it is bothersome.
     return kj::mv(value);
   }
 
