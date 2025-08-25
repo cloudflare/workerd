@@ -588,8 +588,7 @@ class DirectoryBase final: public Directory {
     // and not users and we don't want to count them against the isolate.
     if constexpr (Writable) {
       if (maybeMemoryAdjustment == kj::none) {
-        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
-        KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(DirectoryBase));
+        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(sizeof(DirectoryBase));
       }
     }
   }
@@ -834,8 +833,7 @@ class FileImpl final: public File {
     // controlled by the runtime. We don't want to count them against the isolate.
     if (isWritable()) {
       if (maybeMemoryAdjustment == kj::none) {
-        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
-        KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(FileImpl));
+        maybeMemoryAdjustment = js.getExternalMemoryAdjustment(sizeof(FileImpl));
       }
     }
   }
@@ -846,9 +844,7 @@ class FileImpl final: public File {
     jsg::ExternalMemoryAdjustment adjustment;
     Owned(jsg::Lock& js, kj::Array<kj::byte>&& data)
         : data(kj::mv(data)),
-          adjustment(js.getExternalMemoryAdjustment(0)) {
-      adjustment.adjustNow(js, this->data.size());
-    }
+          adjustment(js.getExternalMemoryAdjustment(this->data.size())) {}
   };
   kj::OneOf<Owned, kj::ArrayPtr<const kj::byte>> ownedOrView;
   kj::Date lastModified;
@@ -1374,8 +1370,7 @@ kj::StringPtr SymbolicLink::getUniqueId(jsg::Lock&) const {
 
 void SymbolicLink::countTowardsIsolateLimit(jsg::Lock& js) const {
   if (maybeMemoryAdjustment == kj::none) {
-    maybeMemoryAdjustment = js.getExternalMemoryAdjustment(0);
-    KJ_ASSERT_NONNULL(maybeMemoryAdjustment).adjustNow(js, sizeof(SymbolicLink));
+    maybeMemoryAdjustment = js.getExternalMemoryAdjustment(sizeof(SymbolicLink));
   }
 }
 
