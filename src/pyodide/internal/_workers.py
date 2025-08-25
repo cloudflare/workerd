@@ -309,6 +309,18 @@ class Response(FetchResponse):
         )
         super().__init__(js_resp.url, js_resp)
 
+    def __repr__(self):
+        body = [f"status={self.status}"]
+        if self.js_object.statusText:
+            body.append(f"status_text={self.status_text!r}")
+        if "content-type" in self.headers:
+            body.append(f"content_type={self.headers['content-type']!r}")
+        if self.js_object.url:
+            body.append(f"url={self.js_object.url!r}")
+        if self.js_object.type != "default":
+            body.append(f"type={self.js_object.type!r}")
+        return f"Response({', '.join(body)})"
+
     @staticmethod
     def _create_options(
         status: HTTPStatus | int | None = HTTPStatus.OK,
@@ -655,6 +667,11 @@ class Request:
             other_options["headers"] = _to_js_headers(other_options["headers"])
         self._js_request = js.Request.new(
             input._js_request if isinstance(input, Request) else input, **other_options
+        )
+
+    def __repr__(self):
+        return (
+            f"Request(method={self._js_request.method!r}, url={self._js_request.url!r})"
         )
 
     @property

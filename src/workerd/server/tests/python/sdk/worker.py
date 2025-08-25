@@ -376,6 +376,7 @@ async def can_use_cf_fetch_opts(env):
 async def request_unit_tests(env):
     req = Request("https://test.com", method=HTTPMethod.POST)
     assert req.method == HTTPMethod.POST
+    assert repr(req) == "Request(method='POST', url='https://test.com/')"
 
     # Verify that we can pass JS headers to Request
     js_headers = js.Headers.new()
@@ -436,6 +437,10 @@ async def can_use_event_decorator(env):
 async def response_unit_tests(env):
     response_json = Response.json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
+    assert (
+        repr(response_json)
+        == "Response(status=200, status_text='OK', content_type='application/json')"
+    )
 
     response_json = Response.from_json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
