@@ -58,6 +58,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     return *db;
   }
 
+  kj::Maybe<SqliteKv&> getSqliteKv() override {
+    requireNotBroken();
+    return kv;
+  }
+
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(
       Key key, ReadOptions options) override;
   kj::OneOf<GetResultList, kj::Promise<GetResultList>> get(

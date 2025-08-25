@@ -638,6 +638,7 @@ interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -3118,6 +3119,23 @@ declare class MessageChannel {
 }
 interface MessagePortPostMessageOptions {
   transfer?: any[];
+}
+interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  get<T = unknown>(keys: string[]): Map<string, T>;
+  list<T = unknown>(options?: SyncKvListOptions): Map<string, T>;
+  put<T>(key: string, value: T): void;
+  put<T>(entries: Record<string, T>): void;
+  delete(key: string): boolean;
+  delete(keys: string[]): number;
+}
+interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
 }
 type AiImageClassificationInput = {
   image: number[];

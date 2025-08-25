@@ -464,6 +464,12 @@ wd_test(
 )
 
 wd_test(
+    src = "sync-kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["sync-kv-test.js"],
+)
+
+wd_test(
     src = "streams/identitytransformstream-backpressure-test.wd-test",
     args = ["--experimental"],
     data = ["streams/identitytransformstream-backpressure-test.js"],
