@@ -7488,7 +7488,9 @@ type ImageTransform = {
   fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
   flip?: "h" | "v" | "hv";
   gamma?: number;
+  segment?: "foreground";
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
