@@ -1891,10 +1891,13 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
     }
   }
 
+  // Get client and trace context (if needed) in one clean call
+  auto clientWithTracing = fetcher->getClientWithTracing(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc);
+  auto traceContext = kj::mv(clientWithTracing.traceContext);
+
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
-  kj::Own<kj::HttpClient> client =
-      asHttpClient(fetcher->getClient(ioContext, jsRequest->serializeCfBlobJson(js), "fetch"_kjc));
+  kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
   kj::HttpHeaders headers(ioContext.getHeaderTable());
   jsRequest->shallowCopyHeadersTo(headers);
@@ -1919,6 +1922,33 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       break;
     default:
       KJ_UNREACHABLE;
+  }
+
+  KJ_IF_SOME(ctx, traceContext) {
+    ctx.userSpan.setTag("network.protocol.name"_kjc, kj::str("http"));
+    ctx.userSpan.setTag("network.protocol.version"_kjc, kj::str("HTTP/1.1"));
+    ctx.userSpan.setTag("http.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
+    ctx.userSpan.setTag("url.full"_kjc, kj::str(jsRequest->getUrl()));
+
+    KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
+      ctx.userSpan.setTag("user_agent.original"_kjc, kj::str(userAgent));
+    }
+
+    KJ_IF_SOME(contentType, headers.get(headerIds.contentType)) {
+      ctx.userSpan.setTag("http.request.header.content-type"_kjc, kj::str(contentType));
+    }
+
+    KJ_IF_SOME(contentLength, headers.get(headerIds.contentLength)) {
+      ctx.userSpan.setTag("http.request.header.content-length"_kjc, kj::str(contentLength));
+    }
+
+    KJ_IF_SOME(accept, headers.get(headerIds.accept)) {
+      ctx.userSpan.setTag("http.request.header.accept"_kjc, kj::str(accept));
+    }
+
+    KJ_IF_SOME(acceptEncoding, headers.get(headerIds.acceptEncoding)) {
+      ctx.userSpan.setTag("http.request.header.accept-encoding"_kjc, kj::str(acceptEncoding));
+    }
   }
 
   kj::String url =
@@ -1968,6 +1998,11 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       // standard does not say that we should. Hence, we always use StreamEncoding::IDENTITY.
       // https://github.com/whatwg/fetch/issues/589
       auto maybeLength = jsBody->tryGetLength(StreamEncoding::IDENTITY);
+      KJ_IF_SOME(ctx, traceContext) {
+        KJ_IF_SOME(length, maybeLength) {
+          ctx.userSpan.setTag("http.request.body.size"_kjc, int64_t(length));
+        }
+      }
 
       if (maybeLength.orDefault(1) == 0 &&
           headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
@@ -2024,9 +2059,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       return kj::mv(exception);
     }),
         [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client)](jsg::Lock& js,
+            client = kj::mv(client), traceContext = kj::mv(traceContext)](jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
+      KJ_IF_SOME(ctx, traceContext) {
+        ctx.userSpan.setTag("http.response.status_code"_kjc, int64_t(response.statusCode));
+        KJ_IF_SOME(length, response.body->tryGetLength()) {
+          ctx.userSpan.setTag("http.response.body.size"_kjc, int64_t(length));
+        }
+      }
       return handleHttpResponse(
           js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response));
     });
@@ -2621,16 +2662,30 @@ jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(
 
 kj::Own<WorkerInterface> Fetcher::getClient(
     IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
+  auto clientWithTracing = getClientWithTracing(ioContext, kj::mv(cfStr), kj::mv(operationName));
+  return clientWithTracing.client.attach(kj::mv(clientWithTracing.traceContext));
+}
+
+Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
+    IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      return ioContext.getSubrequestChannel(
-          channel, isInHouse, kj::mv(cfStr), kj::mv(operationName));
+      // For channels, create trace context
+      auto userSpan = ioContext.makeUserTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto traceSpan = ioContext.makeTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
-      return outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      // For outgoing factories, no trace context needed
+      auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
+      return ClientWithTracing{kj::mv(client), kj::none};
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
-      return outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
+      // For cross-context outgoing factories, no trace context needed
+      auto client = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr));
+      return ClientWithTracing{kj::mv(client), kj::none};
     }
   }
   KJ_UNREACHABLE;
