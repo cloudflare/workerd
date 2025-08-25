@@ -31,24 +31,15 @@ void instantiateEmscriptenSetupModule(jsg::Lock& js, v8::Local<v8::Module>& modu
   KJ_ASSERT(module->GetStatus() == v8::Module::kEvaluated);
 }
 
-v8::Local<v8::Function> getInstantiateEmscriptenModule(
-    jsg::Lock& js, v8::Local<v8::Module>& module) {
+jsg::JsFunction getInstantiateEmscriptenModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   auto instantiateEmscriptenModule =
       js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "instantiateEmscriptenModule"_kj);
   KJ_ASSERT(instantiateEmscriptenModule->IsFunction());
-  return instantiateEmscriptenModule.As<v8::Function>();
-}
-
-template <typename... Args>
-jsg::JsValue callFunction(jsg::Lock& js, v8::Local<v8::Function>& func, Args... args) {
-  v8::LocalVector<v8::Value> argv(
-      js.v8Isolate, std::initializer_list<v8::Local<v8::Value>>{args...});
-  return jsg::JsValue(
-      jsg::check(func->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data())));
+  return jsg::JsFunction(instantiateEmscriptenModule.As<v8::Function>());
 }
 
 jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
-    v8::Local<v8::Function>& func,
+    const jsg::JsFunction& func,
     bool isWorkerd,
     capnp::Data::Reader pythonStdlibZipReader,
     capnp::Data::Reader pyodideAsmWasmReader) {
@@ -63,8 +54,8 @@ jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
   auto pyodideAsmWasm = jsg::check(v8::WasmModuleObject::Compile(js.v8Isolate,
       v8::MemorySpan<const uint8_t>(pyodideAsmWasmReader.begin(), pyodideAsmWasmReader.size())));
   return resolvePromise(js,
-      callFunction(
-          js, func, js.boolean(isWorkerd), kj::mv(pythonStdlibZip), kj::mv(pyodideAsmWasm)));
+      func.call(js, js.null(), js.boolean(isWorkerd), jsg::JsValue(pythonStdlibZip),
+          jsg::JsValue(pyodideAsmWasm)));
 }
 
 EmscriptenRuntime EmscriptenRuntime::initialize(

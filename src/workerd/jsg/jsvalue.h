@@ -25,7 +25,6 @@ inline void requireOnStack(void* self) {
   V(ArgumentsObject)                                                                               \
   V(NativeError)                                                                                   \
   V(Name)                                                                                          \
-  V(Function)                                                                                      \
   V(AsyncFunction)                                                                                 \
   V(GeneratorFunction)                                                                             \
   V(GeneratorObject)                                                                               \
@@ -503,6 +502,46 @@ inline JsObject Lock::opaque(T&& inner) {
   KJ_ASSERT(wrapped->IsObject());
   return JsObject(wrapped.template As<v8::Object>());
 }
+
+class JsFunction final: public JsBase<v8::Function, JsFunction> {
+ public:
+  using JsBase<v8::Function, JsFunction>::JsBase;
+
+  // Calls the function with the given receiver and arguments.
+  template <IsJsValue... Args>
+  JsValue call(Lock& js, const JsValue& recv, Args... args) const {
+    v8::Local<v8::Function> fn = *this;
+    v8::Local<v8::Value> argv[] = {args...};
+    return JsValue(check(fn->Call(js.v8Context(), recv, sizeof...(Args), argv)));
+  }
+
+  // Calls the function with a null receiver and arguments.
+  template <IsJsValue... Args>
+  JsValue callNoReceiver(Lock& js, Args... args) const {
+    return call(js, js.null(), kj::fwd<Args...>(args...));
+  }
+
+  // Calls the function with the given receiver and arguments.
+  JsValue call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const;
+
+  // Calls the function with a null receiver and arguments. When null is passed
+  // as the receiver, the global object is used instead.
+  JsValue callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const;
+
+  // Gets the function's length property.
+  size_t length(Lock& js) const;
+
+  // Gets the function's name property.
+  JsString name(Lock& js) const;
+
+  // Not guaranteed to be unique, but will be the same for the same function.
+  // Use the JsValue strictEquals() method for true identity comparison.
+  uint hashCode() const;
+
+  operator JsObject() const {
+    return JsObject(inner);
+  }
+};
 
 // A persistent handle for a Js* type suitable for storage and GC visitable.
 //
