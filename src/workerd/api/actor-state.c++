@@ -256,13 +256,20 @@ DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<GetOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.get"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
-      return getOne(js, kj::mv(s), options);
+      // resolve the promise and end the span
+      auto prom = getOne(js, kj::mv(s), options);
+      prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+      return prom;
     }
     KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return getMultiple(js, kj::mv(a), options);
+      auto prom = getMultiple(js, kj::mv(a), options);
+      prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+      return prom;
     }
   }
   KJ_UNREACHABLE
@@ -289,6 +296,8 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
 
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
     jsg::Lock& js, jsg::Optional<GetAlarmOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.getAlarm"_kjc);
   // Even if we do not have an alarm handler, we might once have had one. It's fine to return
   // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions
@@ -297,15 +306,19 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   }).orDefault(GetOptions{}));
   auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
-  return transformCacheResult(
-      js, kj::mv(result), options, [](jsg::Lock&, kj::Maybe<kj::Date> date) {
+  auto prom =
+      transformCacheResult(js, kj::mv(result), options, [](jsg::Lock&, kj::Maybe<kj::Date> date) {
     return date.map(
         [](auto& date) { return static_cast<double>((date - kj::UNIX_EPOCH) / kj::MILLISECONDS); });
   });
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.list"_kjc);
   kj::String start;
   kj::Maybe<kj::String> end;
   bool reverse = false;
@@ -409,7 +422,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
   auto result = reverse
       ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
       : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
-  return transformCacheResultWithCacheStatus(js, kj::mv(result), options, &listResultsToMap);
+  auto prom = transformCacheResultWithCacheStatus(js, kj::mv(result), options, &listResultsToMap)
+                  .then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) { return value; });
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
@@ -417,6 +433,8 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
     jsg::Optional<jsg::JsValue> value,
     jsg::Optional<PutOptions> maybeOptions,
     const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.put"_kjc);
   // TODO(soon): Add tests of data generated at current versions to ensure we'll
   // know before releasing any backwards-incompatible serializer changes,
   // potentially checking the header in addition to the value.
@@ -432,13 +450,17 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
     KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
       KJ_IF_SOME(v, value) {
         KJ_IF_SOME(opt, optionsTypeHandler.tryUnwrap(js, v)) {
-          return putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
+          auto prom = putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
+          prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+          return prom;
         } else {
           JSG_FAIL_REQUIRE(TypeError,
               "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
         }
       } else {
-        return putMultiple(js, kj::mv(o), options);
+        auto prom = putMultiple(js, kj::mv(o), options);
+        prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+        return prom;
       }
     }
   }
@@ -451,6 +473,7 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
       "setAlarm() cannot be called with an alarm time <= 0");
 
   auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.setAlarm"_kjc);
   // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
   // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
   // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
@@ -477,7 +500,9 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
   // setAlarm() is billed as a single write unit.
   context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
 
-  return kj::mv(maybeBackpressure);
+  auto prom = kj::mv(maybeBackpressure);
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
@@ -499,6 +524,8 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
     jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     jsg::Optional<PutOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.delete"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
@@ -513,6 +540,8 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
 
 jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
     jsg::Lock& js, jsg::Optional<SetAlarmOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.deleteAlarm"_kjc);
   // Even if we do not have an alarm handler, we might once have had one. It's fine to remove that
   // alarm or noop on the absence of one.
   auto options = configureOptions(maybeOptions
@@ -522,20 +551,25 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
       .noCache = false};
   }).orDefault(PutOptions{}));
 
-  return transformMaybeBackpressure(
+  auto prom = transformMaybeBackpressure(
       js, options, getCache(OP_DELETE_ALARM).setAlarm(kj::none, options));
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 jsg::Promise<void> DurableObjectStorage::deleteAll(
     jsg::Lock& js, jsg::Optional<PutOptions> maybeOptions) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.deleteAll"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
   auto deleteAll = cache->deleteAll(options);
 
-  auto& context = IoContext::current();
   context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
-  return transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
+  auto prom = transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 void DurableObjectTransaction::deleteAll() {
@@ -606,16 +640,17 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
         callback,
     jsg::Optional<TransactionOptions> options) {
   auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.transaction"_kjc);
 
   struct TxnResult {
     jsg::JsRef<jsg::JsValue> value;
     bool isError;
   };
 
-  return context
-      .blockConcurrencyWhile(js,
-          [callback = kj::mv(callback), &context, &cache = *cache](
-              jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
+  auto prom = context
+                  .blockConcurrencyWhile(js,
+                      [callback = kj::mv(callback), &context, &cache = *cache](
+                          jsg::Lock& js) mutable -> jsg::Promise<TxnResult> {
     // Note that the call to `startTransaction()` is when the SQLite-backed implementation will
     // actually invoke `BEGIN TRANSACTION`, so it's important that we're inside the
     // blockConcurrencyWhile block before that point so we don't accidentally catch some other
@@ -647,13 +682,15 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
         // of jsg::V8Ref
         jsg::JsValue(exception.getHandle(js)).addRef(js), true});
     });
-  }).then(js, [](jsg::Lock& js, TxnResult result) -> jsg::JsRef<jsg::JsValue> {
+  }).then(js, [](jsg::Lock& js, TxnResult result) mutable -> jsg::JsRef<jsg::JsValue> {
     if (result.isError) {
       js.throwException(result.value.getHandle(js));
     } else {
       return kj::mv(result.value);
     }
   });
+  prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+  return prom;
 }
 
 jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
@@ -686,6 +723,8 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 }
 
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
+  auto& context = IoContext::current();
+  auto userSpan = context.makeUserTraceSpan("durable_object_storage.sync"_kjc);
   KJ_IF_SOME(p, cache->onNoPendingFlush()) {
     // Note that we're not actually flushing since that will happen anyway once we go async. We're
     // merely checking if we have any pending or in-flight operations, and providing a promise that
@@ -695,9 +734,13 @@ jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
     // output gate will be broken first and the isolate will not resume synchronous execution.
 
     auto& context = IoContext::current();
-    return context.awaitIo(js, kj::mv(p));
+    auto prom = context.awaitIo(js, kj::mv(p));
+    prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+    return prom;
   } else {
-    return js.resolvedPromise();
+    auto prom = js.resolvedPromise();
+    prom.whenResolved(js).then(js, [userSpan = kj::mv(userSpan)](jsg::Lock& js) {});
+    return prom;
   }
 }
 
