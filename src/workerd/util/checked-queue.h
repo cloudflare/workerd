@@ -41,7 +41,9 @@ class Queue final {
     if (inner.empty()) {
       return kj::none;
     }
-    T value = std::move(inner.front());
+    T value = kj::mv(inner.front());
+    inner.pop_front();
+    return kj::mv(value);
     inner.pop_front();
     return kj::mv(value);
   }
