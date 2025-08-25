@@ -44,8 +44,6 @@ class Queue final {
     T value = kj::mv(inner.front());
     inner.pop_front();
     return kj::mv(value);
-    inner.pop_front();
-    return kj::mv(value);
   }
 
   // Returns a reference to the front element without removing it.
