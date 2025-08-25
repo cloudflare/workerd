@@ -750,7 +750,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
         auto emscriptenRuntime =
             api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
         modules->addBuiltinModule("internal:setup-emscripten",
-            jsg::alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
+            lockParam.alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
             workerd::jsg::ModuleRegistry::Type::INTERNAL);
       }
 
