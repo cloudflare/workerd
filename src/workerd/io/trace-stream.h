@@ -4,6 +4,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/util/checked-queue.h>
 
 #include <list>
 
@@ -72,7 +73,7 @@ struct TailStreamWriterState {
     kj::Maybe<rpc::TailStreamTarget::Client> capability;
     bool pumping = false;
     bool onsetSeen = false;
-    std::list<tracing::TailEvent> queue;
+    workerd::util::Queue<tracing::TailEvent> queue;
 
     Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
   };
