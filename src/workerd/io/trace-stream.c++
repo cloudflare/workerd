@@ -1023,7 +1023,7 @@ void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
 
   // Deliver the event to the queue and make sure we are processing.
   for (auto& active: alive) {
-    active->queue.push_back(event.clone());
+    active->queue.push(event.clone());
     if (!active->pumping) {
       waitUntilTasks.add(pump(kj::addRef(*active)));
     }
@@ -1047,9 +1047,7 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
     // a handler for this stream and no further attempts to deliver
     // events should be made for this stream.
     current->onsetSeen = true;
-    KJ_ASSERT(!current->queue.empty());
-    auto onsetEvent = kj::mv(current->queue.front());
-    current->queue.pop_front();
+    auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
     auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
     auto eventsBuilder = builder.initEvents(1);
     // When sending the onset event to the tail worker, the receiving end
@@ -1073,16 +1071,13 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
     auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
     auto eventsBuilder = builder.initEvents(current->queue.size());
     size_t n = 0;
-    for (auto& event: current->queue) {
-      event.copyTo(eventsBuilder[n++]);
-    }
-    current->queue.clear();
+    current->queue.drainTo([&](tracing::TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
 
     auto result = co_await builder.send();
 
     // Note that although we cleared the current.queue above, it is
     // possible/likely that additional events were added to the queue
-    // while the above builder.sent() was being awaited. If the result
+    // while the above builder.send() was being awaited. If the result
     // comes back indicating that we should stop, then we'll stop here
     // without any further processing. We'll defensively clear the
     // queue again and drop the client stub. Otherwise, if result.getStop()

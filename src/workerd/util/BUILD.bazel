@@ -69,6 +69,13 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "checked-queue",
+    hdrs = ["checked-queue.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -320,4 +327,9 @@ kj_test(
     deps = [
         ":uuid",
     ],
+)
+
+kj_test(
+    src = "checked-queue-test.c++",
+    deps = [":checked-queue"],
 )

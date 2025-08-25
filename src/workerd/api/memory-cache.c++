@@ -328,7 +328,7 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
     // We return a Promise, but we keep the fulfiller. We might fulfill it
     // from a different thread, so we need a cross-thread fulfiller here.
     auto pair = kj::newPromiseAndCrossThreadFulfiller<GetWithFallbackOutcome>();
-    existingInProgress->waiting.push_back(InProgress::Waiter{kj::mv(pair.fulfiller)});
+    existingInProgress->waiting.emplace(kj::mv(pair.fulfiller));
     // We have to register a pending event with the I/O context so that the
     // runtime does not detect a hanging promise. Another fallback is in
     // progress and once it settles, we will fulfill the promise that we return
@@ -379,9 +379,9 @@ SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFall
 
       cache->putWhileLocked(
           *data, kj::str(inProgress.key), kj::atomicAddRef(*result.value), result.expiration);
-      for (auto& waiter: inProgress.waiting) {
-        waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value));
-      }
+
+      inProgress.waiting.drainTo(
+          [&](auto&& waiter) { waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value)); });
       data->inProgress.eraseMatch(inProgress.key);
 
       // Track the completion of fallback and distribution to waiters
@@ -403,12 +403,10 @@ void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const
   // queue. Otherwise, just delete the queue entirely.
   {
     auto data = cache->data.lockExclusive();
-    auto next = inProgress.waiting.begin();
-    if (next != inProgress.waiting.end()) {
-      nextFulfiller = kj::mv(next->fulfiller);
-      inProgress.waiting.erase(next);
+
+    KJ_IF_SOME(next, inProgress.waiting.pop()) {
+      nextFulfiller = kj::mv(next.fulfiller);
     } else {
-      // Queue is empty, erase it.
       data->inProgress.eraseMatch(inProgress.key);
     }
   }

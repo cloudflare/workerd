@@ -2,6 +2,7 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/checked-queue.h>
 
 #include <kj/hash.h>
 #include <kj/map.h>
@@ -9,7 +10,6 @@
 #include <kj/table.h>
 #include <kj/time.h>
 
-#include <list>
 #include <set>
 
 namespace workerd {
@@ -231,7 +231,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     struct Waiter {
       kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> fulfiller;
     };
-    std::list<Waiter> waiting;
+    workerd::util::Queue<Waiter> waiting;
 
     InProgress(kj::String&& key): key(kj::mv(key)) {}
 
