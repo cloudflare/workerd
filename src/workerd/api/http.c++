@@ -123,6 +123,7 @@ void requireValidHeaderValue(kj::StringPtr value) {
 Request::CacheMode getCacheModeFromName(kj::StringPtr value) {
   if (value == "no-store") return Request::CacheMode::NOSTORE;
   if (value == "no-cache") return Request::CacheMode::NOCACHE;
+  if (value == "reload") return Request::CacheMode::RELOAD;
   JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported cache mode: ", value));
 }
 
@@ -134,6 +135,8 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
       return "no-cache"_kj;
     case (Request::CacheMode::NOSTORE):
       return "no-store"_kj;
+    case (Request::CacheMode::RELOAD):
+      return "reload"_kj;
   }
   KJ_UNREACHABLE;
 }
@@ -1242,19 +1245,20 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   }
   auto obj = KJ_ASSERT_NONNULL(clone.get(js));
 
-  int ttl = 2;
+  constexpr int NOCACHE_TTL = -1;
   switch (cacheMode) {
     case CacheMode::NOSTORE:
-      ttl = -1;
-      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
       if (obj.has(js, "cacheTtl")) {
         jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
-        JSG_REQUIRE(oldTtl == js.num(ttl), TypeError,
+        JSG_REQUIRE(oldTtl == js.num(NOCACHE_TTL), TypeError,
             kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
                 getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
       } else {
-        obj.set(js, "cacheTtl", js.num(ttl));
+        obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
       }
+      KJ_FALLTHROUGH;
+    case CacheMode::RELOAD:
+      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
       break;
     case CacheMode::NOCACHE:
       obj.set(js, "cacheForceRevalidate", js.boolean(true));
@@ -1275,10 +1279,12 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
     // Validate that the cache type is valid
     auto cacheMode = getCacheModeFromName(c);
 
-    if (!FeatureFlags::get(js).getCacheNoCache()) {
-      JSG_REQUIRE(cacheMode != Request::CacheMode::NOCACHE, TypeError,
-          kj::str("Unsupported cache mode: ", c));
-    }
+    bool invalidNoCache =
+        !FeatureFlags::get(js).getCacheNoCache() && (cacheMode == Request::CacheMode::NOCACHE);
+    bool invalidReload =
+        !FeatureFlags::get(js).getCacheReload() && (cacheMode == Request::CacheMode::RELOAD);
+    JSG_REQUIRE(
+        !invalidNoCache && !invalidReload, TypeError, kj::str("Unsupported cache mode: ", c));
   }
 
   KJ_IF_SOME(e, encodeResponseBody) {
@@ -1900,11 +1906,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   jsRequest->shallowCopyHeadersTo(headers);
 
   // If the jsRequest has a CacheMode, we need to handle that here.
-  // Currently, the only cache mode we support is undefined and no-store (behind an autogate),
-  // but we will soon support no-cache.
+  // Currently, the only cache mode we support is undefined and no-store, no-cache, and reload
   auto headerIds = ioContext.getHeaderIds();
   const auto cacheMode = jsRequest->getCacheMode();
   switch (cacheMode) {
+    case Request::CacheMode::RELOAD:
+      KJ_FALLTHROUGH;
     case Request::CacheMode::NOSTORE:
       KJ_FALLTHROUGH;
     case Request::CacheMode::NOCACHE:

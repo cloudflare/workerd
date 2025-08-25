@@ -1011,4 +1011,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # has legitimately broken real use cases. However, it's true that the old behavior could be a
   # "gotcha" leading to security problems when combined with other mistakes. Hence, the spec was
   # changed, and Workers must follow the spec.
+
+  cacheReload @115 :Bool
+      $compatEnableFlag("cache_reload_enabled")
+      $compatDisableFlag("cache_reload_disabled")
+      $experimental;
+  # Enables the use of cache: reload in the fetch api.
 }
