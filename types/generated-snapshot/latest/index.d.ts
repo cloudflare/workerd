@@ -6250,11 +6250,6 @@ interface BasicImageTransformations {
    */
   fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
   /**
-   * Controls image segmentation where other pixels outside the segment area
-   * are made transparent.
-  */
-  segment?: "foreground";
-  /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
    * "left", "right", "top", "bottom", "auto", or "center" (the default),
@@ -6267,7 +6262,6 @@ interface BasicImageTransformations {
    * source image.
    */
   gravity?:
-    | "face"
     | "left"
     | "right"
     | "top"
