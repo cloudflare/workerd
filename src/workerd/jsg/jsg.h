@@ -2483,9 +2483,9 @@ class Lock {
   // error, this reproduces the original error. If it is not a tunneled error, then it is treated
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
-  Value exceptionToJs(kj::Exception&& exception);
+  Value exceptionToJs(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
-  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
+  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
@@ -2502,8 +2502,8 @@ class Lock {
   // via JSG understand how to handle this and propagate the exception back to JavaScript.
   [[noreturn]] void throwException(Value&& exception);
 
-  [[noreturn]] void throwException(kj::Exception&& exception) {
-    throwException(exceptionToJs(kj::mv(exception)));
+  [[noreturn]] void throwException(kj::Exception&& exception, ExceptionToJsOptions options = {}) {
+    throwException(exceptionToJs(kj::mv(exception), options));
   }
 
   [[noreturn]] void throwException(const JsValue& exception);
@@ -2523,7 +2523,11 @@ class Lock {
   // func() and errorHandler() must return the same type; the value they return will be returned
   // from `tryCatch()` itself.
   template <typename Func, typename ErrorHandler>
-  auto tryCatch(Func&& func, ErrorHandler&& errorHandler) -> decltype(func()) {
+  auto tryCatch(Func&& func,
+      ErrorHandler&& errorHandler,
+      // If an exception occurs, convert KJ exceptions to JS exceptions
+      // using these options.
+      ExceptionToJsOptions options = {}) -> decltype(func()) {
     Value error = nullptr;
 
     {
@@ -2546,7 +2550,7 @@ class Lock {
 
         error = Value(v8Isolate, tryCatch.Exception());
       } catch (kj::Exception& e) {
-        error = exceptionToJs(kj::mv(e));
+        error = exceptionToJs(kj::mv(e), options);
       }
     }
 
@@ -2590,11 +2594,11 @@ class Lock {
 
   // Construct an immediately-rejected promise throwing the given exception.
   template <typename T>
-  Promise<T> rejectedPromise(kj::Exception&& exception);
+  Promise<T> rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Like above, but return a pure-JS promise, not a typed Promise.
   JsPromise rejectedJsPromise(jsg::JsValue exception);
-  JsPromise rejectedJsPromise(kj::Exception&& exception);
+  JsPromise rejectedJsPromise(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Like `kj::evalNow()`, but returns a jsg::Promise for the result. Synchronous exceptions are
   // caught and returned as a rejected promise.
@@ -2702,6 +2706,8 @@ class Lock {
   void installJspi();
 
   void setCaptureThrowsAsRejections(bool capture);
+  void setUsingEnhancedErrorSerialization();
+  bool isUsingEnhancedErrorSerialization() const;
 
   void setNodeJsCompatEnabled();
   void setNodeJsProcessV2Enabled();

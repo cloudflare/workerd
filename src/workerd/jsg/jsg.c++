@@ -187,6 +187,14 @@ void Lock::setAllowEval(bool allow) {
   IsolateBase::from(v8Isolate).setAllowEval({}, allow);
 }
 
+void Lock::setUsingEnhancedErrorSerialization() {
+  IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
+}
+
+bool Lock::isUsingEnhancedErrorSerialization() const {
+  return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
+}
+
 void Lock::installJspi() {
   IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
   v8Isolate->InstallConditionalFeatures(v8Context());

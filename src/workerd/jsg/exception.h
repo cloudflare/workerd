@@ -143,6 +143,9 @@ struct TunneledErrorType {
 
   // Was the error created because a durable object is broken?
   bool isDurableObjectReset;
+
+  // Does the error contain the "worker_do_not_log" magic constant?
+  bool isDoNotLogException;
 };
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
@@ -151,5 +154,22 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage);
 kj::String annotateBroken(kj::StringPtr internalMessage, kj::StringPtr brokennessReason);
 
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
+
+struct ExceptionToJsOptions {
+  // When ignoreDetail is true, tells kjExceptionToJs() to ignore any serialized
+  // exception detail in the kj::Exception.
+  bool ignoreDetail = false;
+
+  // When trusted is true and the kj::Exception has a serialized exception detail, the
+  // stack will be included in the deserialized error if it is available. When false,
+  // the stack will be omitted.
+  bool trusted = false;
+
+  // If the deserialized exception detail is not an object, then it will be ignored
+  // and we will fall back to constructing a new error object. The default is true
+  // to preserve existing behavior, but setting this to false may be useful in some
+  // cases. When false, the kjExceptionToJs() might return a non-object value.
+  bool allowNonObjects = false;
+};
 
 }  // namespace workerd::jsg

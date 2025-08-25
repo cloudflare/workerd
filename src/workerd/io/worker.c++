@@ -1050,6 +1050,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getNoTopLevelAwaitInRequire()) {
       lock->disableTopLevelAwait();
     }
+    if (features.getEnhancedErrorSerialization()) {
+      lock->setUsingEnhancedErrorSerialization();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
@@ -2208,37 +2211,23 @@ void Worker::Lock::logUncaughtException(
 
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception) {
   jsg::Lock& js = *this;
-
-  // If we have an attached serialized exception, deserialize it and log that instead, rather
-  // than try to reconstruct based on the KJ exception description.
-  //
-  // TODO(cleanup): Eventually, js.exceptionToJsValue() should do this internally, and then we
-  //   should remove the code from here.
-  KJ_IF_SOME(serializedJsError, exception.getDetail(jsg::TUNNELED_EXCEPTION_DETAIL_ID)) {
-    if (!js.v8Isolate->IsExecutionTerminating()) {
-      kj::Maybe<jsg::JsValue> deserialized;
-
-      v8::TryCatch tryCatch(js.v8Isolate);
-      try {
-        jsg::Deserializer deser(js, serializedJsError);
-        deserialized = deser.readValue(js);
-      } catch (jsg::JsExceptionThrown&) {
-        // Failed to deserialize, we'll continue with exceptionToJsValue() instead.
-        //
-        // Note that we're intentionally not checking tryCatch.CanContinue() here, because we still
-        // want to log the exception even if the isolate has been terminated.
-      }
-
-      KJ_IF_SOME(d, deserialized) {
-        logUncaughtException(source, d);
-        return;
-      }
-    }
+  try {
+    auto jsError = js.exceptionToJsValue(kj::mv(exception),
+        {
+          .trusted = true,
+        });
+    logUncaughtException(source, jsError.getHandle(js));
+  } catch (const jsg::JsExceptionThrown&) {
+    // An exception occurred while trying to convert the exception to a JS value.
+    // With exceptionToJs, this should only happen if the isolate is terminating
+    // because of a fatal error when trying to deserialize a tunneled exception
+    // detail. In this case, we will want to log the original exception instead,
+    // so let's try exceptionToJs again but this time ignoring the detail, and
+    // if it throws again, we'll give up and propagate that exception to the
+    // caller.
+    auto jsError = js.exceptionToJsValue(kj::cp(exception), {.ignoreDetail = true});
+    logUncaughtException(source, jsError.getHandle(js));
   }
-
-  // Couldn't deserialize an attached exception, so use `exceptionToJsValue()`.
-  auto jsError = js.exceptionToJsValue(kj::mv(exception));
-  logUncaughtException(source, jsError.getHandle(js));
 }
 
 void Worker::Lock::reportPromiseRejectEvent(v8::PromiseRejectMessage& message) {

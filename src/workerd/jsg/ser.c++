@@ -135,8 +135,7 @@ void Serializer::ExternalHandler::serializeProxy(
 Serializer::Serializer(Lock& js, Options options)
     : externalHandler(options.externalHandler),
       treatClassInstancesAsPlainObjects(options.treatClassInstancesAsPlainObjects),
-      treatErrorsAsHostObjects(options.treatErrorsAsHostObjects),
-      preserveStackInErrors(options.preserveStackInErrors),
+      treatErrorsAsHostObjects(js.isUsingEnhancedErrorSerialization()),
       ser(js.v8Isolate, this) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(this, "jsg::Serializer must be allocated on the stack");
@@ -232,7 +231,6 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     if (object->IsNativeError()) {
       auto nameStr = js.str("name"_kj);
       auto messageStr = js.str("message"_kj);
-      auto stackStr = js.str("stack"_kj);
 
       // Get the standard name, message, stack, cause, error, errors properties from
       // the error object.
@@ -271,9 +269,6 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
         // out here.
         if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
 
-        // If the preserveStackInErrors option is false, we do not include the
-        // stack property in the serialization.
-        if (!preserveStackInErrors && name.strictEquals(stackStr)) continue;
         obj.set(js, name, errorObj.get(js, name));
       }
       write(js, obj);
@@ -546,7 +541,7 @@ JsValue structuredClone(
   }
   ser.write(js, value);
   auto released = ser.release();
-  Deserializer des(js, released, kj::none);
+  Deserializer des(js, released);
   return des.readValue(js);
 }
 

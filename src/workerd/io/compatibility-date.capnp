@@ -1011,4 +1011,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # has legitimately broken real use cases. However, it's true that the old behavior could be a
   # "gotcha" leading to security problems when combined with other mistakes. Hence, the spec was
   # changed, and Workers must follow the spec.
+
+  enhancedErrorSerialization @115 :Bool
+      $compatEnableFlag("enhanced_error_serialization")
+      $compatDisableFlag("legacy_error_serialization")
+      $experimental;
+  # Enables enhanced error serialization for errors serialized using structuredClone /
+  # v8 serialization. More error types are supported, and own properties are included.
+  # Note that when enabled, deserialization of the errors will not preserve the original
+  # stack by default.
 }

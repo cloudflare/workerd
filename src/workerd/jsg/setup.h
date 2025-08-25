@@ -250,6 +250,14 @@ class IsolateBase {
     return throwOnUnrecognizedImportAssertion;
   }
 
+  void setUsingEnhancedErrorSerialization() {
+    usingEnhancedErrorSerialization = true;
+  }
+
+  bool getUsingEnhancedErrorSerialization() const {
+    return usingEnhancedErrorSerialization;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
   }
@@ -314,6 +322,7 @@ class IsolateBase {
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
+  bool usingEnhancedErrorSerialization = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
