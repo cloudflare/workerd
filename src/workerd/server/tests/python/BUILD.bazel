@@ -25,11 +25,7 @@ py_wd_test("random")
 
 py_wd_test("subdirectory")
 
-# TODO(EW-9537): Snapshot disabled due to failure on 0.28
-py_wd_test(
-    "sdk",
-    make_snapshot = False,
-)
+py_wd_test("sdk")
 
 py_wd_test("seek-metadatafs")
 
