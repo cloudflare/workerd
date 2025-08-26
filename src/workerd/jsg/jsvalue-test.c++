@@ -77,6 +77,10 @@ struct JsValueContext: public ContextGlobalObject {
     return js.date(0);
   }
 
+  JsValue callFunction(Lock& js, JsFunction fn) {
+    return fn.callNoReceiver(js, js.num(1));
+  }
+
   struct Foo: public Object {
     JSG_RESOURCE_TYPE(Foo) {}
   };
@@ -103,6 +107,7 @@ struct JsValueContext: public ContextGlobalObject {
     JSG_METHOD(getRef);
     JSG_METHOD(getDate);
     JSG_METHOD(checkProxyPrototype);
+    JSG_METHOD(callFunction);
     JSG_NESTED_TYPE(Foo);
   }
 };
@@ -143,6 +148,8 @@ KJ_TEST("simple") {
   e.expectEval("checkProxyPrototype(new Proxy({}, { getPrototypeOf() { return String; } } )) "
                "=== Foo",
       "boolean", "false");
+  e.expectEval("function f(val) { return this == globalThis && val === 1; }; callFunction(f);",
+      "boolean", "true");
 }
 
 }  // namespace
