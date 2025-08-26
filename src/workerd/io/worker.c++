@@ -1388,8 +1388,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   } else {
                     limitScope = isolate->getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
                   }
-                  auto& modules = KJ_ASSERT_NONNULL(impl->moduleContext)->getModuleRegistry();
-                  impl->configureDynamicImports(lock, modules);
+                  impl->configureDynamicImports(lock, *jsg::ModuleRegistry::from(lock));
                   isolate->getApi().compileModules(
                       lock, modulesSource, *isolate, kj::mv(artifacts), kj::mv(parentSpan));
                 }
@@ -1545,43 +1544,16 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
   } else {
     limitScope = script.getIsolate().getLimitEnforcer().enterStartupJs(js, limitErrorOrTime);
   }
-  if (script.getIsolate().getApi().getFeatureFlags().getNewModuleRegistry()) {
-    KJ_DEFER({
-      if (limitErrorOrTime.is<kj::Exception>()) {
-        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-        // thrown an exception.
-        throw jsg::JsExceptionThrown();
-      }
-    });
-    // This intentionally does not return the kj::Maybe directly from the
-    // call to tryResolveModuleNamespace because I intend to add some additional
-    // logging/metrics logic around this call.
-    KJ_IF_SOME(ns,
-        jsg::modules::ModuleRegistry::tryResolveModuleNamespace(js, mainModule.toString(false))) {
-      return ns;
+
+  KJ_DEFER({
+    if (limitErrorOrTime.is<kj::Exception>()) {
+      // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
+      // thrown an exception.
+      throw jsg::JsExceptionThrown();
     }
-  } else {
-    auto& registry = jsContext->getModuleRegistry();
-    KJ_IF_SOME(entry, registry.resolve(js, mainModule, kj::none)) {
-      JSG_REQUIRE(entry.maybeSynthetic == kj::none, TypeError, "Main module must be an ES module.");
-      auto module = entry.module.getHandle(js);
-      jsg::instantiateModule(js, module);
-
-      if (limitErrorOrTime.is<kj::Exception>()) {
-        // If we hit the limit in PerformMicrotaskCheckpoint() we may not have actually
-        // thrown an exception.
-        throw jsg::JsExceptionThrown();
-      }
-
-      auto ns = module->GetModuleNamespace().As<v8::Object>();
-      // The V8 module API is weird. Only the first call to Evaluate() will evaluate the
-      // module, even if subsequent calls pass a different context. Verify that we didn't
-      // switch contexts.
-      KJ_ASSERT(jsg::check(ns->GetCreationContext(js.v8Isolate)) == js.v8Context(),
-          "module was originally instantiated in a different context");
-
-      return jsg::JsObject(ns);
-    }
+  });
+  KJ_IF_SOME(resolved, js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES)) {
+    return resolved;
   }
   return kj::none;
 }

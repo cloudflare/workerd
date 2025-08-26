@@ -13,6 +13,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
+#include <workerd/util/strong-bool.h>
 
 #include <v8-external-memory-accounter.h>
 #include <v8-forward.h>
@@ -764,6 +765,7 @@ enum SetDataIndex {
 // These types can be used in C++ to represent various JavaScript idioms / Web IDL types.
 
 class Lock;
+WD_STRONG_BOOL(RequireEsm);
 
 // Arbitrary V8 data, wrapped for storage from C++. You can't do much with it, so instead you
 // should probably use V8Ref<T>, a version of this that's strongly typed.
@@ -1703,14 +1705,10 @@ class ContextGlobal {
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
-  ModuleRegistry& getModuleRegistry() {
-    return *moduleRegistry;
-  }
-
  private:
-  kj::Own<ModuleRegistry> moduleRegistry;
+  kj::Own<void> moduleRegistry;
 
-  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
+  void setModuleRegistry(kj::Own<void> registry) {
     moduleRegistry = kj::mv(registry);
   }
 
@@ -1727,12 +1725,9 @@ class JsContext {
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle,
-      Ref<T> object,
-      kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(v8::Isolate::GetCurrent(), handle),
-        object(kj::mv(object)),
-        maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
+        object(kj::mv(object)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1752,7 +1747,6 @@ class JsContext {
  private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
-  kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
 };
 
 class BufferSource;
@@ -2820,7 +2814,8 @@ class Lock {
 
   // Resolve a module namespace from the given specifier.
   // This variation includes modules from the worker bundle.
-  kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
+  kj::Maybe<JsObject> resolveModule(
+      kj::StringPtr specifier, RequireEsm requireEsm = RequireEsm::NO);
 
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
