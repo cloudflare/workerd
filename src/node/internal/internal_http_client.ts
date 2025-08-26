@@ -293,20 +293,19 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     const headers: [string, string][] = [];
-    for (const [name, value] of Object.entries(this[kOutHeaders] ?? {})) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (value) {
-        if (Array.isArray(value)) {
-          if (this.joinDuplicateHeaders) {
-            headers.push([name, value.join(', ')]);
-          } else {
-            for (const item of value) {
-              headers.push([name, item as string]);
-            }
-          }
+    for (const [_lowerCaseName, [originalName, value]] of Object.entries(
+      this[kOutHeaders] ?? {}
+    )) {
+      if (Array.isArray(value)) {
+        if (this.joinDuplicateHeaders) {
+          headers.push([originalName, value.join(', ')]);
         } else {
-          headers.push([name, value]);
+          for (const item of value) {
+            headers.push([originalName, item]);
+          }
         }
+      } else {
+        headers.push([originalName, value]);
       }
     }
 

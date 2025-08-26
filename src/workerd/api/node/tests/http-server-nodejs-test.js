@@ -1177,6 +1177,39 @@ export const testIncomingMessageSocket = {
   },
 };
 
+// Test for header duplication bug where headers like "ttl: 60" become "ttl: TTL, 60"
+export const testWebPushHeaderDuplication = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(req.headers).filter(
+              ([key, _]) =>
+                key === 'ttl' || key === 'urgency' || key === 'topic'
+            )
+          )
+        )
+      );
+    });
+
+    server.listen(8080);
+
+    const res = await env.SERVICE.fetch('https://google.com', {
+      headers: {
+        TTL: '60',
+        Urgency: 'high',
+        Topic: 'test',
+      },
+    });
+    const body = await res.json();
+    strictEqual(body.ttl, '60');
+    strictEqual(body.urgency, 'high');
+    strictEqual(body.topic, 'test');
+  },
+};
+
 let scheduledCallCount = 0;
 
 export default {
