@@ -5936,5 +5936,7 @@ export const testEndOfLife = {
     assert.strictEqual(typeof util.isString, 'function');
     assert.strictEqual(typeof util.isSymbol, 'function');
     assert.strictEqual(typeof util.isUndefined, 'function');
+
+    assert.strictEqual(util.isBuffer(true), false);
   },
 };
