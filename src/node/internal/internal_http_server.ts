@@ -718,8 +718,10 @@ export function storeHTTPOptions(
 
   const insecureHTTPParser = options.insecureHTTPParser;
   if (insecureHTTPParser !== undefined) {
+    // If enabled it will use a HTTP parser with leniency flags enabled.
+    // Since our implementation does not use any http parser, and uses "fetch" API,
+    // it doesn't make sense to support this option.
     validateBoolean(insecureHTTPParser, 'options.insecureHTTPParser');
-    throw new ERR_OPTION_NOT_IMPLEMENTED('insecureHTTPParser');
   }
 
   const requestTimeout = options.requestTimeout;

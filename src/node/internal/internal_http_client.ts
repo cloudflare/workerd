@@ -187,7 +187,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       // Since our implementation does not use any http parser, and uses "fetch" API,
       // it doesn't make sense to support this option.
       validateBoolean(options.insecureHTTPParser, 'options.insecureHTTPParser');
-      throw new ERR_OPTION_NOT_IMPLEMENTED('options.insecureHTTPParser');
     }
 
     if (options.createConnection !== undefined) {
