@@ -128,8 +128,8 @@ class FastMethodContext: public jsg::Object, public jsg::ContextGlobal {
     }
   }
 
-  jsg::Ref<StaticMethodContainer> newContainer() {
-    return jsg::alloc<StaticMethodContainer>();
+  jsg::Ref<StaticMethodContainer> newContainer(jsg::Lock& js) {
+    return js.alloc<StaticMethodContainer>();
   }
 
   JSG_RESOURCE_TYPE(FastMethodContext) {

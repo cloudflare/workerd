@@ -43,12 +43,12 @@ MessagePort::MessagePort()
 
 void MessagePort::dispatchMessage(jsg::Lock& js, const jsg::JsValue& value) {
   js.tryCatch([&] {
-    auto message = jsg::alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
+    auto message = js.alloc<MessageEvent>(js, kj::str("message"), value, kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
   }, [&](jsg::Value exception) {
     // There was an error dispatching the message event.
     // We will dispatch a messageerror event instead.
-    auto message = jsg::alloc<MessageEvent>(
+    auto message = js.alloc<MessageEvent>(
         js, kj::str("message"), jsg::JsValue(exception.getHandle(js)), kj::String(), JSG_THIS);
     dispatchEventImpl(js, kj::mv(message));
     // Now, if this dispatchEventImpl throws, we just blow up. Don't try to catch it.
@@ -190,11 +190,11 @@ void MessagePort::setOnMessage(jsg::Lock& js, jsg::JsValue value) {
   }
 }
 
-jsg::Ref<MessageChannel> MessageChannel::constructor() {
-  auto port1 = jsg::alloc<MessagePort>();
-  auto port2 = jsg::alloc<MessagePort>();
+jsg::Ref<MessageChannel> MessageChannel::constructor(jsg::Lock& js) {
+  auto port1 = js.alloc<MessagePort>();
+  auto port2 = js.alloc<MessagePort>();
   MessagePort::entangle(*port1, *port2);
-  return jsg::alloc<MessageChannel>(kj::mv(port1), kj::mv(port2));
+  return js.alloc<MessageChannel>(kj::mv(port1), kj::mv(port2));
 }
 
 }  // namespace workerd::api

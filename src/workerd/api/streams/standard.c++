@@ -3447,7 +3447,7 @@ void WritableStreamJsController::setup(jsg::Lock& js,
   // because their lifetimes are identical and memory accounting itself has a memory overhead.
   state = js.allocAccounted<WritableStreamDefaultController>(
       sizeof(WritableStreamDefaultController) + sizeof(AbortSignal), js, KJ_ASSERT_NONNULL(owner),
-      jsg::alloc<AbortSignal>());
+      js.alloc<AbortSignal>());
   state.get<Controller>()->setup(js, kj::mv(underlyingSink), kj::mv(queuingStrategy));
 }
 

@@ -150,7 +150,7 @@ class MessageChannel final: public jsg::Object {
       : port1(kj::mv(port1)),
         port2(kj::mv(port2)) {}
 
-  static jsg::Ref<MessageChannel> constructor();
+  static jsg::Ref<MessageChannel> constructor(jsg::Lock& js);
 
   jsg::Ref<MessagePort> getPort1() {
     return port1.addRef();
