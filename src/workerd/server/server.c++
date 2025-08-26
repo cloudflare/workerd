@@ -1587,9 +1587,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
         auto time = IoContext::current().now();
         t->recordTimestamp(time);
       }
-      if (fetchStatus != 0) {
-        t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
-      }
       t->setOutcome(
           outcome, 0 * kj::MILLISECONDS /* cpu time */, 0 * kj::MILLISECONDS /* wall time */);
     }
