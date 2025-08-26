@@ -8,35 +8,55 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("base64 encode") {
-  auto b = Base64Module();
+  auto t = TestFixture();
 
-  KJ_ASSERT(b.encodeArray(kj::heapArray("A"_kjb)) == "QQ=="_kjb);
+  t.runInIoContext([](const workerd::TestFixture::Environment& env) {
+    auto b = Base64Module();
+    auto backing = jsg::BackingStore::alloc(env.js, 1);
+    backing.asArrayPtr().begin()[0] = 'A';
+    auto ret = b.encodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+    KJ_ASSERT(ret.asArrayPtr() == "QQ=="_kjb);
+  });
 }
 
 KJ_TEST("base64 valid decode") {
-  auto b = Base64Module();
+  auto t = TestFixture();
 
-  KJ_ASSERT(b.decodeArray(kj::heapArray("QQ=="_kjb)) == "A"_kjb);
+  t.runInIoContext([](const workerd::TestFixture::Environment& env) {
+    auto b = Base64Module();
+    auto backing = jsg::BackingStore::alloc(env.js, 4);
+    backing.asArrayPtr().copyFrom("QQ=="_kjb);
+    auto ret = b.decodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+    KJ_ASSERT(ret.asArrayPtr() == "A"_kjb);
+  });
 }
 
 KJ_TEST("base64 invalid decode") {
-  auto b = Base64Module();
+  auto t = TestFixture();
 
-  try {
-    b.decodeArray(kj::heapArray("INVALID BASE64"_kjb));
-    KJ_UNREACHABLE;
-  } catch (kj::Exception& e) {
-    KJ_EXPECT(e.getDescription().contains("jsg.DOMException(SyntaxError): Invalid base64"_kj));
-  }
+  t.runInIoContext([](const workerd::TestFixture::Environment& env) {
+    auto b = Base64Module();
+    auto backing = jsg::BackingStore::alloc(env.js, 14);
+    auto ptr = backing.asArrayPtr();
+    ptr.copyFrom("INVALID BASE64"_kjb);
+    try {
+      auto ret = b.decodeArray(env.js, jsg::BufferSource(env.js, kj::mv(backing)));
+      KJ_UNREACHABLE;
+    } catch (kj::Exception& e) {
+      KJ_EXPECT(e.getDescription().contains("jsg.DOMException(SyntaxError): Invalid base64"_kj));
+    }
+  });
 }
 
 KJ_TEST("base64 decode as string") {
   auto t = TestFixture();
 
-  t.runInIoContext([](const workerd::TestFixture::Environment& env) -> kj::Promise<void> {
+  t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
-    KJ_ASSERT(b.encodeArrayToString(env.lock, kj::heapArray("A"_kjb)) == env.js.str("QQ=="_kj));
-    return kj::READY_NOW;
+    auto backing = jsg::BackingStore::alloc(env.js, 1);
+    backing.asArrayPtr().begin()[0] = 'A';
+    KJ_ASSERT(b.encodeArrayToString(env.lock, jsg::BufferSource(env.js, kj::mv(backing))) ==
+        env.js.str("QQ=="_kj));
   });
 }
 }  // namespace
