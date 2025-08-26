@@ -131,6 +131,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
         KJ_UNREACHABLE;
       }
     });
+    KJ_IF_SOME(t, context.getWorkerTracer()) {
+      t.setReturn(context.now());
+    }
   } catch (kj::Exception& e) {
     if (auto desc = e.getDescription();
         !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
