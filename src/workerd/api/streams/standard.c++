@@ -3967,7 +3967,7 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("writeAlgorithm", algorithms.write);
   tracker.trackField("sizeAlgorithm", algorithms.size);
 
-  writeRequests.forEach([&](auto& req) { tracker.trackField("writeRequest", req); });
+  writeRequests.forEach([&](auto& req) { tracker.trackField("pendingWrite", req); });
 
   tracker.trackField("inFlightWrite", inFlightWrite);
   tracker.trackField("inFlightClose", inFlightClose);
