@@ -8,9 +8,8 @@
 #include "queue.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/checked-queue.h>
 #include <workerd/util/weak-refs.h>
-
-#include <list>
 
 namespace workerd::api {
 
@@ -373,9 +372,8 @@ class WritableImpl {
   bool backpressure = false;
   size_t highWaterMark = 1;
 
-  // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
-  // is more memory efficient than a std::deque, for example.
-  std::list<WriteRequest> writeRequests;
+  // `writeRequests` is often going to be empty in common usage patterns.
+  workerd::util::Queue<WriteRequest> writeRequests;
   size_t amountBuffered = 0;
   bool warnAboutExcessiveBackpressure = true;
   size_t excessiveBackpressureWarningCount = 0;

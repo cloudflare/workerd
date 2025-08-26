@@ -141,6 +141,22 @@ class Queue final {
     return count;
   }
 
+  // Applies the callback to each element in the queue.
+  // Returns the number of elements processed.
+  // If the callback returns false, the iteration stops.
+  inline size_t forEach(auto callback) {
+    size_t count = 0;
+    for (auto& item: inner) {
+      count++;
+      if constexpr (std::is_void_v<decltype(callback(item))>) {
+        callback(item);
+      } else {
+        if (!callback(item)) break;
+      }
+    }
+    return count;
+  }
+
   // Checks if the queue is empty.
   inline bool empty() const {
     return inner.empty();

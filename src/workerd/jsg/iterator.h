@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/struct.h>
+#include <workerd/util/checked-queue.h>
 
 #include <concepts>
 #include <list>
@@ -800,7 +801,7 @@ class AsyncIteratorImpl {
   }
 
  private:
-  std::list<Promise<void>> pendingStack;
+  workerd::util::Queue<Promise<void>> pendingStack;
 };
 
 // Provides the base implementation of JSG_ASYNC_ITERATOR types. See the documentation
