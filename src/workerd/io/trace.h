@@ -820,7 +820,8 @@ class Trace final: public kj::Refcounted {
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel);
+      ExecutionModel executionModel,
+      kj::Maybe<kj::String> durableObjectId = kj::none);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -842,6 +843,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::String> entrypoint;
+  kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
   kj::Vector<CompleteSpan> spans;

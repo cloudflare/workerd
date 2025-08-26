@@ -68,7 +68,8 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
+      kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
+      kj::Maybe<kj::String> durableObjectId = kj::none);
 
   // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
   // to the host where tracing was initiated.

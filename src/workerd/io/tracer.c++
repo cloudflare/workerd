@@ -85,10 +85,11 @@ kj::Own<WorkerTracer> PipelineTracer::makeWorkerTracer(PipelineLogLevel pipeline
     kj::Maybe<kj::String> dispatchNamespace,
     kj::Array<kj::String> scriptTags,
     kj::Maybe<kj::String> entrypoint,
-    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter) {
+    kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter,
+    kj::Maybe<kj::String> durableObjectId) {
   auto trace = kj::refcounted<Trace>(kj::mv(stableId), kj::mv(scriptName), kj::mv(scriptVersion),
       kj::mv(dispatchNamespace), kj::mv(scriptId), kj::mv(scriptTags), kj::mv(entrypoint),
-      executionModel);
+      executionModel, kj::mv(durableObjectId));
   traces.add(kj::addRef(*trace));
   return kj::refcounted<WorkerTracer>(
       addRefToThis(), kj::mv(trace), pipelineLogLevel, kj::mv(maybeTailStreamWriter));
