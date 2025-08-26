@@ -39,6 +39,5 @@ const helloWorld :Workerd.Worker = (
     "nodejs_compat",
     "enable_nodejs_process_v2",
     "enable_nodejs_fs_module",
-    "experimental",
   ]
 );
