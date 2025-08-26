@@ -1558,9 +1558,6 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
         auto time = IoContext::current().now();
         t->recordTimestamp(time);
       }
-      if (fetchStatus != 0) {
-        t->setFetchResponseInfo(tracing::FetchResponseInfo(fetchStatus));
-      }
       t->setOutcome(
           outcome, 0 * kj::MILLISECONDS /* cpu time */, 0 * kj::MILLISECONDS /* wall time */);
     }
@@ -1591,8 +1588,18 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     try {
       SimpleResponseObserver responseWrapper(&fetchStatus, response);
       co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
+      KJ_IF_SOME(t, tracer) {
+        if (fetchStatus != 0) {
+          t->setReturn(tracing::FetchResponseInfo(fetchStatus));
+        } else {
+          t->setReturn();
+        }
+      }
     } catch (...) {
       fetchStatus = 500;
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn(tracing::FetchResponseInfo(fetchStatus));
+      }
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
       kj::throwFatalException(kj::mv(exception));
@@ -1605,8 +1612,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).connect(
-          host, headers, connection, response, settings);
+      co_await KJ_ASSERT_NONNULL(inner).connect(host, headers, connection, response, settings);
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn();
+      }
+      co_return;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -1616,7 +1626,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<void> prewarm(kj::StringPtr url) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).prewarm(url);
+      co_await KJ_ASSERT_NONNULL(inner).prewarm(url);
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn();
+      }
+      co_return;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -1626,7 +1640,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      auto result = co_await KJ_ASSERT_NONNULL(inner).runScheduled(scheduledTime, cron);
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn();
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -1636,7 +1654,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      auto result = co_await KJ_ASSERT_NONNULL(inner).runAlarm(scheduledTime, retryCount);
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn();
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -1646,6 +1668,9 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<bool> test() override {
     try {
+      // Not adding a return event here – we only provide rudimentary tracing support for test
+      // events (enough so that we can get logs/spans from them in wd-tests), so this is not needed
+      // in practice.
       co_return co_await KJ_ASSERT_NONNULL(inner).test();
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
@@ -1656,7 +1681,11 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     try {
-      co_return co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      auto result = co_await KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event));
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn();
+      }
+      co_return result;
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
