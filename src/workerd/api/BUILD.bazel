@@ -442,7 +442,10 @@ wd_test(
     size = "large",
     src = "sql-test.wd-test",
     args = ["--experimental"],
-    data = ["sql-test.js"],
+    data = [
+        "sql-test.js",
+        "sql-test-tail.js",
+    ],
 )
 
 wd_test(
