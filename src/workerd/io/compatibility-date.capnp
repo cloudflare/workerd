@@ -648,8 +648,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
-      $compatDisableFlag("no_python_workers_20250116")
-      $impliedByAfterDate(name = "pythonWorkers", date = "2025-09-12")
+      $experimental
       $pythonSnapshotRelease;
 
   requestCfOverridesCacheRules @72 :Bool
@@ -957,6 +956,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonDedicatedSnapshot @110 :Bool
       $compatEnableFlag("python_dedicated_snapshot")
+      $impliedByAfterDate(name = "pythonWorkers20250116", date = "2000-01-01")
       $experimental;
   # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
   # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
