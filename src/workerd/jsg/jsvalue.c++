@@ -4,12 +4,15 @@
 #include "ser.h"
 #include "simdutf.h"
 
+#include <kj-rs/kj-rs.h>
 #include <v8.h>
 
 #include <kj/string-tree.h>
 #include <kj/string.h>
 
 #include <cmath>
+
+using namespace kj_rs;
 
 namespace workerd::jsg {
 

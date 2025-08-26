@@ -212,6 +212,12 @@ namespace workerd::jsg {
     registry.template registerMethod<NAME, decltype(&Self::method), &Self::method>();              \
   } while (false)
 
+#define JSG_RUST_METHOD_NAMED(name, method)                                                        \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerMethod<NAME, decltype(&method), &method>();                          \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
 // JavaScript on the resource type's constructor.
 #define JSG_STATIC_METHOD(name)                                                                    \
