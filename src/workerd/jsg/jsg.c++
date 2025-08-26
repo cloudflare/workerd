@@ -323,7 +323,7 @@ kj::Maybe<JsObject> Lock::resolveInternalModule(kj::StringPtr specifier) {
   return jsg::JsObject(module.getHandle(*this).As<v8::Object>());
 }
 
-kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
+kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier, RequireEsm requireEsm) {
   auto& isolate = IsolateBase::from(v8Isolate);
   if (isolate.isUsingNewModuleRegistry()) {
     return jsg::modules::ModuleRegistry::tryResolveModuleNamespace(
@@ -335,6 +335,9 @@ kj::Maybe<JsObject> Lock::resolveModule(kj::StringPtr specifier) {
   auto spec = kj::Path::parse(specifier);
   auto& info = JSG_REQUIRE_NONNULL(
       moduleRegistry->resolve(*this, spec), Error, kj::str("No such module: ", specifier));
+  if (requireEsm) {
+    JSG_REQUIRE(info.maybeSynthetic == kj::none, TypeError, "Main module must be an ES module.");
+  }
   auto module = info.module.getHandle(*this);
   jsg::instantiateModule(*this, module);
   return JsObject(module->GetModuleNamespace().As<v8::Object>());
