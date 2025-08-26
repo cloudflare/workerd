@@ -89,11 +89,8 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return module.getType() == jsg::ModuleType::INTERNAL;
     }
 
-    // node:fs will be considered experimental until it's completed,
-    // so unless the experimental flag is enabled, don't register them.
-    // TODO(soon): Remove the experimental flag check.
     if (isNodeJsCompatFsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsFsModule() && featureFlags.getWorkerdExperimental();
+      return featureFlags.getEnableNodeJsFsModule();
     }
 
     // We put node:http and node:https modules behind a compat flag
@@ -109,7 +106,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     }
 
     if (isNodeOsModule(module.getName())) {
-      return featureFlags.getEnableNodeJsOsModule() && featureFlags.getWorkerdExperimental();
+      return featureFlags.getEnableNodeJsOsModule();
     }
 
     if (isNodeHttp2Module(module.getName())) {

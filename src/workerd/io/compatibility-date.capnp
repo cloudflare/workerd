@@ -914,20 +914,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsFsModule @105 :Bool
     $compatEnableFlag("enable_nodejs_fs_module")
     $compatDisableFlag("disable_nodejs_fs_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-15");
   # Enables the Node.js fs module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
-  # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
-  # when ready to ship in production.
 
   enableNodeJsOsModule @106 :Bool
     $compatEnableFlag("enable_nodejs_os_module")
     $compatDisableFlag("disable_nodejs_os_module")
-    $experimental;
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-15");
   # Enables the Node.js os module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
-  # TODO(soon). This flag is experimental. Add an impliedbByAfter attribute
-  # when ready to ship in production.
 
   pythonWorkersForceNewVendorPath @107 :Bool
       $compatEnableFlag("python_workers_force_new_vendor_path")
