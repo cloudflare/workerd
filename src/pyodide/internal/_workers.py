@@ -172,6 +172,51 @@ class FetchResponse(pyodide.http.FetchResponse):
         self._raise_if_failed()
         return Blob(await self.js_object.blob())
 
+    """
+    Static methods defined below. The `error` static method is not implemented as
+    it is not useful for the Workers use case.
+    """
+
+    @staticmethod
+    def redirect(url: str, status: HTTPStatus | int = HTTPStatus.FOUND):
+        code = status.value if isinstance(status, HTTPStatus) else status
+        try:
+            return js.Response.redirect(url, code)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+    @staticmethod
+    def from_json(
+        data: str | dict[str, Any] | list[Any] | JsProxy,
+        status: HTTPStatus | int = HTTPStatus.OK,
+        status_text="",
+        headers: Headers = None,
+    ):
+        options = Response._create_options(status, status_text, headers)
+        js_resp = None
+        try:
+            if isinstance(data, JsProxy):
+                js_resp = js.Response.json(data, **options)
+            else:
+                if "headers" not in options:
+                    options["headers"] = _to_js_headers(
+                        {"content-type": "application/json"}
+                    )
+                elif not options["headers"].has("content-type"):
+                    options["headers"].set("content-type", "application/json")
+                js_resp = js.Response.new(json.dumps(data), **options)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+        return Response(js_resp)
+
+    def json(self, *args: Never, **kwargs: Never):
+        if isinstance(self, Response):
+            return super().json()
+        # For compatibility, allow static use of Response.json() to mean Response.from_json().
+        data = self
+        return Response.from_json(data, *args, **kwargs)
+
 
 if pyodide_version == "0.26.0a2":
 
@@ -328,51 +373,6 @@ class Response(FetchResponse):
         if web_socket:
             options["webSocket"] = web_socket
         return options
-
-    """
-    Static methods defined below. The `error` static method is not implemented as
-    it is not useful for the Workers use case.
-    """
-
-    @staticmethod
-    def redirect(url: str, status: HTTPStatus | int = HTTPStatus.FOUND):
-        code = status.value if isinstance(status, HTTPStatus) else status
-        try:
-            return js.Response.redirect(url, code)
-        except JsException as exc:
-            raise _to_python_exception(exc) from exc
-
-    @staticmethod
-    def from_json(
-        data: str | dict[str, Any] | list[Any] | JsProxy,
-        status: HTTPStatus | int = HTTPStatus.OK,
-        status_text="",
-        headers: Headers = None,
-    ):
-        options = Response._create_options(status, status_text, headers)
-        js_resp = None
-        try:
-            if isinstance(data, JsProxy):
-                js_resp = js.Response.json(data, **options)
-            else:
-                if "headers" not in options:
-                    options["headers"] = _to_js_headers(
-                        {"content-type": "application/json"}
-                    )
-                elif not options["headers"].has("content-type"):
-                    options["headers"].set("content-type", "application/json")
-                js_resp = js.Response.new(json.dumps(data), **options)
-        except JsException as exc:
-            raise _to_python_exception(exc) from exc
-
-        return Response(js_resp)
-
-    def json(self, *args: Never, **kwargs: Never):
-        if isinstance(self, Response):
-            return super().json()
-        # For compatibility, allow static use of Response.json() to mean Response.from_json().
-        data = self
-        return Response.from_json(data, *args, **kwargs)
 
 
 FormDataValue = "str | js.Blob | Blob"
