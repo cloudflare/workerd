@@ -28,8 +28,8 @@ const mainWorker :Workerd.Worker = (
   compatibilityFlags = ["python_workers"],
   bindings = [
     (
-      name = "secret",
-      text = "thisisasecret"
+      name = "MY_ENV",
+      text = "some_value"
     ),
   ],
   # Learn more about compatibility dates at:

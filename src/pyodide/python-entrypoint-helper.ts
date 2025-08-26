@@ -262,7 +262,11 @@ function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
 }
 
 function makeHandler(pyHandlerName: string): Handler {
-  if (pyHandlerName === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+  if (
+    pyHandlerName === 'test' &&
+    SHOULD_SNAPSHOT_TO_DISK &&
+    legacyGlobalHandlers
+  ) {
     return async function () {
       await getPyodide();
       console.log('Stored snapshot to disk; quitting without running test');
