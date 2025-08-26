@@ -13,13 +13,11 @@ namespace {
 
 // Approximately how much external data we allow in a trace before we start ignoring requests.  We
 // want this number to be big enough to be useful for tracing, but small enough to make it hard to
-// DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request.
+// DoS the C++ heap -- keeping in mind we can record a trace per handler run during a request. For
+// streaming tail worker, this is the maximum size per tail event.
+// TODO(streaming-tail): Add a clear indicator for events being truncated based on MAX_TRACE_BYTES
+// so that developers can understand why this happens.
 static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
-// Limit spans to at most 512, it could be difficult to fit e.g. 1024 spans within MAX_TRACE_BYTES
-// unless most of the included spans do not include tags. If use cases arise where this amount is
-// insufficient, merge smaller spans together or drop smaller spans.
-static constexpr size_t MAX_USER_SPANS = 512;
-
 }  // namespace
 
 namespace tracing {
@@ -154,68 +152,59 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     LogLevel logLevel,
     kj::String message) {
-  if (trace->exceededLogLimit) {
-    return;
-  }
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
-  size_t newSize = trace->bytesUsed + sizeof(tracing::Log) + message.size();
-  if (newSize > MAX_TRACE_BYTES) {
-    trace->exceededLogLimit = true;
-    trace->truncated = true;
-    // We use a JSON encoded array/string to match other console.log() recordings:
-    trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
-    return;
-  }
-  trace->bytesUsed = newSize;
+
   // TODO(streaming-tail): Here we add the log to the trace object and the tail stream writer, if
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))});
-  }
-  trace->logs.add(timestamp, logLevel, kj::mv(message));
-}
-
-void WorkerTracer::addSpan(CompleteSpan&& span) {
-  // This is where we'll actually encode the span.
-  // Drop any spans beyond MAX_USER_SPANS.
-  if (trace->spans.size() >= MAX_USER_SPANS) {
-    return;
+    // If message is too big on its own, truncate it.
+    writer->report(context,
+        {(tracing::Log(timestamp, logLevel,
+            kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES)))))});
   }
 
   if (trace->exceededLogLimit) {
     return;
   }
+
+  size_t messageSize = sizeof(tracing::Log) + message.size();
+  if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
+    // We use a JSON encoded array/string to match other console.log() recordings:
+    trace->logs.add(timestamp, LogLevel::WARN, kj::str(logSizeExceeded));
+    trace->exceededLogLimit = true;
+    trace->truncated = true;
+  } else {
+    trace->bytesUsed += messageSize;
+    trace->logs.add(timestamp, logLevel, kj::mv(message));
+  }
+}
+
+void WorkerTracer::addSpan(CompleteSpan&& span) {
+  // This is where we'll actually encode the span.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
 
   // 48B for traceID, spanID, parentSpanID, start & end time.
   const int fixedSpanOverhead = 48;
-  size_t newSize = trace->bytesUsed + fixedSpanOverhead + span.operationName.size();
+  size_t messageSize = fixedSpanOverhead + span.operationName.size();
   for (const Span::TagMap::Entry& tag: span.tags) {
-    newSize += tag.key.size();
+    messageSize += tag.key.size();
     KJ_SWITCH_ONEOF(tag.value) {
       KJ_CASE_ONEOF(str, kj::String) {
-        newSize += str.size();
+        messageSize += str.size();
       }
       KJ_CASE_ONEOF(val, bool) {
-        newSize++;
+        messageSize++;
       }
       // int64_t and double
       KJ_CASE_ONEOF_DEFAULT {
-        newSize += sizeof(int64_t);
+        messageSize += sizeof(int64_t);
       }
     }
-  }
-
-  if (newSize > MAX_TRACE_BYTES) {
-    trace->exceededLogLimit = true;
-    trace->truncated = true;
-    trace->logs.add(span.endTime, LogLevel::WARN, kj::str(logSizeExceeded));
-    return;
   }
 
   // Span events are transmitted together for now.
@@ -236,7 +225,8 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     // TODO(o11y): Actually report the spanOpen event at span creation time
     writer->report(
         context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)), span.startTime);
-    if (span.tags.size()) {
+    // If a span manages to exceed the size limit, truncate it by not providing span attributes.
+    if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
@@ -245,8 +235,14 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     writer->report(context, tracing::SpanClose(), span.endTime);
   }
 
-  trace->bytesUsed = newSize;
-  trace->spans.add(kj::mv(span));
+  // Note: spans will not be shipped to the production version of the legacy tail worker, so we
+  // don't need an exceededSpanLimit variable for it.
+  if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
+    trace->truncated = true;
+  } else {
+    trace->bytesUsed += messageSize;
+    trace->spans.add(kj::mv(span));
+  }
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
@@ -254,61 +250,77 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     kj::String name,
     kj::String message,
     kj::Maybe<kj::String> stack) {
-  if (trace->exceededExceptionLimit) {
-    return;
-  }
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
-  size_t newSize = trace->bytesUsed + sizeof(tracing::Exception) + name.size() + message.size();
+
+  size_t messageSize = sizeof(tracing::Exception) + name.size() + message.size();
   KJ_IF_SOME(s, stack) {
-    newSize += s.size();
+    messageSize += s.size();
   }
-  if (newSize > MAX_TRACE_BYTES) {
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto maybeTruncatedName = name.first(kj::min(name.size(), MAX_TRACE_BYTES));
+    auto maybeTruncatedMessage =
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedName.size()));
+    kj::Maybe<kj::String> maybeTruncatedStack;
+    KJ_IF_SOME(s, stack) {
+      maybeTruncatedStack = kj::heapString(s.first(kj::min(
+          s.size(), MAX_TRACE_BYTES - maybeTruncatedName.size() - maybeTruncatedMessage.size())));
+    }
+    writer->report(context,
+        {tracing::Exception(timestamp, kj::str(maybeTruncatedName), kj::str(maybeTruncatedMessage),
+            kj::mv(maybeTruncatedStack))});
+  }
+
+  if (trace->exceededExceptionLimit) {
+    return;
+  }
+
+  if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     trace->exceededExceptionLimit = true;
     trace->truncated = true;
     trace->exceptions.add(timestamp, kj::str("Error"),
         kj::str("Trace resource limit exceeded; subsequent exceptions not recorded."), kj::none);
-    return;
+  } else {
+    trace->bytesUsed += messageSize;
+    trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
   }
-  trace->bytesUsed = newSize;
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context,
-        {tracing::Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack))});
-  }
-  trace->exceptions.add(timestamp, kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
 void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::String channel,
     kj::Array<kj::byte> message) {
-  if (trace->exceededDiagnosticChannelEventLimit) {
-    return;
-  }
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
-  size_t newSize =
-      trace->bytesUsed + sizeof(tracing::DiagnosticChannelEvent) + channel.size() + message.size();
-  if (newSize > MAX_TRACE_BYTES) {
+
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto maybeTruncatedChannel = channel.first(kj::min(channel.size(), MAX_TRACE_BYTES));
+    auto maybeTruncatedMessage =
+        message.first(kj::min(message.size(), MAX_TRACE_BYTES - maybeTruncatedChannel.size()));
+    writer->report(context,
+        {tracing::DiagnosticChannelEvent(timestamp, kj::str(maybeTruncatedChannel),
+            kj::heapArray<kj::byte>(maybeTruncatedMessage))});
+  }
+
+  if (trace->exceededDiagnosticChannelEventLimit) {
+    return;
+  }
+
+  size_t messageSize = sizeof(tracing::DiagnosticChannelEvent) + channel.size() + message.size();
+  if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
     trace->exceededDiagnosticChannelEventLimit = true;
     trace->truncated = true;
     trace->diagnosticChannelEvents.add(
         timestamp, kj::str("workerd.LimitExceeded"), kj::Array<kj::byte>());
-    return;
+  } else {
+    trace->bytesUsed += messageSize;
+    trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
   }
-  trace->bytesUsed = newSize;
-
-  KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    writer->report(context,
-        {tracing::DiagnosticChannelEvent(
-            timestamp, kj::str(channel), kj::heapArray<kj::byte>(message))});
-  }
-  trace->diagnosticChannelEvents.add(timestamp, kj::mv(channel), kj::mv(message));
 }
 
 void WorkerTracer::setEventInfo(
@@ -328,7 +340,6 @@ void WorkerTracer::setEventInfo(
   this->topLevelInvocationSpanContext = context.clone();
 
   size_t eventSize = 0;
-  bool truncated = false;
   KJ_SWITCH_ONEOF(info) {
     KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
       eventSize += fetch.url.size();
@@ -336,16 +347,9 @@ void WorkerTracer::setEventInfo(
         eventSize += header.name.size() + header.value.size();
       }
       eventSize += fetch.cfJson.size();
-      if (trace->bytesUsed + eventSize > MAX_TRACE_BYTES) {
-        trace->truncated = true;
-        truncated = true;
-        trace->logs.add(timestamp, LogLevel::WARN,
-            kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
-        trace->eventInfo = tracing::FetchEventInfo(fetch.method, {}, {}, {});
-        // Limit STW onset to MAX_TRACE_BYTES, beyond that dispatch a truncated event too.
-        if (eventSize > MAX_TRACE_BYTES) {
-          info = tracing::FetchEventInfo(fetch.method, {}, {}, {});
-        }
+      // Limit STW onset to MAX_TRACE_BYTES, beyond that dispatch a truncated event too.
+      if (eventSize > MAX_TRACE_BYTES) {
+        info = tracing::FetchEventInfo(fetch.method, {}, {}, {});
       }
     }
     KJ_CASE_ONEOF_DEFAULT {}
@@ -370,7 +374,14 @@ void WorkerTracer::setEventInfo(
     writer->report(context, tracing::Onset(cloneEventInfo(info), kj::mv(workerInfo), kj::none));
   }
 
-  if (!truncated) {
+  // truncation should only be needed for fetch events, since we only set eventSize there.
+  if (trace->bytesUsed + eventSize > MAX_TRACE_BYTES && eventSize > 0) {
+    trace->truncated = true;
+    trace->logs.add(timestamp, LogLevel::WARN,
+        kj::str("[\"Trace resource limit exceeded; could not capture event info.\"]"));
+    trace->eventInfo =
+        tracing::FetchEventInfo(info.get<tracing::FetchEventInfo>().method, {}, {}, {});
+  } else {
     trace->bytesUsed += eventSize;
     trace->eventInfo = kj::mv(info);
   }
