@@ -1212,13 +1212,27 @@ void WritableImpl<Self>::advanceQueueIfNeeded(jsg::Lock& js, jsg::Ref<Self> self
         if (!isCloseQueuedOrInFlight() && isWritable()) {
         updateBackpressure(js);
         }
+        if (state.template is<StreamStates::Erroring>() || writeRequests.empty()) {
+        // In this case, we know advanceQueueIfNeeded won't recurse further, so we can
+        // avoid the extra microtask hop.
         advanceQueueIfNeeded(js, kj::mv(self));
+        return js.resolvedPromise();
+        }
+        // Here, however, let's avoid potentially deep recursion by hopping to a new
+        // microtask to continue processing the queue.
+        return js.resolvedPromise().then(
+            js, JSG_VISITABLE_LAMBDA((this, self = kj::mv(self)), (self), (jsg::Lock & js) mutable {
+              if (isWritable() || state.template is<StreamStates::Erroring>()) {
+              advanceQueueIfNeeded(js, kj::mv(self));
+              }
+            }));
       });
 
   auto onFailure = JSG_VISITABLE_LAMBDA(
       (this, self = self.addRef(), size), (self), (jsg::Lock& js, jsg::Value reason) {
         amountBuffered -= size;
         finishInFlightWrite(js, kj::mv(self), reason.getHandle(js));
+        return js.resolvedPromise();
       });
 
   maybeRunAlgorithm(js, algorithms.write, kj::mv(onSuccess), kj::mv(onFailure), value.getHandle(js),
