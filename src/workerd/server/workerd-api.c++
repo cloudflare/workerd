@@ -39,6 +39,7 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
@@ -138,6 +139,8 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
     EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
     EW_PERFORMANCE_ISOLATE_TYPES,
+    EW_PERFORMANCE_ISOLATE_TYPES,
+    EW_TRACING_MODULE_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,

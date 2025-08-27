@@ -6,6 +6,7 @@ import {
   createBase64DecoderTransformStream,
   createBase64EncoderTransformStream,
 } from 'cloudflare-internal:streaming-base64';
+import tracing from 'cloudflare-internal:tracing';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -233,40 +234,53 @@ class ImagesBindingImpl implements ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
-    const body = new StreamableFormData();
+    const span = tracing.startSpan('images_info');
+    try {
+      const body = new StreamableFormData();
 
-    const decodedStream =
-      options?.encoding === 'base64'
-        ? stream.pipeThrough(createBase64DecoderTransformStream())
-        : stream;
+      const decodedStream =
+        options?.encoding === 'base64'
+          ? stream.pipeThrough(createBase64DecoderTransformStream())
+          : stream;
 
-    body.append('image', decodedStream, { type: 'file' });
+      span.setTag('cloudflare.images.info.encoding', options?.encoding);
 
-    const response = await this.#fetcher.fetch(
-      'https://js.images.cloudflare.com/info',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': body.contentType(),
-        },
-        body: body.stream(),
+      body.append('image', decodedStream, { type: 'file' });
+
+      const response = await this.#fetcher.fetch(
+        'https://js.images.cloudflare.com/info',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': body.contentType(),
+          },
+          body: body.stream(),
+        }
+      );
+
+      await throwErrorIfErrorResponse('INFO', response);
+
+      const r = (await response.json()) as RawInfoResponse;
+
+      span.setTag('cloudflare.images.info.format', r.format);
+
+      if ('file_size' in r) {
+        const ret = {
+          fileSize: r.file_size,
+          width: r.width,
+          height: r.height,
+          format: r.format,
+        };
+        span.setTag('cloudflare.images.info.file_size', ret.fileSize);
+        span.setTag('cloudflare.images.info.width', ret.width);
+        span.setTag('cloudflare.images.info.height', ret.height);
+        return ret;
       }
-    );
 
-    await throwErrorIfErrorResponse('INFO', response);
-
-    const r = (await response.json()) as RawInfoResponse;
-
-    if ('file_size' in r) {
-      return {
-        fileSize: r.file_size,
-        width: r.width,
-        height: r.height,
-        format: r.format,
-      };
+      return r;
+    } finally {
+      span.end();
     }
-
-    return r;
   }
 
   input(
