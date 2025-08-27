@@ -2189,7 +2189,8 @@ class JsMessage;
   V(Map)                                                                                           \
   V(Set)                                                                                           \
   V(Promise)                                                                                       \
-  V(Proxy)
+  V(Proxy)                                                                                         \
+  V(Function)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
