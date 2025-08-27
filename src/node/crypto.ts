@@ -543,7 +543,7 @@ export let createDecipher: (() => void) | undefined = undefined;
 export let Cipher: (() => void) | undefined = undefined;
 export let Decipher: (() => void) | undefined = undefined;
 
-if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol) {
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v22) {
   createCipher = (): void => {
     throw new ERR_METHOD_NOT_IMPLEMENTED('createCipher');
   };

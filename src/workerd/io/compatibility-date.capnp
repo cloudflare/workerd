@@ -1025,4 +1025,20 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # a temporary error on email delivery.
   # Note that by enabling this, user-provided Message-IDs are stripped and
   # Email Workers will generate and use its own.
+
+  removeNodejsCompatEOLv22 @117 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v22")
+      $compatDisableFlag("add_nodejs_compat_eol_v22")
+      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2027-04-30");
+
+  removeNodejsCompatEOLv23 @118 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v23")
+      $compatDisableFlag("add_nodejs_compat_eol_v23")
+      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2025-09-01");
+  # Went EOL on 2025-06-01
+
+  removeNodejsCompatEOLv24 @119 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v24")
+      $compatDisableFlag("add_nodejs_compat_eol_v24")
+      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2028-04-30");
 }
