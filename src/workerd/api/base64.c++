@@ -26,7 +26,7 @@ jsg::BufferSource Base64Module::encodeArray(jsg::Lock& js, jsg::BufferSource inp
   auto out_size = simdutf::binary_to_base64(input.asArrayPtr().asChars().begin(), input.size(),
       buf.asArrayPtr().asChars().begin(), simdutf::base64_default);
   KJ_ASSERT(out_size <= size);
-  buf.trim(size - out_size);
+  buf.limit(out_size);
   return jsg::BufferSource(js, kj::mv(buf));
 }
 
