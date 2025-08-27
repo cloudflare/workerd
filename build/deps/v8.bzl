@@ -62,7 +62,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "4c8cc4b365a505ce35be1e0bd488476c5f79805d",
+        commit = "1b2e3e8a421efae36141a7b932b41e315b089af8",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
