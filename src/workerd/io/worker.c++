@@ -1552,10 +1552,7 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
       throw jsg::JsExceptionThrown();
     }
   });
-  KJ_IF_SOME(resolved, js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES)) {
-    return resolved;
-  }
-  return kj::none;
+  return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
 }
 }  // anonymous namespace
 
