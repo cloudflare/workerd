@@ -44,9 +44,11 @@ struct reprl_context* reprl_create_context();
 /// @param capture_stderr Whether this REPRL context should capture the child's
 /// stderr
 /// @return zero in case of no errors, otherwise a negative value
-int reprl_initialize_context(struct reprl_context* ctx, const char** argv,
-                             const char** envp, int capture_stdout,
-                             int capture_stderr);
+int reprl_initialize_context(struct reprl_context* ctx,
+    const char** argv,
+    const char** envp,
+    int capture_stdout,
+    int capture_stderr);
 
 /// Destroys a REPRL context, freeing all resources held by it.
 ///
@@ -67,9 +69,12 @@ void reprl_destroy_context(struct reprl_context* ctx);
 /// target
 /// @return A REPRL exit status (see below) or a negative number in case of an
 /// error
-int reprl_execute(struct reprl_context* ctx, const char* script,
-                  uint64_t script_size, uint64_t timeout,
-                  uint64_t* execution_time, int fresh_instance);
+int reprl_execute(struct reprl_context* ctx,
+    const char* script,
+    uint64_t script_size,
+    uint64_t timeout,
+    uint64_t* execution_time,
+    int fresh_instance);
 
 /// Returns true if the execution terminated due to a signal.
 ///
@@ -78,10 +83,14 @@ int reprl_execute(struct reprl_context* ctx, const char* script,
 ///     [ 00000000 | did_timeout | exit_code | terminating_signal ]
 /// Only one of did_timeout, exit_code, or terminating_signal may be set at one
 /// time.
-static inline int RIFSIGNALED(int status) { return (status & 0xff) != 0; }
+static inline int RIFSIGNALED(int status) {
+  return (status & 0xff) != 0;
+}
 
 /// Returns true if the execution terminated due to a timeout.
-static inline int RIFTIMEDOUT(int status) { return (status & 0xff0000) != 0; }
+static inline int RIFTIMEDOUT(int status) {
+  return (status & 0xff0000) != 0;
+}
 
 /// Returns true if the execution finished normally.
 static inline int RIFEXITED(int status) {
@@ -89,10 +98,14 @@ static inline int RIFEXITED(int status) {
 }
 
 /// Returns the terminating signal in case RIFSIGNALED is true.
-static inline int RTERMSIG(int status) { return status & 0xff; }
+static inline int RTERMSIG(int status) {
+  return status & 0xff;
+}
 
 /// Returns the exit status in case RIFEXITED is true.
-static inline int REXITSTATUS(int status) { return (status >> 8) & 0xff; }
+static inline int REXITSTATUS(int status) {
+  return (status >> 8) & 0xff;
+}
 
 /// Returns the stdout data of the last successful execution if the context is
 /// capturing stdout, otherwise an empty string. The output is limited to
