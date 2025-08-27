@@ -2,6 +2,8 @@ from asyncio import Event, Future, Queue, create_task, ensure_future, sleep
 from contextlib import contextmanager
 from inspect import isawaitable
 
+from workers import Request
+
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
 
@@ -34,7 +36,11 @@ def request_to_scope(req, env, ws=False):
     # async def example(request: Request):
     #     request.headers.get("content-type")
     # - this will error if header is not "bytes" as in ASGI spec.
-    headers = [(k.lower().encode(), v.encode()) for k, v in req.headers]
+
+    # Support both JS and Python http.client.HTTPMessage headers.
+    req_headers = req.headers.items() if isinstance(req, Request) else req.headers
+
+    headers = [(k.lower().encode(), v.encode()) for k, v in req_headers]
     url = URL.new(req.url)
     assert url.protocol[-1] == ":"
     scheme = url.protocol[:-1]

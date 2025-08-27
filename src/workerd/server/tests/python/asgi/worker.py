@@ -1,3 +1,6 @@
+import js
+from workers import Request
+
 from pyodide.ffi import to_js
 
 
@@ -48,9 +51,24 @@ class Server:
             )
 
 
+example_hdr = {"Header1": "Value1", "Header2": "Value2"}
+
+
 async def on_fetch(request, env):
     import asgi
 
+    # Verify that `asgi` can handle JS-style headers and Python-style headers:
+    js_request = js.Request.new("http://example.com/", headers=to_js(example_hdr))
+    py_request = Request("http://example.com/", headers=example_hdr)
+    js_scope = asgi.request_to_scope(js_request, env)
+    py_scope = asgi.request_to_scope(py_request, env)
+    assert (
+        js_scope["headers"]
+        == py_scope["headers"]
+        == [(k.lower().encode(), v.encode()) for k, v in example_hdr.items()]
+    )
+
+    # Standard asgi.fetch test path.
     return await asgi.fetch(app, request, env)
 
 
@@ -58,7 +76,6 @@ app = Server()
 
 
 async def header_test(env):
-    example_hdr = {"Header1": "Value1", "Header2": "Value2"}
     response = await env.SELF.fetch("http://example.com/", headers=to_js(example_hdr))
     for header in response.headers:
         assert isinstance(header[0], str) and isinstance(header[1], str)
