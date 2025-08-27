@@ -8,7 +8,8 @@ const unitTests :Workerd.Config = (
           ( name = "worker", esModule = embed "images-api-test.js" )
         ],
         compatibilityDate = "2024-05-12",
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker", "tail_worker_user_spans"],
+        streamingTails = ["tail"],
         bindings = [
           ( name = "images",
             wrapped = (
@@ -29,6 +30,16 @@ const unitTests :Workerd.Config = (
           ( name = "worker", esModule = embed "images-upstream-mock.js" )
         ],
       )
-    )
+    ),
+    ( name = "tail", worker = .tailWorker, ),
   ]
 );
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "images-api-instrumentation-test.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
+
