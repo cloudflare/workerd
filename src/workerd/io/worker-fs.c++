@@ -1295,7 +1295,7 @@ TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
     : dir(Directory::newWritable()),
       // we use the /bundle cwd for the isolate vfs
       // and the /tmp cwd for the iocontext vfs
-      cwd(kj::Path({guard == kj::none ? "bundle" : "tmp"})) {
+      cwd({"bundle"}) {
   if (guard == kj::none) {
     kj::requireOnStack(this, "must be created on the stack");
     onStack = true;

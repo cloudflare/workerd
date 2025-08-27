@@ -752,6 +752,7 @@ export const processLoadEnvFile = {
     // supports cwd
     {
       const originalCwd = process.cwd();
+      process.chdir('/tmp');
       writeFileSync('.env', validEnv);
       try {
         process.loadEnvFile();
@@ -793,8 +794,7 @@ assert.deepStrictEqual(readdirSync('.'), ['bundle', 'tmp', 'dev']);
 
 export const processCwd = {
   test() {
-    // cwd gets changed by iocontext
-    assert.strictEqual(process.cwd(), '/tmp');
+    assert.strictEqual(process.cwd(), '/bundle');
 
     const originalCwd = process.cwd();
 
