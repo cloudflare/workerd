@@ -705,8 +705,10 @@ struct Onset final {
         : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
   };
 
-  explicit Onset(
-      Info&& info, WorkerInfo&& workerInfo, kj::Maybe<TriggerContext> maybeTrigger = kj::none);
+  explicit Onset(Info&& info,
+      WorkerInfo&& workerInfo,
+      CustomInfo attributes,
+      kj::Maybe<TriggerContext> maybeTrigger = kj::none);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
@@ -715,6 +717,7 @@ struct Onset final {
 
   Info info;
   WorkerInfo workerInfo;
+  CustomInfo attributes;
   kj::Maybe<TriggerContext> trigger;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;

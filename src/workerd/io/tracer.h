@@ -174,13 +174,18 @@ class WorkerTracer: public BaseTracer {
   SpanParent getUserRequestSpan() override;
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
-  void setUserRequestSpan(SpanBuilder&& span);
+  void setUserRequestSpan(SpanParent&& span);
+
+  // Set a worker-level tag/attribute to be provided in the onset event.
+  void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
   // The root span for the new tracing format.
-  SpanBuilder userRequestSpan;
+  SpanParent userRequestSpan;
+  // span attributes to be added to the onset event.
+  kj::Vector<tracing::Attribute> attributes;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
