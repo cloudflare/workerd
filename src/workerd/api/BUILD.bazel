@@ -283,13 +283,27 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
-        "headers-test.c++",
-        "form-data-memory-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
         "util-test.c++",
     ]
 ]
+
+# TODO(cleanup): Reenable test when we reenable string accounting
+# kj_test(
+#     src = "form-data-memory-test.c++",
+#     deps = [
+#         "//src/workerd/io",
+#     ],
+# )
+
+# TODO(cleanup): Reenable test when we reenable string accounting
+# kj_test(
+#     src = "headers-test.c++",
+#     deps = [
+#         "//src/workerd/io",
+#     ],
+# )
 
 kj_test(
     src = "data-url-test.c++",

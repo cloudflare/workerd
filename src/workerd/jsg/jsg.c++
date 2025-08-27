@@ -416,23 +416,35 @@ kj::Arc<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
 }
 
 kj::String Lock::accountedKjString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return kj::String(str.attach(getExternalMemoryAdjustment(size)));
+  // TODO(Cleanup): The memory accounting that was attached to these strings
+  // has been removed because it was too expensive. We should rethink how
+  // to handle it. Making this non-ops for now and will remove the actual
+  // methods separately.
+  return kj::String(kj::mv(str));
 }
 
 ByteString Lock::accountedByteString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return ByteString(str.attach(getExternalMemoryAdjustment(size)));
+  // TODO(Cleanup): The memory accounting that was attached to these strings
+  // has been removed because it was too expensive. We should rethink how
+  // to handle it. Making this non-ops for now and will remove the actual
+  // methods separately.
+  return ByteString(kj::mv(str));
 }
 
 DOMString Lock::accountedDOMString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return DOMString(str.attach(getExternalMemoryAdjustment(size)));
+  // TODO(Cleanup): The memory accounting that was attached to these strings
+  // has been removed because it was too expensive. We should rethink how
+  // to handle it. Making this non-ops for now and will remove the actual
+  // methods separately.
+  return DOMString(kj::mv(str));
 }
 
 USVString Lock::accountedUSVString(kj::Array<char>&& str) {
-  size_t size = str.size();
-  return USVString(str.attach(getExternalMemoryAdjustment(size)));
+  // TODO(Cleanup): The memory accounting that was attached to these strings
+  // has been removed because it was too expensive. We should rethink how
+  // to handle it. Making this non-ops for now and will remove the actual
+  // methods separately.
+  return USVString(kj::mv(str));
 }
 
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
