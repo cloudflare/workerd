@@ -13,7 +13,6 @@
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
-#include <v8-version.h>
 
 #if !_WIN32
 #include <cxxabi.h>
@@ -720,11 +719,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
     case v8::StateTag::IDLE:
       vmState = "idle";
       break;
-#if V8_MAJOR_VERSION >= 14
     case v8::StateTag::IDLE_EXTERNAL:
       vmState = "idle_external";
       break;
-#endif
     case v8::StateTag::LOGGING:
       vmState = "logging";
       break;
