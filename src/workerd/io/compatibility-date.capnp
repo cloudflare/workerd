@@ -1016,4 +1016,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # v8 serialization. More error types are supported, and own properties are included.
   # Note that when enabled, deserialization of the errors will not preserve the original
   # stack by default.
+
+  emailSendingQueuing @116 :Bool
+      $compatEnableFlag("enable_email_sending_queuing")
+      $compatDisableFlag("disable_email_sending_queuing")
+      $experimental;
+  # Enables Queuing on the `.send(message: EmailMessage)` function on send_email binding if there's
+  # a temporary error on email delivery.
+  # Note that by enabling this, user-provided Message-IDs are stripped and
+  # Email Workers will generate and use its own.
 }
