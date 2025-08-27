@@ -8,7 +8,7 @@ namespace workerd::api {
 namespace {
 
 KJ_TEST("base64 encode") {
-  auto t = TestFixture();
+  TestFixture t;
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
@@ -20,7 +20,7 @@ KJ_TEST("base64 encode") {
 }
 
 KJ_TEST("base64 valid decode") {
-  auto t = TestFixture();
+  TestFixture t;
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
@@ -32,7 +32,7 @@ KJ_TEST("base64 valid decode") {
 }
 
 KJ_TEST("base64 invalid decode") {
-  auto t = TestFixture();
+  TestFixture t;
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
@@ -49,7 +49,7 @@ KJ_TEST("base64 invalid decode") {
 }
 
 KJ_TEST("base64 decode as string") {
-  auto t = TestFixture();
+  TestFixture t;
 
   t.runInIoContext([](const workerd::TestFixture::Environment& env) {
     auto b = Base64Module();
