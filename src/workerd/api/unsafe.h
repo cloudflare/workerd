@@ -1,22 +1,21 @@
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/script.h>
 #include <workerd/jsg/url.h>
-#include <workerd/io/io-context.h>
-#include <iostream>
+
 #include <unistd.h>
 
-#include <workerd/jsg/script.h>
-
 #include <csignal>
-
+#include <iostream>
 
 namespace workerd::api {
 
 struct shmem_data {
-    uint32_t num_edges;
-    unsigned char edges[];
+  uint32_t num_edges;
+  unsigned char edges[];
 };
 
 #define SHM_SIZE 0x200000
@@ -77,26 +76,23 @@ class UnsafeEval: public jsg::Object {
   }
 };
 
-
 // Define the REPRL file descriptors
 #define REPRL_CRFD 100
 #define REPRL_CWFD 101
 #define REPRL_DRFD 102
 #define REPRL_DWFD 103
 
-
-
-#define CHECK(condition) \
-do { \
-    if (!(condition)) { \
-        fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition); \
-        exit(EXIT_FAILURE); \
-    } \
-} while (0)
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition);     \
+      exit(EXIT_FAILURE);                                                                          \
+    }                                                                                              \
+  } while (0)
 
 // A special binding that allows access to stdin. Used for REPL.
 class Stdin: public jsg::Object {
-public:
+ public:
   Stdin() = default;
 
   kj::String getline(jsg::Lock& js) {
@@ -114,7 +110,6 @@ public:
             ->GetCoverageBitmap(reinterpret_cast<v8::Isolate*>(js.v8Isolate))
             .size()));
     */
-
 
     char helo[] = "HELO";
     if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
@@ -135,25 +130,24 @@ public:
       ssize_t nread = read(REPRL_CRFD, &action, 4);
       fflush(0);
       fflush(stderr);
-      if (nread != 4 || action != 0x63657865) { // 'exec'
-          fprintf(stderr, "Unknown action: %x\n", action);
-          _exit(-1);
+      if (nread != 4 || action != 0x63657865) {  // 'exec'
+        fprintf(stderr, "Unknown action: %x\n", action);
+        _exit(-1);
       }
 
       CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
 
-      char* script_ = (char*) malloc(script_size + 1);
+      char* script_ = (char*)malloc(script_size + 1);
       CHECK(script_ != nullptr);
 
-
       char* source_buffer_tail = script_;
-      ssize_t remaining = (ssize_t) script_size;
+      ssize_t remaining = (ssize_t)script_size;
 
       //printf("Reading in script with size: %zu\n",script_size);
       //fflush(stdout);
 
       while (remaining > 0) {
-        ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t) remaining);
+        ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t)remaining);
         if (rv <= 0) {
           fprintf(stderr, "Failed to load script\n");
           _exit(-1);
@@ -167,17 +161,18 @@ public:
       int status = 0;
       unsigned res_val = 0;
       const kj::String script = kj::str(script_);
-      const kj::String wrapped = kj::str("{",script_,"}");
+      const kj::String wrapped = kj::str("{", script_, "}");
       auto compiled = jsg::NonModuleScript::compile(js, wrapped, "reprl"_kj);
       try {
         auto result = compiled.runAndReturn(js);
         res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(js.v8Context()));
         // if we reach that point execution was successful -> return 0
         res_val = 0;
-      } catch(jsg::JsExceptionThrown&) {
+      } catch (jsg::JsExceptionThrown&) {
         res_val = 11;
-        if(try_catch.HasCaught()) {
-          auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
+        if (try_catch.HasCaught()) {
+          auto str =
+              workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
           v8::String::Utf8Value utf8String(js.v8Isolate, str);
           fflush(stdout);
         }
@@ -191,8 +186,7 @@ public:
       free(script_);
       //cleanup context
 
-
-    } while(true);
+    } while (true);
   }
 
   JSG_RESOURCE_TYPE(Stdin) {
@@ -220,15 +214,14 @@ void registerUnsafeModule(Registry& registry) {
       "workerd:unsafe-eval", workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, \
- api::UnsafeModule, \
- api::Stdin
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin
 
-template <class Registry> void registerUnsafeModules(Registry& registry, auto featureFlags) {
-  registry.template addBuiltinModule<UnsafeEval>("internal:unsafe-eval",
-                                                 workerd::jsg::ModuleRegistry::Type::INTERNAL);
-  registry.template addBuiltinModule<Stdin>("workerd:stdin",
-                                                 workerd::jsg::ModuleRegistry::Type::BUILTIN);
+template <class Registry>
+void registerUnsafeModules(Registry& registry, auto featureFlags) {
+  registry.template addBuiltinModule<UnsafeEval>(
+      "internal:unsafe-eval", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+  registry.template addBuiltinModule<Stdin>(
+      "workerd:stdin", workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
 template <typename TypeWrapper>
