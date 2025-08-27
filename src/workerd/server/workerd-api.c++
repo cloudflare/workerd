@@ -35,6 +35,7 @@
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
@@ -129,6 +130,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WORKER_LOADER_ISOLATE_TYPES,
     EW_MESSAGECHANNEL_ISOLATE_TYPES,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
+    EW_TRACING_MODULE_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
