@@ -12,7 +12,69 @@
 #include <workerd/jsg/value.h>
 #include <workerd/jsg/web-idl.h>
 
+#include <concepts>
+#include <type_traits>
+
 namespace workerd::jsg {
+
+template <typename T>
+constexpr bool isV8LocalOrData = isV8Local<T>() || std::is_base_of_v<v8::Data, T> || IsJsValue<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::Maybe<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<Optional<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<LenientOptional<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::Array<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<kj::ArrayPtr<T>> = isV8LocalOrData<T>;
+
+template <typename T>
+constexpr bool isV8LocalOrData<Dict<T>> = isV8LocalOrData<T>;
+
+template <typename T, typename... Rest>
+constexpr bool isV8LocalOrData<kj::OneOf<T, Rest...>> =
+    isV8LocalOrData<T> || (isV8LocalOrData<Rest> || ...);
+
+// JSG_STRUCT member fields really should not be v8::Locals, v8::Datas, or JsValues because
+// there's no guarantee the v8::HandleScope will be valid when the field is accessed. Instead
+// they should be wrapped in jsg::V8Ref or jsg::JsRef. However, we only want to enforce this
+// for JSG_STRUCTs that we *receive* from JS, not for JSG_STRUCTs that we *send* to JS, so
+// we only actually apply this check when unwrapping (JS -> C++). Why? Great question! It's
+// because when we are sending a struct to JS, we know we have a valid v8::HandleScope and
+// it's fairly expensive to create a jsg::JsRef/jsg::V8Ref, especially when we need to do
+// so repeatedly (e.g. for an iterator, for instance).
+template <typename T>
+concept NotV8Local = !isV8LocalOrData<T>;
+
+// Just to be sure we got the concept right...
+static_assert(NotV8Local<int>);
+static_assert(NotV8Local<kj::String>);
+static_assert(NotV8Local<kj::Array<int>>);
+static_assert(NotV8Local<kj::Maybe<kj::String>>);
+static_assert(NotV8Local<kj::OneOf<int, kj::String>>);
+static_assert(!NotV8Local<kj::Maybe<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<kj::Maybe<JsValue>>);
+static_assert(!NotV8Local<jsg::Optional<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<jsg::Optional<JsObject>>);
+static_assert(!NotV8Local<kj::OneOf<int, v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<kj::OneOf<int, JsValue>>);
+static_assert(!NotV8Local<kj::OneOf<int, kj::String, kj::Maybe<JsValue>>>);
+static_assert(
+    !NotV8Local<kj::OneOf<int, kj::String, kj::Maybe<kj::OneOf<int, kj::Maybe<JsValue>>>>>);
+static_assert(!NotV8Local<v8::Local<v8::Object>>);
+static_assert(!NotV8Local<JsValue>);
+static_assert(!NotV8Local<v8::Local<v8::Value>>);
+static_assert(!NotV8Local<v8::Value>);
+static_assert(!NotV8Local<kj::Array<JsValue>>);
+static_assert(!NotV8Local<kj::Array<v8::Local<v8::Object>>>);
+static_assert(!NotV8Local<Dict<JsValue>>);
 
 template <typename TypeWrapper,
     typename Struct,
@@ -54,6 +116,7 @@ class FieldWrapper {
       v8::Isolate* isolate,
       v8::Local<v8::Context> context,
       v8::Local<v8::Object> in) {
+    static_assert(NotV8Local<Type>);
     v8::Local<v8::Value> jsValue = check(in->Get(context, nameHandle.Get(isolate)));
     auto& js = Lock::from(isolate);
     return wrapper.template unwrap<Type>(
