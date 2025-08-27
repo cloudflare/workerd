@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import tracing from 'cloudflare-internal:tracing';
+
 interface Fetcher {
   fetch: typeof fetch;
 }
@@ -93,7 +95,13 @@ class D1Database {
   }
 
   async exec(query: string): Promise<D1ExecResult> {
-    return this.alwaysPrimarySession.exec(query);
+    const span = tracing.startSpan('exec');
+    span.setTag('query', query);
+    try {
+      return this.alwaysPrimarySession.exec(query);
+    } finally {
+      span.end();
+    }
   }
 
   withSession(
