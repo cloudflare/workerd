@@ -7,10 +7,10 @@ bazel_dep(name = "rules_android", version = "0.6.4")
 # protobuf for use with perfetto
 # Updated protobuf can't be imported reliably under WORKSPACE logic in Bazel 8, so we need to use
 # bzlmod.
-bazel_dep(name = "protobuf", version = "31.1", repo_name = "com_google_protobuf")
+bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
 
 # abseil is used by protobuf and tcmalloc.
-bazel_dep(name = "abseil-cpp", version = "20250512.1")
+bazel_dep(name = "abseil-cpp", version = "20250814.0")
 
 # Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
 bazel_dep(name = "platforms", version = "1.0.0")
