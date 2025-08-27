@@ -294,7 +294,7 @@ kj::String KJ_STRINGIFY(const CustomInfo& customInfo) {
 namespace {
 
 static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
-  KJ_REQUIRE(method <= capnp::HttpMethod::UNSUBSCRIBE, "unknown method", method);
+  KJ_REQUIRE(method <= capnp::HttpMethod::BAN, "unknown method", method);
   return static_cast<kj::HttpMethod>(method);
 }
 
