@@ -11,6 +11,7 @@
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
 #include <workerd/api/hibernatable-web-socket.h>
+#include <workerd/api/immediate-crash.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
@@ -28,8 +29,6 @@
 #include <workerd/util/use-perfetto-categories.h>
 
 #include <kj/encoding.h>
-
-#include <workerd/api/immediate-crash.h>
 
 namespace workerd::api {
 
@@ -730,17 +729,15 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   return js.str(result.first(written));
 }
 
-
 //Fuzzilli required macros
 #define REPRL_CRFD 100
 #define REPRL_CWFD 101
 #define REPRL_DRFD 102
 #define REPRL_DWFD 103
-#define USE(...)                            \
-  do {                                      \
-    (void)(__VA_ARGS__);                    \
+#define USE(...)                                                                                   \
+  do {                                                                                             \
+    (void)(__VA_ARGS__);                                                                           \
   } while (false)
-
 
 void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
@@ -754,7 +751,8 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
   }
 
   if (strcmp(*operation, "FUZZILLI_CRASH") == 0) {
-    auto maybeArg = v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
+    auto maybeArg =
+        v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
     if (!maybeArg.IsJust()) {
       printf("Maybe arg is empty...\n");
       fflush(stdout);
@@ -831,9 +829,9 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         // This allows Fuzzilli to check that DEBUG is defined, which should be
         // the case if dcheck_always_on is set. This is useful for fuzzing as
         // there are some integrity checks behind DEBUG.
-// #ifdef DEBUG
-//         IMMEDIATE_CRASH();
-// #endif
+        // #ifdef DEBUG
+        //         IMMEDIATE_CRASH();
+        // #endif
         break;
       }
       default:
@@ -843,20 +841,18 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
   } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
     static FILE* fzliout = fdopen(REPRL_DWFD, "w");
     if (!fzliout) {
-      fprintf(
-          stderr,
-          "Fuzzer output channel not available, printing to stdout instead\n");
+      fprintf(stderr, "Fuzzer output channel not available, printing to stdout instead\n");
       fzliout = stdout;
     }
 
-  value = v8::Local<v8::Value>::Cast(args[1].getHandle(isolate));
-  str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
-  v8::String::Utf8Value string(js.v8Isolate, str);
-  if (*string == nullptr) {
-    return;
-  }
-  fprintf(fzliout, "%s\n", *string);
-  fflush(fzliout);
+    value = v8::Local<v8::Value>::Cast(args[1].getHandle(isolate));
+    str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+    v8::String::Utf8Value string(js.v8Isolate, str);
+    if (*string == nullptr) {
+      return;
+    }
+    fprintf(fzliout, "%s\n", *string);
+    fflush(fzliout);
   }
 }
 

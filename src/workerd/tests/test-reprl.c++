@@ -17,9 +17,9 @@ bool execute(const char* code) {
   uint64_t exec_time;
   const uint64_t SECONDS = 1000000;  // Timeout is in microseconds.
   print_splitter();
-  printf("Executing: %s\n",code);
+  printf("Executing: %s\n", code);
   int status = reprl_execute(ctx, code, strlen(code), 1 * SECONDS, &exec_time, 0);
-  printf("Return code: %d\n",status);
+  printf("Return code: %d\n", status);
 
   const char* fuzzout = reprl_fetch_fuzzout(ctx);
   printf("Fuzzout stdout:\n%s\n", fuzzout);
@@ -59,9 +59,9 @@ void expect_failure(const char* code) {
 int main(int argc, char** argv) {
   ctx = reprl_create_context();
 
-  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-16",nullptr};
-  if(argc < 4) {
-    printf("Usage: %s <workerd_path> <command> <path-to-config> <workerd-flags>",argv[0]);
+  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-16", nullptr};
+  if (argc < 4) {
+    printf("Usage: %s <workerd_path> <command> <path-to-config> <workerd-flags>", argv[0]);
     exit(-1);
   }
 

@@ -62,18 +62,18 @@
 
 #endif  // Compiler check
 
-#define TRAP_SEQUENCE_() \
-  do {                   \
-    TRAP_SEQUENCE1_();   \
-    TRAP_SEQUENCE2_();   \
+#define TRAP_SEQUENCE_()                                                                           \
+  do {                                                                                             \
+    TRAP_SEQUENCE1_();                                                                             \
+    TRAP_SEQUENCE2_();                                                                             \
   } while (false)
 
 // Wrapping the trap sequence to allow its use inside constexpr functions.
 #if defined(__GNUC__) || defined(__clang__)
 
-#define WRAPPED_TRAP_SEQUENCE_() \
-  do {                           \
-    [] { TRAP_SEQUENCE_(); }();  \
+#define WRAPPED_TRAP_SEQUENCE_()                                                                   \
+  do {                                                                                             \
+    [] { TRAP_SEQUENCE_(); }();                                                                    \
   } while (false)
 
 #else
@@ -85,10 +85,10 @@
 #if defined(__clang__) || defined(__GNUC__)
 
 // __builtin_unreachable() hints to the compiler that this code path is not reachable.
-#define IMMEDIATE_CRASH()     \
-  ({                          \
-    WRAPPED_TRAP_SEQUENCE_(); \
-    __builtin_unreachable();  \
+#define IMMEDIATE_CRASH()                                                                          \
+  ({                                                                                               \
+    WRAPPED_TRAP_SEQUENCE_();                                                                      \
+    __builtin_unreachable();                                                                       \
   })
 
 #else
