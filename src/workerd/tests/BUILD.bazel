@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -116,7 +117,7 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
-cc_binary(
+wd_cc_binary(
     name = "test-reprl",
     srcs = [
         "libreprl/libreprl.c",
@@ -129,4 +130,5 @@ cc_binary(
     includes = [
         "libreprl",
     ],
+    visibility = ["//visibility:public"],
 )
