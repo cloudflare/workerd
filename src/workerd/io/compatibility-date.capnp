@@ -1030,15 +1030,21 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatEnableFlag("remove_nodejs_compat_eol_v22")
       $compatDisableFlag("add_nodejs_compat_eol_v22")
       $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2027-04-30");
+  # Removes APIs that reached end-of-life in Node.js 22.x. When using the
+  # removeNodejsCompatEOL flag, this will default enable on/after 2027-04-30.
 
   removeNodejsCompatEOLv23 @118 :Bool
       $compatEnableFlag("remove_nodejs_compat_eol_v23")
       $compatDisableFlag("add_nodejs_compat_eol_v23")
-      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2025-09-01");
+      $impliedByAfterDate(name = "removeNodejsCompatEOLv24", date = "2025-09-01");
+  # Removes APIs that reached end-of-life in Node.js 23.x. This will default
+  # enable when the removeNodejsCompatEOLv24 flag is enabled after 2025-09-01.
   # Went EOL on 2025-06-01
 
   removeNodejsCompatEOLv24 @119 :Bool
       $compatEnableFlag("remove_nodejs_compat_eol_v24")
       $compatDisableFlag("add_nodejs_compat_eol_v24")
       $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2028-04-30");
+  # Removes APIs that reached end-of-life in Node.js 24.x. When using the
+	# removeNodejsCompatEOL flag, this will default enable on/after 2028-04-30.
 }
