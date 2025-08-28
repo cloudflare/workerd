@@ -1566,46 +1566,42 @@ export let testAutoRollBackOnCriticalError = {
     let id = env.ns.idFromName('auto-rollback-on-critical-error-test');
     let stub = env.ns.get(id);
     await stub.createStringTable();
-    try {
+
+    // Even though the DO function catches and handles all exceptions, we still expect it to fail
+    // with the critical exception, due to the output gate being broken with it.
+    await assert.rejects(async () => {
       await stub.runActorFunc('doAutoRollBackOnCriticalError');
-      throw new Error(
-        'should have thrown SQLITE_FULL exception before we reach here'
-      );
-    } catch (err) {
-      if (!err.message.startsWith('database or disk is full: SQLITE_FULL')) {
-        throw err;
-      }
-    }
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
     // Get a new stub since the old stub is broken due to critical error
     stub = env.ns.get(id);
-    assert.deepStrictEqual(await stub.getStringTableIds(), []);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
   },
 };
 actorFuncs.doAutoRollBackOnCriticalError = async (state) => {
   // Limit size of db so we can trigger a SQLITE_FULL error
   state.storage.sql.setMaxPageCountForTest(10);
 
-  try {
-    // Create large data to fill the database quickly
-    const largeData = new Uint8Array(1000000).fill(42);
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database.  We expect this to fail with a critical
+  // error that rolls back the current implicit transaction and breaks the output gate:
+  assert.throws(() => {
     state.storage.sql.exec(
       'INSERT INTO string_table VALUES (?, ?)',
-      2,
-      largeData
+      3,
+      'a'.repeat(1000000)
     );
-    throw new Error(
-      'should have thrown SQLITE_FULL exception before we reach here'
-    );
-  } catch (err) {
-    if (err.message !== 'database or disk is full: SQLITE_FULL') {
-      throw err;
-    }
-  }
+  }, /^Error: database or disk is full: SQLITE_FULL/);
 
-  const smallData = new Uint8Array(10).fill(1);
-  state.storage.sql.exec(
-    'INSERT INTO string_table VALUES (?, ?)',
-    1,
-    smallData
-  );
-}
+  // Further storage ops are expected to fail because we've cached the critical error:
+  assert.throws(() => {
+    state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 4, 'a');
+  }, /^Error: database or disk is full: SQLITE_FULL/);
+};
