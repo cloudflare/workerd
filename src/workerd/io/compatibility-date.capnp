@@ -896,7 +896,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $compatDisableFlag("disable_nodejs_http_server_modules")
       $impliedByAfterDate(name = "enableNodejsHttpModules", date = "2025-09-01");
   # Enables Node.js http server related modules such as node:_http_server
-  # This flag is experimental and may change or be removed in future versions.
   # It is required to use this flag with `enable_nodejs_http_modules` since
   # it enables the usage of http related node.js modules, and this flag enables
   # the methods exposed by the node.js http modules.
