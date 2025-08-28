@@ -1588,9 +1588,11 @@ void testCriticalError(const char* expectedErrorMessage,
     }
   });
 
+  KJ_EXPECT(!db.observedCriticalError());
   KJ_EXPECT_THROW_MESSAGE(expectedErrorMessage, triggerErrorFn(db, vfs));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(db.observedCriticalError());
 }
 
 KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
@@ -1626,11 +1628,13 @@ KJ_TEST("SQLite critical error handling for SQLITE_IOERR") {
   // Now arrange for an error on write().
   KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
 
+  KJ_EXPECT(!db.observedCriticalError());
   KJ_EXPECT_THROW_MESSAGE("test-vfs-error", db.run(SqliteDatabase::TRUSTED, kj::str(R"(
     INSERT INTO things(value) VALUES (456);
   )")));
 
   KJ_EXPECT(criticalErrorCallbackCalled);
+  KJ_EXPECT(db.observedCriticalError());
 }
 
 // No test for SQLITE_BUSY as a critical error because we haven't been able to figure out how to

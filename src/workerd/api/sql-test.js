@@ -1605,3 +1605,51 @@ actorFuncs.doAutoRollBackOnCriticalError = async (state) => {
     state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 4, 'a');
   }, /^Error: database or disk is full: SQLITE_FULL/);
 };
+
+export let testCriticalErrorOnTransactionSyncRollback = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-sync-rollback');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionSyncRollback');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionSyncRollback = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to also get rolled
+  // back when the subsequent transactionSync() fails.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit synchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.  Earlier versions of the code failed here with
+  // an internal error "no such savepoint: _cf_sync_savepoint_0" when trying to roll back.
+  assert.throws(() => {
+    state.storage.transactionSync(() => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+
+      // Throw an exception to make transactionSync() attempt to roll back the transaction:
+      throw new Error('an_escaping_exception_to_trigger_rollback');
+    });
+  }, /^Error: an_escaping_exception_to_trigger_rollback/);
+};
