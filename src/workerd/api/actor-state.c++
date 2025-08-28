@@ -676,8 +676,12 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
       sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      // If a critical error forced an automatic rollback, we skip the rollback and release
+      // attempt, because savepoints should already be released.
+      if (!sqlite.observedCriticalError()) {
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      }
       js.throwException(kj::mv(exception));
     });
   } else {
