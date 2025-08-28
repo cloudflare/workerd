@@ -1708,8 +1708,9 @@ export let testCriticalErrorOnTransactionRollback = {
     let stub = env.ns.get(id);
     await stub.createStringTable();
 
-    // TODO(now): this call should rethrow the broken exception, but doesn't:
-    await stub.runActorFunc('doCriticalErrorOnTransactionRollback');
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionRollback');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
 
     // Get a new stub since the old stub is broken due to critical error
     stub = env.ns.get(id);
