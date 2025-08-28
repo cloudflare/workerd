@@ -673,6 +673,12 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
+
+      // If a critical error forced an automatic rollback, we throw an exception to convey failure
+      // to the caller of transactionSync(), even if the callback did not throw.
+      JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
+          "Cannot commit transaction due to an earlier SQL critical error");
+
       sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {

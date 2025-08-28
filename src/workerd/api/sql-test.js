@@ -1653,3 +1653,51 @@ actorFuncs.doCriticalErrorOnTransactionSyncRollback = async (state) => {
     });
   }, /^Error: an_escaping_exception_to_trigger_rollback/);
 };
+
+export let testCriticalErrorOnTransactionSyncCommit = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-sync-commit');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    await assert.rejects(async () => {
+      await stub.runActorFunc('doCriticalErrorOnTransactionSyncCommit');
+    }, /^Error: database or disk is full: SQLITE_FULL/);
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first, committed row to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionSyncCommit = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to also get rolled
+  // back when the subsequent transactionSync() fails.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit synchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.  Earlier versions of the code failed here with
+  // internal errors "no such savepoint: _cf_sync_savepoint_0" when trying to commit, then roll
+  // back.
+  assert.throws(() => {
+    state.storage.transactionSync(() => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+      // Because the lambda completes successfully, transactionSync() will still try to commit the
+      // transaction.
+    });
+  }, /^Error: Cannot commit transaction due to an earlier SQL critical error/);
+};
