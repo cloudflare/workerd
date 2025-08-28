@@ -181,6 +181,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
+  actorSqlite.requireNotBroken();
   JSG_REQUIRE(!hasChild, Error,
       "Cannot roll back an outer transaction while a nested transaction is still running.");
   if (!committed) {
