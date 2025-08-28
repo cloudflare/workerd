@@ -5,6 +5,10 @@
 import * as assert from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';
 
+// A collection of functions that can be triggered by name from the DO, to make
+// it easier to keep the DO and test functions together in the test file:
+let actorFuncs = {};
+
 async function test(state) {
   const storage = state.storage;
   const sql = storage.sql;
@@ -1421,49 +1425,21 @@ export class DurableObjectExample extends DurableObject {
     return bookmark;
   }
 
-  async createTableForTestingAutoRollBackOnCriticalError() {
+  async createStringTable() {
     this.state.storage.sql.exec(
-      'CREATE TABLE IF NOT EXISTS test_full (id INTEGER PRIMARY KEY, data BLOB)'
+      'CREATE TABLE IF NOT EXISTS string_table (id INTEGER PRIMARY KEY, data BLOB)'
     );
   }
 
-  async createCriticalErrorThatLeadsToAutoRollback() {
-    // Limit size of db so we can trigger a SQLITE_FULL error
-    this.state.storage.sql.setMaxPageCountForTest(10);
-
-    try {
-      // Create large data to fill the database quickly
-      const largeData = new Uint8Array(1000000).fill(42);
-      this.state.storage.sql.exec(
-        'INSERT INTO test_full VALUES (?, ?)',
-        2,
-        largeData
-      );
-      throw new Error(
-        'should have thrown SQLITE_FULL exception before we reach here'
-      );
-    } catch (err) {
-      if (err.message !== 'database or disk is full: SQLITE_FULL') {
-        throw err;
-      }
-    }
-
-    const smallData = new Uint8Array(10).fill(1);
-    this.state.storage.sql.exec(
-      'INSERT INTO test_full VALUES (?, ?)',
-      1,
-      smallData
+  async getStringTableIds() {
+    return Array.from(
+      this.state.storage.sql.exec('SELECT id FROM string_table'),
+      (x) => x.id
     );
   }
 
-  async verifyAutoRollbackAfterCriticalError() {
-    if (
-      [...this.state.storage.sql.exec('SELECT * FROM test_full')].length != 0
-    ) {
-      throw new Error(
-        'found data that was committed when a critical error happened'
-      );
-    }
+  async runActorFunc(name) {
+    return actorFuncs[name](this.state);
   }
 }
 
@@ -1589,9 +1565,9 @@ export let testAutoRollBackOnCriticalError = {
   async test(ctrl, env, ctx) {
     let id = env.ns.idFromName('auto-rollback-on-critical-error-test');
     let stub = env.ns.get(id);
-    await stub.createTableForTestingAutoRollBackOnCriticalError();
+    await stub.createStringTable();
     try {
-      await stub.createCriticalErrorThatLeadsToAutoRollback();
+      await stub.runActorFunc('doAutoRollBackOnCriticalError');
       throw new Error(
         'should have thrown SQLITE_FULL exception before we reach here'
       );
@@ -1602,6 +1578,34 @@ export let testAutoRollBackOnCriticalError = {
     }
     // Get a new stub since the old stub is broken due to critical error
     stub = env.ns.get(id);
-    await stub.verifyAutoRollbackAfterCriticalError();
+    assert.deepStrictEqual(await stub.getStringTableIds(), []);
   },
 };
+actorFuncs.doAutoRollBackOnCriticalError = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  try {
+    // Create large data to fill the database quickly
+    const largeData = new Uint8Array(1000000).fill(42);
+    state.storage.sql.exec(
+      'INSERT INTO string_table VALUES (?, ?)',
+      2,
+      largeData
+    );
+    throw new Error(
+      'should have thrown SQLITE_FULL exception before we reach here'
+    );
+  } catch (err) {
+    if (err.message !== 'database or disk is full: SQLITE_FULL') {
+      throw err;
+    }
+  }
+
+  const smallData = new Uint8Array(10).fill(1);
+  state.storage.sql.exec(
+    'INSERT INTO string_table VALUES (?, ?)',
+    1,
+    smallData
+  );
+}
