@@ -4239,7 +4239,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
-  kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry;
+  kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (def.featureFlags.getNewModuleRegistry()) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
@@ -4273,7 +4273,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   auto isolateGroup = v8::IsolateGroup::GetDefault();
   auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
       limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(newModuleRegistry));
+      pythonConfig);
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
@@ -4346,7 +4346,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(def.maybeOwnedSourceCode)), false, errorReporter,
-      kj::mv(artifactBundler));
+      kj::mv(artifactBundler), kj::mv(newModuleRegistry));
 
   using Global = WorkerdApi::Global;
   jsg::V8Ref<v8::Object> ctxExportsHandle = nullptr;

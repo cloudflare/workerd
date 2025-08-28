@@ -172,6 +172,8 @@ struct ResolveContext final {
   kj::HashMap<kj::StringPtr, kj::StringPtr> attributes;
 };
 
+class ModuleRegistry;
+
 // The abstraction of a module within the ModuleRegistry.
 // Importantly, a Module is immutable once created and must be thread-safe.
 // The Module class itself represents the definition of a module and not
@@ -211,13 +213,21 @@ class Module {
     EVAL = 1 << 2,
   };
 
-  // The EvalCallback is used to to ensure evaluation of a module outside of an
-  // IoContext, when necessary. If the EvalCallback is not set, then the
-  // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
-  // Modules that have the Flag::EVAL set will have their evaluation deferred
-  // to this callback.
-  using EvalCallback = Function<jsg::Promise<Value>(
-      const Module& module, v8::Local<v8::Module> v8Module, const CompilationObserver& observer)>;
+  // The Evaluator is used to to ensure evaluation of a module outside of an
+  // IoContext, when necessary.
+  class Evaluator final {
+   public:
+    KJ_DISALLOW_COPY_AND_MOVE(Evaluator);
+    kj::Maybe<jsg::Promise<Value>> operator()(jsg::Lock& js,
+        const Module& module,
+        v8::Local<v8::Module> v8Module,
+        const CompilationObserver& observer) const;
+
+   private:
+    Evaluator(const ModuleRegistry& registry): registry(registry) {}
+    const ModuleRegistry& registry;
+    friend class ModuleRegistry;
+  };
 
   KJ_DISALLOW_COPY_AND_MOVE(Module);
   virtual ~Module() = default;
@@ -270,7 +280,7 @@ class Module {
   virtual v8::MaybeLocal<v8::Value> evaluate(Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer,
-      kj::Maybe<EvalCallback>& maybeEvalCallback) const KJ_WARN_UNUSED_RESULT = 0;
+      const Evaluator& maybeEvaluate) const KJ_WARN_UNUSED_RESULT = 0;
 
   virtual v8::MaybeLocal<v8::Value> actuallyEvaluate(Lock& js,
       v8::Local<v8::Module> module,
@@ -297,7 +307,10 @@ class Module {
   };
 
   // The EvaluateCallback is used to evaluate a synthetic module. The callback
-  // is called after the module is resolved and instantiated.
+  // is called after the module is resolved and instantiated. Note that this
+  // is different from the Module::Evaluator, which is used to ensure that
+  // evaluation of a module occurs outside of an IoContext. This callback
+  // is always called to actually perform the evaluation of a synthetic module.
   using EvaluateCallback =
       Function<bool(const Url& specifier, const ModuleNamespace&, const CompilationObserver&)>;
 
@@ -413,7 +426,7 @@ class Module {
   Module(Url specifier, Type type, Flags flags = Flags::NONE);
 
  private:
-  Url specifier_;
+  const Url specifier_;
   Type type_;
   Flags flags_;
 };
@@ -579,13 +592,22 @@ constexpr ModuleBundle::BuiltInBundleOptions operator&(
 
 // A ModuleRegistry is a collection of zero or more ModuleBundles.
 // Importantly, the ModuleRegistry is immutable once created and
-// must be thread-safe.
-class ModuleRegistry final: public ModuleRegistryBase {
+// must be thread-safe. In workerd, the module registry is created
+// and owned by a single Worker instance. In production, however, a
+// single ModuleRegistry instance may be shared by multiple replicas
+// of a Worker and therefore must be AtomicRefcounted.
+class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBase {
  private:
   enum BundleIndices { kBundle, kBuiltin, kBuiltinOnly, kFallback, kBundleCount };
 
  public:
-  using EvalCallback = Module::EvalCallback;
+  // The EvalCallback is used to to ensure evaluation of a module outside of an
+  // IoContext, when necessary. If the EvalCallback is not set, then the
+  // Flag::EVAL on a module is ignored. If the EvalCallback is set, then any
+  // Modules that have the Flag::EVAL set will have their evaluation deferred
+  // to this callback.
+  using EvalCallback = Function<jsg::Promise<Value>(
+      const Module& module, v8::Local<v8::Module> v8Module, const CompilationObserver& observer)>;
 
   class Builder final {
    public:
@@ -603,14 +625,9 @@ class ModuleRegistry final: public ModuleRegistryBase {
         Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
 
-    // A ModuleRegistry may have exactly one parent registry. When set, if this
-    // registry cannot resolve a module, it will attempt to resolve the module
-    // from the parent registry.
-    Builder& setParent(ModuleRegistry& parent) KJ_LIFETIMEBOUND;
-
     Builder& add(kj::Own<ModuleBundle> bundle) KJ_LIFETIMEBOUND;
 
-    kj::Own<ModuleRegistry> finish() KJ_WARN_UNUSED_RESULT;
+    kj::Arc<ModuleRegistry> finish() KJ_WARN_UNUSED_RESULT;
 
     Builder& setEvalCallback(EvalCallback callback) KJ_LIFETIMEBOUND;
 
@@ -624,20 +641,19 @@ class ModuleRegistry final: public ModuleRegistryBase {
     // One slot for each of ModuleBundle::Type
     const ResolveObserver& observer;
     const jsg::Url& bundleBase;
-    kj::Maybe<ModuleRegistry&> maybeParent;
     const Options options;
-    kj::Vector<kj::Own<ModuleBundle>> bundles_[ModuleRegistry::kBundleCount];
+    kj::FixedArray<kj::Vector<kj::Own<ModuleBundle>>, ModuleRegistry::kBundleCount> bundles_;
     kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
     kj::Own<capnp::SchemaLoader> schemaLoader;
     friend class ModuleRegistry;
   };
 
   kj::Maybe<const Module&> resolve(
-      const ResolveContext& context) KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+      const ResolveContext& context) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
 
   // Attaches the ModuleRegistry to the given isolate by creating an IsolateModuleRegistry
   // and linking that to the isolate.
-  kj::Own<void> attachToIsolate(Lock& js, const CompilationObserver& observer) override;
+  kj::Own<void> attachToIsolate(Lock& js, const CompilationObserver& observer) const override;
 
   // Synchronously resolve the specified module from the registry bound to the given lock.
   // This will throw a JsExceptionThrown exception if the module cannot be found or an
@@ -661,10 +677,6 @@ class ModuleRegistry final: public ModuleRegistryBase {
       ResolveContext::Source source = ResolveContext::Source::INTERNAL,
       kj::Maybe<const Url&> maybeReferrer = kj::none);
 
-  kj::Maybe<EvalCallback>& getEvalCallback() {
-    return maybeEvalCallback;
-  }
-
   // The constructor is public because kj::heap requires is to be. Do not
   // use the constructor directly. Use the ModuleRegistry::Builder
   ModuleRegistry(ModuleRegistry::Builder* builder);
@@ -678,14 +690,49 @@ class ModuleRegistry final: public ModuleRegistryBase {
     return *schemaLoader;
   }
 
+  const Module::Evaluator getEvaluator() const {
+    return Module::Evaluator(*this);
+  }
+
  private:
+  struct Impl {
+    // One slot for each of ModuleBundle::Type, within each slot is
+    // an array of bundles of that type in registration order.
+    kj::FixedArray<kj::Array<kj::Own<ModuleBundle>>, kBundleCount> bundles;
+    Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> bundles);
+  };
+
   const ResolveObserver& observer;
   const jsg::Url& bundleBase;
-  kj::Maybe<ModuleRegistry&> maybeParent;
-  // One slot for each of ModuleBundle::Type
-  kj::Array<kj::Own<ModuleBundle>> bundles_[kBundleCount];
+  kj::MutexGuarded<Impl> impl;
   kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
   kj::Own<capnp::SchemaLoader> schemaLoader;
+
+  struct ModuleRef {
+    const Module& module;
+  };
+  using ModuleOrRedirect = kj::OneOf<ModuleRef, Url>;
+
+  kj::Maybe<const Module&> lookupImpl(Impl& impl,
+      const ResolveContext& context,
+      bool recursed) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+
+  kj::Maybe<ModuleOrRedirect> tryFindInBundleGroup(const ResolveContext& context,
+      kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) const KJ_LIFETIMEBOUND KJ_WARN_UNUSED_RESULT;
+
+  // Attempts to find the module in the given bundle. If found, returns
+  // const Module&, if an alias is found, returns the new ResolveContext
+  // to try again with. If not found, returns kj::none.
+  static kj::Maybe<ModuleOrRedirect> tryFindInBundle(const ResolveContext& context,
+      ModuleBundle& bundle,
+      const Url& bundleBase) KJ_WARN_UNUSED_RESULT;
+
+  kj::Maybe<jsg::Promise<Value>> evaluateImpl(jsg::Lock& js,
+      const Module& module,
+      v8::Local<v8::Module> v8Module,
+      const CompilationObserver& observer) const;
+
+  friend class Module::Evaluator;
 };
 
 constexpr ModuleRegistry::Builder::Options operator|(

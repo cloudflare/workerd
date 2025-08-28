@@ -348,7 +348,6 @@ kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource&
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
-  kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
@@ -381,21 +380,16 @@ struct WorkerdApi::Impl final {
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
-      const PythonConfig& pythonConfig = defaultConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
+      const PythonConfig& pythonConfig = defaultConfig)
       : features(capnp::clone(featuresParam)),
         extensions(extensionsParam),
-        maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(
             v8System, group, Configuration(*this), kj::mv(observerParam), kj::mv(createParams)),
         memoryCacheProvider(memoryCacheProvider),
         pythonConfig(pythonConfig) {
     jsgIsolate.runInLockScope([&](JsgWorkerdIsolate::Lock& lock) {
-      // maybeOwnedModuleRegistry is only set when using the
-      // new module registry implementation. When that is the
-      // case we also need to tell JSG.
-      if (maybeOwnedModuleRegistry != kj::none) {
+      if (featuresParam.getNewModuleRegistry()) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
 
@@ -438,13 +432,6 @@ struct WorkerdApi::Impl final {
       JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
     return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
   };
-
-  kj::Maybe<jsg::modules::ModuleRegistry&> tryGetModuleRegistry() const {
-    KJ_IF_SOME(owned, maybeOwnedModuleRegistry) {
-      return *const_cast<jsg::modules::ModuleRegistry*>(owned.get());
-    }
-    return kj::none;
-  }
 };
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
@@ -454,8 +441,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     v8::IsolateGroup group,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
-    const PythonConfig& pythonConfig,
-    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
+    const PythonConfig& pythonConfig)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -463,8 +449,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           group,
           kj::mv(observer),
           memoryCacheProvider,
-          pythonConfig,
-          kj::mv(newModuleRegistry))) {}
+          pythonConfig)) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
 
 kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
@@ -473,13 +458,14 @@ kj::Own<jsg::Lock> WorkerdApi::lock(jsg::V8StackScope& stackScope) const {
 CompatibilityFlags::Reader WorkerdApi::getFeatureFlags() const {
   return *impl->features;
 }
-jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(jsg::Lock& lock) const {
-  jsg::NewContextOptions options{
-    .newModuleRegistry = impl->tryGetModuleRegistry(),
+jsg::JsContext<api::ServiceWorkerGlobalScope> WorkerdApi::newContext(
+    jsg::Lock& lock, Worker::Api::NewContextOptions options) const {
+  jsg::NewContextOptions opts{
+    .newModuleRegistry = options.newModuleRegistry,
     .enableWeakRef = getFeatureFlags().getJsWeakRef(),
   };
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).newContext<api::ServiceWorkerGlobalScope>(
-      kj::mv(options));
+      kj::mv(opts));
 }
 jsg::Dict<NamedExport> WorkerdApi::unwrapExports(
     jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const {
@@ -1128,7 +1114,7 @@ namespace {
 static constexpr auto PYTHON_TAR_READER = "export default { }"_kj;
 }  // namespace
 
-kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
+kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry(
     const jsg::ResolveObserver& observer,
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,
     const CompatibilityFlags::Reader& featureFlags,

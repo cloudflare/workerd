@@ -73,7 +73,6 @@ class EsModule final: public Module {
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
-  // This variation does not take ownership of the source buffer.
   KJ_DISALLOW_COPY_AND_MOVE(EsModule);
 
   v8::MaybeLocal<v8::Module> getDescriptor(
@@ -178,22 +177,22 @@ class EsModule final: public Module {
   v8::MaybeLocal<v8::Value> evaluate(Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer,
-      kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
+      const Evaluator& maybeEvaluate) const override {
     if (!ensureInstantiated(js, module, observer, *this)) {
       return v8::MaybeLocal<v8::Value>();
     };
 
-    // No need to check isEval here since EsModules are always eval'd.
-    KJ_IF_SOME(evalCallback, maybeEvalCallback) {
-      return js.wrapSimplePromise(evalCallback(js, *this, module, observer));
+    KJ_IF_SOME(result, maybeEvaluate(js, *this, module, observer)) {
+      return js.wrapSimplePromise(kj::mv(result));
     }
 
     return actuallyEvaluate(js, module, observer);
   }
 
   kj::ArrayPtr<const char> source;
-  // When externed is true, the source buffer is passed into the isolate as an externalized
-  // string. This is only appropriate for built-in modules that are compiled into the binary.
+
+  // The cachedData holds the cached compilation data for this module, if any. It is
+  // generated on-demand the first time the module is compiled, if possible.
   kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
 };
 
@@ -260,7 +259,7 @@ class SyntheticModule final: public Module {
   v8::MaybeLocal<v8::Value> evaluate(Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer,
-      kj::Maybe<EvalCallback>& maybeEvalCallback) const override {
+      const Evaluator& maybeEvaluate) const override {
     if (!ensureInstantiated(js, module, observer, *this)) {
       return v8::MaybeLocal<v8::Value>();
     }
@@ -268,8 +267,8 @@ class SyntheticModule final: public Module {
     // If this synthetic module is marked with Flags::EVAL, and the evalCallback
     // is specified, then we defer evaluation to the given callback.
     if (isEval()) {
-      KJ_IF_SOME(evalCallback, maybeEvalCallback) {
-        return js.wrapSimplePromise(evalCallback(js, *this, module, observer));
+      KJ_IF_SOME(result, maybeEvaluate(js, *this, module, observer)) {
+        return js.wrapSimplePromise(kj::mv(result));
       }
     }
 
@@ -308,7 +307,8 @@ class IsolateModuleRegistry final {
     const Module& module;
   };
 
-  IsolateModuleRegistry(Lock& js, ModuleRegistry& registry, const CompilationObserver& observer);
+  IsolateModuleRegistry(
+      Lock& js, const ModuleRegistry& registry, const CompilationObserver& observer);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateModuleRegistry);
 
   // Used to implement the normal static import of modules (using `import ... from`).
@@ -334,11 +334,11 @@ class IsolateModuleRegistry final {
   v8::MaybeLocal<v8::Promise> dynamicResolve(
       Lock& js, Url specifier, Url referrer, kj::StringPtr rawSpecifier) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const CompilationObserver& observer,
-                                         kj::Maybe<Module::EvalCallback>& maybeEvalCallback) {
+                                         const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
       return js
-          .toPromise(check(entry.module.evaluate(js, module, observer, maybeEvalCallback))
-                         .As<v8::Promise>())
+          .toPromise(
+              check(entry.module.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>())
           .then(js, [module = js.v8Ref(module)](Lock& js, Value) mutable -> Promise<Value> {
         return js.resolvedPromise(js.v8Ref(module.getHandle(js)->GetModuleNamespace()));
       });
@@ -363,12 +363,12 @@ class IsolateModuleRegistry final {
 
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, getObserver(), inner.getEvalCallback());
+        return evaluate(js, found, getObserver(), inner.getEvaluator());
       }
 
       // No? That's OK, let's look it up.
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, getObserver(), inner.getEvalCallback());
+        return evaluate(js, found, getObserver(), inner.getEvaluator());
       }
 
       // Nothing found? Aw... fail!
@@ -393,7 +393,7 @@ class IsolateModuleRegistry final {
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& specifier,
                                          const CompilationObserver& observer,
-                                         kj::Maybe<Module::EvalCallback>& maybeEvalCallback) {
+                                         const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
       auto status = module->GetStatus();
 
@@ -425,7 +425,7 @@ class IsolateModuleRegistry final {
 
       // Evaluate the module and grab the default export from the module namespace.
       auto promise =
-          check(entry.module.evaluate(js, module, observer, maybeEvalCallback)).As<v8::Promise>();
+          check(entry.module.evaluate(js, module, observer, maybeEvaluate)).As<v8::Promise>();
 
       // Run the microtasks to ensure that any promises that happen to be scheduled
       // during the evaluation of the top-level scope have a chance to be settled,
@@ -461,11 +461,11 @@ class IsolateModuleRegistry final {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, context.specifier, getObserver(), inner.getEvalCallback());
+        return evaluate(js, found, context.specifier, getObserver(), inner.getEvaluator());
       }
 
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, context.specifier, getObserver(), inner.getEvalCallback());
+        return evaluate(js, found, context.specifier, getObserver(), inner.getEvaluator());
       }
 
       if (option == RequireOption::RETURN_EMPTY) {
@@ -491,7 +491,7 @@ class IsolateModuleRegistry final {
   }
 
  private:
-  ModuleRegistry& inner;
+  const ModuleRegistry& inner;
   const CompilationObserver& observer;
 
   const CompilationObserver& getObserver() const {
@@ -582,7 +582,7 @@ v8::MaybeLocal<v8::Value> SyntheticModule::evaluationSteps(
 
     KJ_IF_SOME(found, registry.lookup(js, module)) {
       return found.module.evaluate(
-          js, module, registry.getObserver(), registry.inner.getEvalCallback());
+          js, module, registry.getObserver(), registry.inner.getEvaluator());
     }
 
     // This case really should never actually happen but we handle it anyway.
@@ -750,7 +750,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
 }
 
 IsolateModuleRegistry::IsolateModuleRegistry(
-    Lock& js, ModuleRegistry& registry, const CompilationObserver& observer)
+    Lock& js, const ModuleRegistry& registry, const CompilationObserver& observer)
     : inner(registry),
       observer(observer),
       lookupCache(EntryCallbacks{}, ContextCallbacks{}, UrlCallbacks{}) {
@@ -853,43 +853,59 @@ class FallbackModuleBundle final: public ModuleBundle {
         callback(kj::mv(callback)) {}
 
   kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
-    {
-      auto lock = cache.lockShared();
-      KJ_IF_SOME(found, lock->storage.find(context.specifier)) {
-        const Module& module = *found;
-        return Resolved{
-          .module = module,
-        };
-      }
-      KJ_IF_SOME(found, lock->aliases.find(context.specifier)) {
-        return Resolved{
-          .module = *found,
-        };
-      }
+    // Maybe it's an alias? If so, we just return the aliased specifier.
+    // We don't resolve again because the alias might be to a specifier
+    // in another bundle. We should start the resolution process over
+    // from the start.
+    KJ_IF_SOME(found, aliases.find(context.specifier)) {
+      return Resolved{
+        .specifier = kj::str(found),
+      };
     }
 
-    {
-      auto lock = cache.lockExclusive();
-      KJ_IF_SOME(resolved, callback(context)) {
-        KJ_SWITCH_ONEOF(resolved) {
-          KJ_CASE_ONEOF(str, kj::String) {
-            return Resolved{
-              .specifier = kj::mv(str),
-            };
+    // Maybe it's already cached? If so, we just return the cached module.
+    KJ_IF_SOME(found, storage.find(context.specifier)) {
+      return Resolved{
+        .module = *found,
+      };
+    }
+
+    // Well, let's actually try to resolve it.
+    KJ_IF_SOME(resolved, callback(context)) {
+      KJ_SWITCH_ONEOF(resolved) {
+        KJ_CASE_ONEOF(str, kj::String) {
+          // We got an alias back. Store it and return it, unless it's an alias
+          // to itself, in which case return kj::none. It's possible that a buggy
+          // fallback resolver could end up in an infinite loop of aliasing.
+          if (str == context.specifier.getHref()) {
+            return kj::none;
           }
-          KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
-            Module& module = *resolved;
-            lock->storage.upsert(context.specifier.clone(), kj::mv(resolved));
-            if (module.specifier() != context.specifier) {
-              lock->aliases.upsert(module.specifier().clone(), &module);
-            }
-            return Resolved{
-              .module = module,
-            };
-          }
+          aliases.insert(context.specifier.clone(), kj::str(str));
+          return Resolved{
+            .specifier = kj::mv(str),
+          };
         }
-        KJ_UNREACHABLE;
+        KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
+          auto& module = *resolved;
+          // If the fallback service returned a module with a specifier that
+          // already exists in storage, ignore it and return kj::none. We can't
+          // have two different modules with the same specifier in the bundle.
+          if (storage.find(module.specifier()) != kj::none) {
+            return kj::none;
+          }
+          storage.insert(module.specifier().clone(), kj::mv(resolved));
+          if (context.specifier != module.specifier()) {
+            // We checked for the existence of the specifier alias above so this
+            // insert should always succeed. In debug mode, let's check.
+            KJ_DASSERT(aliases.find(context.specifier) == kj::none);
+            aliases.insert(context.specifier.clone(), kj::str(module.specifier().getHref()));
+          }
+          return Resolved{
+            .module = module,
+          };
+        }
       }
+      KJ_UNREACHABLE;
     }
 
     return kj::none;
@@ -898,12 +914,8 @@ class FallbackModuleBundle final: public ModuleBundle {
  private:
   Builder::ResolveCallback callback;
 
-  struct Cache final {
-    kj::HashMap<Url, kj::Own<Module>> storage;
-    kj::HashMap<Url, Module*> aliases;
-  };
-
-  kj::MutexGuarded<Cache> cache;
+  kj::HashMap<Url, kj::Own<Module>> storage;
+  kj::HashMap<Url, kj::String> aliases;
 };
 
 // The static module bundle maintains an internal table of specifiers to resolve callbacks
@@ -916,29 +928,24 @@ class StaticModuleBundle final: public ModuleBundle {
       : ModuleBundle(type),
         modules(kj::mv(modules)),
         aliases(kj::mv(aliases)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(StaticModuleBundle);
 
   kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
+    // Is it an alias? If so, we just return the aliased specifier.
     KJ_IF_SOME(aliased, aliases.find(context.specifier)) {
-      // The specifier is registered as an alias. We need to resolve the alias instead.
-      // This is set up to allow for recursive aliases.
-      ResolveContext newContext{
-        .type = context.type,
-        .source = context.source,
-        .specifier = aliased,
-        .referrer = context.referrer,
-        .rawSpecifier = context.rawSpecifier,
+      return Resolved{
+        .specifier = kj::str(aliased.getHref()),
       };
-      return resolve(newContext);
     }
 
-    auto lock = cache.lockExclusive();
-    KJ_IF_SOME(cached, lock->find(context.specifier)) {
+    // It's not an alias, maybe it's already cached?
+    KJ_IF_SOME(cached, cache.find(context.specifier)) {
       return Resolved{
         .module = checkModule(context, *cached),
       };
     }
 
-    // Module was not cached, try to resolve it.
+    // Not aliased or cached, we need to look it up.
     KJ_IF_SOME(found, modules.find(context.specifier)) {
       KJ_IF_SOME(resolved, found(context)) {
         KJ_SWITCH_ONEOF(resolved) {
@@ -949,7 +956,7 @@ class StaticModuleBundle final: public ModuleBundle {
           }
           KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
             const Module& module = *resolved;
-            lock->upsert(context.specifier.clone(), kj::mv(resolved));
+            cache.insert(context.specifier.clone(), kj::mv(resolved));
             return Resolved{
               .module = checkModule(context, module),
             };
@@ -965,7 +972,7 @@ class StaticModuleBundle final: public ModuleBundle {
  private:
   kj::HashMap<Url, ModuleBundle::Builder::ResolveCallback> modules;
   kj::HashMap<Url, Url> aliases;
-  kj::MutexGuarded<kj::HashMap<Url, kj::Own<Module>>> cache;
+  kj::HashMap<Url, kj::Own<Module>> cache;
 };
 
 kj::HashSet<kj::StringPtr> toHashSet(kj::ArrayPtr<const kj::String> arr) {
@@ -1132,6 +1139,13 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
 }
 
 // ======================================================================================
+ModuleRegistry::Impl::Impl(kj::ArrayPtr<kj::Vector<kj::Own<ModuleBundle>>> vectors) {
+  bundles[kBundle] = vectors[kBundle].releaseAsArray();
+  bundles[kBuiltin] = vectors[kBuiltin].releaseAsArray();
+  bundles[kBuiltinOnly] = vectors[kBuiltinOnly].releaseAsArray();
+  bundles[kFallback] = vectors[kFallback].releaseAsArray();
+}
+
 ModuleRegistry::Builder::Builder(
     const ResolveObserver& observer, const jsg::Url& bundleBase, Options options)
     : observer(observer),
@@ -1141,11 +1155,6 @@ ModuleRegistry::Builder::Builder(
 
 bool ModuleRegistry::Builder::allowsFallback() const {
   return (options & Options::ALLOW_FALLBACK) == Options::ALLOW_FALLBACK;
-}
-
-ModuleRegistry::Builder& ModuleRegistry::Builder::setParent(ModuleRegistry& parent) {
-  maybeParent = parent;
-  return *this;
 }
 
 ModuleRegistry::Builder& ModuleRegistry::Builder::add(kj::Own<ModuleBundle> bundle) {
@@ -1162,124 +1171,133 @@ ModuleRegistry::Builder& ModuleRegistry::Builder::setEvalCallback(EvalCallback c
   return *this;
 }
 
-kj::Own<ModuleRegistry> ModuleRegistry::Builder::finish() {
-  return kj::heap<ModuleRegistry>(this);
+kj::Arc<ModuleRegistry> ModuleRegistry::Builder::finish() {
+  return kj::arc<ModuleRegistry>(this);
 }
 
 ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
     : observer(builder->observer),
       bundleBase(builder->bundleBase),
-      maybeParent(builder->maybeParent),
-      schemaLoader(kj::mv(builder->schemaLoader)) {
-  bundles_[kBundle] = builder->bundles_[kBundle].releaseAsArray();
-  bundles_[kBuiltin] = builder->bundles_[kBuiltin].releaseAsArray();
-  bundles_[kBuiltinOnly] = builder->bundles_[kBuiltinOnly].releaseAsArray();
-  bundles_[kFallback] = builder->bundles_[kFallback].releaseAsArray();
-  maybeEvalCallback = kj::mv(builder->maybeEvalCallback);
+      impl(Impl(builder->bundles_.asPtr())),
+      maybeEvalCallback(kj::mv(builder->maybeEvalCallback)),
+      schemaLoader(kj::mv(builder->schemaLoader)) {}
+
+kj::Maybe<jsg::Promise<Value>> ModuleRegistry::evaluateImpl(jsg::Lock& js,
+    const Module& module,
+    v8::Local<v8::Module> v8Module,
+    const CompilationObserver& observer) const {
+  KJ_IF_SOME(callback, maybeEvalCallback) {
+    // Evil const_cast ok here because the callback itself is not mutated.
+    auto& c = const_cast<EvalCallback&>(callback);
+    return c(js, module, v8Module, observer);
+  }
+  return kj::none;
 }
 
-kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserver& observer) {
+kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserver& observer) const {
   // The IsolateModuleRegistry is attached to the isolate as an embedder data slot.
   // We have to keep it alive for the duration of the v8::Context so we return a
   // kj::Own and store that in the jsg::JsContext
   return kj::heap<IsolateModuleRegistry>(js, *this, observer);
 }
 
-kj::Maybe<const Module&> ModuleRegistry::resolve(const ResolveContext& context) {
-  auto tryFind = [this](const ResolveContext& context,
-                     kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) -> kj::Maybe<const Module&> {
-    for (auto& bundle: bundles) {
-      KJ_IF_SOME(found, bundle->resolve(context)) {
-        KJ_IF_SOME(str, found.specifier) {
-          // We received a redirect to another module specifier. Let's
-          // start resolution over again with the new specifier... but only
-          // if we can successfully parse the specifier as a URL.
-          KJ_IF_SOME(specifier, jsg::Url::tryParse(str.asPtr())) {
-
-            kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;
-            for (const auto& [key, value]: context.attributes) {
-              clonedAttrs.insert(key, value);
-            }
-
-            return resolve(ResolveContext{
-              .type = context.type,
-              .source = context.source,
-              .specifier = kj::mv(specifier),
-              .referrer = context.referrer.clone(),
-              .rawSpecifier = context.rawSpecifier.map([](auto& str) { return kj::str(str); }),
-              .attributes = kj::mv(clonedAttrs),
-            });
-          }
-          return kj::none;
-        }
-        KJ_IF_SOME(module, found.module) {
-          return module;
-        }
-        KJ_UNREACHABLE;
+kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundle(
+    const ResolveContext& context, ModuleBundle& bundle, const Url& bundleBase) {
+  KJ_IF_SOME(found, bundle.resolve(context)) {
+    KJ_IF_SOME(str, found.specifier) {
+      // We received a redirect to another module specifier. Let's
+      // start resolution over again with the new specifier... but only
+      // if we can successfully parse the specifier as a URL.
+      KJ_IF_SOME(specifier, jsg::Url::tryParse(str.asPtr(), bundleBase.getHref())) {
+        return kj::Maybe(kj::mv(specifier));
       }
     }
-    return kj::none;
-  };
+    KJ_IF_SOME(module, found.module) {
+      return kj::Maybe(ModuleRef{
+        .module = module,
+      });
+    }
+  }
+  return kj::none;
+}
 
-  // If the embedder supports it, collect metrics on what modules were resolved.
-  auto metrics = observer.onResolveModule(context.specifier, context.type, context.source);
+kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundleGroup(
+    const ResolveContext& context, kj::ArrayPtr<kj::Own<ModuleBundle>> bundles) const {
+  for (auto& bundle: bundles) {
+    KJ_IF_SOME(found, tryFindInBundle(context, *bundle, bundleBase)) {
+      return kj::mv(found);
+    }
+  }
+  return kj::none;
+}
+
+kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
+    Impl& impl, const ResolveContext& context, bool recursed) const {
+#define MODULE_LOOKUP(context, bundle)                                                             \
+  KJ_IF_SOME(found, tryFindInBundleGroup(context, impl.bundles[bundle])) {                         \
+    KJ_SWITCH_ONEOF(found) {                                                                       \
+      KJ_CASE_ONEOF(url, Url) {                                                                    \
+        if (recursed) { /* avoid recursing indefinitely */                                         \
+          return kj::none;                                                                         \
+        }                                                                                          \
+        kj::HashMap<kj::StringPtr, kj::StringPtr> clonedAttrs;                                     \
+        for (const auto& [key, value]: context.attributes) {                                       \
+          clonedAttrs.insert(key, value);                                                          \
+        }                                                                                          \
+        ResolveContext ctx{                                                                        \
+          .type = context.type,                                                                    \
+          .source = context.source,                                                                \
+          .specifier = url,                                                                        \
+          .referrer = context.referrer.clone(),                                                    \
+          .rawSpecifier = context.rawSpecifier.map([](auto& str) { return kj::str(str); }),        \
+          .attributes = kj::mv(clonedAttrs),                                                       \
+        };                                                                                         \
+        return lookupImpl(impl, ctx, true);                                                        \
+      }                                                                                            \
+      KJ_CASE_ONEOF(mod, ModuleRef) {                                                              \
+        return mod.module;                                                                         \
+      }                                                                                            \
+    }                                                                                              \
+    KJ_UNREACHABLE;                                                                                \
+  }
 
   switch (context.type) {
     case ResolveContext::Type::BUNDLE: {
       // For bundle resolution, we only use Bundle, Builtin, and Fallback bundles,
       // in that order.
-      KJ_IF_SOME(found, tryFind(context, bundles_[kBundle])) {
-        metrics->found();
-        return found;
-      }
-      KJ_IF_SOME(found, tryFind(context, bundles_[kBuiltin])) {
-        metrics->found();
-        return found;
-      }
-      KJ_IF_SOME(found, tryFind(context, bundles_[kFallback])) {
-        metrics->found();
-        return found;
-      }
-
-      KJ_IF_SOME(parent, maybeParent) {
-        return parent.resolve(context);
-      }
-
-      metrics->notFound();
-      return kj::none;
+      MODULE_LOOKUP(context, kBundle);
+      MODULE_LOOKUP(context, kBuiltin);
+      MODULE_LOOKUP(context, kFallback);
+      break;
     }
     case ResolveContext::Type::BUILTIN: {
       // For built-in resolution, we only use builtin and builtin-only bundles.
-      KJ_IF_SOME(found, tryFind(context, bundles_[kBuiltin])) {
-        metrics->found();
-        return found;
-      }
-      KJ_IF_SOME(found, tryFind(context, bundles_[kBuiltinOnly])) {
-        metrics->found();
-        return found;
-      }
-
-      KJ_IF_SOME(parent, maybeParent) {
-        return parent.resolve(context);
-      }
-
-      metrics->notFound();
-      return kj::none;
+      MODULE_LOOKUP(context, kBuiltin);
+      MODULE_LOOKUP(context, kBuiltinOnly);
+      break;
     }
     case ResolveContext::Type::BUILTIN_ONLY: {
       // For built-in only resolution, we only use builtin-only bundles.
-      KJ_IF_SOME(found, tryFind(context, bundles_[kBuiltinOnly])) {
-        metrics->found();
-        return found;
-      }
-
-      KJ_IF_SOME(parent, maybeParent) {
-        return parent.resolve(context);
-      }
-
-      metrics->notFound();
-      return kj::none;
+      MODULE_LOOKUP(context, kBuiltinOnly);
+      break;
     }
+  }
+
+  return kj::none;
+}
+
+kj::Maybe<const Module&> ModuleRegistry::resolve(const ResolveContext& context) const {
+  // If the embedder supports it, collect metrics on what modules were resolved.
+  auto metrics = observer.onResolveModule(context.specifier, context.type, context.source);
+
+  // While multiple threads may be holing references to the registry, only one thread
+  // at a time may resolve a module. Resolving a module may involve mutating internal
+  // state (e.g. caching) so we lock here. Fortunately, module resolution should be
+  // fast, especially with caching, so this lock should be held only briefly.
+  auto lock = impl.lockExclusive();
+  KJ_IF_SOME(found, lookupImpl(*lock, context, false)) {
+    metrics->found();
+    return found;
   }
 
   metrics->notFound();
@@ -1334,6 +1352,13 @@ Module::Module(Url specifier, Type type, Flags flags)
     : specifier_(kj::mv(specifier)),
       type_(type),
       flags_(flags) {}
+
+kj::Maybe<jsg::Promise<Value>> Module::Evaluator::operator()(jsg::Lock& js,
+    const Module& module,
+    v8::Local<v8::Module> v8Module,
+    const CompilationObserver& observer) const {
+  return registry.evaluateImpl(js, module, v8Module, observer);
+}
 
 bool Module::instantiate(
     Lock& js, v8::Local<v8::Module> module, const CompilationObserver& observer) const {

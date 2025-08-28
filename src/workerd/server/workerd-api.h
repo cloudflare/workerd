@@ -8,7 +8,6 @@
 
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
-#include <workerd/jsg/modules-new.h>
 #include <workerd/server/workerd.capnp.h>
 
 namespace workerd {
@@ -21,7 +20,10 @@ struct PythonConfig;
 namespace workerd {
 namespace jsg {
 class V8System;
+namespace modules {
+class ModuleRegistry;
 }
+}  // namespace jsg
 }  // namespace workerd
 
 namespace workerd::api {
@@ -42,15 +44,15 @@ class WorkerdApi final: public Worker::Api {
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
-      const PythonConfig& pythonConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
+      const PythonConfig& pythonConfig);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
-  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const override;
+  jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
+      jsg::Lock& lock, Worker::Api::NewContextOptions options = {}) const override;
   jsg::Dict<NamedExport> unwrapExports(
       jsg::Lock& lock, v8::Local<v8::Value> moduleNamespace) const override;
   NamedExport unwrapExport(jsg::Lock& lock, v8::Local<v8::Value> exportVal) const override;
@@ -333,7 +335,7 @@ class WorkerdApi final: public Worker::Api {
   void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const override;
 
   // Create the ModuleRegistry instance for the worker.
-  static kj::Own<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
+  static kj::Arc<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
       const jsg::ResolveObserver& resolveObserver,
       kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
