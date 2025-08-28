@@ -33,8 +33,8 @@ class WorkerEntrypoint: public jsg::Object {
 // Like WorkerEntrypoint, but this is the base class for Durable Object classes.
 //
 // Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
-// in C++ would conflict with the type name currently used by DO stubs.
-// TODO(cleanup): Rename DO stubs to `DurableObjectStub`?
+// in C++ would have previously conflicted with the name used by DO stubs.
+// TODO(cleanup): Rename to `DurableObject`?
 //
 // Historically, DO classes were not expected to inherit anything. However, this made it impossible
 // to tell whether an exported class was intended to be a DO class vs. something else. Originally
