@@ -54,7 +54,6 @@ namespace {
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
   V(OUTCOME, "outcome")                                                                            \
-  V(PARENTSPANID, "parentSpanId")                                                                  \
   V(QUEUE, "queue")                                                                                \
   V(QUEUENAME, "queueName")                                                                        \
   V(RAWSIZE, "rawSize")                                                                            \
@@ -69,6 +68,7 @@ namespace {
   V(SCRIPTVERSION, "scriptVersion")                                                                \
   V(SEQUENCE, "sequence")                                                                          \
   V(SPANCLOSE, "spanClose")                                                                        \
+  V(SPANCONTEXT, "spanContext")                                                                    \
   V(SPANID, "spanId")                                                                              \
   V(SPANOPEN, "spanOpen")                                                                          \
   V(STACK, "stack")                                                                                \
@@ -78,7 +78,6 @@ namespace {
   V(TRACEID, "traceId")                                                                            \
   V(TRACE, "trace")                                                                                \
   V(TRACES, "traces")                                                                              \
-  V(TRIGGER, "trigger")                                                                            \
   V(TYPE, "type")                                                                                  \
   V(UNKNOWN, "unknown")                                                                            \
   V(URL, "url")                                                                                    \
@@ -337,6 +336,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
   obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
+  obj.set(js, SPANID_STR, js.str(onset.spanId.toGoString()));
 
   KJ_IF_SOME(ns, onset.workerInfo.dispatchNamespace) {
     obj.set(js, DISPATCHNAMESPACE_STR, js.str(ns));
@@ -364,14 +364,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
       vobj.set(js, MESSAGE_STR, js.str(version->getMessage()));
     }
     obj.set(js, SCRIPTVERSION_STR, vobj);
-  }
-
-  KJ_IF_SOME(trigger, onset.trigger) {
-    auto tobj = js.obj();
-    tobj.set(js, TRACEID_STR, js.str(trigger.traceId.toGoString()));
-    tobj.set(js, INVOCATIONID_STR, js.str(trigger.invocationId.toGoString()));
-    tobj.set(js, SPANID_STR, js.str(trigger.spanId.toGoString()));
-    obj.set(js, TRIGGER_STR, tobj);
   }
 
   KJ_SWITCH_ONEOF(onset.info) {
@@ -431,13 +423,8 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
-
-  // TODO(streaming-tail): Finalize format for providing span ID/parent span ID
-  if (isPredictableModeForTest()) {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex((uint64_t)0x2a2a2a2a2a2a2a2a)));
-  } else {
-    obj.set(js, PARENTSPANID_STR, js.str(kj::hex(spanOpen.parentSpanId)));
-  }
+  // Export span ID as non-truncated hex value – in practice this will be a random span ID.
+  obj.set(js, SPANID_STR, js.str(spanOpen.spanId.toGoString()));
 
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
@@ -511,9 +498,16 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
 
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
-  obj.set(js, TRACEID_STR, js.str(event.traceId.toGoString()));
+
+  // Set SpanContext
+  auto sCObj = js.obj();
+  sCObj.set(js, TRACEID_STR, js.str(event.spanContext.getTraceId().toGoString()));
+  KJ_IF_SOME(spanId, event.spanContext.getSpanId()) {
+    sCObj.set(js, SPANID_STR, js.str(spanId.toGoString()));
+  }
+  obj.set(js, SPANCONTEXT_STR, kj::mv(sCObj));
+
   obj.set(js, INVOCATIONID_STR, js.str(event.invocationId.toGoString()));
-  obj.set(js, SPANID_STR, js.str(event.spanId.toGoString()));
   obj.set(js, TIMESTAMP_STR, js.date(event.timestamp));
   obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 

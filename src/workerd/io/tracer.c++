@@ -47,7 +47,8 @@ void TailStreamWriter::report(
     }
   }
 
-  tracing::TailEvent tailEvent(context, timestamp, s.sequence++, kj::mv(event));
+  tracing::TailEvent tailEvent(context.getTraceId(), context.getInvocationId(), context.getSpanId(),
+      timestamp, s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
   if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
@@ -216,7 +217,6 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
   // Span events are transmitted together for now.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // TODO(o11y): Provide correct nested spans
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
     auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span);
@@ -230,16 +230,21 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
 
     // Compose span events
     // TODO(o11y): Actually report the spanOpen event at span creation time
-    writer->report(
-        context, tracing::SpanOpen(span.parentSpanId, kj::str(span.operationName)), span.startTime);
+    auto spanOpenContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.parentSpanId);
+    auto spanComponentContext = tracing::InvocationSpanContext(
+        topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
+
+    writer->report(spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)),
+        span.startTime);
     // If a span manages to exceed the size limit, truncate it by not providing span attributes.
     if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
       tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
         return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
       };
-      writer->report(context, kj::mv(attr), span.startTime);
+      writer->report(spanComponentContext, kj::mv(attr), span.startTime);
     }
-    writer->report(context, tracing::SpanClose(), span.endTime);
+    writer->report(spanComponentContext, tracing::SpanClose(), span.endTime);
   }
 
   // Note: spans will not be shipped to the production version of the legacy tail worker, so we
@@ -381,9 +386,12 @@ void WorkerTracer::setEventInfo(
       .entrypoint = mapCopyString(trace->entrypoint),
     };
 
+    // TODO(o11y): At this time, the onset spanId is always zero. We could use the invocation span
+    // context ID, but we'd need to propagate it to the top-level span as its parent span ID and
+    // would have to still use a fixed ID in tests.
     writer->report(context,
-        tracing::Onset(
-            cloneEventInfo(info), kj::mv(workerInfo), attributes.releaseAsArray(), kj::none),
+        tracing::Onset(tracing::SpanId::nullId, cloneEventInfo(info), kj::mv(workerInfo),
+            attributes.releaseAsArray()),
         timestamp);
   }
 
