@@ -170,6 +170,7 @@ class Default(WorkerEntrypoint):
         await request_unit_tests(js_env)
         await can_use_event_decorator(js_env)
         await response_unit_tests(js_env)
+        await can_fetch_python_request()
 
 
 # TODO: Right now the `fetch` that's available on a binding is the JS fetch.
@@ -495,3 +496,11 @@ async def response_unit_tests(env):
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
     assert response_ws.status == 201
+
+
+async def can_fetch_python_request():
+    def fetch_check(request, opts):
+        assert isinstance(request, JsProxy)
+
+    async with _mock_fetch(fetch_check):
+        await fetch(Request("https://example.com/redirect"))
