@@ -206,14 +206,11 @@ void ActorSqlite::onCriticalError(
   if (broken == kj::none) {
     // TODO(someday): If we are setting the broken exception, do we also need to explicitly break
     // the output gate?
-    KJ_IF_SOME(e, maybeException) {
-      e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
-      broken.emplace(kj::mv(e));
-    } else {
-      kj::Exception exception = JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
-      exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
-      broken.emplace(kj::mv(exception));
-    }
+    kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
+      return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
+    });
+    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    broken.emplace(kj::mv(exception));
   }
 }
 
