@@ -123,7 +123,7 @@ static char** copy_string_array(const char** orig)
     for (const char** current = orig; *current; current++) {
         num_entries += 1;
     }
-    char** copy = calloc(num_entries + 1, sizeof(char*));
+    char** copy = (char**) calloc(num_entries + 1, sizeof(char*));
     for (size_t i = 0; i < num_entries; i++) {
         copy[i] = strdup(orig[i]);
     }
@@ -199,13 +199,13 @@ static struct data_channel* reprl_create_data_channel(struct reprl_context* ctx)
         reprl_error(ctx, "Failed to create data channel file: %s", strerror(errno));
         return NULL;
     }
-    char* mapping = mmap(0, REPRL_MAX_DATA_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    char* mapping = (char*) mmap(0, REPRL_MAX_DATA_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (mapping == MAP_FAILED) {
         reprl_error(ctx, "Failed to mmap data channel file: %s", strerror(errno));
         return NULL;
     }
 
-    struct data_channel* channel = malloc(sizeof(struct data_channel));
+    struct data_channel* channel = (struct data_channel*) malloc(sizeof(struct data_channel));
     channel->fd = fd;
     channel->mapping = mapping;
     return channel;
@@ -407,7 +407,7 @@ struct reprl_context* reprl_create_context()
     dup2(devnull, REPRL_CHILD_DATA_OUT);
     close(devnull);
 
-    return calloc(1, sizeof(struct reprl_context));
+    return (struct reprl_context*) calloc(1, sizeof(struct reprl_context));
 }
 
 int reprl_initialize_context(struct reprl_context* ctx, const char** argv, const char** envp, int capture_stdout, int capture_stderr)

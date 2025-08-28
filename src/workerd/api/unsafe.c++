@@ -6,9 +6,11 @@
 
 namespace workerd::api {
 
+// NOLINTBEGIN(edgeworker-mutable-globals)
 struct shmem_data* __shmem = nullptr;
 uint32_t* __edges_start = nullptr;
 uint32_t* __edges_stop = nullptr;
+// NOLINTEND(edgeworker-mutable-globals)
 
 void __sanitizer_cov_reset_edgeguards() {
   uint64_t N = 0;
