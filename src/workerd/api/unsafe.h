@@ -6,8 +6,6 @@
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/url.h>
 
-#include <unistd.h>
-
 #include <csignal>
 #include <iostream>
 
@@ -142,9 +140,6 @@ class Stdin: public jsg::Object {
 
       char* source_buffer_tail = script_;
       ssize_t remaining = (ssize_t)script_size;
-
-      //printf("Reading in script with size: %zu\n",script_size);
-      //fflush(stdout);
 
       while (remaining > 0) {
         ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t)remaining);
