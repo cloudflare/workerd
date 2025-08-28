@@ -167,7 +167,7 @@ KJ_TEST("opaque rust type") {
   KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
 
   s->set_name("another_name");
-  KJ_EXPECT("another_name"_kj == kj::StringPtr((std::string)s->get_name()));
+  KJ_EXPECT("another_name"_kjc == kj::arrayPtr(s->get_name().data(), s->get_name().size()));
 }
 
 KJ_TEST("rust::String test") {
