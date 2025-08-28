@@ -111,7 +111,7 @@ class DurableObjectStub final: public Fetcher {
     JSG_READONLY_INSTANCE_PROPERTY(id, getId);
     JSG_READONLY_INSTANCE_PROPERTY(name, getName);
 
-    JSG_TS_DEFINE(interface DurableObjectStub {
+    JSG_TS_DEFINE(interface DurableObject {
       fetch(request: Request): Response | Promise<Response>;
       alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
       webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;

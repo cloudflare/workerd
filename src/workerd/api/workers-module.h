@@ -32,21 +32,17 @@ class WorkerEntrypoint: public jsg::Object {
 
 // Like WorkerEntrypoint, but this is the base class for Durable Object classes.
 //
-// Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
-// in C++ would have previously conflicted with the name used by DO stubs.
-// TODO(cleanup): Rename to `DurableObject`?
-//
 // Historically, DO classes were not expected to inherit anything. However, this made it impossible
 // to tell whether an exported class was intended to be a DO class vs. something else. Originally
 // there were no other kinds of exported classes so this was fine. Going forward, we encourage
 // everyone to be explicit by inheriting this, and we require it if you want to use RPC.
-class DurableObjectBase: public jsg::Object {
+class DurableObject: public jsg::Object {
  public:
-  static jsg::Ref<DurableObjectBase> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
+  static jsg::Ref<DurableObject> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
       jsg::Ref<DurableObjectState> ctx,
       jsg::JsObject env);
 
-  JSG_RESOURCE_TYPE(DurableObjectBase) {}
+  JSG_RESOURCE_TYPE(DurableObject) {}
 };
 
 // Base class for Workflows
@@ -82,7 +78,7 @@ class EntrypointsModule: public jsg::Object {
   JSG_RESOURCE_TYPE(EntrypointsModule) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
     JSG_NESTED_TYPE(WorkflowEntrypoint);
-    JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
+    JSG_NESTED_TYPE(DurableObject);
     JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
     JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
     JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
@@ -94,7 +90,7 @@ class EntrypointsModule: public jsg::Object {
 };
 
 #define EW_WORKERS_MODULE_ISOLATE_TYPES                                                            \
-  api::WorkerEntrypoint, api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
+  api::WorkerEntrypoint, api::WorkflowEntrypoint, api::DurableObject, api::EntrypointsModule
 
 template <class Registry>
 void registerWorkersModule(Registry& registry, CompatibilityFlags::Reader flags) {

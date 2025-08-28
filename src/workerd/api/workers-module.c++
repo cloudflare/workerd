@@ -22,8 +22,7 @@ jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
   return js.alloc<WorkerEntrypoint>();
 }
 
-jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
+jsg::Ref<DurableObject> DurableObject::constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
     jsg::Ref<DurableObjectState> ctx,
     jsg::JsObject env) {
   // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
@@ -34,7 +33,7 @@ jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
   jsg::JsObject self(args.This());
   self.set(js, "ctx", jsg::JsValue(args[0]));
   self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<DurableObjectBase>();
+  return js.alloc<DurableObject>();
 }
 
 jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
