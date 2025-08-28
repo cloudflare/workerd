@@ -65,7 +65,7 @@ wd_cc_library(
     srcs = glob(["r2*.c++"]),
     hdrs = glob(["r2*.h"]),
     implementation_deps = [
-        "//src/workerd/api:r2-api_capnp",
+        ":r2-api_capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [

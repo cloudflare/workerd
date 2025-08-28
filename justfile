@@ -100,7 +100,7 @@ clippy package="...":
   bazel build //src/rust/{{package}} --config=lint
 
 generate-types:
-  bazel build //types:types
+  bazel build //types
   cp -r bazel-bin/types/definitions/latest types/generated-snapshot/
   cp -r bazel-bin/types/definitions/experimental types/generated-snapshot/
 

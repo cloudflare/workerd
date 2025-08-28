@@ -13,7 +13,7 @@ def wd_ts_type_test(src, **kwargs):
             "../../definitions/experimental",
         ],
         data = [
-            "//types:types",
+            "//types",
             "//types:test/types/tsconfig.json",
             "//:node_modules/expect-type",
             src,

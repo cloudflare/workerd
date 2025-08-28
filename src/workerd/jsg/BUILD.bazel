@@ -348,7 +348,7 @@ kj_test(
 kj_test(
     src = "multiple-typewrappers-test.c++",
     deps = [
+        ":jsg",
         "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
     ],
 )
