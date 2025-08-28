@@ -739,6 +739,20 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
     (void)(__VA_ARGS__);                                                                           \
   } while (false)
 
+void perform_wild_write() {
+  // Access an invalid address.
+  // We want to use an "interesting" address for the access (instead of
+  // e.g. nullptr). In the (unlikely) case that the address is actually
+  // mapped, simply increment the pointer until it crashes.
+  // The cast ensures that this works correctly on both 32-bit and 64-bit.
+  uintptr_t addr = static_cast<uintptr_t>(0x414141414141ull);
+  char* ptr = reinterpret_cast<char*>(addr);
+  for (int i = 0; i < 1024; i++) {
+    *ptr = 'A';
+    ptr += 1 * 1024 * 1024;
+  }
+}
+
 void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Value> value = v8::Local<v8::Value>::Cast(args[0].getHandle(isolate));
@@ -772,32 +786,18 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         //DCHECK(false);
         break;
       case 3: {
-        // Access an invalid address.
-        // We want to use an "interesting" address for the access (instead of
-        // e.g. nullptr). In the (unlikely) case that the address is actually
-        // mapped, simply increment the pointer until it crashes.
-        // The cast ensures that this works correctly on both 32-bit and 64-bit.
-        v8::internal::Address addr = static_cast<v8::internal::Address>(0x414141414141ull);
-        // If we're in sandbox testing mode, use the target page as address.
-        // This is the page that must be written to to demonstrate a sandbox
-        // bypass, in which case there should be a detectable crash.
-#ifdef V8_ENABLE_SANDBOX
-        if (SandboxTesting::mode() == SandboxTesting::Mode::kForTesting) {
-          addr = SandboxTesting::target_page_base();
-        }
-#endif  // V8_ENABLE_SANDBOX
-        char* ptr = reinterpret_cast<char*>(addr);
-        for (int i = 0; i < 1024; i++) {
-          *ptr = 'A';
-          ptr += 1 * v8::internal::MB;
-        }
+        perform_wild_write();
         break;
       }
       case 4: {
-        // Use-after-free, likely only crashes in ASan builds.
+        // Use-after-free, should be caught by ASan (if active).
         auto* vec = new std::vector<int>(4);
         delete vec;
         USE(vec->at(0));
+#ifndef V8_USE_ADDRESS_SANITIZER
+        // The testcase must also crash on non-asan builds.
+        perform_wild_write();
+#endif  // !V8_USE_ADDRESS_SANITIZER
         break;
       }
       case 5: {
@@ -810,6 +810,8 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
       case 6: {
         // Out-of-bounds access (2), likely only crashes in ASan builds.
         std::vector<int> vec(6);
+        //linter complains about this...
+        // NOLINTNEXTLINE(edgeworker-ban-memset)
         memset(vec.data(), 42, 0x100);
         break;
       }
@@ -839,7 +841,7 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         break;
     }
   } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
-    static FILE* fzliout = fdopen(REPRL_DWFD, "w");
+    FILE* fzliout = fdopen(REPRL_DWFD, "w");
     if (!fzliout) {
       fprintf(stderr, "Fuzzer output channel not available, printing to stdout instead\n");
       fzliout = stdout;

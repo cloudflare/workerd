@@ -1725,8 +1725,11 @@ struct shmem_data {
   unsigned char edges[];
 };
 
+// NOLINTBEGIN(edgeworker-mutable-globals)
 struct shmem_data* __shmem;
-uint32_t *__edges_start, *__edges_stop;
+uint32_t* __edges_start;
+uint32_t* __edges_stop;
+// NOLINTEND(edgeworker-mutable-globals)
 
 void __sanitizer_cov_reset_edgeguards() {
   uint64_t N = 0;
