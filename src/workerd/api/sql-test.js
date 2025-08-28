@@ -1701,3 +1701,50 @@ actorFuncs.doCriticalErrorOnTransactionSyncCommit = async (state) => {
     });
   }, /^Error: Cannot commit transaction due to an earlier SQL critical error/);
 };
+
+export let testCriticalErrorOnTransactionRollback = {
+  async test(ctrl, env, ctx) {
+    let id = env.ns.idFromName('critical-error-on-transaction-rollback');
+    let stub = env.ns.get(id);
+    await stub.createStringTable();
+
+    // TODO(now): this call should rethrow the broken exception, but doesn't:
+    await stub.runActorFunc('doCriticalErrorOnTransactionRollback');
+
+    // Get a new stub since the old stub is broken due to critical error
+    stub = env.ns.get(id);
+    // We expect only the first two committed rows to be present:
+    assert.deepStrictEqual(await stub.getStringTableIds(), [1, 2]);
+  },
+};
+actorFuncs.doCriticalErrorOnTransactionRollback = async (state) => {
+  // Limit size of db so we can trigger a SQLITE_FULL error
+  state.storage.sql.setMaxPageCountForTest(10);
+
+  // Add a row as part of an implicit transaction, and wait for it to commit.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 1, 'a');
+  await state.storage.sync();
+
+  // Add another row as part of a new implicit transaction.  We expect this to be committed
+  // prior to the failing explicit transaction.
+  state.storage.sql.exec('INSERT INTO string_table VALUES (?, ?)', 2, 'a');
+
+  // Try to add a row that is too big for the database, within an explicit asynchronous
+  // transaction.  We expect this to fail with a critical error that rolls back the explicit
+  // transaction and breaks the output gate.
+  await assert.rejects(async () => {
+    await state.storage.transaction(async (txn) => {
+      assert.throws(() => {
+        state.storage.sql.exec(
+          'INSERT INTO string_table VALUES (?, ?)',
+          3,
+          'a'.repeat(1000000)
+        );
+      }, /^Error: database or disk is full: SQLITE_FULL/);
+
+      // Explicitly roll back transaction.  In earlier versions of the code, this could throw
+      // "no such savepoint: _cf_savepoint_0" due to a missing brokenness check.
+      txn.rollback();
+    });
+  }, /^Error: database or disk is full: SQLITE_FULL/);
+};
