@@ -477,7 +477,6 @@ class ConsumerImpl final {
               otherReady.buffer.push(Close{});
             }
             KJ_CASE_ONEOF(entry, QueueEntry) {
-              // Evil const_cast required for clone(...) below.
               auto& q = const_cast<QueueEntry&>(entry);
               otherReady.buffer.push(q.clone(js));
             }
