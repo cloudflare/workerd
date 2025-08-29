@@ -9,7 +9,8 @@
 
 #include <workerd/io/io-context.h>
 #include <workerd/io/observer.h>
-#include <workerd/util/checked-queue.h>
+
+#include <list>
 
 namespace workerd::api {
 
@@ -365,7 +366,9 @@ class WritableStreamInternalController: public WritableStreamController {
     }
   };
 
-  workerd::util::Queue<WriteEvent> queue;
+  // We use std::list to keep memory overhead low when there are many streams with no or few pending
+  // events.
+  std::list<WriteEvent> queue;
 };
 
 // An implementation of ReadableStreamSource and WritableStreamSink which communicates read and
