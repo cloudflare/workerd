@@ -132,29 +132,44 @@ jsg::JsArray UtilModule::getOwnNonIndexProperties(jsg::Lock& js, jsg::JsObject v
       js, jsg::KeyCollectionFilter::OWN_ONLY, propertyFilter, jsg::IndexFilter::SKIP_INDICES);
 }
 
-jsg::Optional<UtilModule::PromiseDetails> UtilModule::getPromiseDetails(jsg::JsValue value) {
+jsg::Optional<UtilModule::PromiseDetails> UtilModule::getPromiseDetails(
+    jsg::Lock& js, jsg::JsValue value) {
   auto promise = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsPromise>(), kj::none);
   auto state = promise.state();
   if (state != jsg::PromiseState::PENDING) {
     auto result = promise.result();
-    return PromiseDetails{.state = state, .result = result};
+    return PromiseDetails{
+      .state = state,
+      .result = jsg::JsRef(js, result),
+    };
   } else {
-    return PromiseDetails{.state = state, .result = kj::none};
+    return PromiseDetails{
+      .state = state,
+      .result = kj::none,
+    };
   }
 }
 
-jsg::Optional<UtilModule::ProxyDetails> UtilModule::getProxyDetails(jsg::JsValue value) {
+jsg::Optional<UtilModule::ProxyDetails> UtilModule::getProxyDetails(
+    jsg::Lock& js, jsg::JsValue value) {
   auto proxy = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsProxy>(), kj::none);
   auto target = proxy.target();
   auto handler = proxy.handler();
-  return ProxyDetails{.target = target, .handler = handler};
+  return ProxyDetails{
+    .target = jsg::JsRef(js, target),
+    .handler = jsg::JsRef(js, handler),
+  };
 }
 
-jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(jsg::JsValue value) {
+jsg::Optional<UtilModule::PreviewedEntries> UtilModule::previewEntries(
+    jsg::Lock& js, jsg::JsValue value) {
   auto object = KJ_UNWRAP_OR_RETURN(value.tryCast<jsg::JsObject>(), kj::none);
   bool isKeyValue;
   auto entries = object.previewEntries(&isKeyValue);
-  return PreviewedEntries{.entries = entries, .isKeyValue = isKeyValue};
+  return PreviewedEntries{
+    .entries = jsg::JsRef(js, entries),
+    .isKeyValue = isKeyValue,
+  };
 }
 
 jsg::JsString UtilModule::getConstructorName(jsg::Lock& js, jsg::JsObject value) {

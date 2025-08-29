@@ -38,7 +38,7 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
   }
 
@@ -65,7 +65,7 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(p, o.props) {
-      props = Frankenvalue::fromJs(js, p);
+      props = Frankenvalue::fromJs(js, p.getHandle(js));
     }
   }
 
