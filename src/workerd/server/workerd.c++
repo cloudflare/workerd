@@ -21,8 +21,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
+
+#ifdef __linux__
 #include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -935,11 +938,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   }
 
   kj::MainFunc getFuzz() {
-
-#ifdef WORKERD_FUZZILLI
-    KJ_DBG("Setting up signal handler");
-    initSignalHandlers();
-#endif
     auto builder = kj::MainBuilder(context, getVersionString(),
         "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
 
@@ -1716,7 +1714,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 //
 // BEGIN FUZZING CODE
 //
-
+#if defined(__linux__) && defined(WORKERD_FUZZILLI)
 #define SHM_SIZE 0x200000
 #define MAX_EDGES ((SHM_SIZE - 4) * 8)
 
@@ -1790,7 +1788,7 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t* guard) {
       exit(EXIT_FAILURE);                                                                          \
     }                                                                                              \
   } while (0)
-
+#endif
 //
 // END FUZZING CODE
 //
@@ -1803,6 +1801,10 @@ int main(int argc, char* argv[]) {
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
+#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

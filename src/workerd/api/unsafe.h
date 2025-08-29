@@ -9,6 +9,12 @@
 #include <csignal>
 #include <iostream>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace workerd::api {
 
 struct shmem_data {
@@ -130,7 +136,7 @@ class Stdin: public jsg::Object {
       fflush(stderr);
       if (nread != 4 || action != 0x63657865) {  // 'exec'
         fprintf(stderr, "Unknown action: %x\n", action);
-        _exit(-1);
+        exit(-1);
       }
 
       CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
@@ -145,7 +151,7 @@ class Stdin: public jsg::Object {
         ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t)remaining);
         if (rv <= 0) {
           fprintf(stderr, "Failed to load script\n");
-          _exit(-1);
+          exit(-1);
         }
         remaining -= rv;
         source_buffer_tail += rv;
