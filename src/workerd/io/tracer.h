@@ -122,7 +122,9 @@ class BaseTracer: public kj::Refcounted {
   // if available. Must not be called more than once, and fetchResponseInfo should only be set for
   // fetch events. For legacy tail worker, there is no distinct return event so we only add
   // fetchResponseInfo to the trace if present.
-  virtual void setReturn(kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
+  static kj::Date setReturnTime();
+  virtual void setReturn(kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none,
+      kj::Date time = setReturnTime()) = 0;
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
@@ -181,7 +183,8 @@ class WorkerTracer: public BaseTracer {
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
-  void setReturn(kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
+  void setReturn(kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none,
+      kj::Date time = setReturnTime()) override;
 
  private:
   PipelineLogLevel pipelineLogLevel;
