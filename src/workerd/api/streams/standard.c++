@@ -1270,7 +1270,9 @@ void WritableImpl<Self>::dealWithRejection(
 
 template <typename Self>
 typename WritableImpl<Self>::WriteRequest WritableImpl<Self>::dequeueWriteRequest() {
-  return KJ_ASSERT_NONNULL(writeRequests.pop());
+  auto write = kj::mv(writeRequests.front());
+  writeRequests.pop_front();
+  return kj::mv(write);
 }
 
 template <typename Self>
@@ -1319,8 +1321,10 @@ void WritableImpl<Self>::finishErroring(jsg::Lock& js, jsg::Ref<Self> self) {
   KJ_ASSERT(inFlightClose == kj::none);
   state.template init<StreamStates::Errored>(kj::mv(erroring.reason));
 
-  writeRequests.drainTo([&](WriteRequest&& req) { req.resolver.reject(js, reason); });
-  KJ_DASSERT(writeRequests.empty());
+  while (!writeRequests.empty()) {
+    dequeueWriteRequest().resolver.reject(js, reason);
+  }
+  KJ_ASSERT(writeRequests.empty());
 
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     if (pendingAbort->reject) {
@@ -1542,7 +1546,7 @@ jsg::Promise<void> WritableImpl<Self>::write(
   KJ_ASSERT(isWritable());
 
   auto prp = js.newPromiseAndResolver<void>();
-  writeRequests.push(WriteRequest{
+  writeRequests.push_back(WriteRequest{
     .resolver = kj::mv(prp.resolver),
     .value = js.v8Ref(value),
     .size = size,
@@ -1570,11 +1574,7 @@ void WritableImpl<Self>::visitForGc(jsg::GcVisitor& visitor) {
   KJ_IF_SOME(pendingAbort, maybePendingAbort) {
     visitor.visit(*pendingAbort);
   }
-  writeRequests.forEach([&](const WriteRequest& write) {
-    // const_cast is ugly here but GcVisitor only supports non-const references.
-    auto& w = const_cast<WriteRequest&>(write);
-    visitor.visit(w.resolver, w.value);
-  });
+  visitor.visitAll(writeRequests);
 }
 
 template <typename Self>
@@ -1584,7 +1584,10 @@ bool WritableImpl<Self>::isWritable() const {
 
 template <typename Self>
 void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
-  writeRequests.drainTo([&](WriteRequest&& write) { write.resolver.reject(js, reason); });
+  for (auto& write: writeRequests) {
+    write.resolver.reject(js, reason);
+  }
+  writeRequests.clear();
 }
 
 // ======================================================================================
@@ -3985,7 +3988,9 @@ void WritableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("writeAlgorithm", algorithms.write);
   tracker.trackField("sizeAlgorithm", algorithms.size);
 
-  writeRequests.forEach([&](const auto& req) { tracker.trackField("writeRequest", req); });
+  for (auto& request: writeRequests) {
+    tracker.trackField("pendingWrite", request);
+  }
 
   tracker.trackField("inFlightWrite", inFlightWrite);
   tracker.trackField("inFlightClose", inFlightClose);
