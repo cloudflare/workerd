@@ -84,7 +84,7 @@ export const test = {
       // tail-worker-test-jsrpc: Regression test for EW-9282 (missing onset event with
       // JsRpcSessionCustomEventImpl). This is derived from tests/js-rpc-test.js.
       '{"type":"onset","executionModel":"stateless","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc","methodName":"nonFunctionProperty"}}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc","methodName":"nonFunctionProperty"}}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
     assert.deepStrictEqual(response, expected);
