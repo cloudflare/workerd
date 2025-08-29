@@ -181,6 +181,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
+  actorSqlite.requireNotBroken();
   JSG_REQUIRE(!hasChild, Error,
       "Cannot roll back an outer transaction while a nested transaction is still running.");
   if (!committed) {
@@ -204,16 +205,14 @@ void ActorSqlite::onCriticalError(
     kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
-    // TODO(someday): If we are setting the broken exception, do we also need to explicitly break
-    // the output gate?
-    KJ_IF_SOME(e, maybeException) {
-      e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
-      broken.emplace(kj::mv(e));
-    } else {
-      kj::Exception exception = JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
-      exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
-      broken.emplace(kj::mv(exception));
-    }
+    kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
+      return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
+    });
+    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    broken.emplace(kj::cp(exception));
+
+    // Also ensure output gate is explicitly broken.
+    commitTasks.add(outputGate.lockWhile(kj::Promise<void>(kj::mv(exception))));
   }
 }
 

@@ -542,6 +542,10 @@ SqliteDatabase::operator sqlite3*() {
   return &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 }
 
+bool SqliteDatabase::observedCriticalError() {
+  return criticalErrorOccurred;
+}
+
 void SqliteDatabase::notifyWrite() {
   KJ_IF_SOME(cb, onWriteCallback) {
     cb();
@@ -560,6 +564,7 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
       if (inTransaction || !savepoints.empty()) {
         // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
         if (sqlite3_get_autocommit(db) != 0) {
+          criticalErrorOccurred = true;
           KJ_IF_SOME(cb, onCriticalErrorCallback) {
             cb(errorMessage, maybeException);
           }

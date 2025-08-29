@@ -673,11 +673,27 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
+
+      // In the case of critical errors, we throw an exception to attempt rollback and convey
+      // failure to the caller of transactionSync(), even if the callback did not throw.
+      JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
+          "Cannot commit transaction due to an earlier SQL critical error");
+
       sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      if (sqlite.observedCriticalError()) {
+        // The database has observed a critical error that forced an automatic rollback.  SQLite
+        // docs recommend attempting an explicit rollback, even though it is expected to fail due
+        // to missing savepoints.
+        kj::runCatchingExceptions([&]() {
+          sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+          sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+        });
+      } else {
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      }
       js.throwException(kj::mv(exception));
     });
   } else {

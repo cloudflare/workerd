@@ -203,11 +203,18 @@ class SqliteDatabase {
     onWriteCallback = kj::mv(callback);
   }
 
+  // Invokes the given callback when a "critical error" causes an automatic rollback during a
+  // transaction.
+  //
+  // See: https://www.sqlite.org/lang_transaction.html#response_to_errors_within_a_transaction
   void onCriticalError(
       kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>
           callback) {
     onCriticalErrorCallback = kj::mv(callback);
   }
+
+  // Returns true if a transaction was automatically rolled due to a critical error.
+  bool observedCriticalError();
 
   // Invoke the onWrite() callback.
   //
@@ -319,6 +326,7 @@ class SqliteDatabase {
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
+  bool criticalErrorOccurred = false;
   kj::Maybe<kj::Function<void()>> onWriteCallback;
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
       onCriticalErrorCallback;
