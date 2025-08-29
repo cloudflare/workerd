@@ -57,9 +57,10 @@ void expect_failure(const char* code) {
 }
 
 int main(int argc, char** argv) {
+#ifdef __linux__
   ctx = reprl_create_context();
 
-  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-16", nullptr};
+  const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-19", nullptr};
   if (argc < 4) {
     printf("Usage: %s <workerd_path> <command> <path-to-config> <workerd-flags>", argv[0]);
     exit(-1);
@@ -95,5 +96,6 @@ int main(int argc, char** argv) {
   //expect_failure("async function fail() { throw 42; }; fail()");
   fflush(stdout);
   puts("OK");
+#endif
   return 0;
 }
