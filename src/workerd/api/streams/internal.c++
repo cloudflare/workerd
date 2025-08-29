@@ -2024,8 +2024,9 @@ void WritableStreamInternalController::drain(jsg::Lock& js, v8::Local<v8::Value>
 }
 
 void WritableStreamInternalController::visitForGc(jsg::GcVisitor& visitor) {
-  queue.forEach([&](auto& event) {
-    KJ_SWITCH_ONEOF(event.event) {
+  queue.forEach([&](const WriteEvent& event) {
+    WriteEvent& e = const_cast<WriteEvent&>(event);
+    KJ_SWITCH_ONEOF(e.event) {
       KJ_CASE_ONEOF(write, Write) {
         visitor.visit(write.promise);
       }
