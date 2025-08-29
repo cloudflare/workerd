@@ -34,7 +34,9 @@ namespace workerd::jsg::modules {
 // Every Worker has exactly one ModuleRegistry associated with composed of
 // of or more ModuleBundles (e.g. a ModuleBundle with modules from the worker
 // bundle, a ModuleBundle representing built-in modules, a ModuleBundle that is
-// a fallback service, etc)
+// a fallback service, etc). When multiple replicas of a Worker are created, they
+// may share the same ModuleRegistry instance, since multiple workers may be
+// acting across multiple threads, the ModuleRegistry instance must be thread-safe.
 //
 // The ModuleRegistry is the collection of individual Modules that can be
 // imported (i.e. `import * from '...'` and `await import('...')`) or required
@@ -43,21 +45,33 @@ namespace workerd::jsg::modules {
 // The ModuleRegistry is conceptually immutable once created (individual
 // instances may support dynamic resolution using, for instance, a fallback
 // service but there is no API to manipulate the ModuleRegistry once it has
-// been created).
+// been created). There is internal state that may change, such as caching of
+// resolved modules, and compile cache data, but the set of modules that are
+// available within the ModuleRegistry does not change. The only exception to
+// this is the fallback service, which may dynamically resolved modules that
+// are not otherwise available in the ModuleRegistry, but that is only used
+// for local development in workerd and is never used in production.
 //
-// All access to the ModuleRegistry is thread-safe by way of requiring callers
-// to hold and pass the jsg::Lock&. With exception to the fallback service, all
-// operations within the ModuleRegistry are either synchronous or expected to
-// use JavaScript promises to perform asynchronous operations.
+// All access to the ModuleRegistry is thread-safe by way of (a) requiring callers
+// to hold and pass the jsg::Lock& when resolving modules and (b) having the
+// ModuleRegistry instance by AtomicRefcounted with MutexGuarded locks. With
+// exception to the fallback service, all operations within the ModuleRegistry
+// are either synchronous or expected to use JavaScript promises to perform
+// asynchronous operations.
 //
 // When a Worker is created, a ModuleBundle is created to contain Module
-// definitions declared by the worker bundle configuration. One or more
+// definitions declared by the worker source bundle configuration. One or more
 // are also provided that provides modules from within the runtime.
 //
 // When a v8::Isolate* is created for a particular worker, the ModuleRegistry
 // instance will be bound to the isolate in the form of a new IsolateModuleRegistry
 // instance. This is the interface that is actually used to resolve specifiers into
-// imported modules. The ModuleRegistry instance itself is owned by the Worker.
+// imported modules. The ModuleRegistry instance itself is owned by the Worker::Script
+// and the IsolateModuleRegistry instance can be viewed as a client.
+//
+// When there are multiple IsolateModuleRegistry instances pointing to the same
+// ModuleRegistry instance, only one can peform resolution at a time, controlled
+// by an exclusive lock on a MutexGuarded within the ModuleRegistry.
 //
 // The ModuleRegistry, ModuleBundle, and individual Module instances do not /
 // must not store any state that is specific to an isolate.
@@ -70,7 +84,9 @@ namespace workerd::jsg::modules {
 // `buffer`.
 //
 // Specifiers for modules that come from the worker bundle config are always
-// relative to `file:///bundle` (by default).
+// relative to `file:///bundle` (by default). Note that the `/bundle` part
+// will be configurable in the future and is shared with the virtual file
+// system used by the worker.
 //
 // For ESM modules, the specifier is accessible using import.meta.url.
 // All ESM modules support import.meta.resolve(...)
@@ -82,7 +98,11 @@ namespace workerd::jsg::modules {
 // the ModuleRegistry will not actually generate the v8::Local<v8::Module>,
 // compile scripts, or evaluate it until the module is actually imported.
 // This means that any modules that are never actually imported by a worker
-// will never actually be compiled or evaluated.
+// will never actually be compiled or evaluated. Keep in mind, that this does
+// not mean everything is dynamically imported. Static imports will still
+// be statically resolved and evaluated when the module that imports them
+// is resolved/evaluated. The key difference is that if a module is never
+// imported, it will never be resolved/compiled/evaluated.
 //
 // A ModuleBundle will have one of three basic types: Bundle, Builtin,
 // or Builtin-Only.
@@ -144,6 +164,20 @@ namespace workerd::jsg::modules {
 // held.
 //
 // Metrics can be collected for module resolution and evaluation.
+//
+// Other details:
+//
+// * Module specifiers can be aliases for other specifiers, but only one
+//   level of aliasing is supported. That is, an alias cannot point to another
+//   alias. When a specifier resolves to an alias, the resolution starts over
+//   and the aliased module can be located in any ModuleBundle.
+// * Import attributes are not currently implemented but will be in a future
+//   iteration. For now, if any import attributes are specified an error will
+//   be thrown.
+// * ESM modules all support the compile cache. When the ModuleRegistry is
+//   shared across multiple replicas of a Worker, the compile cache will speed
+//   up module compilation since the same compile cache can be used across all
+//   replicas.
 
 // The ResolveContext identifies the module that is being resolved along with
 // other key bits of information that may be used to resolve the module.
