@@ -159,6 +159,7 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
         "//src/workerd/io",
+        "//src/workerd/io:worker-modules",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "@capnp-cpp//src/kj/compat:kj-gzip",

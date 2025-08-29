@@ -133,6 +133,21 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "worker-modules",
+    hdrs = ["worker-modules.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/pyodide:pyodide_static",
+        "//src/pyodide:python-entrypoint",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/api:rtti",
+        "//src/workerd/api/node",
+        "//src/workerd/jsg",
+    ],
+)
+
 # TODO(cleanup): Split this up further.
 wd_cc_library(
     name = "actor",

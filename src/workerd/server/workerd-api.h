@@ -335,7 +335,7 @@ class WorkerdApi final: public Worker::Api {
   void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const override;
 
   // Create the ModuleRegistry instance for the worker.
-  static kj::Arc<jsg::modules::ModuleRegistry> initializeBundleModuleRegistry(
+  static kj::Arc<jsg::modules::ModuleRegistry> newWorkerdModuleRegistry(
       const jsg::ResolveObserver& resolveObserver,
       kj::Maybe<const Worker::Script::ModulesSource&> source,
       const CompatibilityFlags::Reader& featureFlags,
