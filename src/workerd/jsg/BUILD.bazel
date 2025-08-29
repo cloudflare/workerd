@@ -45,7 +45,6 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         "//src/workerd/util",
-        "//src/workerd/util:checked-queue",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",

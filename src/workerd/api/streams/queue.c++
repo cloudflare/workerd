@@ -84,7 +84,7 @@ void ValueQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
   impl.error(js, kj::mv(reason));
 };
 
-void ValueQueue::Consumer::read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+void ValueQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
@@ -153,20 +153,21 @@ void ValueQueue::handlePush(
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
     state.queueTotalSize += entry->getSize();
-    state.buffer.push(QueueEntry{.entry = kj::mv(entry)});
+    state.buffer.push_back(QueueEntry{.entry = kj::mv(entry)});
     return;
   }
 
   // Otherwise, pop the next pending read and resolve it. There should be nothing in the queue.
-  KJ_REQUIRE(state.queueTotalSize == 0);
-  KJ_ASSERT_NONNULL(state.readRequests.pop())->resolve(js, entry->getValue(js));
+  KJ_REQUIRE(state.buffer.empty() && state.queueTotalSize == 0);
+  state.readRequests.front().resolve(js, entry->getValue(js));
+  state.readRequests.pop_front();
 }
 
 void ValueQueue::handleRead(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     ConsumerImpl& consumer,
     QueueImpl& queue,
-    kj::Own<ReadRequest> request) {
+    ReadRequest request) {
   // If there are no pending read requests and there is data in the buffer,
   // we will try to fulfill the read request immediately.
   if (state.queueTotalSize > 0 && state.buffer.empty()) {
@@ -176,7 +177,7 @@ void ValueQueue::handleRead(jsg::Lock& js,
         state.queueTotalSize);
   }
   if (state.readRequests.empty() && !state.buffer.empty()) {
-    auto& entry = KJ_ASSERT_NONNULL(state.buffer.peek());
+    auto& entry = state.buffer.front();
 
     KJ_SWITCH_ONEOF(entry) {
       KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
@@ -191,13 +192,13 @@ void ValueQueue::handleRead(jsg::Lock& js,
             "ValueQueue::handleRead encountered a close sentinel in the queue "
             "with queueTotalSize > 0. This should not happen.",
             state.queueTotalSize);
-        request->resolveAsDone(js);
+        request.resolveAsDone(js);
         return;
       }
       KJ_CASE_ONEOF(entry, QueueEntry) {
         auto freed = kj::mv(entry);
-        auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(state.buffer.pop());
-        request->resolve(js, freed.entry->getValue(js));
+        state.buffer.pop_front();
+        request.resolve(js, freed.entry->getValue(js));
         state.queueTotalSize -= freed.entry->getSize();
         return;
       }
@@ -206,12 +207,12 @@ void ValueQueue::handleRead(jsg::Lock& js,
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
     // Otherwise, if state.queueTotalSize is zero and isClosing() is true there won't be any
     // more data coming. Just resolve the read as done and move on.
-    request->resolveAsDone(js);
+    request.resolveAsDone(js);
   } else {
     // Otherwise, push the read request into the pending readRequests. It will be
     // resolved either as soon as there is data available or the consumer closes
     // or errors.
-    state.readRequests.push(kj::mv(request));
+    state.readRequests.push_back(kj::mv(request));
     KJ_IF_SOME(listener, consumer.stateListener) {
       listener.onConsumerWantsData(js);
     }
@@ -248,14 +249,23 @@ void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma region ByteQueue::ReadRequest
 
+namespace {
+void maybeInvalidateByobRequest(kj::Maybe<ByteQueue::ByobRequest&>& req) {
+  KJ_IF_SOME(byobRequest, req) {
+    byobRequest.invalidate();
+    // The call to byobRequest->invalidate() should have cleared the reference.
+    KJ_ASSERT(req == kj::none);
+  }
+}
+}  // namespace
+
 ByteQueue::ReadRequest::ReadRequest(
     jsg::Promise<ReadResult>::Resolver resolver, ByteQueue::ReadRequest::PullInto pullInto)
-    : selfRef(WeakRef<ReadRequest>::create(kj::Badge<ReadRequest>{}, *this)),
-      resolver(kj::mv(resolver)),
+    : resolver(kj::mv(resolver)),
       pullInto(kj::mv(pullInto)) {}
 
 ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
-  selfRef->invalidate();
+  maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
@@ -271,23 +281,25 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     KJ_ASSERT(pullInto.store.size() == 0);
     resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
   }
-  selfRef->invalidate();
+  maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
   resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
-  selfRef->invalidate();
+  maybeInvalidateByobRequest(byobReadRequest);
 }
 
 void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
   resolver.reject(js, value.getHandle(js));
-  selfRef->invalidate();
+  maybeInvalidateByobRequest(byobReadRequest);
 }
 
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     ConsumerImpl& consumer, QueueImpl& queue) {
-  return kj::heap<ByobRequest>(selfRef->addRef(), consumer, queue);
+  auto req = kj::heap<ByobRequest>(*this, consumer, queue);
+  byobReadRequest = *req;
+  return kj::mv(req);
 }
 
 #pragma endregion ByteQueue::ReadRequest
@@ -349,7 +361,7 @@ void ByteQueue::Consumer::error(jsg::Lock& js, jsg::Value reason) {
   impl.error(js, kj::mv(reason));
 }
 
-void ByteQueue::Consumer::read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+void ByteQueue::Consumer::read(jsg::Lock& js, ReadRequest request) {
   impl.read(js, kj::mv(request));
 }
 
@@ -388,6 +400,17 @@ void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma region ByteQueue::ByobRequest
 
+ByteQueue::ByobRequest::~ByobRequest() noexcept(false) {
+  invalidate();
+}
+
+void ByteQueue::ByobRequest::invalidate() {
+  KJ_IF_SOME(req, request) {
+    req.byobReadRequest = kj::none;
+    request = kj::none;
+  }
+}
+
 bool ByteQueue::ByobRequest::isPartiallyFulfilled() {
   return !isInvalidated() && getRequest().pullInto.filled > 0 &&
       getRequest().pullInto.store.getElementSize() > 1;
@@ -403,8 +426,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // First, we check to make sure that the request hasn't been invalidated already.
   // Here, invalidated is a fancy word for the promise having been resolved or
   // rejected already.
-  auto& req = KJ_REQUIRE_NONNULL(
-      request->tryGet(), "the pending byob read request was already invalidated");
+  auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
 
   // The amount cannot be more than the total space in the request store.
   JSG_REQUIRE(req.pullInto.filled + amount <= req.pullInto.store.size(), RangeError,
@@ -480,8 +502,7 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
   // What we do here is perform some basic validations on what we were given, and if
   // those pass, we'll replace the backing store held in the req.pullInto with the one
   // given, then continue on issuing the respond as normal.
-  auto& req = KJ_REQUIRE_NONNULL(
-      request->tryGet(), "the pending byob read request was already invalidated");
+  auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
   auto amount = view.size();
 
   JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
@@ -497,14 +518,14 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
 }
 
 size_t ByteQueue::ByobRequest::getAtLeast() const {
-  KJ_IF_SOME(req, request->tryGet()) {
+  KJ_IF_SOME(req, request) {
     return req.pullInto.atLeast;
   }
   return 0;
 }
 
 v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
-  KJ_IF_SOME(req, request->tryGet()) {
+  KJ_IF_SOME(req, request) {
     return req.pullInto.store
         .getTypedViewSlice<v8::Uint8Array>(js, req.pullInto.filled, req.pullInto.store.size())
         .getHandle(js)
@@ -519,7 +540,11 @@ ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
   KJ_IF_SOME(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
-    ready.pendingByobReadRequests.clear();
+    while (!ready.pendingByobReadRequests.empty()) {
+      auto& req = ready.pendingByobReadRequests.front();
+      req->invalidate();
+      ready.pendingByobReadRequests.pop_front();
+    }
   }
   impl.close(js);
 }
@@ -535,10 +560,11 @@ void ByteQueue::error(jsg::Lock& js, jsg::Value reason) {
 void ByteQueue::maybeUpdateBackpressure() {
   KJ_IF_SOME(state, impl.getState()) {
     // Invalidated byob read requests will accumulate if we do not take
-    // care of them from time to time since. Since maybeUpdateBackpressure
+    // take of them from time to time since. Since maybeUpdateBackpressure
     // is going to be called regularly while the queue is actively in use,
     // this is as good a place to clean them out as any.
-    state.pendingByobReadRequests.deleteIf([](auto& item) { return item->isInvalidated(); });
+    auto pivot KJ_UNUSED = std::remove_if(state.pendingByobReadRequests.begin(),
+        state.pendingByobReadRequests.end(), [](auto& item) { return item->isInvalidated(); });
   }
   impl.maybeUpdateBackpressure();
 }
@@ -555,7 +581,7 @@ void ByteQueue::handlePush(
     jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
     state.queueTotalSize += newEntry->getSize() - offset;
-    state.buffer.push(QueueEntry{
+    state.buffer.emplace_back(QueueEntry{
       .entry = kj::mv(newEntry),
       .offset = offset,
     });
@@ -576,26 +602,26 @@ void ByteQueue::handlePush(
   size_t entryOffset = 0;
 
   while (!state.readRequests.empty() && amountAvailable > 0) {
-    auto& pending = KJ_ASSERT_NONNULL(state.readRequests.peek());
+    auto& pending = state.readRequests.front();
 
     // If the amountAvailable is less than the pending read request's atLeast,
     // then we're just going to buffer the data and bailout without fulfilling
     // the read. We will take care of fulfilling the read later once there
     // is enough data.
 
-    if (amountAvailable < pending->pullInto.atLeast) {
+    if (amountAvailable < pending.pullInto.atLeast) {
       return bufferData(0);
     }
 
     // There might be at least some data in the buffer. If there is, it should
     // not be more than the current pending.pullInfo.atLeast or something went
     // wrong somewhere else.
-    KJ_REQUIRE(state.queueTotalSize < pending->pullInto.atLeast);
+    KJ_REQUIRE(state.queueTotalSize < pending.pullInto.atLeast);
 
     // First, we copy any data in the buffer out to the pending.pullInto. This
     // should completely consume the current buffer.
     while (!state.buffer.empty()) {
-      auto& next = KJ_ASSERT_NONNULL(state.buffer.peek());
+      auto& next = state.buffer.front();
       KJ_SWITCH_ONEOF(next) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
           // This should have been caught by the isClosing() check above.
@@ -605,8 +631,8 @@ void ByteQueue::handlePush(
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending->pullInto.store.asArrayPtr().begin() + pending->pullInto.filled;
-          auto destAmount = pending->pullInto.store.size() - pending->pullInto.filled;
+          auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
+          auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
 
           // sourceSize is the amount of data remaining in the current entry to copy.
           // destAmount is the amount of space remaining to be filled in the pending read.
@@ -621,9 +647,10 @@ void ByteQueue::handlePush(
 
           // We have completely consumed the data in this entry and can safely free
           // our reference to it now. Yay!
-          auto dropped = KJ_ASSERT_NONNULL(state.buffer.pop());
+          auto released = kj::mv(next);
+          state.buffer.pop_front();
 
-          pending->pullInto.filled += sourceSize;
+          pending.pullInto.filled += sourceSize;
 
           // There is no reason to adjust the pullInto.atLeast here because we
           // will be immediately resolving the read in the next step.
@@ -638,7 +665,7 @@ void ByteQueue::handlePush(
     KJ_REQUIRE(state.queueTotalSize == 0);
 
     // And there should be data remaining in the pending pullInto destination.
-    KJ_REQUIRE(pending->pullInto.filled < pending->pullInto.store.size());
+    KJ_REQUIRE(pending.pullInto.filled < pending.pullInto.store.size());
 
     // And the amountAvailable should be equal to the current push size.
     KJ_REQUIRE(amountAvailable == entrySize - entryOffset);
@@ -648,7 +675,7 @@ void ByteQueue::handlePush(
     // destination pullInto size - filled (which gives us the amount of space
     // remaining in the destination).
     auto amountToCopy =
-        kj::min(amountAvailable, pending->pullInto.store.size() - pending->pullInto.filled);
+        kj::min(amountAvailable, pending.pullInto.store.size() - pending.pullInto.filled);
 
     // The amountToCopy should not be more than the entry size minus the entryOffset
     // (which is the amount of data remaining to be consumed in the current entry).
@@ -656,15 +683,15 @@ void ByteQueue::handlePush(
 
     // The amountToCopy plus pending.pullInto.filled should be more than or equal to atLeast
     // and less than or equal pending.pullInto.store.size().
-    KJ_REQUIRE(amountToCopy + pending->pullInto.filled >= pending->pullInto.atLeast &&
-        amountToCopy + pending->pullInto.filled <= pending->pullInto.store.size());
+    KJ_REQUIRE(amountToCopy + pending.pullInto.filled >= pending.pullInto.atLeast &&
+        amountToCopy + pending.pullInto.filled <= pending.pullInto.store.size());
 
     // Awesome, so now we safely copy amountToCopy bytes from the current entry into
     // the remaining space in pending.pullInto.store, being careful to account for
     // the entryOffset and pending.pullInto.filled offsets to determine the range
     // where we start copying.
     auto entryPtr = newEntry->toArrayPtr();
-    auto destPtr = pending->pullInto.store.asArrayPtr().begin() + pending->pullInto.filled;
+    auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
     std::copy(
         entryPtr.begin() + entryOffset, entryPtr.begin() + entryOffset + amountToCopy, destPtr);
 
@@ -672,13 +699,13 @@ void ByteQueue::handlePush(
     // the amountAvailable and continue trying to consume data.
     amountAvailable -= amountToCopy;
     entryOffset += amountToCopy;
-    pending->pullInto.filled += amountToCopy;
+    pending.pullInto.filled += amountToCopy;
 
     // We do not need to adjust the pullInto.atLeast here since we are immediately
     // fulfilling the read at this point.
 
-    pending->resolve(js);
-    auto dropped = KJ_ASSERT_NONNULL(state.readRequests.pop());
+    pending.resolve(js);
+    state.readRequests.pop_front();
   }
 
   // If the entry was consumed completely by the pending read, then we're done!
@@ -699,10 +726,10 @@ void ByteQueue::handleRead(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     ConsumerImpl& consumer,
     QueueImpl& queue,
-    kj::Own<ReadRequest> request) {
+    ReadRequest request) {
   const auto pendingRead = [&]() {
-    bool isByob = request->pullInto.type == ReadRequest::Type::BYOB;
-    state.readRequests.push(kj::mv(request));
+    bool isByob = request.pullInto.type == ReadRequest::Type::BYOB;
+    state.readRequests.push_back(kj::mv(request));
     if (isByob) {
       // Because ReadRequest is movable, and because the ByobRequest captures
       // a reference to the ReadRequest, we wait until after it is added to
@@ -710,8 +737,8 @@ void ByteQueue::handleRead(jsg::Lock& js,
       // If the queue state is nullptr here, it means the queue has already
       // been closed.
       KJ_IF_SOME(queueState, queue.getState()) {
-        queueState.pendingByobReadRequests.push(
-            KJ_ASSERT_NONNULL(state.readRequests.peekBack())->makeByobReadRequest(consumer, queue));
+        queueState.pendingByobReadRequests.push_back(
+            state.readRequests.back().makeByobReadRequest(consumer, queue));
       }
     }
     KJ_IF_SOME(listener, consumer.stateListener) {
@@ -721,8 +748,9 @@ void ByteQueue::handleRead(jsg::Lock& js,
 
   const auto consume = [&](size_t amountToConsume) {
     while (amountToConsume > 0) {
+      KJ_REQUIRE(!state.buffer.empty());
       // There must be at least one item in the buffer.
-      auto& item = KJ_ASSERT_NONNULL(state.buffer.peek());
+      auto& item = state.buffer.front();
 
       KJ_SWITCH_ONEOF(item) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
@@ -734,8 +762,8 @@ void ByteQueue::handleRead(jsg::Lock& js,
           // offset and the data remaining in the destination to fill.
           auto entrySize = entry.entry->getSize();
           auto amountToCopy = kj::min(
-              entrySize - entry.offset, request->pullInto.store.size() - request->pullInto.filled);
-          auto elementSize = request->pullInto.store.getElementSize();
+              entrySize - entry.offset, request.pullInto.store.size() - request.pullInto.filled);
+          auto elementSize = request.pullInto.store.getElementSize();
           if (amountToCopy > elementSize) {
             amountToCopy -= amountToCopy % elementSize;
           }
@@ -746,19 +774,19 @@ void ByteQueue::handleRead(jsg::Lock& js,
           // Once we have the amount, we safely copy amountToCopy bytes from the
           // entry into the destination request, accounting properly for the offsets.
           auto sourcePtr = entry.entry->toArrayPtr().begin() + entry.offset;
-          auto destPtr = request->pullInto.store.asArrayPtr().begin() + request->pullInto.filled;
+          auto destPtr = request.pullInto.store.asArrayPtr().begin() + request.pullInto.filled;
 
           std::copy(sourcePtr, sourcePtr + amountToCopy, destPtr);
 
-          request->pullInto.filled += amountToCopy;
+          request.pullInto.filled += amountToCopy;
 
           // If pullInto.atLeast is greater than amountToCopy, let's adjust
           // atLeast down by the number of bytes we've consumed, indicating
           // a smaller minimum read requirement.
-          if (request->pullInto.atLeast > amountToCopy) {
-            request->pullInto.atLeast -= amountToCopy;
-          } else if (request->pullInto.atLeast == amountToCopy) {
-            request->pullInto.atLeast = 1;
+          if (request.pullInto.atLeast > amountToCopy) {
+            request.pullInto.atLeast -= amountToCopy;
+          } else if (request.pullInto.atLeast == amountToCopy) {
+            request.pullInto.atLeast = 1;
           }
           entry.offset += amountToCopy;
           amountToConsume -= amountToCopy;
@@ -768,7 +796,8 @@ void ByteQueue::handleRead(jsg::Lock& js,
           // entire thing and can free it and continue iterating. The amountToConsume might
           // be >= 0, we will check it at the start of the next iteration.
           if (entry.offset == entrySize) {
-            auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(state.buffer.pop());
+            auto released = kj::mv(item);
+            state.buffer.pop_front();
             continue;
           }
 
@@ -789,12 +818,12 @@ void ByteQueue::handleRead(jsg::Lock& js,
     // If the available size is less than the read requests atLeast, then
     // push the read request into the pending so we can wait for more data...
 
-    if (state.queueTotalSize < request->pullInto.atLeast) {
+    if (state.queueTotalSize < request.pullInto.atLeast) {
       // If there is anything in the consumers queue at this point, We need to
       // copy those bytes into the byob buffer and advance the filled counter
       // forward that number of bytes.
       if (state.queueTotalSize > 0 && consume(state.queueTotalSize)) {
-        return request->resolveAsDone(js);
+        return request.resolveAsDone(js);
       }
       return pendingRead();
     }
@@ -803,23 +832,23 @@ void ByteQueue::handleRead(jsg::Lock& js,
     // to minimally fill this read request! The amount to copy is the lesser
     // of the queue total size and the maximum amount of space in the request
     // pull into.
-    if (consume(kj::min(state.queueTotalSize, request->pullInto.store.size()))) {
+    if (consume(kj::min(state.queueTotalSize, request.pullInto.store.size()))) {
 
       // If consume returns true, the consumer hit the end and we need to
       // just resolve the request as done and return.
-      return request->resolveAsDone(js);
+      return request.resolveAsDone(js);
     }
 
     // Now, we can resolve the read promise. Since we consumed data from the
     // buffer, we also want to make sure to notify the queue so it can update
     // backpressure signaling.
-    request->resolve(js);
+    request.resolve(js);
   } else if (state.queueTotalSize == 0 && consumer.isClosing()) {
     // Otherwise, if size() is zero and isClosing() is true, we should have already
     // drained but let's take care of that now. Specifically, in this case there's
     // no data in the queue and close() has already been called, so there won't be
     // any more data coming.
-    request->resolveAsDone(js);
+    request.resolveAsDone(js);
   } else {
     // Otherwise, push the read request into the pending readRequests. It will be
     // resolved either as soon as there is data available or the consumer closes
@@ -849,10 +878,11 @@ bool ByteQueue::handleMaybeClose(
     // then we'll return false to indicate that there's more data to consume. In
     // either case, the pending read is popped off the pending queue and resolved.
 
-    auto& pending = KJ_ASSERT_NONNULL(state.readRequests.peek());
+    KJ_ASSERT(!state.readRequests.empty());
+    auto& pending = state.readRequests.front();
 
     while (!state.buffer.empty()) {
-      auto& next = KJ_ASSERT_NONNULL(state.buffer.peek());
+      auto& next = state.buffer.front();
       KJ_SWITCH_ONEOF(next) {
         KJ_CASE_ONEOF(c, ConsumerImpl::Close) {
           // We've reached the end! queueTotalSize should be zero. We need to
@@ -862,16 +892,16 @@ bool ByteQueue::handleMaybeClose(
           // Technically, we really shouldn't get here but the case is covered
           // just in case.
           KJ_ASSERT(state.queueTotalSize == 0);
-          pending->resolve(js);
-          auto dropped = KJ_ASSERT_NONNULL(state.readRequests.pop());
+          pending.resolve(js);
+          state.readRequests.pop_front();
           return true;
         }
         KJ_CASE_ONEOF(entry, QueueEntry) {
           auto sourcePtr = entry.entry->toArrayPtr();
           auto sourceSize = sourcePtr.size() - entry.offset;
 
-          auto destPtr = pending->pullInto.store.asArrayPtr().begin() + pending->pullInto.filled;
-          auto destAmount = pending->pullInto.store.size() - pending->pullInto.filled;
+          auto destPtr = pending.pullInto.store.asArrayPtr().begin() + pending.pullInto.filled;
+          auto destAmount = pending.pullInto.store.size() - pending.pullInto.filled;
 
           // There should be space available to copy into and data to copy from, or
           // something else went wrong.
@@ -891,7 +921,7 @@ bool ByteQueue::handleMaybeClose(
 
           // Safely copy amountToCopy bytes from the source into the destination.
           std::copy(sourceStart, sourceEnd, destPtr);
-          pending->pullInto.filled += amountToCopy;
+          pending.pullInto.filled += amountToCopy;
 
           // We do not need to adjust down the atLeast here because, no matter what,
           // the read is going to be resolved either here or in the next iteration.
@@ -904,7 +934,8 @@ bool ByteQueue::handleMaybeClose(
           if (sourceEnd == sourcePtr.end()) {
             // If sourceEnd is equal to sourcePtr.end(), we've consumed the entire entry
             // and we can free it.
-            auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(state.buffer.pop());
+            auto released = kj::mv(next);
+            state.buffer.pop_front();
 
             if (amountToCopy == destAmount) {
               // If the amountToCopy is equal to destAmount, then we've completely filled
@@ -912,13 +943,13 @@ bool ByteQueue::handleMaybeClose(
               // state.queueTotalSize happens to be zero, we can safely indicate that we
               // have read the remaining data as this may have been the last actual value
               // entry in the buffer.
-              pending->resolve(js);
-              auto dropped = KJ_ASSERT_NONNULL(state.readRequests.pop());
+              pending.resolve(js);
+              state.readRequests.pop_front();
 
               if (state.queueTotalSize == 0) {
                 // If the queueTotalSize is zero at this point, the next item in the queue
                 // must be a close and we can return true. All of the data has been consumed.
-                KJ_ASSERT(KJ_ASSERT_NONNULL(state.buffer.peek()).is<ConsumerImpl::Close>());
+                KJ_ASSERT(state.buffer.front().is<ConsumerImpl::Close>());
                 return true;
               }
 
@@ -946,8 +977,8 @@ bool ByteQueue::handleMaybeClose(
           // buffer.
           KJ_ASSERT(state.queueTotalSize > 0);
 
-          pending->resolve(js);
-          auto dropped = KJ_ASSERT_NONNULL(state.readRequests.pop());
+          pending.resolve(js);
+          state.readRequests.pop_front();
           return false;
         }
       }
@@ -984,7 +1015,8 @@ bool ByteQueue::handleMaybeClose(
 kj::Maybe<kj::Own<ByteQueue::ByobRequest>> ByteQueue::nextPendingByobReadRequest() {
   KJ_IF_SOME(state, impl.getState()) {
     while (!state.pendingByobReadRequests.empty()) {
-      auto request = KJ_ASSERT_NONNULL(state.pendingByobReadRequests.pop());
+      auto request = kj::mv(state.pendingByobReadRequests.front());
+      state.pendingByobReadRequests.pop_front();
       if (!request->isInvalidated()) {
         return kj::mv(request);
       }
@@ -996,8 +1028,8 @@ kj::Maybe<kj::Own<ByteQueue::ByobRequest>> ByteQueue::nextPendingByobReadRequest
 bool ByteQueue::hasPartiallyFulfilledRead() {
   KJ_IF_SOME(state, impl.getState()) {
     if (!state.pendingByobReadRequests.empty()) {
-      auto& pending = KJ_ASSERT_NONNULL(state.pendingByobReadRequests.peek());
-      if (!pending->isInvalidated() && pending->isPartiallyFulfilled()) {
+      auto& pending = state.pendingByobReadRequests.front();
+      if (pending->isPartiallyFulfilled()) {
         return true;
       }
     }

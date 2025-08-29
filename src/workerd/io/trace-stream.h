@@ -6,6 +6,8 @@
 #include <workerd/io/worker-interface.h>
 #include <workerd/util/checked-queue.h>
 
+#include <list>
+
 namespace workerd::tracing {
 
 // A WorkerInterface::CustomEvent implementation used to deliver streaming tail

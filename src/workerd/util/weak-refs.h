@@ -93,18 +93,11 @@ class WeakRef final: public kj::Refcounted {
   inline kj::Maybe<T&> tryGet() {
     return maybeThing;
   }
-  inline kj::Maybe<const T&> tryGet() const {
-    return maybeThing;
-  }
   inline kj::Own<WeakRef> addRef() {
     return kj::addRef(*this);
   }
   inline bool isValid() const {
     return maybeThing != kj::none;
-  }
-
-  static kj::Own<WeakRef> create(kj::Badge<T> badge, T& thing) {
-    return kj::refcounted<WeakRef>(badge, thing);
   }
 
  private:
