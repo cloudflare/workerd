@@ -248,14 +248,20 @@ void ValueQueue::visitForGc(jsg::GcVisitor& visitor) {}
 
 #pragma region ByteQueue::ReadRequest
 
+void ByteQueue::ReadRequest::maybeInvalidateByobRequest() {
+  KJ_IF_SOME(byobRequest, byobReadRequest) {
+    byobRequest.invalidate();
+    // The call to byobRequest->invalidate() should have cleared the reference.
+  }
+}
+
 ByteQueue::ReadRequest::ReadRequest(
     jsg::Promise<ReadResult>::Resolver resolver, ByteQueue::ReadRequest::PullInto pullInto)
-    : selfRef(WeakRef<ReadRequest>::create(kj::Badge<ReadRequest>{}, *this)),
-      resolver(kj::mv(resolver)),
+    : resolver(kj::mv(resolver)),
       pullInto(kj::mv(pullInto)) {}
 
 ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
-  selfRef->invalidate();
+  maybeInvalidateByobRequest();
 }
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
@@ -271,23 +277,25 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
     KJ_ASSERT(pullInto.store.size() == 0);
     resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = true});
   }
-  selfRef->invalidate();
+  maybeInvalidateByobRequest();
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
   pullInto.store.trim(js, pullInto.store.size() - pullInto.filled);
   resolver.resolve(js, ReadResult{.value = js.v8Ref(pullInto.store.getHandle(js)), .done = false});
-  selfRef->invalidate();
+  maybeInvalidateByobRequest();
 }
 
 void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::Value& value) {
   resolver.reject(js, value.getHandle(js));
-  selfRef->invalidate();
+  maybeInvalidateByobRequest();
 }
 
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     ConsumerImpl& consumer, QueueImpl& queue) {
-  return kj::heap<ByobRequest>(selfRef->addRef(), consumer, queue);
+  auto req = kj::heap<ByobRequest>(*this, consumer, queue);
+  byobReadRequest = *req;
+  return kj::mv(req);
 }
 
 #pragma endregion ByteQueue::ReadRequest
@@ -388,6 +396,17 @@ void ByteQueue::Consumer::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma region ByteQueue::ByobRequest
 
+ByteQueue::ByobRequest::~ByobRequest() noexcept(false) {
+  invalidate();
+}
+
+void ByteQueue::ByobRequest::invalidate() {
+  KJ_IF_SOME(req, request) {
+    req.byobReadRequest = kj::none;
+    request = kj::none;
+  }
+}
+
 bool ByteQueue::ByobRequest::isPartiallyFulfilled() {
   return !isInvalidated() && getRequest().pullInto.filled > 0 &&
       getRequest().pullInto.store.getElementSize() > 1;
@@ -403,8 +422,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
   // First, we check to make sure that the request hasn't been invalidated already.
   // Here, invalidated is a fancy word for the promise having been resolved or
   // rejected already.
-  auto& req = KJ_REQUIRE_NONNULL(
-      request->tryGet(), "the pending byob read request was already invalidated");
+  auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
 
   // The amount cannot be more than the total space in the request store.
   JSG_REQUIRE(req.pullInto.filled + amount <= req.pullInto.store.size(), RangeError,
@@ -480,8 +498,7 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
   // What we do here is perform some basic validations on what we were given, and if
   // those pass, we'll replace the backing store held in the req.pullInto with the one
   // given, then continue on issuing the respond as normal.
-  auto& req = KJ_REQUIRE_NONNULL(
-      request->tryGet(), "the pending byob read request was already invalidated");
+  auto& req = KJ_REQUIRE_NONNULL(request, "the pending byob read request was already invalidated");
   auto amount = view.size();
 
   JSG_REQUIRE(view.canDetach(js), TypeError, "Unable to use non-detachable ArrayBuffer.");
@@ -497,14 +514,14 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::BufferSource
 }
 
 size_t ByteQueue::ByobRequest::getAtLeast() const {
-  KJ_IF_SOME(req, request->tryGet()) {
+  KJ_IF_SOME(req, request) {
     return req.pullInto.atLeast;
   }
   return 0;
 }
 
 v8::Local<v8::Uint8Array> ByteQueue::ByobRequest::getView(jsg::Lock& js) {
-  KJ_IF_SOME(req, request->tryGet()) {
+  KJ_IF_SOME(req, request) {
     return req.pullInto.store
         .getTypedViewSlice<v8::Uint8Array>(js, req.pullInto.filled, req.pullInto.store.size())
         .getHandle(js)
@@ -519,7 +536,7 @@ ByteQueue::ByteQueue(size_t highWaterMark): impl(highWaterMark) {}
 
 void ByteQueue::close(jsg::Lock& js) {
   KJ_IF_SOME(ready, impl.state.tryGet<ByteQueue::QueueImpl::Ready>()) {
-    ready.pendingByobReadRequests.clear();
+    ready.pendingByobReadRequests.drainTo([&](auto&& req) { req->invalidate(); });
   }
   impl.close(js);
 }
