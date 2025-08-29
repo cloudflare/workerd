@@ -31,10 +31,6 @@ class DurableObjectExample(DurableObject, MixinTest):
         assert isinstance(request, Request)
 
         curr = await self.storage.getAlarm()
-        # TODO(EW-9548): It seems that running this code when taking a snapshot results in the alarm state
-        # being preserved in the snapshot. But this code doesn't run before snapshot generation
-        # occurs, so this shouldn't happen. So if you disable that logic (search for
-        # "quitting without running test"), the alarm will never trigger and this test fails.
         if not curr:
             self.storage.setAlarm(Date.now() + 100)
 
