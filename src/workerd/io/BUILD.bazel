@@ -70,6 +70,7 @@ wd_cc_library(
         "tracer.h",
         "worker.h",
         "worker-fs.h",
+        "worker-modules.h",
         "worker-source.h",
     ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
