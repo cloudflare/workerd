@@ -1,5 +1,5 @@
 Language: Cpp
-Standard: c++20
+Standard: c++23
 ColumnLimit: 100
 
 WhitespaceSensitiveMacros:
