@@ -177,6 +177,13 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(wallTime, getWallTime);
   }
 
+  JSG_SERIALIZABLE(rpc::SerializationTag::TRACE_ITEM);
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+
+  static jsg::Ref<TraceItem> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
