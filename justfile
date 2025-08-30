@@ -4,6 +4,7 @@ alias f := format
 alias st := stream-test
 alias c := coverage
 alias w := watch
+alias l := lint
 
 default:
   @just --list
@@ -144,3 +145,5 @@ profile path:
 
 watch *args="build":
   watchexec -rc -w src -w build just {{args}}
+
+lint: clippy eslint
