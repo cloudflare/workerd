@@ -85,6 +85,11 @@ HibernationManagerImpl::HibernationManagerImpl(
       readLoopTasks(onDisconnect) {}
 
 HibernationManagerImpl::~HibernationManagerImpl() noexcept(false) {
+  // Drop our outstanding tasks, the `readLoopTasks` have weak references to the
+  // `HibernatableWebSockets` in `allWs`, and since we're about to drop all of those WebSockets,
+  // we can't allow any more events to be delivered.
+  readLoopTasks.clear();
+
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
