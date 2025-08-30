@@ -294,7 +294,8 @@ class Worker::Script: public kj::AtomicRefcounted {
       kj::Maybe<ValidationErrorReporter&> errorReporter,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
       SpanParent parentSpan,
-      kj::Own<workerd::VirtualFileSystem> vfs);
+      kj::Own<workerd::VirtualFileSystem> vfs,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -363,7 +364,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::Own<workerd::VirtualFileSystem> vfs,
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry =
+          kj::none) const;
 
   inline IsolateLimitEnforcer& getLimitEnforcer() {
     return *limitEnforcer;
@@ -549,8 +552,15 @@ class Worker::Api {
   // Api.
   virtual CompatibilityFlags::Reader getFeatureFlags() const = 0;
 
+  struct NewContextOptions {
+    // If the worker is using the new module registry system, this is the registry to
+    // install on the newly created context. If null, the old system is assumed.
+    kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> newModuleRegistry;
+  };
+
   // Create the context (global scope) object.
-  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(jsg::Lock& lock) const = 0;
+  virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
+      jsg::Lock& lock, NewContextOptions options = {}) const = 0;
 
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
