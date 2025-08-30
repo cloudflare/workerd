@@ -34,6 +34,7 @@
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
@@ -122,6 +123,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_FILESYSTEM_ISOLATE_TYPES,
     EW_WEBSOCKET_ISOLATE_TYPES,
     EW_SQL_ISOLATE_TYPES,
+    EW_SYNC_KV_ISOLATE_TYPES,
     EW_NODE_ISOLATE_TYPES,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
