@@ -315,7 +315,7 @@ KJ_TEST("check put multiple wraps operations in a transaction and does not rollb
       test.putMultiple(putKVs.releaseAsArray());
       // We should fail with correct error before reaching here.
       KJ_UNREACHABLE;
-    } catch (kj::Exception e) {
+    } catch (kj::Exception& e) {
       KJ_ASSERT(
           e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
     }
@@ -403,7 +403,7 @@ KJ_TEST(
       auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
       commitFulfiller->fulfill();
       KJ_UNREACHABLE;
-    } catch (kj::Exception e) {
+    } catch (kj::Exception& e) {
       KJ_ASSERT(
           e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
     }

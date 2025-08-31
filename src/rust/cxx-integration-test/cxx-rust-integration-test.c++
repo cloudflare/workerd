@@ -33,7 +33,7 @@ KJ_TEST("err Result") {
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     // this is expected
     KJ_EXPECT(e.getDescription() == "test error"_kj);
   }

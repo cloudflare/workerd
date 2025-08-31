@@ -4,6 +4,8 @@
 
 #include "alarm-scheduler.h"
 
+#include <kj/debug.h>
+
 #include <cmath>
 
 namespace workerd::server {
