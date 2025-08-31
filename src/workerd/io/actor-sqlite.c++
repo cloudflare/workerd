@@ -488,7 +488,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
       for (const auto& pair: pairs) {
         try {
           kv.put(pair.key, pair.value);
-        } catch (kj::Exception e) {
+        } catch (kj::Exception& e) {
           // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
           db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
           db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));

@@ -82,7 +82,7 @@ struct NormalizedFilePath {
     return url;
   }
 
-  operator const kj::Path() const {
+  operator kj::Path() const {
     auto path = kj::str(url.getPathname().slice(1));
     kj::Path root{};
     return root.eval(path);
