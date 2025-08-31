@@ -45,7 +45,7 @@ rust_library(
     ],
     version = "0.19.2",
     deps = [
-        "@crates_vendor__camino-1.1.11//:camino",
+        "@crates_vendor__camino-1.1.12//:camino",
         "@crates_vendor__cargo-platform-0.1.9//:cargo_platform",
         "@crates_vendor__semver-1.0.26//:semver",
         "@crates_vendor__serde-1.0.219//:serde",
