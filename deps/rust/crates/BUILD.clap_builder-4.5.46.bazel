@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "getopts",
+    name = "clap_builder",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "help",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,13 +39,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=getopts",
+        "crate-name=clap_builder",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.23",
+    version = "4.5.46",
     deps = [
-        "@crates_vendor__unicode-width-0.2.1//:unicode_width",
+        "@crates_vendor__anstyle-1.0.11//:anstyle",
+        "@crates_vendor__clap_lex-0.7.5//:clap_lex",
     ],
 )

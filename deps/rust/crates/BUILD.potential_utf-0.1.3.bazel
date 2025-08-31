@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clang_ast",
+    name = "potential_utf",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,9 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "zerovec",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,14 +38,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=potential_utf",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.31",
+    version = "0.1.3",
     deps = [
-        "@crates_vendor__foldhash-0.1.5//:foldhash",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__zerovec-0.11.4//:zerovec",
     ],
 )
