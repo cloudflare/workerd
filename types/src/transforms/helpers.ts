@@ -32,7 +32,7 @@ export function ensureModifier(
 
 // Ensure a modifiers array doesn't have the specified modifier
 export function ensureNoModifier(
-  ctx: ts.TransformationContext,
+  _ctx: ts.TransformationContext,
   modifiers: ReadonlyArray<ts.Modifier> | undefined,
   ensure: ts.SyntaxKind.ExportKeyword | ts.SyntaxKind.DeclareKeyword
 ): ReadonlyArray<ts.Modifier> {

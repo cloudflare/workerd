@@ -26,14 +26,12 @@
 import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
-  ERR_INCOMPATIBLE_OPTION_PAIR,
 } from 'node-internal:internal_errors';
 import {
   validateAbortSignal,
   validateObject,
   validateBoolean,
   validateInteger,
-  validateFunction,
   validateInt32,
   validateUint32,
   validateEncoding,
@@ -69,23 +67,31 @@ import {
 import { strictEqual } from 'node-internal:internal_assert';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import processImpl from 'node-internal:process';
 export type FilePath = string | URL | Buffer;
 
 import type {
-  CopyOptions,
-  CopySyncOptions,
   MakeDirectoryOptions,
+  OpenDirOptions,
   ReadSyncOptions,
   RmDirOptions,
   RmOptions,
   WriteFileOptions,
 } from 'node:fs';
 
+export type ValidEncoding = BufferEncoding | 'buffer' | null;
+
 import type { Stat as InternalStat } from 'cloudflare-internal:filesystem';
 
 // A non-public symbol used to ensure that certain constructors cannot
 // be called from user-code
 export const kBadge = Symbol('kBadge');
+export const kFileHandle = Symbol('kFileHandle');
+
+export function isFileHandle(object: unknown): boolean {
+  if (typeof object !== 'object' || object === null) return false;
+  return Reflect.has(object, kFileHandle);
+}
 
 export type RawTime = string | number | bigint;
 export type SymlinkType = 'dir' | 'file' | 'junction' | null | undefined;
@@ -122,13 +128,36 @@ export function normalizePath(path: FilePath, encoding: string = 'utf8'): URL {
   // implementation will end up seeing slightly different behavior
   // here but that's not something we need to worry about for now.
   if (typeof path === 'string') {
-    return new URL(path, 'file://');
+    // fallthrough for typical case
   } else if (path instanceof URL) {
     return path;
   } else if (Buffer.isBuffer(path)) {
-    return new URL(path.toString(encoding), 'file://');
+    path = path.toString(encoding);
+  } else {
+    throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
   }
-  throw new ERR_INVALID_ARG_TYPE('path', ['string', 'Buffer', 'URL'], path);
+
+  if (path.indexOf('\0') !== -1) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'path',
+      path,
+      'must not contain null bytes'
+    );
+  }
+
+  // In this case, we have a string path. Any ? or # characters in the
+  // path should be percent-encoded to ensure they are not treated as
+  // special characters in the URL.
+  path = path.replace(/[#?]/g, encodeURIComponent);
+
+  // Node.js will also ignore empty path segments (e.g. `//` in the path).
+  // Let's normalize those out here as well.
+  path = path.replace(/\/\//g, '/');
+
+  return new URL(
+    path,
+    path.startsWith('/') ? 'file://' : `file://${processImpl.getCwd()}/`
+  );
 }
 
 export const kMaxUserId = 2 ** 32 - 1;
@@ -282,33 +311,63 @@ export function validateRmDirArgs(
 // We could use the @types/node definition here but it's a bit overly
 // complex for our needs here.
 export type ReadDirOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: ValidEncoding | undefined;
   withFileTypes?: boolean | undefined;
   recursive?: boolean | undefined;
 };
 
 export function validateReaddirArgs(
   path: FilePath,
-  options: ReadDirOptions
+  options: ReadDirOptions | ValidEncoding
 ): {
   path: URL;
-  encoding: BufferEncoding;
+  encoding: ValidEncoding;
   withFileTypes: boolean;
   recursive: boolean;
 } {
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
   validateObject(options, 'options');
   const {
     encoding = 'utf8',
     withFileTypes = false,
     recursive = false,
   } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   validateBoolean(withFileTypes, 'options.withFileTypes');
   validateBoolean(recursive, 'options.recursive');
   return {
     path: normalizePath(path),
     encoding,
     withFileTypes,
+    recursive,
+  };
+}
+
+export function validateOpendirArgs(
+  path: FilePath,
+  options: OpenDirOptions
+): {
+  path: URL;
+  encoding: ValidEncoding;
+  recursive: boolean;
+} {
+  validateObject(options, 'options');
+  const { encoding = 'utf8', bufferSize = 32, recursive = false } = options;
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
+  // We don't implement the bufferSize option in any meaningful way but we
+  // do at least validate it.
+  validateUint32(bufferSize, 'options.bufferSize');
+  validateBoolean(recursive, 'options.recursive');
+  return {
+    path: normalizePath(path),
+    encoding: encoding as BufferEncoding,
     recursive,
   };
 }
@@ -323,7 +382,7 @@ export function validateWriteArgs(
   fd: number,
   buffer: NodeJS.ArrayBufferView | string,
   offsetOrOptions: WriteSyncOptions | Position | undefined,
-  length: number | BufferEncoding | null | undefined,
+  length: number | ValidEncoding | undefined,
   position: Position | undefined
 ): { fd: number; buffer: Buffer[]; position: Position } {
   fd = getValidatedFd(fd);
@@ -332,23 +391,21 @@ export function validateWriteArgs(
   if (isArrayBufferView(buffer)) {
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
-        offset = 0,
-        length = buffer.byteLength - offset,
+        offset = buffer.byteOffset,
+        length = buffer.byteLength,
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
     }
     position ??= null;
     offset ??= buffer.byteOffset;
+    length ??= buffer.byteLength;
 
     validateInteger(offset, 'offset', 0);
     validatePosition(position, 'position');
-
-    length ??= buffer.byteLength - offset;
-
     validateInteger(length, 'length', 0);
 
     // Validate that the offset + length do not exceed the buffer's byte length.
-    if (offset + length > buffer.byteLength) {
+    if (length > buffer.byteLength) {
       throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
     }
 
@@ -359,7 +416,13 @@ export function validateWriteArgs(
     };
   }
 
-  validateStringAfterArrayBufferView(buffer, 'buffer');
+  if (typeof buffer !== 'string') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'buffer',
+      ['string', 'Buffer', 'TypedArray', 'DataView'],
+      buffer
+    );
+  }
 
   // In this case, offsetOrOptions must either be a number, bigint, or null.
   validatePosition(offsetOrOptions, 'position');
@@ -378,7 +441,7 @@ export function validateWriteArgs(
 export function validateWriteFileArgs(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions
+  options: ValidEncoding | WriteFileOptions
 ): {
   path: number | URL;
   data: NodeJS.ArrayBufferView;
@@ -402,7 +465,9 @@ export function validateWriteFileArgs(
     flag = 'w',
     flush = false,
   } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   validateBoolean(flush, 'options.flush');
   parseFileMode(mode, 'options.mode', 0o666);
   const newFlag = stringToFlags(flag as string);
@@ -556,7 +621,11 @@ function validateMode(
 }
 
 function assertEncoding(encoding: unknown): asserts encoding is string {
-  if (encoding && !Buffer.isEncoding(encoding as string)) {
+  if (
+    encoding &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding as string)
+  ) {
     const reason = 'is invalid encoding';
     throw new ERR_INVALID_ARG_VALUE('encoding', encoding, reason);
   }
@@ -584,39 +653,6 @@ export function getOptions(
     validateAbortSignal(options.signal, 'options.signal');
   }
 
-  return options;
-}
-
-const defaultCpOptions: CopyOptions = {
-  dereference: false,
-  errorOnExist: false,
-  force: true,
-  preserveTimestamps: false,
-  recursive: false,
-  verbatimSymlinks: false,
-};
-
-export function validateCpOptions(
-  _options: unknown
-): CopyOptions | CopySyncOptions {
-  if (_options === undefined) return { ...defaultCpOptions };
-  validateObject(_options, 'options');
-  const options: CopyOptions = { ...defaultCpOptions, ..._options };
-  validateBoolean(options.dereference, 'options.dereference');
-  validateBoolean(options.errorOnExist, 'options.errorOnExist');
-  validateBoolean(options.force, 'options.force');
-  validateBoolean(options.preserveTimestamps, 'options.preserveTimestamps');
-  validateBoolean(options.recursive, 'options.recursive');
-  validateBoolean(options.verbatimSymlinks, 'options.verbatimSymlinks');
-  options.mode = validateMode(options.mode, 'copyFile');
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-  if (options.dereference === true && options.verbatimSymlinks === true) {
-    throw new ERR_INCOMPATIBLE_OPTION_PAIR('dereference', 'verbatimSymlinks');
-  }
-  if (options.filter !== undefined) {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    validateFunction(options.filter, 'options.filter');
-  }
   return options;
 }
 
@@ -679,29 +715,6 @@ export function stringToFlags(
   throw new ERR_INVALID_ARG_VALUE('flags', flags);
 }
 
-const defaultRmdirOptions: RmDirOptions = {
-  retryDelay: 100,
-  maxRetries: 0,
-  recursive: false,
-};
-
-export function validateRmdirOptions(
-  _options: RmDirOptions | undefined,
-  defaults: RmDirOptions = defaultRmdirOptions
-): RmDirOptions {
-  if (_options === undefined) return defaults;
-  validateObject(_options, 'options');
-
-  const options = { ...defaults, ..._options };
-
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  validateBoolean(options.recursive, 'options.recursive');
-  validateInt32(options.retryDelay, 'options.retryDelay', 0);
-  validateUint32(options.maxRetries, 'options.maxRetries');
-
-  return options;
-}
-
 export type Position = number | null | bigint;
 
 export function validatePosition(
@@ -744,19 +757,6 @@ export function validateBufferArray(
   return buffers as ArrayBufferView[];
 }
 
-function validateStringAfterArrayBufferView(
-  buffer: unknown,
-  name: string
-): void {
-  if (typeof buffer !== 'string') {
-    throw new ERR_INVALID_ARG_TYPE(
-      name,
-      ['string', 'Buffer', 'TypedArray', 'DataView'],
-      buffer
-    );
-  }
-}
-
 // Our implementation of the Stats class differs a bit from Node.js' in that
 // the one in Node.js uses the older function-style class. However, use of
 // new fs.Stats(...) has been deprecated in Node.js for quite some time and
@@ -764,34 +764,30 @@ function validateStringAfterArrayBufferView(
 // Therefore, we intentionally use a class-style object here and make it an
 // error to try to create your own Stats object using the constructor.
 export class Stats {
-  public dev: number | bigint;
-  public ino: number | bigint;
-  public mode: number | bigint;
-  public nlink: number | bigint;
-  public uid: number | bigint;
-  public gid: number | bigint;
-  public rdev: number | bigint;
-  public size: number | bigint;
-  public blksize: number | bigint;
-  public blocks: number | bigint;
-  public atimeMs: number | bigint;
-  public mtimeMs: number | bigint;
-  public ctimeMs: number | bigint;
-  public birthtimeMs: number | bigint;
-  public atimeNs?: bigint;
-  public mtimeNs?: bigint;
-  public ctimeNs?: bigint;
-  public birthtimeNs?: bigint;
-  public atime: Date;
-  public mtime: Date;
-  public ctime: Date;
-  public birthtime: Date;
+  dev: number | bigint;
+  ino: number | bigint;
+  mode: number | bigint;
+  nlink: number | bigint;
+  uid: number | bigint;
+  gid: number | bigint;
+  rdev: number | bigint;
+  size: number | bigint;
+  blksize: number | bigint;
+  blocks: number | bigint;
+  atimeMs: number | bigint;
+  mtimeMs: number | bigint;
+  ctimeMs: number | bigint;
+  birthtimeMs: number | bigint;
+  atimeNs?: bigint;
+  mtimeNs?: bigint;
+  ctimeNs?: bigint;
+  birthtimeNs?: bigint;
+  atime: Date;
+  mtime: Date;
+  ctime: Date;
+  birthtime: Date;
 
-  public constructor(
-    badge: symbol,
-    stat: InternalStat,
-    options: { bigint: boolean }
-  ) {
+  constructor(badge: symbol, stat: InternalStat, options: { bigint: boolean }) {
     // The kBadge symbol is never exported for users. We use it as an internal
     // marker to ensure that only internal code can create a Stats object using
     // the constructor.
@@ -871,31 +867,31 @@ export class Stats {
     }
   }
 
-  public isBlockDevice(): boolean {
+  isBlockDevice(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFBLK;
   }
 
-  public isCharacterDevice(): boolean {
+  isCharacterDevice(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFCHR;
   }
 
-  public isDirectory(): boolean {
+  isDirectory(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFDIR;
   }
 
-  public isFIFO(): boolean {
+  isFIFO(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFIFO;
   }
 
-  public isFile(): boolean {
+  isFile(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFREG;
   }
 
-  public isSocket(): boolean {
+  isSocket(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFSOCK;
   }
 
-  public isSymbolicLink(): boolean {
+  isSymbolicLink(): boolean {
     return (Number(this.mode) & S_IFMT) === S_IFLNK;
   }
 }

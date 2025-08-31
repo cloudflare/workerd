@@ -35,8 +35,7 @@ import {
 
 import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
-type ArrayLike = cryptoImpl.ArrayLike;
-export { ArrayLike };
+export type ArrayLike = cryptoImpl.ArrayLike;
 
 export function pbkdf2Sync(
   password: ArrayLike,

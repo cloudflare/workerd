@@ -368,7 +368,7 @@ class JsRpcStub: public JsRpcClientProvider {
   // that extend `JsRpcTarget` and then they will simply return those. The serializer will
   // automatically handle `JsRpcTarget` by wrapping it in `JsRpcStub`. However, it can be useful
   // for testing to be able to construct a loopback stub.
-  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object);
+  static jsg::Ref<JsRpcStub> constructor(jsg::Lock& js, jsg::JsObject object);
 
   // Call the stub itself as a function.
   jsg::Ref<JsRpcPromise> call(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -431,11 +431,13 @@ class RpcStubDisposalGroup {
 class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
  public:
   JsRpcSessionCustomEventImpl(uint16_t typeId,
+      kj::Maybe<kj::String> wrapperModule = kj::none,
       kj::PromiseFulfillerPair<rpc::JsRpcTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::JsRpcTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
-        typeId(typeId) {}
+        typeId(typeId),
+        wrapperModule(kj::mv(wrapperModule)) {}
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -479,104 +481,12 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   kj::Maybe<rpc::JsRpcTarget::Client> clientCap;
   uint16_t typeId;
 
+  kj::Maybe<kj::String> wrapperModule;
+
   class ServerTopLevelMembrane;
 };
 
-// Base class for exported RPC services.
-//
-// When the worker's top-level module exports a class that extends this class, it means that it
-// is a stateless service.
-//
-//     import {WorkerEntrypoint} from "cloudflare:workers";
-//     export class MyService extends WorkerEntrypoint {
-//       async fetch(req) { ... }
-//       async someRpcMethod(a, b) { ... }
-//     }
-//
-// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
-// define a constructor.
-class WorkerEntrypoint: public jsg::Object {
- public:
-  static jsg::Ref<WorkerEntrypoint> constructor(
-      const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(WorkerEntrypoint) {}
-};
-
-// Like WorkerEntrypoint, but this is the base class for Durable Object classes.
-//
-// Note that the name of this class as seen by JavaScript is `DurableObject`, but using that name
-// in C++ would conflict with the type name currently used by DO stubs.
-// TODO(cleanup): Rename DO stubs to `DurableObjectStub`?
-//
-// Historically, DO classes were not expected to inherit anything. However, this made it impossible
-// to tell whether an exported class was intended to be a DO class vs. something else. Originally
-// there were no other kinds of exported classes so this was fine. Going forward, we encourage
-// everyone to be explicit by inheriting this, and we require it if you want to use RPC.
-class DurableObjectBase: public jsg::Object {
- public:
-  static jsg::Ref<DurableObjectBase> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<DurableObjectState> ctx,
-      jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(DurableObjectBase) {}
-};
-
-// Base class for Workflows
-//
-// When the worker's top-level module exports a class that extends this class, it means that it
-// is a Workflow.
-//
-//     import { WorkflowEntrypoint } from "cloudflare:workers";
-//     export class MyWorkflow extends WorkflowEntrypoint {
-//       async run(batch, fns) { ... }
-//     }
-//
-// `env` and `ctx` are automatically available as `this.env` and `this.ctx`, without the need to
-// define a constructor.
-class WorkflowEntrypoint: public jsg::Object {
- public:
-  static jsg::Ref<WorkflowEntrypoint> constructor(const v8::FunctionCallbackInfo<v8::Value>& args,
-      jsg::Ref<ExecutionContext> ctx,
-      jsg::JsObject env);
-
-  JSG_RESOURCE_TYPE(WorkflowEntrypoint) {}
-};
-
-// The "cloudflare:workers" module, which exposes the WorkerEntrypoint, WorkflowEntrypoint and DurableObject types
-// for extending.
-class EntrypointsModule: public jsg::Object {
- public:
-  EntrypointsModule() = default;
-  EntrypointsModule(jsg::Lock&, const jsg::Url&) {}
-
-  JSG_RESOURCE_TYPE(EntrypointsModule) {
-    JSG_NESTED_TYPE(WorkerEntrypoint);
-    JSG_NESTED_TYPE(WorkflowEntrypoint);
-    JSG_NESTED_TYPE_NAMED(DurableObjectBase, DurableObject);
-    JSG_NESTED_TYPE_NAMED(JsRpcPromise, RpcPromise);
-    JSG_NESTED_TYPE_NAMED(JsRpcProperty, RpcProperty);
-    JSG_NESTED_TYPE_NAMED(JsRpcStub, RpcStub);
-    JSG_NESTED_TYPE_NAMED(JsRpcTarget, RpcTarget);
-  }
-};
-
 #define EW_WORKER_RPC_ISOLATE_TYPES                                                                \
-  api::JsRpcPromise, api::JsRpcProperty, api::JsRpcStub, api::JsRpcTarget, api::WorkerEntrypoint,  \
-      api::WorkflowEntrypoint, api::DurableObjectBase, api::EntrypointsModule
+  api::JsRpcPromise, api::JsRpcProperty, api::JsRpcStub, api::JsRpcTarget
 
-template <class Registry>
-void registerRpcModules(Registry& registry, CompatibilityFlags::Reader flags) {
-  registry.template addBuiltinModule<EntrypointsModule>(
-      "cloudflare-internal:workers", workerd::jsg::ModuleRegistry::Type::INTERNAL);
-}
-
-template <typename TypeWrapper>
-kj::Own<jsg::modules::ModuleBundle> getInternalRpcModuleBundle(auto featureFlags) {
-  jsg::modules::ModuleBundle::BuiltinBuilder builder(
-      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
-  static const auto kSpecifier = "cloudflare-internal:workers"_url;
-  builder.addObject<EntrypointsModule, TypeWrapper>(kSpecifier);
-  return builder.finish();
-}
 };  // namespace workerd::api

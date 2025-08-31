@@ -1,34 +1,10 @@
 {
+  "extends": "../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": ["ESNext", "DOM"],
-    "alwaysStrict": true,
-    "strict": true,
-    "allowJs": true,
-    "allowUnreachableCode": false,
-    "allowUnusedLabels": false,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "noUncheckedIndexedAccess": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "strictNullChecks": true,
-    "esModuleInterop": true,
-    "moduleResolution": "node",
     "declaration": true,
-    "types": [
-      // TODO: consume generated workerd types
-      // "@cloudflare/workers-types"
-    ],
     "paths": {
       "cloudflare:*": ["./*"],
-      "cloudflare-internal:*": ["./internal/*"],
-      "workerd:compatibility-flags": ["./internal/compatibility-flags.d.ts"]
+      "cloudflare-internal:*": ["./internal/*"]
     }
-  },
-  "exclude": []
+  }
 }

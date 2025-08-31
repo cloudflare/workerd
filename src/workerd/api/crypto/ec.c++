@@ -232,7 +232,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
     kj::Vector<kj::byte> sharedSecret;
     sharedSecret.resize(
-        integerCeilDivision<std::make_unsigned<decltype(fieldSize)>::type>(fieldSize, 8u));
+        integerCeilDivision<std::make_unsigned_t<decltype(fieldSize)>>(fieldSize, 8u));
     auto written = ECDH_compute_key(sharedSecret.begin(), sharedSecret.capacity(),
         publicEcKey.getPublicKey(), privateEcKey.getKey(), nullptr);
     JSG_REQUIRE(written > 0, DOMOperationError, "Failed to generate shared ECDH secret",

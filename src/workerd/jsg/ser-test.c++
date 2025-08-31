@@ -283,6 +283,5 @@ KJ_TEST("serialization") {
                 "roundTrip(obj).bar.val.bar.val.bar.val.i",
       "number", "321");
 }
-
 }  // namespace
 }  // namespace workerd::jsg::test

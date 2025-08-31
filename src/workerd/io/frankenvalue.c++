@@ -99,6 +99,8 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
           return jsg::JsValue(jsg::check(v8::JSON::Parse(js.v8Context(), js.str(json.json))));
         }
         KJ_CASE_ONEOF(v8Serialized, V8Serialized) {
+          // When enhanced error serialization is enabled, if the serialized data
+          // is an error object, the original stack will not be preserved.
           jsg::Deserializer deser(js, v8Serialized.data);
           return deser.readValue(js);
         }
@@ -117,6 +119,22 @@ jsg::JsValue Frankenvalue::toJs(jsg::Lock& js) const {
 
     return result;
   });
+}
+
+void Frankenvalue::populateJsObject(jsg::Lock& js, jsg::JsObject target) const {
+  if (!empty()) {
+    js.withinHandleScope([&]() {
+      auto sourceObj = KJ_REQUIRE_NONNULL(toJs(js).tryCast<jsg::JsObject>(),
+          "Frankenvalue must be an object for populateJsObject()");
+      auto props = sourceObj.getPropertyNames(js, jsg::KeyCollectionFilter::OWN_ONLY,
+          jsg::PropertyFilter::ONLY_ENUMERABLE, jsg::IndexFilter::INCLUDE_INDICES);
+      auto propCount = props.size();
+      for (auto i: kj::zeroTo(propCount)) {
+        auto prop = props.get(js, i);
+        target.set(js, prop, sourceObj.get(js, prop));
+      }
+    });
+  }
 }
 
 Frankenvalue Frankenvalue::fromJs(jsg::Lock& js, jsg::JsValue value) {

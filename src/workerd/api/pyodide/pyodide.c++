@@ -12,8 +12,13 @@
 
 #include <kj/array.h>
 #include <kj/common.h>
+#include <kj/compat/gzip.h>
+#include <kj/compat/tls.h>
 #include <kj/debug.h>
 #include <kj/string.h>
+
+// for std::sort
+#include <algorithm>
 
 namespace workerd::api::pyodide {
 
@@ -93,7 +98,7 @@ kj::Array<kj::String> PythonModuleInfo::getPythonFileContents() {
 
 kj::HashSet<kj::String> PythonModuleInfo::getWorkerModuleSet() {
   auto result = kj::HashSet<kj::String>();
-  const auto vendor = "vendor/"_kj;
+  const auto vendor = "python_modules/"_kj;
   const auto dotPy = ".py"_kj;
   const auto dotSo = ".so"_kj;
   for (auto& item: names) {
@@ -406,14 +411,35 @@ PyodideMetadataReader::State::State(const State& other)
       snapshotToDisk(other.snapshotToDisk),
       createBaselineSnapshot(other.createBaselineSnapshot),
       memorySnapshot(other.memorySnapshot.map(
-          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })),
-      durableObjectClasses(other.durableObjectClasses.map(
-          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })),
-      entrypointClasses(other.entrypointClasses.map(
-          [](auto& classes) { return KJ_MAP(c, classes) { return kj::str(c); }; })) {}
+          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
 
 kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
   return kj::heap<PyodideMetadataReader::State>(*this);
+}
+
+void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
+  // Verify that we don't have module named after the main module in the `python_modules` subdir.
+  // mainModule includes the .py extension, so we need to extract the base name
+  kj::ArrayPtr<const char> mainModuleBase = mainModule;
+  if (mainModule.endsWith(".py")) {
+    mainModuleBase = mainModuleBase.slice(0, mainModuleBase.size() - 3);
+  }
+
+  for (auto& name: moduleInfo.names) {
+    if (name.startsWith(kj::str("python_modules/", mainModule))) {
+      JSG_FAIL_REQUIRE(
+          Error, kj::str("Python module python_modules/", mainModule, " clashes with main module"));
+    }
+    if (name == kj::str("python_modules/", mainModuleBase, "/__init__.py")) {
+      JSG_FAIL_REQUIRE(Error,
+          kj::str("Python module python_modules/", mainModuleBase,
+              "/__init__.py clashes with main module"));
+    }
+    if (name == kj::str("python_modules/", mainModuleBase, ".so")) {
+      JSG_FAIL_REQUIRE(Error,
+          kj::str("Python module python_modules/", mainModuleBase, ".so clashes with main module"));
+    }
+  }
 }
 
 kj::Array<kj::String> PythonModuleInfo::filterPythonScriptImports(
@@ -495,6 +521,8 @@ jsg::Optional<kj::Array<kj::byte>> DiskCache::get(jsg::Lock& js, kj::String key)
   }
 }
 
+// TODO: DiskCache is currently only used for --python-save-snapshot. Can we use ArtifactBundler for
+// this instead and remove DiskCache completely?
 void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
   KJ_IF_SOME(root, cacheRoot) {
     kj::Path path(key);
@@ -512,12 +540,11 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
 
 jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
   js.installJspi();
-  js.v8Context()->SetSecurityToken(emscriptenRuntime.contextToken.getHandle(js));
   return emscriptenRuntime.emscriptenRuntime.getHandle(js);
 }
 
 void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
-  visitor.visit(const_cast<EmscriptenRuntime&>(emscriptenRuntime).emscriptenRuntime);
+  visitor.visit(emscriptenRuntime.emscriptenRuntime);
 }
 
 }  // namespace workerd::api::pyodide
@@ -603,4 +630,62 @@ kj::String getPythonBundleName(PythonSnapshotRelease::Reader pyodideRelease) {
   return kj::str(pyodideRelease.getPyodide(), "_", pyodideRelease.getPyodideRevision(), "_",
       pyodideRelease.getBackport());
 }
+
+namespace api::pyodide {
+
+// Returns a string containing the contents of the hashset, delimited by ", "
+kj::String hashsetToString(const kj::HashSet<kj::String>& set) {
+  if (set.size() == 0) {
+    return kj::String();
+  }
+
+  kj::Vector<kj::StringPtr> elems;
+  for (const auto& e: set) {
+    elems.add(e);
+  }
+
+  // Sort the elements for consistent output
+  auto array = elems.releaseAsArray();
+  std::sort(array.begin(), array.end());
+
+  return kj::str(kj::delimited(array, ", "_kjc));
+}
+
+kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
+    kj::ArrayPtr<kj::String> requirements,
+    kj::StringPtr packagesVersion) {
+  auto packages = parseLockFile(lockFileContents);
+  auto depMap = getDepMapFromPackagesLock(*packages);
+
+  auto allRequirements = getPythonPackageNames(*packages, depMap, requirements, packagesVersion);
+
+  // Add the file names of all the requirements to our result array.
+  kj::Vector<kj::String> res;
+  for (const auto& ent: *packages) {
+    auto name = ent.getName();
+    auto obj = ent.getValue().getObject();
+    auto fileName = kj::str(getField(obj, "file_name").getString());
+
+    auto maybeRow = allRequirements.find(name);
+    KJ_IF_SOME(row, maybeRow) {
+      allRequirements.erase(row);
+      res.add(kj::mv(fileName));
+    } else if (packagesVersion == "20240829.4") {
+      auto packageType = getField(obj, "package_type").getString();
+      if (packageType == "cpython_module") {
+        res.add(kj::mv(fileName));
+      }
+    }
+  }
+
+  if (allRequirements.size() != 0) {
+    JSG_FAIL_REQUIRE(Error,
+        "Requested Python package(s) that are not supported: ", hashsetToString(allRequirements));
+  }
+
+  return res.releaseAsArray();
+}
+
+}  // namespace api::pyodide
+
 }  // namespace workerd

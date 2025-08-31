@@ -36,6 +36,10 @@ class Frankenvalue {
   jsg::JsValue toJs(jsg::Lock& js) const;
   static Frankenvalue fromJs(jsg::Lock& js, jsg::JsValue value);
 
+  // Like toJs() but add the properties to an existing object. Throws if the `Frankenvalue` does
+  // not represent an object. This is used to populate `env` in particular.
+  void populateJsObject(jsg::Lock& js, jsg::JsObject target) const;
+
   // Construct a Frakenvalue from JSON.
   //
   // (It's not possible to convert a Frakenvalue back to JSON, except by evaluating it in JS and

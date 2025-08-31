@@ -754,7 +754,7 @@ void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& c
 
 void Rewriter::output(const char* buffer, size_t size, void* userdata) {
   auto& rewriter = *reinterpret_cast<Rewriter*>(userdata);
-  rewriter.outputImpl(kj::arrayPtr(buffer, size).asBytes());
+  rewriter.outputImpl(kj::asBytes(buffer, size));
 }
 
 void Rewriter::outputImpl(kj::ArrayPtr<const byte> buffer) {

@@ -5,6 +5,7 @@
 #include "actor-sqlite.h"
 #include "io-gate.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
@@ -147,6 +148,16 @@ struct ActorSqliteTest final {
   auto put(kj::StringPtr key, kj::StringPtr value, ActorCache::WriteOptions options = {}) {
     return actor.put(kj::str(key), kj::heapArray(value.asBytes()), options);
   }
+  auto putMultiple(
+      kj::Array<ActorCache::KeyValuePair> pairs, ActorCache::WriteOptions options = {}) {
+    return actor.put(kj::mv(pairs), options);
+  }
+  auto putMultipleExplicitTxn(
+      kj::Array<ActorCache::KeyValuePair> pairs, ActorCache::WriteOptions options = {}) {
+    auto txn = actor.startTransaction();
+    txn->put(kj::mv(pairs), options);
+    return txn->commit();
+  }
   auto setAlarm(kj::Maybe<kj::Date> newTime, ActorCache::WriteOptions options = {}) {
     return actor.setAlarm(newTime, options);
   }
@@ -166,6 +177,271 @@ KJ_TEST("can set and get alarm") {
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("check put multiple wraps operations in a transaction") {
+  ActorSqliteTest test;
+
+  // Let's deinit the autogate. This will enforce the old behavior where putMultiple would commit
+  // some puts, until a single put failed.
+  util::Autogate::deinitAutogate();
+
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+
+  // NoTxn test
+  {
+    // Check that we're in a NoTxn
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.putMultiple(putKVs.releaseAsArray());
+    // During write, all NoTxn operations are wrapped in an ImplicitTxn.
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  }
+
+  // ExplicitTxn test
+  {
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
+    test.putMultipleExplicitTxn(putKVs.releaseAsArray());
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
+  }
+
+  // ImplicitTxn test
+  {
+    // A single put will create an ImplicitTxn that we can use to wrap our putMultiple into.
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.put("baz", "bat");
+
+    // By now, we should check there's a commit scheduled in a ImplicitTxn.
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+    test.putMultiple(putKVs.releaseAsArray());
+
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
+    commitFulfiller->fulfill();
+  }
+}
+
+KJ_TEST(
+    "check put multiple wraps operations in a transaction with sql-kv-put-multiple-transaction autogate") {
+  ActorSqliteTest test;
+
+  // This test should reflect the same behavior we saw without the autogate enabled.
+  util::Autogate::initAutogateNamesForTest({"sql-kv-put-multiple-transaction"_kj});
+
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+
+  // NoTxn test
+  {
+    // Check that we're in a NoTxn
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.putMultiple(putKVs.releaseAsArray());
+    // During write, all NoTxn operations are wrapped in an ImplicitTxn.
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  }
+
+  // ExplicitTxn test
+  {
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
+    test.putMultipleExplicitTxn(putKVs.releaseAsArray());
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
+  }
+
+  // ImplicitTxn test
+  {
+    // A single put will create an ImplicitTxn that we can use to wrap our putMultiple into.
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.put("baz", "bat");
+
+    // By now, we should check there's a commit scheduled in a ImplicitTxn.
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+    test.putMultiple(putKVs.releaseAsArray());
+
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
+    commitFulfiller->fulfill();
+  }
+}
+
+KJ_TEST("check put multiple wraps operations in a transaction and does not rollback on error") {
+  ActorSqliteTest test;
+
+  if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
+    // We should skip this test as it will expect a different behavior when
+    // SQL_KV_PUT_MULTIPLE_TRANSACTION is set
+    KJ_DBG("Skipping test because SQL_KV_PUT_MULTIPLE_TRANSACTION is enabled.");
+    return;
+  }
+
+  // Let's deinit the autogate. This will enforce the old behavior where putMultiple would commit
+  // some puts, until a single put failed.
+  util::Autogate::deinitAutogate();
+
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+
+  // Add some regular key-value pairs that we know are supported
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+
+  // Now create a key that's too large. Should fail with  string or blob too big: SQLITE_TOOBIG
+  auto tooLongKey = kj::heapString(2200000);
+  tooLongKey.asArray().fill('a');
+  // Add it to our KV array
+  putKVs.add(
+      ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray(kj::str("bar").asBytes())});
+
+  // NoTxn test
+  {
+    // Check that we're in a NoTxn
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    try {
+      test.putMultiple(putKVs.releaseAsArray());
+      // We should fail with correct error before reaching here.
+      KJ_UNREACHABLE;
+    } catch (kj::Exception e) {
+      KJ_ASSERT(
+          e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
+    }
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo2"))) == kj::str("bar2").asBytes());
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo3"))) == kj::str("bar3").asBytes());
+    // During write, all NoTxn operations are wrapped in an ImplicitTxn. Since some puts succeeded
+    // we need to flush commit.
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+  }
+
+  {
+    // Let's clear the db.
+    test.actor.deleteAll({});
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+  }
+
+  // ExplicitTxn test
+  {
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
+    test.putMultipleExplicitTxn(putKVs.releaseAsArray());
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    // This was wrapped in an explicit transaction. We rolled back as expected.
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+  }
+
+  // ImplicitTxn test
+  {
+    // A single put will create an ImplicitTxn that we can use to wrap our putMultiple into.
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.put("baz", "bat");
+
+    // By now, we should check there's a commit scheduled in a ImplicitTxn.
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    test.putMultiple(putKVs.releaseAsArray());
+
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    // The single put succeeded, but the putMultiple did not.
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+    commitFulfiller->fulfill();
+  }
+}
+
+KJ_TEST(
+    "check put multiple wraps operations in a transaction and rollback on error with sql-kv-put-multiple-transaction autogate") {
+  ActorSqliteTest test;
+
+  // With the autogate enabled, we expect that putMultiple is all of nothing, rolling back if a
+  // single put fails.
+  util::Autogate::initAutogateNamesForTest({"sql-kv-put-multiple-transaction"_kj});
+
+  kj::Vector<ActorCache::KeyValuePair> putKVs;
+
+  // Add some regular key-value pairs that we know are supported
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo2"), kj::heapArray(kj::str("bar2").asBytes())});
+  putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray(kj::str("bar3").asBytes())});
+
+  // Now create a key that's too large. Should fail with  string or blob too big: SQLITE_TOOBIG
+  auto tooLongKey = kj::heapString(2200000);
+  tooLongKey.asArray().fill('a');
+  // Add it to our KV array
+  putKVs.add(
+      ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray(kj::str("bar").asBytes())});
+
+  // NoTxn test
+  {
+    // Check that we're in a NoTxn
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    try {
+      test.putMultiple(putKVs.releaseAsArray());
+      // During write, all NoTxn operations are wrapped in an ImplicitTxn.
+      auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+      commitFulfiller->fulfill();
+      KJ_UNREACHABLE;
+    } catch (kj::Exception e) {
+      KJ_ASSERT(
+          e.getDescription() == "expected false; jsg.Error: string or blob too big: SQLITE_TOOBIG");
+    }
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+  }
+
+  // ExplicitTxn test
+  {
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    // Similar to the previous putMultiple, but wrapped in a transactionSync (ExplicitTxn)
+    test.putMultipleExplicitTxn(putKVs.releaseAsArray());
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+  }
+
+  // ImplicitTxn test
+  {
+    // A single put will create an ImplicitTxn that we can use to wrap our putMultiple into.
+    KJ_ASSERT(!test.actor.isCommitScheduled());
+    test.put("baz", "bat");
+
+    // By now, we should check there's a commit scheduled in a ImplicitTxn.
+    KJ_ASSERT(test.actor.isCommitScheduled());
+    test.putMultiple(putKVs.releaseAsArray());
+
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    // The single put succeeded, but the putMultiple did not.
+    KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("bat").asBytes());
+    KJ_ASSERT(expectSync(test.get(kj::str("foo"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo2"))) == nullptr);
+    KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
+    commitFulfiller->fulfill();
+  }
 }
 
 KJ_TEST("alarm write happens transactionally with storage ops") {
@@ -909,7 +1185,7 @@ KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
   commit2MsFulfiller->fulfill();
 }
 
-KJ_TEST("rejected alarm scheduling request breaks gate") {
+KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
   ActorSqliteTest test({.monitorOutputGate = false});
 
   auto promise = test.gate.onBroken();
@@ -919,6 +1195,31 @@ KJ_TEST("rejected alarm scheduling request breaks gate") {
       KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
 
   KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
+}
+
+KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Update alarm to be later.  We expect the db to be persisted before the alarm scheduling.
+  // We simulate a failure during the alarm rescheduling, but expect it to not break the output
+  // gate.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
+      KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
+
+  // Subsequent kv put succeeds.  In an earlier version of the code, this failed, due to capturing
+  // the scheduling failure as if it had broke the output gate, without actually breaking the
+  // output gate.
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("an exception thrown during merged commits does not hang") {

@@ -1,7 +1,11 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  simpleRunPython,
+} from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 
 const canonicalizeNameRegex = /[-_.]+/g;
@@ -46,11 +50,19 @@ function createTarFsInfo(): TarFSInfo {
  * in /usr/lib.
  */
 class VirtualizedDir {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private rootInfo: TarFSInfo; // site-packages directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private soFiles: FilePath[];
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private loadedRequirements: Set<string>;
-  public constructor() {
+  constructor() {
     this.rootInfo = createTarFsInfo();
     this.dynlibTarFs = createTarFsInfo();
     this.soFiles = [];
@@ -63,11 +75,11 @@ class VirtualizedDir {
    * If a file or directory already exists, an error is thrown.
    * @param {TarInfo} overlayInfo The directory that is to be "copied" into site-packages
    */
-  public mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
+  mountOverlay(overlayInfo: TarFSInfo, dir: InstallDir): void {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new Error(
+        throw new PythonRuntimeError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -85,7 +97,7 @@ class VirtualizedDir {
    * @param {String} requirement The canonicalized package name this small bundle corresponds to
    * @param {InstallDir} installDir The `install_dir` field from the metadata about the package taken from the lockfile
    */
-  public addSmallBundle(
+  addSmallBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirement: string,
@@ -105,7 +117,7 @@ class VirtualizedDir {
    * @param {List<String>} soFiles A list of .so files contained in the big bundle
    * @param {List<String>} requirements canonicalized list of packages to pick from the big bundle
    */
-  public addBigBundle(
+  addBigBundle(
     tarInfo: TarFSInfo,
     soFiles: string[],
     requirements: Set<string>
@@ -114,7 +126,7 @@ class VirtualizedDir {
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
       const [pkg, ...rest] = soFile.split('/');
-      if (requirements.has(pkg)) {
+      if (requirements.has(pkg!)) {
         this.soFiles.push(rest);
       }
     }
@@ -122,30 +134,32 @@ class VirtualizedDir {
     for (const req of requirements) {
       const child = tarInfo.children!.get(req);
       if (!child) {
-        throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+        throw new PythonUserError(
+          `Requirement ${req} not found in pyodide packages tar`
+        );
       }
       this.mountOverlay(child, 'site');
       this.loadedRequirements.add(req);
     }
   }
 
-  public getSitePackagesRoot(): TarFSInfo {
+  getSitePackagesRoot(): TarFSInfo {
     return this.rootInfo;
   }
 
-  public getDynlibRoot(): TarFSInfo {
+  getDynlibRoot(): TarFSInfo {
     return this.dynlibTarFs;
   }
 
-  public getSoFilesToLoad(): FilePath[] {
+  getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
 
-  public hasRequirementLoaded(req: string): boolean {
+  hasRequirementLoaded(req: string): boolean {
     return this.loadedRequirements.has(req);
   }
 
-  public mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
+  mount(Module: Module, tarFS: EmscriptenFS<TarFSInfo>): void {
     Module.FS.mkdirTree(Module.FS.sessionSitePackages);
     Module.FS.mount(
       tarFS,
@@ -197,7 +211,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new Error(
+  throw new PythonRuntimeError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }
@@ -217,7 +231,7 @@ export function mountWorkerFiles(Module: Module): void {
 
 /**
  * Add the directories created by mountLib to sys.path.
- * Has to run after the runtime is initialized.
+ * Has to run after the runtime is initialized but before memory snapshot is collected.
  */
 export function adjustSysPath(Module: Module): void {
   const site_packages = Module.FS.sessionSitePackages;

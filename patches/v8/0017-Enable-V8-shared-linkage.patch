@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Sun, 9 Jul 2023 18:46:20 -0400
+Subject: Enable V8 shared linkage
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 177301d141540e81e2a8ac885f2d05432533f00d..5506a9de22c128e3d97df1187752a58c8aec176a 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -1438,6 +1438,7 @@ filegroup(
+         "src/builtins/constants-table-builder.cc",
+         "src/builtins/constants-table-builder.h",
+         "src/builtins/data-view-ops.h",
++        "src/builtins/profile-data-reader.cc",
+         "src/builtins/profile-data-reader.h",
+         "src/codegen/aligned-slot-allocator.cc",
+         "src/codegen/aligned-slot-allocator.h",
+@@ -1622,7 +1623,6 @@ filegroup(
+         "src/execution/futex-emulation.h",
+         "src/execution/interrupts-scope.cc",
+         "src/execution/interrupts-scope.h",
+-        "src/execution/isolate.cc",
+         "src/execution/isolate.h",
+         "src/execution/isolate-data.h",
+         "src/execution/isolate-inl.h",
+@@ -3184,7 +3184,6 @@ filegroup(
+ filegroup(
+     name = "v8_compiler_files",
+     srcs = [
+-        "src/builtins/profile-data-reader.h",
+         "src/compiler/access-builder.cc",
+         "src/compiler/access-builder.h",
+         "src/compiler/access-info.cc",
+@@ -3773,8 +3772,6 @@ filegroup(
+         "src/builtins/growable-fixed-array-gen.cc",
+         "src/builtins/growable-fixed-array-gen.h",
+         "src/builtins/number-builtins-reducer-inl.h",
+-        "src/builtins/profile-data-reader.cc",
+-        "src/builtins/profile-data-reader.h",
+         "src/builtins/setup-builtins-internal.cc",
+         "src/builtins/torque-csa-header-includes.h",
+         "src/codegen/turboshaft-builtins-assembler-inl.h",
+@@ -4049,6 +4046,7 @@ filegroup(
+         "src/snapshot/snapshot-empty.cc",
+         "src/snapshot/static-roots-gen.cc",
+         "src/snapshot/static-roots-gen.h",
++        "src/execution/isolate.cc",
+     ],
+ )
+ 
+@@ -4159,6 +4157,10 @@ filegroup(
+     name = "noicu/snapshot_files",
+     srcs = [
+         "src/init/setup-isolate-deserialize.cc",
++        # Not a snapshot file per se, but depends on symbols only present in the snapshot (or
++        # through a placeholder when building the snapshot itself); having it here makes using
++        # shared linkage for the main v8 target possible.
++        "src/execution/isolate.cc",
+     ] + select({
+         "@v8//bazel/config:v8_target_arm": [
+             "google3/snapshots/arm/noicu/embedded.S",
+@@ -4176,6 +4178,7 @@ filegroup(
+     name = "icu/snapshot_files",
+     srcs = [
+         "src/init/setup-isolate-deserialize.cc",
++        "src/execution/isolate.cc",
+     ] + select({
+         "@v8//bazel/config:v8_target_arm": [
+             "google3/snapshots/arm/icu/embedded.S",
+diff --git a/bazel/defs.bzl b/bazel/defs.bzl
+index 9c1c403156f0701df3c32917cd7db817c5e075ad..205be2680e7327e7cc8e2658295a583564f78910 100644
+--- a/bazel/defs.bzl
++++ b/bazel/defs.bzl
+@@ -302,7 +302,6 @@ def v8_library(
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 
+@@ -321,7 +320,6 @@ def v8_library(
+             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 
+@@ -341,7 +339,6 @@ def v8_library(
+             copts = copts + default.copts,
+             linkopts = linkopts + default.linkopts,
+             alwayslink = 1,
+-            linkstatic = 1,
+             **kwargs
+         )
+ 

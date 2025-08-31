@@ -4,11 +4,10 @@
 
 #include "workerd-api.h"
 
-#include "workerd/api/worker-rpc.h"
-
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
 #include <workerd/api/analytics-engine.h>
+#include <workerd/api/base64.h>
 #include <workerd/api/cache.h>
 #include <workerd/api/commonjs.h>
 #include <workerd/api/container.h>
@@ -25,6 +24,7 @@
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/pyodide/setup-emscripten.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
@@ -39,6 +39,9 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
+#include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg.h>
@@ -46,16 +49,22 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/url.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/transpiler/lib.rs.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/fallback-service.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <kj-rs/kj-rs.h>
 #include <pyodide/generated/pyodide_extra.capnp.h>
+#include <pyodide/python-entrypoint.embed.h>
 
+#include <kj/compat/gzip.h>
 #include <kj/compat/http.h>
 #include <kj/compat/tls.h>
 #include <kj/compat/url.h>
+
+using namespace kj_rs;
 
 namespace workerd::server {
 
@@ -81,6 +90,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_ACTOR_ISOLATE_TYPES,
     EW_ACTOR_STATE_ISOLATE_TYPES,
     EW_ANALYTICS_ENGINE_ISOLATE_TYPES,
+    EW_BASE64_ISOLATE_TYPES,
     EW_BASICS_ISOLATE_TYPES,
     EW_BLOB_ISOLATE_TYPES,
     EW_CACHE_ISOLATE_TYPES,
@@ -116,6 +126,9 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_RTTI_ISOLATE_TYPES,
     EW_HYPERDRIVE_ISOLATE_TYPES,
     EW_EVENTSOURCE_ISOLATE_TYPES,
+    EW_WORKER_LOADER_ISOLATE_TYPES,
+    EW_MESSAGECHANNEL_ISOLATE_TYPES,
+    EW_WORKERS_MODULE_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -128,34 +141,6 @@ static const PythonConfig defaultConfig{
   .createSnapshot = false,
   .createBaselineSnapshot = false,
 };
-
-kj::Path getPyodideBundleFileName(kj::StringPtr version) {
-  return kj::Path(kj::str("pyodide_", version, ".capnp.bin"));
-}
-
-kj::Maybe<kj::Own<const kj::ReadableFile>> getPyodideBundleFile(
-    const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir, kj::StringPtr version) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundleFileName(version);
-    auto file = dir->tryOpenFile(filename);
-
-    return file;
-  }
-
-  return kj::none;
-}
-
-void writePyodideBundleFileToDisk(const kj::Maybe<kj::Own<const kj::Directory>>& maybeDir,
-    kj::StringPtr version,
-    kj::ArrayPtr<byte> bytes) {
-  KJ_IF_SOME(dir, maybeDir) {
-    kj::Path filename = getPyodideBundleFileName(version);
-    auto replacer = dir->replaceFile(filename, kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
-
-    replacer->get().writeAll(bytes);
-    replacer->commit();
-  }
-}
 
 kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     const Worker::Script::ModulesSource& source,
@@ -267,82 +252,103 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     false     /* isTracing */,
     snapshotToDisk,
     pythonConfig.createBaselineSnapshot,
-    kj::mv(memorySnapshot),
-    KJ_MAP(c, source.inferredActorClassesForPython) { return kj::str(c); },
-    KJ_MAP(c, source.inferredEntrypointClassesForPython) { return kj::str(c); }
+    kj::mv(memorySnapshot)
   );
   // clang-format on
 }
 
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes.
+class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Server {
+ public:
+  kj::Promise<void> get(GetContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> getMultiple(GetMultipleContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .sendIgnoringResult();
+  }
+  kj::Promise<void> list(ListContext context) override {
+    return context.getParams()
+        .getStream()
+        .endRequest(capnp::MessageSize{2, 0})
+        .sendIgnoringResult();
+  }
+  kj::Promise<void> getAlarm(GetAlarmContext context) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> txn(TxnContext context) override {
+    auto results = context.getResults(capnp::MessageSize{2, 1});
+    results.setTransaction(kj::heap<TransactionImpl>());
+    return kj::READY_NOW;
+  }
+
+ private:
+  class TransactionImpl final: public rpc::ActorStorage::Stage::Transaction::Server {
+   protected:
+    kj::Promise<void> get(GetContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> getMultiple(GetMultipleContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .sendIgnoringResult();
+    }
+    kj::Promise<void> list(ListContext context) override {
+      return context.getParams()
+          .getStream()
+          .endRequest(capnp::MessageSize{2, 0})
+          .sendIgnoringResult();
+    }
+    kj::Promise<void> getAlarm(GetAlarmContext context) override {
+      return kj::READY_NOW;
+    }
+    kj::Promise<void> commit(CommitContext context) override {
+      return kj::READY_NOW;
+    }
+  };
+};
+
 }  // namespace
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
+jsg::Bundle::Reader retrievePyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
-  if (pyConfig.pyodideBundleManager.getPyodideBundle(version) != kj::none) {
-    return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle");
+}
+
+/**
+ * This function matches the implementation of `getPythonRequirements` in the internal repo. But it
+ * works on the workerd ModulesSource definition rather than the WorkerBundle.
+ */
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source) {
+  kj::Vector<kj::String> requirements;
+
+  for (auto& def: source.modules) {
+    KJ_SWITCH_ONEOF(def.content) {
+      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+        requirements.add(api::pyodide::canonicalizePythonPackageName(def.name));
+      }
+      KJ_CASE_ONEOF_DEFAULT {
+        break;
+      }
+    }
   }
 
-  auto maybePyodideBundleFile = getPyodideBundleFile(pyConfig.pyodideDiskCacheRoot, version);
-  KJ_IF_SOME(pyodideBundleFile, maybePyodideBundleFile) {
-    auto body = pyodideBundleFile->readAllBytes();
-    pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-    return pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  }
-
-  if (version == "dev") {
-    // the "dev" version is special and indicates we're using the tip-of-tree version built for testing
-    // so we shouldn't fetch it from the internet, only check for its existence in the disk cache
-    return kj::none;
-  }
-
-  {
-    kj::Thread([&]() {
-      kj::String url =
-          kj::str("https://pyodide-capnp-bin.edgeworker.net/pyodide_", version, ".capnp.bin");
-      KJ_LOG(INFO, "Loading Pyodide bundle from internet", url);
-      kj::AsyncIoContext io = kj::setupAsyncIo();
-      kj::HttpHeaderTable table;
-
-      kj::TlsContext::Options options;
-      options.useSystemTrustStore = true;
-
-      kj::Own<kj::TlsContext> tls = kj::heap<kj::TlsContext>(kj::mv(options));
-      auto& network = io.provider->getNetwork();
-      auto tlsNetwork = tls->wrapNetwork(network);
-      auto& timer = io.provider->getTimer();
-
-      auto client = kj::newHttpClient(timer, table, network, *tlsNetwork);
-
-      kj::HttpHeaders headers(table);
-
-      auto req = client->request(kj::HttpMethod::GET, url.asPtr(), headers);
-
-      auto res = req.response.wait(io.waitScope);
-      KJ_ASSERT(res.statusCode == 200,
-          kj::str(
-              "Request for Pyodide bundle at ", url, " failed with HTTP status ", res.statusCode));
-      auto body = res.body->readAllBytes().wait(io.waitScope);
-
-      writePyodideBundleFileToDisk(pyConfig.pyodideDiskCacheRoot, version, body);
-
-      pyConfig.pyodideBundleManager.setPyodideBundleData(kj::str(version), kj::mv(body));
-    });
-  }
-
-  KJ_LOG(INFO, "Loaded Pyodide package from internet");
-  return pyConfig.pyodideBundleManager.getPyodideBundle(version);
+  return requirements.releaseAsArray();
 }
 
 struct WorkerdApi::Impl final {
   kj::Own<CompatibilityFlags::Reader> features;
   capnp::List<config::Extension>::Reader extensions;
-  kj::Own<VirtualFileSystem> vfs;
   kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> maybeOwnedModuleRegistry;
   kj::Own<JsgIsolateObserver> observer;
   JsgWorkerdIsolate jsgIsolate;
   api::MemoryCacheProvider& memoryCacheProvider;
   const PythonConfig& pythonConfig;
-  kj::Maybe<api::pyodide::EmscriptenRuntime> maybeEmscriptenRuntime;
 
   class Configuration {
    public:
@@ -371,12 +377,10 @@ struct WorkerdApi::Impl final {
       v8::IsolateGroup group,
       kj::Own<JsgIsolateObserver> observerParam,
       api::MemoryCacheProvider& memoryCacheProvider,
-      kj::Own<VirtualFileSystem> vfs,
       const PythonConfig& pythonConfig = defaultConfig,
       kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry = kj::none)
       : features(capnp::clone(featuresParam)),
         extensions(extensionsParam),
-        vfs(kj::mv(vfs)),
         maybeOwnedModuleRegistry(kj::mv(newModuleRegistry)),
         observer(kj::atomicAddRef(*observerParam)),
         jsgIsolate(
@@ -390,17 +394,13 @@ struct WorkerdApi::Impl final {
       if (maybeOwnedModuleRegistry != kj::none) {
         jsgIsolate.setUsingNewModuleRegistry();
       }
-      if (features->getPythonWorkers()) {
-        auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(*features));
-        auto version = getPythonBundleName(pythonRelease);
-        auto bundle = KJ_ASSERT_NONNULL(
-            fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
-        jsg::NewContextOptions options{.enableWeakRef = features->getJsWeakRef()};
-        auto context = lock.newContext<api::ServiceWorkerGlobalScope>(options);
-        v8::Context::Scope scope(context.getHandle(lock));
-        // Init emscripten synchronously, the python script will import setup-emscripten and
-        // call setEmscriptenModele
-        maybeEmscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(lock, true, bundle);
+
+      // Allows us to begin experimenting with eval/new fuction enabled in
+      // preparation for *possibly* enabling it by default in the future
+      // once v8 sandbox is fully enabled and rolled out.
+      if (featuresParam.getExperimentalAllowEvalAlways() &&
+          featuresParam.getWorkerdExperimental()) {
+        jsgIsolate.setAllowsAllowEval();
       }
     });
   }
@@ -451,8 +451,7 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
     kj::Own<JsgIsolateObserver> observer,
     api::MemoryCacheProvider& memoryCacheProvider,
     const PythonConfig& pythonConfig,
-    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-    kj::Own<VirtualFileSystem> vfs)
+    kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry)
     : impl(kj::heap<Impl>(v8System,
           features,
           extensions,
@@ -460,7 +459,6 @@ WorkerdApi::WorkerdApi(jsg::V8System& v8System,
           group,
           kj::mv(observer),
           memoryCacheProvider,
-          kj::mv(vfs),
           pythonConfig,
           kj::mv(newModuleRegistry))) {}
 WorkerdApi::~WorkerdApi() noexcept(false) {}
@@ -521,6 +519,7 @@ void WorkerdApi::setIsolateObserver(IsolateObserver&) {};
 
 Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
     config::Worker::Reader conf,
+    CompatibilityFlags::Reader featureFlags,
     Worker::ValidationErrorReporter& errorReporter) {
   TRACE_EVENT("workerd", "WorkerdApi::extractSource()");
   switch (conf.which()) {
@@ -536,32 +535,11 @@ Worker::Script::Source WorkerdApi::extractSource(kj::StringPtr name,
         if (module.isPythonModule()) {
           isPython = true;
         }
-        return readModuleConf(module, errorReporter);
+        return readModuleConf(module, featureFlags, errorReporter);
       };
 
       Worker::Script::ModulesSource result{
         .mainModule = modules[0].getName(), .modules = kj::mv(moduleArray), .isPython = isPython};
-
-      if (isPython) {
-        // Special hack for Python: Infer the set of exported classes based on whan the config
-        // references.
-        result.inferredActorClassesForPython =
-            KJ_MAP(objectNamespace, conf.getDurableObjectNamespaces()) {
-          return kj::str(objectNamespace.getClassName());
-        };
-
-        // To get the entrypoint classes, we iterate through bindings looking for services with
-        // entrypoint field set. This doesn't allow us to discern between worker entrypoints and
-        // workflow entrypoints, but is the best we can do until we rewrite how workerd loads
-        // packages.
-        auto entrypointClasses = kj::Vector<kj::String>();
-        for (auto binding: conf.getBindings()) {
-          if (binding.isService() && binding.getService().hasEntrypoint()) {
-            entrypointClasses.add(kj::str(binding.getService().getEntrypoint()));
-          }
-        }
-        result.inferredEntrypointClassesForPython = entrypointClasses.releaseAsArray();
-      }
 
       return result;
     }
@@ -630,7 +608,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
     config::Worker::Module::Reader conf,
     jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
-  return tryCompileModule(js, readModuleConf(conf), observer, featureFlags);
+  return tryCompileModule(js, readModuleConf(conf, featureFlags), observer, featureFlags);
 }
 
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
@@ -685,6 +663,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
 }
 
 Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader conf,
+    CompatibilityFlags::Reader featureFlags,
     kj::Maybe<Worker::ValidationErrorReporter&> errorReporter) {
   return {.name = conf.getName(), .content = [&]() -> Worker::Script::ModuleContent {
     switch (conf.which()) {
@@ -697,7 +676,30 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
       case config::Worker::Module::JSON:
         return Worker::Script::JsonModule{conf.getJson()};
       case config::Worker::Module::ES_MODULE:
-        return Worker::Script::EsModule{conf.getEsModule()};
+        // TODO(soon): Update this to also support full TS transform
+        // with a separate compat flag.
+        if (featureFlags.getTypescriptStripTypes()) {
+          auto output = rust::transpiler::ts_strip(
+              // value comes from capnp so it is a valid utf-8
+              conf.getName().as<RustUncheckedUtf8>(), conf.getEsModule().asBytes().as<Rust>());
+
+          if (output.success) {
+            return Worker::Script::EsModule{
+              .body = ::kj_rs::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+          }
+
+          auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);
+          for (auto& diag: output.diagnostics) {
+            description = kj::str(description, "\n    ", diag.message);
+          }
+          KJ_IF_SOME(reporter, errorReporter) {
+            reporter.addError(kj::mv(description));
+            return Worker::Script::TextModule{""};
+          } else {
+            KJ_FAIL_REQUIRE(description);
+          }
+        }
+        return Worker::Script::EsModule{static_cast<kj::StringPtr>(conf.getEsModule())};
       case config::Worker::Module::COMMON_JS_MODULE: {
         Worker::Script::CommonJsModule result{.body = conf.getCommonJsModule()};
         if (conf.hasNamedExports()) {
@@ -729,7 +731,8 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 void WorkerdApi::compileModules(jsg::Lock& lockParam,
     const Worker::Script::ModulesSource& source,
     const Worker::Isolate& isolate,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    SpanParent parentSpan) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileModules()");
   lockParam.withinHandleScope([&] {
     auto modules = jsg::ModuleRegistryImpl<JsgWorkerdIsolate_TypeWrapper>::from(lockParam);
@@ -739,15 +742,17 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     if (source.isPython) {
       KJ_REQUIRE(featureFlags.getPythonWorkers(),
           "The python_workers compatibility flag is required to use Python.");
-      // Inject SetupEmscripten module
-      modules->addBuiltinModule("internal:setup-emscripten",
-          lockParam.alloc<SetupEmscripten>(KJ_ASSERT_NONNULL(impl->maybeEmscriptenRuntime)),
-          workerd::jsg::ModuleRegistry::Type::INTERNAL);
-
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
-      auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(impl->pythonConfig, version), "Failed to get Pyodide bundle");
+      auto bundle = retrievePyodideBundle(impl->pythonConfig, version);
+      // Inject SetupEmscripten module
+      {
+        auto emscriptenRuntime =
+            api::pyodide::EmscriptenRuntime::initialize(lockParam, true, bundle);
+        modules->addBuiltinModule("internal:setup-emscripten",
+            lockParam.alloc<SetupEmscripten>(kj::mv(emscriptenRuntime)),
+            workerd::jsg::ModuleRegistry::Type::INTERNAL);
+      }
 
       // Inject Pyodide bundle
       modules->addBuiltinBundle(bundle, kj::none);
@@ -969,6 +974,16 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
       value = lock.wrap(context, lock.alloc<api::UnsafeEval>());
     }
+
+    KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
+      value = lock.wrap(context, lock.alloc<api::DurableObjectClass>(actorClass.channel));
+    }
+
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      value = lock.wrap(context,
+          lock.alloc<api::WorkerLoader>(
+              workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
+    }
   }
 
   return value;
@@ -1055,16 +1070,16 @@ WorkerdApi::Global WorkerdApi::Global::clone() const {
     KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
       result.value = Global::UnsafeEval{};
     }
+
+    KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
+      result.value = actorClass.clone();
+    }
+    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
+      result.value = workerLoader.clone();
+    }
   }
 
   return result;
-}
-
-kj::Maybe<const api::pyodide::EmscriptenRuntime&> WorkerdApi::getEmscriptenRuntime() const {
-  return impl->maybeEmscriptenRuntime.map(
-      [](auto& emscriptenRuntime) -> const api::pyodide::EmscriptenRuntime& {
-    return emscriptenRuntime;
-  });
 }
 
 const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
@@ -1084,7 +1099,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
     const PythonConfig& pythonConfig,
     const jsg::Url& bundleBase,
     capnp::List<config::Extension>::Reader extensions,
-    kj::Maybe<kj::String> maybeFallbackService) {
+    kj::Maybe<kj::String> maybeFallbackService,
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) {
   jsg::modules::ModuleRegistry::Builder builder(
       observer, bundleBase, jsg::modules::ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
 
@@ -1222,8 +1238,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       // Inject metadata that the entrypoint module will read.
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
       auto version = getPythonBundleName(pythonRelease);
-      auto bundle = KJ_ASSERT_NONNULL(
-          fetchPyodideBundle(pythonConfig, version), "Failed to get Pyodide bundle");
+      auto bundle = retrievePyodideBundle(pythonConfig, version);
 
       // We end up add modules from the bundle twice, once to get BUILTIN modules
       // and again to get the BUILTIN_ONLY modules. These end up in two different
@@ -1247,10 +1262,9 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
       pyodideBundleBuilder.addSynthetic(bootrapSpecifier,
           jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::SetupEmscripten,
               JsgWorkerdIsolate_TypeWrapper>(
-              [](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
-        auto& api = Worker::Api::current();
-        return js.alloc<api::pyodide::SetupEmscripten>(
-            KJ_ASSERT_NONNULL(api.getEmscriptenRuntime()));
+              [bundle](jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::SetupEmscripten> {
+        auto emscriptenRuntime = api::pyodide::EmscriptenRuntime::initialize(js, true, bundle);
+        return js.alloc<api::pyodide::SetupEmscripten>(kj::mv(emscriptenRuntime));
       }));
 
       pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
@@ -1327,7 +1341,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   // service to try resolving.
   KJ_IF_SOME(fallbackService, maybeFallbackService) {
     builder.add(jsg::modules::ModuleBundle::newFallbackBundle(
-        [fallbackService = kj::str(fallbackService)](const jsg::modules::ResolveContext& context)
+        [fallbackService = kj::str(fallbackService), featureFlags](
+            const jsg::modules::ResolveContext& context)
             -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
       auto specifier = kj::str(context.specifier.getHref());
       auto referrer = kj::str(context.referrer.getHref());
@@ -1344,7 +1359,7 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
           KJ_CASE_ONEOF(def, kj::Own<server::config::Worker::Module::Reader>) {
             // The fallback service returned a module definition.
             // We need to convert that into a Module instance.
-            auto mod = readModuleConf(*def, kj::none);
+            auto mod = readModuleConf(*def, featureFlags, kj::none);
             KJ_IF_SOME(specifier, jsg::Url::tryParse(mod.name)) {
               // Note that unlike the regular case, the module content returned
               // by the fallback service is not guaranteed to be memory-resident.
@@ -1440,8 +1455,8 @@ kj::Own<jsg::modules::ModuleRegistry> WorkerdApi::initializeBundleModuleRegistry
   return builder.finish();
 }
 
-const VirtualFileSystem& WorkerdApi::getVirtualFileSystem() const {
-  return *impl->vfs;
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage() {
+  return kj::heap<EmptyReadOnlyActorStorageImpl>();
 }
 
 }  // namespace workerd::server

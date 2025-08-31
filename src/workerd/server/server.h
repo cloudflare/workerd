@@ -131,6 +131,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   bool experimental = false;
 
   Worker::ConsoleMode consoleMode;
+  StructuredLogging structuredLogging{StructuredLogging::NO};
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
@@ -154,12 +155,19 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class Service;
   kj::Own<Service> invalidConfigServiceSingleton;
 
+  class ActorClass;
+  kj::Own<ActorClass> invalidConfigActorClassSingleton;
+
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
   // This needs to be populated in advance of constructing any services, in order to be able to
   // correctly construct dependent services.
   kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
+
+  class WorkerLoaderNamespace;
+  kj::HashMap<kj::String, kj::Rc<WorkerLoaderNamespace>> workerLoaderNamespaces;
+  kj::Vector<kj::Rc<WorkerLoaderNamespace>> anonymousWorkerLoaderNamespaces;
 
   kj::Own<kj::PromiseFulfiller<void>> fatalFulfiller;
 
@@ -213,10 +221,10 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Own<Service> makeWorker(kj::StringPtr name,
+  kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
       config::Worker::Reader conf,
       capnp::List<config::Extension>::Reader extensions);
-  kj::Own<Service> makeService(config::Service::Reader conf,
+  kj::Promise<kj::Own<Service>> makeService(config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
@@ -229,12 +237,18 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<Service> lookupService(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
+  // Like lookupService() but looks up an actor class (especially for use as a facet class).
+  // Returns none on a config error.
+  kj::Own<ActorClass> lookupActorClass(
+      config::ServiceDesignator::Reader designator, kj::String errorContext);
+
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
       kj::Own<Service> service,
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
   class InvalidConfigService;
+  class InvalidConfigActorClass;
   class ExternalHttpService;
   class ExternalTcpService;
   class NetworkService;
@@ -243,7 +257,16 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class WorkerEntrypointService;
   class HttpListener;
 
-  void startServices(jsg::V8System& v8System,
+  struct ErrorReporter;
+  struct ConfigErrorReporter;
+  struct DynamicErrorReporter;
+  struct WorkerDef;
+  kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
+      WorkerDef def,
+      capnp::List<config::Extension>::Reader extensions,
+      ErrorReporter& errorReporter);
+
+  kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen);
@@ -255,6 +278,13 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       kj::ForkedPromise<void>& forkedDrainWhen,
       bool forTest = false);
+
+  void unlinkWorkerLoaders();
+
+  kj::Promise<void> preloadPython(
+      kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);
+
+  friend struct FutureSubrequestChannel;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

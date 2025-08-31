@@ -30,14 +30,12 @@ kj::Maybe<AsyncContextFrame&> tryGetFrame(kj::Maybe<Ref<AsyncContextFrame>>& may
 UnhandledRejectionHandler::UnhandledRejection::UnhandledRejection(jsg::Lock& js,
     jsg::V8Ref<v8::Promise> promise,
     jsg::Value value,
-    v8::Local<v8::Message> message,
-    size_t rejectionNumber)
+    v8::Local<v8::Message> message)
     : hash(kj::hashCode(promise.getHandle(js)->GetIdentityHash())),
       promise(js.v8Isolate, promise.getHandle(js)),
       value(js.v8Isolate, value.getHandle(js)),
       message(js.v8Isolate, message),
-      asyncContextFrame(getFrameRef(js)),
-      rejectionNumber(rejectionNumber) {
+      asyncContextFrame(getFrameRef(js)) {
   this->promise.SetWeak();
   this->value.SetWeak();
 }
@@ -94,7 +92,7 @@ void UnhandledRejectionHandler::rejectedWithNoHandler(
   // value and message when it does.
 
   unhandledRejections.upsert(
-      UnhandledRejection(js, kj::mv(promise), kj::mv(value), kj::mv(message), ++rejectionCount),
+      UnhandledRejection(js, kj::mv(promise), kj::mv(value), kj::mv(message)),
       [&](UnhandledRejection& existing, UnhandledRejection&& replacement) {
     // Replacing the promise here is defensive, since they have the same hash
     // it *should* be the same promise, but let's be sure. We don't need to
@@ -122,20 +120,7 @@ void UnhandledRejectionHandler::handledAfterRejection(
   KJ_IF_SOME(item, warnedRejections.find(key)) {
     auto promise = getLocal(js.v8Isolate, item.promise);
     if (!promise.IsEmpty()) {
-      // TODO(later): Chromium handles this differently... essentially when the
-      // inspector log is created, chromium will revoke the log entry here instead
-      // of printing a new warning (causing the previously printed warning to disappear
-      // from the inspector console). We currently don't appear to have a way of
-      // doing that yet, so printing the warning is the next best thing.
-      if (js.areWarningsLogged()) {
-        js.logWarning(kj::str("A promise rejection was handled asynchronously. This warning "
-                              "occurs when attaching a catch handler to a promise after it "
-                              "rejected. (rejection #",
-            item.rejectionNumber, ")"));
-      }
-
       AsyncContextFrame::Scope scope(js, tryGetFrame(item.asyncContextFrame));
-
       handler(js, v8::kPromiseHandlerAddedAfterReject, jsg::HashableV8Ref(js.v8Isolate, promise),
           js.v8Ref(js.v8Undefined()));
     }

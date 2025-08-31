@@ -384,7 +384,7 @@ struct ClearErrorOnReturn {
 // Returns ceil(a / b) for integers (std::ceil always returns a floating point result).
 template <typename T>
 static inline T integerCeilDivision(T a, T b) {
-  static_assert(std::is_unsigned<T>::value);
+  static_assert(std::is_unsigned_v<T>);
   return a == 0 ? 0 : 1 + (a - 1) / b;
 }
 

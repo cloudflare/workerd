@@ -16,8 +16,8 @@ export default {
     ],
   },
   'AddEventListenerOptions-signal.any.js': {
-    comment: 'addEventListener(): options.capture must be false.',
-    expectedFailures: [
+    comment: 'capture is not relevant outside of the DOM',
+    omittedTests: [
       'Passing an AbortSignal to addEventListener works with the capture flag',
     ],
   },
@@ -26,18 +26,22 @@ export default {
     disabledTests: true,
   },
   'Event-dispatch-listener-order.window.js': {
-    comment: 'document is not defined',
+    comment: 'Test requires DOM',
     // There is a single test, whose name is the empty string
-    expectedFailures: [''],
+    omittedTests: [''],
   },
   'Event-isTrusted.any.js': {
-    comment: 'Fix notStrictEqual for undefined, undefined',
-    // There is a single test, whose name is the empty string
-    expectedFailures: [''],
+    comment: 'isTrusted must be an own property, not a prototype property',
+    // With the pedantic_wpt compat flag we actually set the isTrusted property
+    // to be an own property. However, it's an own property that uses a value
+    // in the descriptor rather than a getter and the test is specifically looking
+    // for a getter for some reason. That's way more pedantic than we want to
+    // deal with so just omit the test for now.
+    omittedTests: [''],
   },
   'EventListener-addEventListener.sub.window.js': {
-    comment: 'document is not defined',
-    expectedFailures: [
+    comment: 'Only relevant to browsers',
+    omittedTests: [
       "EventListener.addEventListener doesn't throw when a cross origin object is passed in.",
     ],
   },
@@ -45,16 +49,14 @@ export default {
   'EventTarget-addEventListener.any.js': {},
   'EventTarget-constructible.any.js': {
     comment: 'Should be null, not EventTarget',
-    expectedFailures: [
-      'A constructed EventTarget implements dispatch correctly',
-    ],
+    expectedFailures: [],
   },
   'EventTarget-removeEventListener.any.js': {
-    comment: 'TypeError: removeEventListener(): useCapture must be false.',
+    comment: 'capture is not relevant outside of the DOM',
     expectedFailures: ['removing a null event listener should succeed'],
   },
   'event-global-extra.window.js': {
-    comment: 'ReferenceError: document is not defined',
+    comment: 'Test is DOM-specific',
     disabledTests: true,
   },
   'event-global-set-before-handleEvent-lookup.window.js': {
@@ -66,12 +68,12 @@ export default {
     disabledTests: true,
   },
   'legacy-pre-activation-behavior.window.js': {
-    comment: 'ReferenceError: document is not defined',
-    expectedFailures: ['Use NONE phase during legacy-pre-activation behavior'],
+    comment: 'Only relevant to browsers',
+    omittedTests: ['Use NONE phase during legacy-pre-activation behavior'],
   },
   'relatedTarget.window.js': {
-    comment: 'ReferenceError: document is not defined',
-    disabledTests: true,
+    comment: 'Test is DOM-specific',
+    omittedTests: true,
   },
   'scrolling/scroll_support.js': {
     comment: 'Only used by HTML files',

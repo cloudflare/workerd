@@ -29,6 +29,11 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     virtual kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime);
 
     static const Hooks DEFAULT;
+
+    static constexpr inline Hooks& getDefaultHooks() {
+      // Hooks has no member variables, so const_cast is acceptable.
+      return const_cast<Hooks&>(Hooks::DEFAULT);
+    }
   };
 
   // Constructs ActorSqlite, arranging to honor the output gate, that is, any writes to the
@@ -43,8 +48,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   explicit ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       OutputGate& outputGate,
       kj::Function<kj::Promise<void>()> commitCallback,
-      // Hooks has no member variables, so const_cast is acceptable.
-      Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
+      Hooks& hooks = Hooks::getDefaultHooks());
 
   bool isCommitScheduled() {
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;
@@ -210,6 +214,13 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
+
+  class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
+   public:
+    void taskFailed(kj::Exception&& exception) override;
+  };
+  AlarmLaterErrorHandler alarmLaterErrorHandler;
+  kj::TaskSet alarmLaterTasks;
 
   void onWrite();
 

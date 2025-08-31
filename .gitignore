@@ -35,3 +35,6 @@ MODULE.bazel.lock
 # Bazel plugin for Intellij paths
 .clwb
 .aswb
+
+coverage
+perf.data

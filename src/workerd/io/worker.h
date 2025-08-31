@@ -12,19 +12,17 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/limit-enforcer.h>
-#include <workerd/io/outcome.capnp.h>
 #include <workerd/io/request-tracker.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-fs.h>
-#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/io/worker-source.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/thread-scopes.h>
+#include <workerd/util/strong-bool.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/weak-refs.h>
-#include <workerd/util/xthreadnotifier.h>
 
-#include <capnp/schema.capnp.h>
 #include <kj/compat/http.h>
 #include <kj/mutex.h>
 
@@ -33,6 +31,8 @@ class Isolate;
 }
 
 namespace workerd {
+
+WD_STRONG_BOOL(StructuredLogging);
 
 namespace api {
 class DurableObjectState;
@@ -104,6 +104,9 @@ class Worker: public kj::AtomicRefcounted {
 
     // Report that the Worker exports a Durable Object class with the given name.
     virtual void addActorClass(kj::StringPtr exportName) = 0;
+
+    // Report that the Worker exports a Workflow class with the given name.
+    virtual void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) = 0;
   };
 
   class LockType;
@@ -180,8 +183,10 @@ class Worker: public kj::AtomicRefcounted {
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
-  static void setupContext(
-      jsg::Lock& lock, v8::Local<v8::Context> context, Worker::ConsoleMode consoleMode);
+  static void setupContext(jsg::Lock& lock,
+      v8::Local<v8::Context> context,
+      Worker::ConsoleMode consoleMode,
+      StructuredLogging structuredLogging);
 
  private:
   kj::Own<const Script> script;
@@ -209,6 +214,7 @@ class Worker: public kj::AtomicRefcounted {
   static void handleLog(jsg::Lock& js,
       ConsoleMode mode,
       LogLevel level,
+      StructuredLogging structuredLogging,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
 
@@ -237,138 +243,34 @@ class Worker::Script: public kj::AtomicRefcounted {
   inline bool isPython() const {
     return python;
   }
+  inline kj::Maybe<kj::Arc<DynamicEnvBuilder>> getDynamicEnvBuilder() const {
+    return mapAddRef(dynamicEnvBuilder);
+  }
+
+  void installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const;
 
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
     jsg::V8Ref<v8::Value> value;
   };
 
-  // These structs are the variants of the `ModuleContent` `OneOf`, defining all the different
-  // module types.
-  struct EsModule {
-    kj::StringPtr body;
-  };
-  struct CommonJsModule {
-    kj::StringPtr body;
-    kj::Maybe<kj::Array<kj::StringPtr>> namedExports;
-  };
-  struct TextModule {
-    kj::StringPtr body;
-  };
-  struct DataModule {
-    kj::ArrayPtr<const byte> body;
-  };
-  struct WasmModule {
-    // Compiled .wasm file content.
-    kj::ArrayPtr<const byte> body;
-  };
-  struct JsonModule {
-    // JSON-encoded content; will be parsed automatically when imported.
-    kj::StringPtr body;
-  };
-  struct PythonModule {
-    kj::StringPtr body;
-  };
-
-  // PythonRequirement is a variant of ModuleContent, but has no body. The module name specifies
-  // a Python package to be provided by the system.
-  struct PythonRequirement {};
-
-  // CapnpModule is a .capnp Cap'n Proto schema file. The original text of the file isn't provided;
-  // instead, `ModulesSource::capnpSchemas` contains all the capnp schemas needed by the Worker,
-  // and the `CapnpModule` only specifies the type ID of a particular file found in there.
-  //
-  // TODO(someday): Support CapnpSchema in workerd. Today, it's only supported in the internal
-  //   codebase.
-  struct CapnpModule {
-    uint64_t typeId;
-  };
-
-  using ModuleContent = kj::OneOf<EsModule,
-      CommonJsModule,
-      TextModule,
-      DataModule,
-      WasmModule,
-      JsonModule,
-      PythonModule,
-      PythonRequirement,
-      CapnpModule>;
-
-  struct Module {
-    kj::StringPtr name;
-    ModuleContent content;
-  };
-
-  // Representation of source code for a worker using Service Workers syntax (deprecated, but will
-  // be supported forever).
-  struct ScriptSource {
-    // Content of the script (JavaScript). Pointer is valid only until the Script constructor
-    // returns.
-    kj::StringPtr mainScript;
-
-    // Name of the script, used as the script origin for stack traces. Pointer is valid only until
-    // the Script constructor returns.
-    kj::StringPtr mainScriptName;
-
-    // Global variables to inject at startup.
-    //
-    // This is sort of weird and historical. Under the old Service Workers syntax, the entire
-    // Worker is one JavaScript file, so there are no "modules" in the normal sense. However,
-    // there were various extra blobs of data we wanted to distribute with the code: Wasm modules,
-    // as well as large text and data blobs (e.g. embedded asset files). We decided at the time
-    // that these made sense as types of bindings. But in fact they don't fit well in the bindings
-    // abstraction: most bindings are used as configuration, but these are whole files, too big
-    // to be treated like configuration. We ended up creating a mechanism to separate out these
-    // binding types and distribute them with the code rather than the config. We also need them
-    // to be delivered to the `Worker::Script` constructor rather than the `Worker` constructor
-    // (long story).
-    //
-    // When ES modules arrived, it suddenly made sense to just say that these are modules, not
-    // bindings. But of course, we have to keep supporting Service Workers syntax forever.
-    //
-    // Recall that in Service Workers syntax, bindings show up as global variables.
-    //
-    // So, this array contains the set of Service Worker bindings that are module-like (text, data,
-    // or Wasm blobs), which should be injected into the global scope. We reuse the `Module` type
-    // for this because it is convenient, but note that only a subset of types are actually
-    // supported as globals. In this array, the `name` of each `Module` is the global variable
-    // name.
-    kj::Array<Module> globals;
-
-    // The worker may have a bundle of capnp schemas attached. (In Service Workers syntax, these
-    // can't be referenced directly by the app, but they may be used by bindings.)
-    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
-  };
-
-  // Representation of source code for a worker using ES Modules syntax.
-  struct ModulesSource {
-    // Path to the main module, which can be looked up in the module registry. Pointer is valid
-    // only until the Script constructor returns.
-    kj::StringPtr mainModule;
-
-    // All the Worker's modules.
-    kj::Array<Module> modules;
-
-    // The worker may have a bundle of capnp schemas attached.
-    capnp::List<capnp::schema::Node>::Reader capnpSchemas;
-
-    bool isPython;
-
-    // Only in workerd (not on the edge), only as a hack for Python, we infer the list of
-    // entrypoint classes based on the declared self-referential bindings and actor namespaces
-    // pointing at the service. This is needed becaues in workerd, the Python runtime is unable
-    // to fully execute at startup in order to discover what the Worker actually exports. This
-    // should be fixed eventually, but for now, we use this work-around.
-    kj::Array<kj::String> inferredEntrypointClassesForPython;
-    kj::Array<kj::String> inferredActorClassesForPython;
-
-    // Optional Python memory snapshot. The actual capnp type is declared in the internal codebase,
-    // so we use AnyStruct here. This is deprecated anyway.
-    kj::Maybe<capnp::AnyStruct::Reader> pythonMemorySnapshot;
-  };
-
-  // Representation of the source code for a worker.
-  using Source = kj::OneOf<ScriptSource, ModulesSource>;
+  // Historically these types were declared here, but then they were moved to `WorkerSource`. We
+  // maintain aliases here for backwards compatibility.
+  // TODO(cleanup): Update all the references, then remove these.
+  using EsModule = WorkerSource::EsModule;
+  using CommonJsModule = WorkerSource::CommonJsModule;
+  using TextModule = WorkerSource::TextModule;
+  using DataModule = WorkerSource::DataModule;
+  using WasmModule = WorkerSource::WasmModule;
+  using JsonModule = WorkerSource::JsonModule;
+  using PythonModule = WorkerSource::PythonModule;
+  using PythonRequirement = WorkerSource::PythonRequirement;
+  using CapnpModule = WorkerSource::CapnpModule;
+  using ModuleContent = WorkerSource::ModuleContent;
+  using Module = WorkerSource::Module;
+  using ScriptSource = WorkerSource::ScriptSource;
+  using ModulesSource = WorkerSource::ModulesSource;
+  using Source = WorkerSource;
 
  private:
   kj::Own<const Isolate> isolate;
@@ -379,16 +281,20 @@ class Worker::Script: public kj::AtomicRefcounted {
   struct Impl;
   kj::Own<Impl> impl;
 
+  kj::Maybe<kj::Arc<DynamicEnvBuilder>> dynamicEnvBuilder;
+
   friend class Worker;
 
  public:  // pretend this is private (needs to be public because allocated through template)
   explicit Script(kj::Own<const Isolate> isolate,
       kj::StringPtr id,
-      Source source,
+      const Source& source,
       IsolateObserver::StartType startType,
       bool logNewScript,
       kj::Maybe<ValidationErrorReporter&> errorReporter,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts);
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs);
 };
 
 // Multiple zones may share the same script. We would like to compile each script only once,
@@ -425,7 +331,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::StringPtr id,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
-      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY);
+      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY,
+      StructuredLogging structuredLogging = StructuredLogging::NO);
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -446,9 +353,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   }
 
   // Parses the given code to create a new script object and returns it.
+  //
+  // Note that the `source` is fully consumed before this method returns, so the underlying buffers
+  // it points into can be freed immediately after the call.
   kj::Own<const Worker::Script> newScript(kj::StringPtr id,
-      Script::Source source,
+      const Script::Source& source,
       IsolateObserver::StartType startType,
+      SpanParent parentSpan,
+      kj::Own<workerd::VirtualFileSystem> vfs,
       bool logNewScript = false,
       kj::Maybe<ValidationErrorReporter&> errorReporter = kj::none,
       kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none) const;
@@ -563,6 +475,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<Api> api;
   ConsoleMode consoleMode;
+  StructuredLogging structuredLogging;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.
@@ -642,7 +555,8 @@ class Worker::Api {
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
       const Worker::Isolate& isolate,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const = 0;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan) const = 0;
 
   virtual kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Script::ScriptSource& source,
@@ -697,13 +611,6 @@ class Worker::Api {
       kj::Maybe<kj::StringPtr>);
   virtual void setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&& callback) const {
     // By default does nothing.
-  }
-
-  // Return the virtual file system for this worker.
-  virtual const VirtualFileSystem& getVirtualFileSystem() const = 0;
-
-  virtual kj::Maybe<const api::pyodide::EmscriptenRuntime&> getEmscriptenRuntime() const {
-    return kj::none;
   }
 };
 
@@ -870,6 +777,7 @@ class Worker::Actor final: public kj::Refcounted {
   //   to customize the JS API but only the underlying ActorCacheInterface?
 
   using Id = kj::OneOf<kj::Own<ActorIdFactory::ActorId>, kj::String>;
+  static bool idsEqual(const Id& a, const Id& b);
 
   // Class that allows sending requests to this actor, recreating it as needed. It is safe to hold
   // onto this for longer than a Worker::Actor is alive.
@@ -902,6 +810,28 @@ class Worker::Actor final: public kj::Refcounted {
     virtual kj::Maybe<uint32_t> getEventTimeout() = 0;
   };
 
+  class FacetManager {
+   public:
+    // Information needed to start a facet.
+    struct StartInfo {
+      // The actor class, from a DurableObjectClass binding.
+      //
+      // WARNING: The object passed here MUST be directly from IoChannelFactory::getActorClass(),
+      //   as the FacetManager implementation is allowed to assume it can downcast to whatever
+      //   type the IoChannelFactory produces.
+      kj::Own<IoChannelFactory::ActorClassChannel> actorClass;
+
+      // ctx.id for the child object.
+      Worker::Actor::Id id;
+    };
+
+    // These methods are C++ equivalents of the JavaScript ctx.facets API.
+    virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
+        kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
+    virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
+    virtual void deleteFacet(kj::StringPtr name) = 0;
+  };
+
   // Create a new Actor hosted by this Worker. Note that this Actor object may only be manipulated
   // from the thread that created it.
   Actor(const Worker& worker,
@@ -916,7 +846,8 @@ class Worker::Actor final: public kj::Refcounted {
       kj::Own<ActorObserver> metrics,
       kj::Maybe<kj::Own<HibernationManager>> manager,
       kj::Maybe<uint16_t> hibernationEventType,
-      kj::Maybe<rpc::Container::Client> container = kj::none);
+      kj::Maybe<rpc::Container::Client> container = kj::none,
+      kj::Maybe<FacetManager&> facetManager = kj::none);
 
   ~Actor() noexcept(false);
 
@@ -976,6 +907,12 @@ class Worker::Actor final: public kj::Refcounted {
   //   rather than have WorkerEntrypoint create it on the first request? We'd have to plumb through
   //   some more information to the place where `Actor` is created, which might be uglier than it's
   //   worth.
+
+  // Get the `ctx` object for this actor.
+  jsg::JsObject getCtx(jsg::Lock& js);
+
+  // Get the `env` object for this actor.
+  jsg::JsValue getEnv(jsg::Lock& js);
 
   // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
   // setHibernationManager() hasn't been called yet.
@@ -1042,6 +979,10 @@ struct SimpleWorkerErrorReporter final: public Worker::ValidationErrorReporter {
     KJ_UNREACHABLE;
   }
   void addActorClass(kj::StringPtr exportName) override {
+    KJ_UNREACHABLE;
+  }
+
+  void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {
     KJ_UNREACHABLE;
   }
 

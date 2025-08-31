@@ -5,6 +5,7 @@
 #include "web-socket.h"
 
 #include "events.h"
+#include "messagechannel.h"
 #include "util.h"
 
 #include <workerd/io/features.h>
@@ -814,7 +815,7 @@ void WebSocket::ensurePumping(jsg::Lock& js) {
 
 kj::Promise<void> WebSocket::sendAutoResponse(kj::String message, kj::WebSocket& ws) {
   if (autoResponseStatus.isPumping) {
-    autoResponseStatus.pendingAutoResponseDeque.push_back(kj::mv(message));
+    autoResponseStatus.pendingAutoResponseDeque.push(kj::mv(message));
   } else if (!autoResponseStatus.isClosed) {
     auto p = ws.send(message).fork();
     autoResponseStatus.ongoingAutoResponse = p.addBranch();
@@ -872,9 +873,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
 
     autoResponse.isPumping = false;
 
-    if (autoResponse.pendingAutoResponseDeque.size() > 0) {
-      autoResponse.pendingAutoResponseDeque.clear();
-    }
+    autoResponse.pendingAutoResponseDeque.clear();
 
     if (!completed) {
       // We didn't make it to `completed = true` at the end of this function, so either an
@@ -900,10 +899,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
       auto size = countBytesFromMessage(gatedMessage.message);
 
       while (gatedMessage.pendingAutoResponses > 0) {
-        KJ_ASSERT(
-            autoResponse.pendingAutoResponseDeque.size() >= gatedMessage.pendingAutoResponses);
-        auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-        autoResponse.pendingAutoResponseDeque.pop_front();
+        auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
         co_await ws.send(message);
@@ -937,8 +933,7 @@ kj::Promise<void> WebSocket::pump(IoContext& context,
     // If there are any auto-responses left to process, we should do it now.
     // We should also check if the last sent message was a close. Shouldn't happen.
     while (autoResponse.pendingAutoResponseDeque.size() > 0 && !autoResponse.isClosed) {
-      auto message = kj::mv(autoResponse.pendingAutoResponseDeque.front());
-      autoResponse.pendingAutoResponseDeque.pop_front();
+      auto message = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       co_await ws.send(message);
     }
 

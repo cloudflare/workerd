@@ -5,6 +5,7 @@
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
+#include <kj/debug.h>
 
 #include <cctype>
 

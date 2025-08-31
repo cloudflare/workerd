@@ -23,16 +23,21 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { FilterList, UnknownFunc, TestFn, PromiseTestFn } from './common';
+import {
+  FilterList,
+  type UnknownFunc,
+  type TestFn,
+  type PromiseTestFn,
+} from './common';
 
 declare global {
   function promise_test(
     func: PromiseTestFn,
-    name: string,
+    name?: string,
     properties?: unknown
   ): void;
-  function async_test(func: TestFn, name: string, properties?: unknown): void;
-  function test(func: TestFn, name: string, properties?: unknown): void;
+  function async_test(func: TestFn, name?: string, properties?: unknown): void;
+  function test(func: TestFn, name?: string, properties?: unknown): void;
 }
 
 type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
@@ -47,7 +52,7 @@ type TestErrorType = Error | 'OMITTED' | 'DISABLED' | undefined;
  */
 /* eslint-disable @typescript-eslint/no-this-alias -- WPT allows for overriding the this environment for a step but defaults to the Test class */
 export class Test {
-  public static Phases = {
+  static Phases = {
     INITIAL: 0,
     STARTED: 1,
     HAS_RESULT: 2,
@@ -55,17 +60,17 @@ export class Test {
     COMPLETE: 4,
   } as const;
 
-  public name: string;
-  public properties: unknown;
-  public phase: (typeof Test.Phases)[keyof typeof Test.Phases];
-  public cleanup_callbacks: UnknownFunc[] = [];
+  name: string;
+  properties: unknown;
+  phase: (typeof Test.Phases)[keyof typeof Test.Phases];
+  cleanup_callbacks: UnknownFunc[] = [];
 
-  public error: TestErrorType = undefined;
+  error: TestErrorType = undefined;
 
   // If this test is asynchronous, stores a promise that resolves on test completion
-  public promise?: Promise<void>;
+  promise?: Promise<void>;
 
-  public constructor(name: string, properties?: unknown) {
+  constructor(name: string, properties?: unknown) {
     this.name = name;
     this.properties = properties;
     this.phase = Test.Phases.INITIAL;
@@ -80,11 +85,7 @@ export class Test {
    * @param [this_obj] - The object to use as the this
    * value when calling ``func``. Defaults to the  :js:class:`Test` object.
    */
-  public step(
-    func: UnknownFunc,
-    this_obj?: object,
-    ...rest: unknown[]
-  ): unknown {
+  step(func: UnknownFunc, this_obj?: object, ...rest: unknown[]): unknown {
     if (this.phase > Test.Phases.STARTED) {
       return undefined;
     }
@@ -128,7 +129,7 @@ export class Test {
    * @param [this_obj] - The object to use as the this
    * value when calling ``func``. Defaults to the :js:class:`Test` object.
    */
-  public step_func(func: UnknownFunc, this_obj?: object): UnknownFunc {
+  step_func(func: UnknownFunc, this_obj?: object): UnknownFunc {
     if (arguments.length === 1) {
       this_obj = this;
     }
@@ -148,7 +149,7 @@ export class Test {
    * @param [this_obj] - The object to use as the this
    * value when calling `func`. Defaults to the :js:class:`Test` object.
    */
-  public step_func_done(func?: UnknownFunc, this_obj?: object): UnknownFunc {
+  step_func_done(func?: UnknownFunc, this_obj?: object): UnknownFunc {
     if (arguments.length === 1) {
       this_obj = this;
     }
@@ -170,7 +171,7 @@ export class Test {
    * in case of failure.
    *
    */
-  public unreached_func(description?: string): UnknownFunc {
+  unreached_func(description?: string): UnknownFunc {
     return this.step_func(() => {
       assert_unreached(description);
     });
@@ -189,7 +190,7 @@ export class Test {
    * test step.
    *
    */
-  public step_timeout(
+  step_timeout(
     func: UnknownFunc,
     timeout: number,
     ...rest: unknown[]
@@ -200,11 +201,11 @@ export class Test {
     );
   }
 
-  public add_cleanup(func: UnknownFunc): void {
+  add_cleanup(func: UnknownFunc): void {
     this.cleanup_callbacks.push(func);
   }
 
-  public done(): void {
+  done(): void {
     if (this.phase >= Test.Phases.CLEANING) {
       return;
     }
@@ -212,7 +213,7 @@ export class Test {
     this.cleanup();
   }
 
-  public cleanup(): void {
+  cleanup(): void {
     // TODO(soon): Cleanup functions can also return a promise instead of being synchronous, but we don't need this for any tests currently.
     for (const cleanFn of this.cleanup_callbacks) {
       cleanFn();
@@ -223,12 +224,12 @@ export class Test {
 
 /* eslint-enable @typescript-eslint/no-this-alias */
 class SkippedTest extends Test {
-  public constructor(name: string, reason: TestErrorType) {
+  constructor(name: string, reason: TestErrorType) {
     super(name);
     this.error = reason;
   }
 
-  public override step(
+  override step(
     _func: UnknownFunc,
     _this_obj?: object,
     ..._rest: unknown[]
@@ -242,11 +243,11 @@ class PromiseTest extends Test {
 }
 
 globalThis.promise_test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new PromiseTest(name, properties);
+  const testCase = new PromiseTest(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   const promise = testCase.step(func, testCase, testCase);
@@ -275,29 +276,29 @@ globalThis.promise_test = (func, name, properties): void => {
 };
 
 class AsyncTest extends Test {
-  private resolve: () => void;
+  #resolve: () => void;
 
-  public constructor(name: string, properties: unknown) {
+  constructor(name: string, properties: unknown) {
     super(name, properties);
 
     // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
     const { promise, resolve } = Promise.withResolvers<void>();
     this.promise = promise;
-    this.resolve = resolve;
+    this.#resolve = resolve;
   }
 
-  public override done(): void {
+  override done(): void {
     super.done();
-    this.resolve();
+    this.#resolve();
   }
 }
 
 globalThis.async_test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new AsyncTest(name, properties);
+  const testCase = new AsyncTest(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);
@@ -315,11 +316,11 @@ globalThis.async_test = (func, name, properties): void => {
  * given file and must be invariant between runs.
  */
 globalThis.test = (func, name, properties): void => {
-  if (maybeAddSkippedTest(name)) {
+  if (maybeAddSkippedTest(name ?? '')) {
     return;
   }
 
-  const testCase = new Test(name, properties);
+  const testCase = new Test(name ?? '', properties);
   globalThis.state.subtests.push(testCase);
 
   testCase.step(func, testCase, testCase);

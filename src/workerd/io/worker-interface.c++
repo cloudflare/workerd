@@ -4,6 +4,8 @@
 
 #include "worker-interface.h"
 
+#include <workerd/util/http-util.h>
+
 #include <kj/debug.h>
 
 using kj::byte;
@@ -25,10 +27,12 @@ class PromisedWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
+    throwIfInvalidHeaderValue(headers);
     KJ_IF_SOME(w, worker) {
       co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await promise;
+      throwIfInvalidHeaderValue(headers);
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }
@@ -57,8 +61,8 @@ class PromisedWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    KJ_IF_SOME(w, worker) {
-      co_return co_await w->runScheduled(scheduledTime, cron);
+    KJ_IF_SOME(wrk, worker) {
+      co_return co_await wrk->runScheduled(scheduledTime, cron);
     } else {
       co_await promise;
       co_return co_await KJ_ASSERT_NONNULL(worker)->runScheduled(scheduledTime, cron);
@@ -253,6 +257,7 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::request(kj::HttpMethod meth
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
   auto wrappedResponse = kj::heap<RevocableWebSocketHttpResponse>(response, revokeProm.addBranch());
+  throwIfInvalidHeaderValue(headers);
   return worker.request(method, url, headers, requestBody, *wrappedResponse)
       .attach(kj::mv(wrappedResponse));
 }
@@ -364,6 +369,7 @@ kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
+  throwIfInvalidHeaderValue(headers);
   auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));

@@ -2,12 +2,6 @@ name: Tests
 
 on:
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'justfile'
-      - '.devcontainer'
-      - '**/*.md'
-      - '.gitignore'
   merge_group:
   push:
     branches:
@@ -19,6 +13,14 @@ concurrency:
   group: test.yml-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  # Read repo
+  contents: read
+  # Read/write artifacts
+  actions: write
+  # Required for adding comments to PR.
+  # Specifically for sticky-pull-request-comment workflow action.
+  pull-requests: write
 jobs:
   fixup:
     if: github.event_name == 'pull_request'
@@ -31,10 +33,10 @@ jobs:
       matrix:
         os:
           [
-            { name: linux, image: ubuntu-22.04 },
-            { name: linux-arm, image: ubuntu-22.04-arm },
-            { name: macOS, image: macos-15 },
-            { name: windows, image: windows-2025 },
+            { name: linux, arch: X64, image: ubuntu-22.04 },
+            { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
+            { name: macOS, arch: ARM64, image: macos-15 },
+            { name: windows, arch: X64, image: windows-2025 },
           ]
         config: [
             # Default build: no suffix or additional bazel arguments
@@ -44,7 +46,7 @@ jobs:
           ]
         include:
           # Add an Address Sanitizer (ASAN) build on Linux for additional checking.
-          - os: { name: linux, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -asan }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
@@ -53,25 +55,27 @@ jobs:
           # - os:     { name : windows, image : windows-2025 }
           #   config: { suffix: -debug, bazel-args: --config=windows_dbg }
         exclude:
-          - os: { name: windows, image: windows-2025 }
+          - os: { name: windows, arch: X64, image: windows-2025 }
             config: { suffix: -debug }
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, image: macos-15 }
+          - os: { name: macOS, arch: ARM64 ,image: macos-15 }
             config: { suffix: -debug }
-          - os: { name: linux, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -debug }
             # linux release is handled by separate test-linux job
-          - os: { name: linux, image: ubuntu-22.04 }
+          - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: '' }
       fail-fast: false
+    name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ${{ matrix.os.image }}
       os_name: ${{ matrix.os.name }}
+      arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
-      extra_bazel_args: '--config=ci-test'
+      extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}'
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
@@ -82,9 +86,10 @@ jobs:
     with:
       image: ubuntu-22.04
       os_name: linux
+      arch_name: 'X64'
       suffix: ''
-      extra_bazel_args: '--config=ci-test'
-      run_wpt_report: true
+      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      upload_test_logs: true
       upload_binary: true
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
@@ -93,7 +98,7 @@ jobs:
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: '--config=lint --config=ci-test'
+      extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux'
       run_tests: false
     secrets:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
@@ -113,19 +118,11 @@ jobs:
         with:
           path: ~/bazel-disk-cache
           key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
-      - name: Setup Linux
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          wget https://apt.llvm.org/llvm.sh
-          sed -i '/apt-get install/d' llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 19
-          sudo apt-get install -y --no-install-recommends clang-19 lld-19 libunwind-19 libc++abi1-19 libc++1-19 libc++-19-dev
-          echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
-          echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
       - name: build types
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
       - name: Check snapshot diff
         run: |
           diff -r types/generated-snapshot/latest bazel-bin/types/definitions/latest > types.diff
@@ -217,3 +214,11 @@ jobs:
         run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+  wpt-report:
+    needs: [test-linux]
+    uses: ./.github/workflows/_wpt.yml
+    with:
+      image: 'ubuntu-22.04'
+      logs_artifact: 'test-logs-linux-X64.zip'
+      report_artifact: 'wpt-report-linux-X64.json'

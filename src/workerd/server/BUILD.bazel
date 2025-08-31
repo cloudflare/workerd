@@ -4,6 +4,7 @@ load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 config_setting(
@@ -41,15 +42,31 @@ wd_cc_library(
     }),
 )
 
+wd_cc_embed(
+    name = "workerd-capnp-schema",
+    src = "workerd.capnp",
+    base_name = "workerd-capnp-schema",
+    is_text = True,
+)
+
+wd_cc_embed(
+    name = "cpp-capnp-schema",
+    src = "@capnp-cpp//src/capnp:c++.capnp",
+    base_name = "cpp-capnp-schema",
+    is_text = True,
+)
+
 wd_cc_binary(
     name = "workerd",
     srcs = ["workerd.c++"],
     malloc = ":malloc",
     visibility = ["//visibility:public"],
     deps = [
+        ":cpp-capnp-schema",
+        ":json-logger",
         ":server",
         ":v8-platform-impl",
-        ":workerd-meta_capnp",
+        ":workerd-capnp-schema",
         ":workerd_capnp",
         "//src/pyodide:pyodide_extra_capnp",
         "//src/rust/cxx-integration",
@@ -95,27 +112,45 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "server",
+    name = "pyodide",
     srcs = [
-        "server.c++",
+        "pyodide.c++",
+    ],
+    hdrs = [
+        "pyodide.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "workerd-api",
+    srcs = [
         "workerd-api.c++",
     ],
     hdrs = [
-        "server.h",
         "workerd-api.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
-        ":alarm-scheduler",
-        ":bundle-fs",
-        ":container-client",
         ":fallback-service",
+        ":pyodide",
         ":workerd_capnp",
         "//deps/rust:runtime",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide:pyodide_static",
+        "//src/pyodide:python-entrypoint",
+        "//src/rust/transpiler",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:memory-cache",
@@ -124,16 +159,61 @@ wd_cc_library(
         "//src/workerd/api:rtti",
         "//src/workerd/api/node",
         "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/util:perfetto",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-tls",
+    ],
+)
+
+wd_cc_library(
+    name = "server",
+    srcs = [
+        "server.c++",
+    ],
+    hdrs = [
+        "server.h",
+    ],
+    deps = [
+        ":actor-id-impl",
+        ":alarm-scheduler",
+        ":container-client",
+        ":facet-tree-index",
+        ":fallback-service",
+        ":workerd-api",
+        ":workerd_capnp",
+        "//deps/rust:runtime",
+        "//src/cloudflare",
+        "//src/node",
+        "//src/pyodide:pyodide_static",
+        "//src/workerd/api:memory-cache",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io",
         "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
         "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
 wd_capnp_library(src = "docker-api.capnp")
+
+wd_capnp_library(src = "log-schema.capnp")
+
+wd_cc_library(
+    name = "json-logger",
+    srcs = ["json-logger.c++"],
+    hdrs = ["json-logger.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":log-schema_capnp",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj",
+    ],
+)
 
 wd_cc_library(
     name = "container-client",
@@ -148,21 +228,6 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
-    ],
-)
-
-wd_cc_library(
-    name = "bundle-fs",
-    srcs = [
-        "bundle-fs.c++",
-    ],
-    hdrs = [
-        "bundle-fs.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":workerd_capnp",
-        "//src/workerd/io",
     ],
 )
 
@@ -197,6 +262,20 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "facet-tree-index",
+    srcs = [
+        "facet-tree-index.c++",
+    ],
+    hdrs = [
+        "facet-tree-index.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
 wd_capnp_library(
     src = "workerd.capnp",
     # Limit visibility to avoid accidental usage – there should be no need to use this outside of
@@ -206,11 +285,6 @@ wd_capnp_library(
         "//src/workerd/api:__pkg__",
         "//src/workerd/tests:__pkg__",
     ],
-)
-
-wd_capnp_library(
-    src = "workerd-meta.capnp",
-    deps = [":workerd_capnp"],
 )
 
 kj_test(
@@ -233,16 +307,24 @@ kj_test(
     ],
 )
 
-kj_test(
-    src = "bundle-fs-test.c++",
-    deps = [
-        ":bundle-fs",
-        "//src/workerd/tests:test-fixture",
-    ],
-)
-
 copy_file(
     name = "pyodide.capnp.bin@rule",
     src = "//src/pyodide:pyodide.capnp.bin_cross",
     out = "pyodide.capnp.bin",
+)
+
+kj_test(
+    src = "facet-tree-index-test.c++",
+    deps = [
+        ":facet-tree-index",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "json-logger-test.c++",
+    deps = [
+        ":json-logger",
+        "@capnp-cpp//src/capnp/compat:json",
+    ],
 )

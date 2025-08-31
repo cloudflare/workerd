@@ -36,7 +36,7 @@ export class Timeout {
   #isRepeat: boolean;
   #isRefed: boolean;
 
-  public constructor(
+  constructor(
     callback: (...args: unknown[]) => unknown,
     after: number = 1,
     args: unknown[] = [],
@@ -69,38 +69,38 @@ export class Timeout {
     }
   }
 
-  public refresh(): this {
+  refresh(): this {
     this.#clearTimeout();
     this.#constructTimer();
     return this;
   }
 
-  public unref(): this {
+  unref(): this {
     // Intentionally left as no-op.
     this.#isRefed = false;
     return this;
   }
 
-  public ref(): this {
+  ref(): this {
     // Intentionally left as no-op.
     this.#isRefed = true;
     return this;
   }
 
-  public hasRef(): boolean {
+  hasRef(): boolean {
     return this.#isRefed;
   }
 
-  public close(): this {
+  close(): this {
     this.#clearTimeout();
     return this;
   }
 
-  public [Symbol.dispose](): void {
+  [Symbol.dispose](): void {
     this.#clearTimeout();
   }
 
-  public [Symbol.toPrimitive](): number {
+  [Symbol.toPrimitive](): number {
     return this.#timer;
   }
 

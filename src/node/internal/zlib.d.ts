@@ -181,18 +181,18 @@ type ErrorHandler = (errno: number, code: string, message: string) => void;
 type ProcessHandler = () => void;
 
 export abstract class CompressionStream {
-  public [owner_symbol]: Zlib;
+  [owner_symbol]: Zlib;
   // Not used by C++ implementation but required to be Node.js compatible.
-  public inOff: number;
-  public buffer: NodeJS.TypedArray | null;
-  public cb: () => void;
-  public availOutBefore: number;
-  public availInBefore: number;
-  public flushFlag: number;
+  inOff: number;
+  buffer: NodeJS.TypedArray | null;
+  cb: () => void;
+  availOutBefore: number;
+  availInBefore: number;
+  flushFlag: number;
 
-  public constructor(mode: number);
-  public close(): void;
-  public write(
+  constructor(mode: number);
+  close(): void;
+  write(
     flushFlag: number,
     inputBuffer: NodeJS.TypedArray,
     inputOffset: number,
@@ -201,7 +201,7 @@ export abstract class CompressionStream {
     outputOffset: number,
     outputLength: number
   ): void;
-  public writeSync(
+  writeSync(
     flushFlag: number,
     inputBuffer: NodeJS.TypedArray,
     inputOffset: number,
@@ -210,14 +210,14 @@ export abstract class CompressionStream {
     outputOffset: number,
     outputLength: number
   ): void;
-  public reset(): void;
+  reset(): void;
 
   // Workerd specific functions
-  public setErrorHandler(cb: ErrorHandler): void;
+  setErrorHandler(cb: ErrorHandler): void;
 }
 
 export class ZlibStream extends CompressionStream {
-  public initialize(
+  initialize(
     windowBits: number,
     level: number,
     memLevel: number,
@@ -226,23 +226,23 @@ export class ZlibStream extends CompressionStream {
     processCallback: ProcessHandler,
     dictionary: ZlibOptions['dictionary']
   ): void;
-  public params(level: number, strategy: number): void;
+  params(level: number, strategy: number): void;
 }
 
 export class BrotliDecoder extends CompressionStream {
-  public initialize(
+  initialize(
     params: Uint32Array,
     writeResult: Uint32Array,
     writeCallback: () => void
   ): boolean;
-  public params(): void;
+  params(): void;
 }
 
 export class BrotliEncoder extends CompressionStream {
-  public initialize(
+  initialize(
     params: Uint32Array,
     writeResult: Uint32Array,
     writeCallback: () => void
   ): boolean;
-  public params(): void;
+  params(): void;
 }

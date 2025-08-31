@@ -6,12 +6,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - 'docs/**'
-      - 'justfile'
-      - '.devcontainer'
-      - '**/*.md'
-      - '.gitignore'
 
 concurrency:
   # Cancel existing builds for the same PR.

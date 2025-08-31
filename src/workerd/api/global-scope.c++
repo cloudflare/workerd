@@ -145,6 +145,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler,
     kj::Maybe<jsg::Ref<AbortSignal>> abortSignal) {
+  throwIfInvalidHeaderValue(headers);
   TRACE_EVENT("workerd", "ServiceWorkerGlobalScope::request()");
   // To construct a ReadableStream object, we're supposed to pass in an Own<AsyncInputStream>, so
   // that it can drop the reference whenever it gets GC'ed. But in this case the stream's lifetime
@@ -214,7 +215,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   }
 
   auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-      jsg::alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
+      js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
       /* signal */ kj::mv(abortSignal), kj::mv(cf), kj::mv(body),
       /* thisSignal */ kj::none, Request::CacheMode::NONE);
 
@@ -791,7 +792,7 @@ jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
     jsg::Function<void()> function, double msDelay) {
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /** repeats = */ false, kj::mv(function), msDelay);
+      /* repeat */ false, kj::mv(function), msDelay);
   return timeoutId.toNumber();
 }
 
@@ -884,31 +885,67 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
 }
 
 jsg::JsValue ServiceWorkerGlobalScope::getBuffer(jsg::Lock& js) {
+  KJ_IF_SOME(p, bufferValue) {
+    return p.getHandle(js);
+  }
   constexpr auto kSpecifier = "node:buffer"_kj;
   KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+    KJ_IF_SOME(p, bufferValue) {
+      // There's a chance that resolving the module caused side-effects
+      // that set the bufferValue, we let's check again.
+      return p.getHandle(js);
+    }
     auto def = module.get(js, "default"_kj);
     auto obj = KJ_ASSERT_NONNULL(def.tryCast<jsg::JsObject>());
     auto buffer = obj.get(js, "Buffer"_kj);
     JSG_REQUIRE(buffer.isFunction(), TypeError, "Invalid node:buffer implementation");
+    bufferValue = jsg::JsRef(js, buffer);
     return buffer;
   } else {
     // If we are unable to resolve the node:buffer module here, it likely
     // means that we don't actually have a module registry installed. Just
     // return undefined in this case.
+    bufferValue = jsg::JsRef(js, js.undefined());
     return js.undefined();
   }
 }
 
+void ServiceWorkerGlobalScope::setProcess(jsg::Lock& js, jsg::JsValue newProcess) {
+  processValue = jsg::JsRef(js, newProcess);
+}
+
+void ServiceWorkerGlobalScope::setBuffer(jsg::Lock& js, jsg::JsValue newBuffer) {
+  bufferValue = jsg::JsRef(js, newBuffer);
+}
+
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
-  constexpr auto kSpecifier = "node:process"_kj;
-  KJ_IF_SOME(module, js.resolveModule(kSpecifier)) {
+  KJ_IF_SOME(p, processValue) {
+    return p.getHandle(js);
+  }
+  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  auto specifier = ([&]() -> kj::StringPtr {
+    if (FeatureFlags::get(js).getEnableNodeJsProcessV2()) {
+      return "node-internal:public_process"_kj;
+    } else {
+      return "node-internal:legacy_process"_kj;
+    }
+  })();
+
+  KJ_IF_SOME(module, js.resolveInternalModule(specifier)) {
+    KJ_IF_SOME(p, processValue) {
+      // There's a chance that resolving the module caused side-effects
+      // that set the processValue, we let's check again.
+      return p.getHandle(js);
+    }
     auto def = module.get(js, "default"_kj);
     JSG_REQUIRE(def.isObject(), TypeError, "Invalid node:process implementation");
+    processValue = jsg::JsRef(js, def);
     return def;
   } else {
-    // If we are unable to resolve the node:process module here, it likely
+    // If we are unable to resolve the internal module here, it likely
     // means that we don't actually have a module registry installed. Just
     // return undefined in this case.
+    processValue = jsg::JsRef(js, js.undefined());
     return js.undefined();
   }
 }
@@ -976,7 +1013,7 @@ jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
     function(js, kj::mv(args));
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
-      /* repeats = */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
+      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
   return js.alloc<Immediate>(context, timeoutId);
 }
 

@@ -155,7 +155,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
 template <typename Func>
 bool SqliteKv::get(KeyPtr key, Func&& callback) {
-  if (!tableCreated) return 0;
+  if (!tableCreated) return false;
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return false);
 
   auto query = stmts.stmtGet.run(key);

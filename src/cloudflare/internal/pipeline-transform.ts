@@ -58,7 +58,7 @@ type Batch = {
   shard: string; // assigned shard
   ts: number; // creation timestamp of the batch
 
-  format: Format;
+  format: FormatType;
   size: {
     bytes: number;
     rows: number;
@@ -66,14 +66,15 @@ type Batch = {
   data: unknown;
 };
 
+const Format = {
+  JSON_STREAM: 'json_stream' as const, // jsonl
+};
+type FormatType = (typeof Format)[keyof typeof Format];
+
 type JsonStream = Batch & {
-  format: Format.JSON_STREAM;
+  format: typeof Format.JSON_STREAM;
   data: ReadableStream<Uint8Array>;
 };
-
-enum Format {
-  JSON_STREAM = 'json_stream', // jsonl
-}
 
 type PipelineBatchMetadata = {
   pipelineId: string;
@@ -91,15 +92,13 @@ export class PipelineTransformImpl<
 
   // stub overridden on the subclass
   // eslint-disable-next-line @typescript-eslint/require-await
-  public async run(
-    _records: I[],
-    _metadata: PipelineBatchMetadata
-  ): Promise<O[]> {
+  async run(_records: I[], _metadata: PipelineBatchMetadata): Promise<O[]> {
     throw new Error('should be implemented by parent');
   }
 
   // called by the dispatcher to validate that run is properly implemented by the subclass
-  // @ts-expect-error thinks ping is never used
+  // @ts-expect-error This is OK. We use this method in tests.
+  // eslint-disable-next-line no-restricted-syntax
   private async _ping(): Promise<void> {
     // making sure the function was overridden by an implementing subclass
     if (this.run !== PipelineTransformImpl.prototype.run) {
@@ -116,7 +115,8 @@ export class PipelineTransformImpl<
   // called by the dispatcher which then calls the subclass methods
   // the reason this is typescript private and not javascript private is that this must be
   // able to be called by the dispatcher but should not be called by the class implementer
-  // @ts-expect-error _run is called by rpc
+  // @ts-expect-error This is OK. We use this method in tests.
+  // eslint-disable-next-line no-restricted-syntax
   private async _run(
     batch: Batch,
     metadata: PipelineBatchMetadata

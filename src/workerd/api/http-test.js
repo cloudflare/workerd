@@ -92,7 +92,8 @@ export default {
   },
 };
 
-export const inspect = {
+// inspect tests
+export const test = {
   async test(ctrl, env, ctx) {
     // Check URL with duplicate search param keys
     const url = new URL('http://user:pass@placeholder:8787/path?a=1&a=2&b=3');
@@ -226,6 +227,10 @@ export const inspect = {
         assert.strictEqual(
           event.data,
           `MessageEvent {
+  ports: [ [length]: 0 ],
+  source: null,
+  lastEventId: '',
+  origin: null,
   data: 'data',
   type: 'message',
   eventPhase: 2,
@@ -253,6 +258,9 @@ export const inspect = {
     webSocket.send('data');
     webSocket.close();
     await messagePromise;
+
+    // Test sending to oversized URL (bigger than MAX_TRACE_BYTES), relevant primarily for tail worker test.
+    await env.SERVICE.fetch('http://placeholder/' + '0'.repeat(2 ** 18));
   },
 };
 

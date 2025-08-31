@@ -23,16 +23,12 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { EventEmitter } from 'node-internal:events';
 
 import { Stream } from 'node-internal:streams_legacy';
 
 import { Buffer } from 'node-internal:internal_buffer';
-
-import * as process from 'node-internal:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import {
   nop,
@@ -64,8 +60,6 @@ import {
   ERR_UNKNOWN_ENCODING,
 } from 'node-internal:internal_errors';
 
-import { isDuplexInstance } from 'node-internal:streams_duplex';
-
 // ======================================================================================
 // WritableState
 
@@ -75,7 +69,6 @@ export function WritableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream,
   // e.g. options.readableObjectMode vs. options.writableObjectMode, etc.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag to indicate whether or not this stream
   // contains buffers or objects.
@@ -225,20 +218,9 @@ Object.setPrototypeOf(Writable.prototype, Stream.prototype);
 Object.setPrototypeOf(Writable, Stream);
 
 export function Writable(options) {
-  // Writable ctor is applied to Duplexes, too.
-  // `realHasInstance` is necessary because using plain `instanceof`
-  // would return false, as no `_writableState` property is attached.
+  if (!(this instanceof Writable)) return new Writable(options);
 
-  // Trying to use the custom `instanceof` for Writable here will also break the
-  // Node.js LazyTransform implementation, which has a non-trivial getter for
-  // `_writableState` that would lead to infinite recursion.
-
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the WritableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  if (!isDuplex && !Writable[Symbol.hasInstance](this))
-    return new Writable(options);
-  this._writableState = new WritableState(options, this, isDuplex);
+  this._writableState = new WritableState(options, this, false);
   if (options) {
     if (typeof options.write === 'function') this._write = options.write;
     if (typeof options.writev === 'function') this._writev = options.writev;
@@ -311,7 +293,7 @@ function _write(stream, chunk, encoding, cb) {
     err = new ERR_STREAM_DESTROYED('write');
   }
   if (err) {
-    process.nextTick(cb, err);
+    nextTick(cb, err);
     errorOrDestroy(stream, err, true);
     return err;
   }
@@ -420,7 +402,7 @@ function onwrite(stream, er) {
   state.writelen = 0;
   if (er) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
-    er.stack; // eslint-disable-line no-unused-expressions
+    er.stack; // eslint-disable-line @typescript-eslint/no-unused-expressions
 
     if (!state.errored) {
       state.errored = er;
@@ -432,7 +414,7 @@ function onwrite(stream, er) {
       stream._readableState.errored = er;
     }
     if (sync) {
-      process.nextTick(onwriteError, stream, state, er, cb);
+      nextTick(onwriteError, stream, state, er, cb);
     } else {
       onwriteError(stream, state, er, cb);
     }
@@ -457,7 +439,7 @@ function onwrite(stream, er) {
           stream,
           state,
         };
-        process.nextTick(afterWriteTick, state.afterWriteTickInfo);
+        nextTick(afterWriteTick, state.afterWriteTickInfo);
       }
     } else {
       afterWrite(stream, state, 1, cb);
@@ -627,7 +609,7 @@ function end(chunk, encoding, cb) {
   }
   if (typeof cb === 'function') {
     if (err || state.finished) {
-      process.nextTick(cb, err);
+      nextTick(cb, err);
     } else {
       state[kOnFinished].push(cb);
     }
@@ -674,7 +656,7 @@ function callFinal(stream, state) {
       // Some streams assume 'finish' will be emitted
       // asynchronously relative to _final callback.
       state.pendingcb++;
-      process.nextTick(finish, stream, state);
+      nextTick(finish, stream, state);
     }
   }
   state.sync = true;
@@ -705,7 +687,7 @@ function finishMaybe(stream, state, sync = false) {
     if (state.pendingcb === 0) {
       if (sync) {
         state.pendingcb++;
-        process.nextTick(() => {
+        nextTick(() => {
           ((stream, state) => {
             if (needFinish(state)) {
               finish(stream, state);
@@ -854,7 +836,7 @@ Writable.prototype.destroy = function (err, cb) {
     !state.destroyed &&
     (state.bufferedIndex < state.buffered.length || state[kOnFinished].length)
   ) {
-    process.nextTick(errorBuffer, state);
+    nextTick(errorBuffer, state);
   }
   destroy.call(this, err, cb);
   return this;

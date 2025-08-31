@@ -336,6 +336,10 @@ class WritableImpl {
     kj::Maybe<jsg::Function<StreamQueuingStrategy::SizeAlgorithm>> size;
 
     Algorithms() {};
+    ~Algorithms() {
+      // Clear all algorithm references to break circular references
+      clear();
+    }
     Algorithms(Algorithms&& other) = default;
     Algorithms& operator=(Algorithms&& other) = default;
 
@@ -457,7 +461,7 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  public:
   ReadableStreamBYOBRequest(jsg::Lock& js,
       kj::Own<ByteQueue::ByobRequest> readRequest,
-      jsg::Ref<ReadableByteStreamController> controller);
+      kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamBYOBRequest);
 
@@ -491,12 +495,12 @@ class ReadableStreamBYOBRequest: public jsg::Object {
  private:
   struct Impl {
     kj::Own<ByteQueue::ByobRequest> readRequest;
-    jsg::Ref<ReadableByteStreamController> controller;
+    kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::V8Ref<v8::Uint8Array> view;
 
     Impl(jsg::Lock& js,
         kj::Own<ByteQueue::ByobRequest> readRequest,
-        jsg::Ref<ReadableByteStreamController> controller);
+        kj::Rc<WeakRef<ReadableByteStreamController>> controller);
 
     void updateView(jsg::Lock& js);
   };
@@ -517,6 +521,11 @@ class ReadableByteStreamController: public jsg::Object {
 
   ReadableByteStreamController(
       UnderlyingSource underlyingSource, StreamQueuingStrategy queuingStrategy);
+  ~ReadableByteStreamController() noexcept(false);
+
+  jsg::Ref<ReadableByteStreamController> getSelf() {
+    return JSG_THIS;
+  }
 
   void start(jsg::Lock& js);
 
@@ -553,6 +562,7 @@ class ReadableByteStreamController: public jsg::Object {
   }
 
  private:
+  kj::Rc<WeakRef<ReadableByteStreamController>> weakSelf;
   kj::Maybe<IoContext&> ioContext;
   ReadableImpl impl;
   kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> maybeByobRequest;
@@ -575,6 +585,8 @@ class WritableStreamDefaultController: public jsg::Object {
 
   explicit WritableStreamDefaultController(
       jsg::Lock& js, WritableStream& owner, jsg::Ref<AbortSignal> abortSignal);
+
+  ~WritableStreamDefaultController() noexcept(false);
 
   jsg::Promise<void> abort(jsg::Lock& js, v8::Local<v8::Value> reason);
 
@@ -604,6 +616,9 @@ class WritableStreamDefaultController: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
   void cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason);
+
+  // Clear algorithms to break circular references during destruction
+  void clearAlgorithms();
 
  private:
   kj::Maybe<IoContext&> ioContext;

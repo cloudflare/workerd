@@ -24,6 +24,8 @@ import {
   rmdir,
   readdir,
   promises,
+  opendirSync,
+  opendir,
 } from 'node:fs';
 
 strictEqual(typeof existsSync, 'function');
@@ -38,13 +40,17 @@ strictEqual(typeof mkdir, 'function');
 strictEqual(typeof rm, 'function');
 strictEqual(typeof rmdir, 'function');
 strictEqual(typeof readdir, 'function');
+strictEqual(typeof opendirSync, 'function');
+strictEqual(typeof opendir, 'function');
 strictEqual(typeof promises.mkdir, 'function');
 strictEqual(typeof promises.mkdtemp, 'function');
 strictEqual(typeof promises.rm, 'function');
 strictEqual(typeof promises.rmdir, 'function');
 strictEqual(typeof promises.readdir, 'function');
+strictEqual(typeof promises.opendir, 'function');
 
 const kInvalidArgTypeError = { code: 'ERR_INVALID_ARG_TYPE' };
+const kInvalidArgValueError = { code: 'ERR_INVALID_ARG_VALUE' };
 const kEPermError = { code: 'EPERM' };
 const kENoEntError = { code: 'ENOENT' };
 const kEExistError = { code: 'EEXIST' };
@@ -830,5 +836,85 @@ export const readdirAsyncPromiseTest = {
       strictEqual(ents[4].isSymbolicLink(), false);
       strictEqual(ents[4].parentPath, '/dev');
     }
+  },
+};
+
+export const opendirSyncTest = {
+  test() {
+    throws(() => opendirSync(), kInvalidArgTypeError);
+    throws(() => opendirSync(123), kInvalidArgTypeError);
+    throws(() => opendirSync('/tmp', { encoding: 123 }), kInvalidArgValueError);
+
+    const dir = opendirSync('/', { recursive: true });
+    strictEqual(dir.path, '/');
+    strictEqual(dir.readSync().name, 'bundle');
+    strictEqual(dir.readSync().name, 'bundle/worker');
+    strictEqual(dir.readSync().name, 'tmp');
+    strictEqual(dir.readSync().name, 'dev');
+    strictEqual(dir.readSync().name, 'dev/null');
+    strictEqual(dir.readSync().name, 'dev/zero');
+    strictEqual(dir.readSync().name, 'dev/full');
+    strictEqual(dir.readSync().name, 'dev/random');
+    strictEqual(dir.readSync(), null); // All done.
+    dir.closeSync();
+
+    // Closing again throws
+    throws(() => dir.closeSync(), { code: 'ERR_DIR_CLOSED' });
+    // Reading again throws
+    throws(() => dir.readSync(), { code: 'ERR_DIR_CLOSED' });
+  },
+};
+
+export const opendirSyncAndAsyncTest = {
+  async test() {
+    throws(() => opendir(), kInvalidArgTypeError);
+    throws(() => opendir(123), kInvalidArgTypeError);
+    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgValueError);
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    opendir('/', { recursive: true }, (err, dir) => {
+      if (err) reject(err);
+      else resolve(dir);
+    });
+
+    await using dir = await promise;
+
+    strictEqual((await dir.read()).name, 'bundle');
+    strictEqual((await dir.read()).name, 'bundle/worker');
+    strictEqual((await dir.read()).name, 'tmp');
+    strictEqual((await dir.read()).name, 'dev');
+    strictEqual((await dir.read()).name, 'dev/null');
+    strictEqual((await dir.read()).name, 'dev/zero');
+    strictEqual((await dir.read()).name, 'dev/full');
+    strictEqual((await dir.read()).name, 'dev/random');
+    strictEqual(await dir.read(), null); // All done.
+  },
+};
+
+export const opendirSyncAndAsyncTest2 = {
+  async test() {
+    throws(() => opendir(), kInvalidArgTypeError);
+    throws(() => opendir(123), kInvalidArgTypeError);
+    throws(() => opendir('/tmp', { encoding: 123 }), kInvalidArgValueError);
+
+    const { promise, resolve, reject } = Promise.withResolvers();
+    opendir('/', { recursive: true }, (err, dir) => {
+      if (err) reject(err);
+      else resolve(dir);
+    });
+
+    await using dir = await promise;
+
+    const entries = await Array.fromAsync(dir);
+
+    strictEqual(entries.length, 8);
+    strictEqual(entries[0].name, 'bundle');
+    strictEqual(entries[1].name, 'bundle/worker');
+    strictEqual(entries[2].name, 'tmp');
+    strictEqual(entries[3].name, 'dev');
+    strictEqual(entries[4].name, 'dev/null');
+    strictEqual(entries[5].name, 'dev/zero');
+    strictEqual(entries[6].name, 'dev/full');
+    strictEqual(entries[7].name, 'dev/random');
   },
 };

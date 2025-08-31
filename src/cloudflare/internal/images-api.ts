@@ -1,6 +1,11 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+import { StreamableFormData } from 'cloudflare-internal:streaming-forms';
+import {
+  createBase64DecoderTransformStream,
+  createBase64EncoderTransformStream,
+} from 'cloudflare-internal:streaming-base64';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -26,10 +31,14 @@ type RawInfoResponse =
     };
 
 class TransformationResultImpl implements ImageTransformationResult {
-  public constructor(private readonly bindingsResponse: Response) {}
+  readonly #bindingsResponse: Response;
 
-  public contentType(): string {
-    const contentType = this.bindingsResponse.headers.get('content-type');
+  constructor(bindingsResponse: Response) {
+    this.#bindingsResponse = bindingsResponse;
+  }
+
+  contentType(): string {
+    const contentType = this.#bindingsResponse.headers.get('content-type');
     if (!contentType) {
       throw new ImagesErrorImpl(
         'IMAGES_TRANSFORM_ERROR 9523: No content-type on bindings response',
@@ -40,11 +49,17 @@ class TransformationResultImpl implements ImageTransformationResult {
     return contentType;
   }
 
-  public image(): ReadableStream<Uint8Array> {
-    return this.bindingsResponse.body || new ReadableStream();
+  image(
+    options?: ImageTransformationOutputOptions
+  ): ReadableStream<Uint8Array> {
+    const stream = this.#bindingsResponse.body || new Blob().stream();
+
+    return options?.encoding === 'base64'
+      ? stream.pipeThrough(createBase64EncoderTransformStream())
+      : stream;
   }
 
-  public response(): Response {
+  response(): Response {
     return new Response(this.image(), {
       headers: {
         'content-type': this.contentType(),
@@ -54,41 +69,45 @@ class TransformationResultImpl implements ImageTransformationResult {
 }
 
 class DrawTransformer {
-  public constructor(
-    public readonly child: ImageTransformerImpl,
-    public readonly options: ImageDrawOptions
-  ) {}
+  readonly child: ImageTransformerImpl;
+  readonly options: ImageDrawOptions;
+  constructor(child: ImageTransformerImpl, options: ImageDrawOptions) {
+    this.child = child;
+    this.options = options;
+  }
 }
 
 class ImageTransformerImpl implements ImageTransformer {
-  private transforms: (ImageTransform | DrawTransformer)[];
-  private consumed: boolean;
+  readonly #fetcher: Fetcher;
+  readonly #stream: ReadableStream<Uint8Array>;
 
-  public constructor(
-    private readonly fetcher: Fetcher,
-    private readonly stream: ReadableStream<Uint8Array>
-  ) {
-    this.transforms = [];
-    this.consumed = false;
+  #transforms: (ImageTransform | DrawTransformer)[];
+  #consumed: boolean;
+
+  constructor(fetcher: Fetcher, stream: ReadableStream<Uint8Array>) {
+    this.#fetcher = fetcher;
+    this.#stream = stream;
+    this.#transforms = [];
+    this.#consumed = false;
   }
 
-  public transform(transform: ImageTransform): this {
-    this.transforms.push(transform);
+  transform(transform: ImageTransform): this {
+    this.#transforms.push(transform);
     return this;
   }
 
-  public draw(
+  draw(
     image: ReadableStream<Uint8Array> | ImageTransformer,
     options: ImageDrawOptions = {}
   ): this {
     if (isTransformer(image)) {
-      image.consume();
-      this.transforms.push(new DrawTransformer(image, options));
+      image.#consume();
+      this.#transforms.push(new DrawTransformer(image, options));
     } else {
-      this.transforms.push(
+      this.#transforms.push(
         new DrawTransformer(
           new ImageTransformerImpl(
-            this.fetcher,
+            this.#fetcher,
             image as ReadableStream<Uint8Array>
           ),
           options
@@ -99,15 +118,15 @@ class ImageTransformerImpl implements ImageTransformer {
     return this;
   }
 
-  public async output(
+  async output(
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
     const formData = new StreamableFormData();
 
-    this.consume();
-    formData.append('image', this.stream, { type: 'file' });
+    this.#consume();
+    formData.append('image', this.#stream, { type: 'file' });
 
-    this.serializeTransforms(formData);
+    this.#serializeTransforms(formData);
 
     formData.append('output_format', options.format);
     if (options.quality !== undefined) {
@@ -118,7 +137,7 @@ class ImageTransformerImpl implements ImageTransformer {
       formData.append('background', options.background);
     }
 
-    const response = await this.fetcher.fetch(
+    const response = await this.#fetcher.fetch(
       'https://js.images.cloudflare.com/transform',
       {
         method: 'POST',
@@ -134,18 +153,18 @@ class ImageTransformerImpl implements ImageTransformer {
     return new TransformationResultImpl(response);
   }
 
-  private consume(): void {
-    if (this.consumed) {
+  #consume(): void {
+    if (this.#consumed) {
       throw new ImagesErrorImpl(
         'IMAGES_TRANSFORM_ERROR 9525: ImageTransformer consumed; you may only call .output() or draw a transformer once',
         9525
       );
     }
 
-    this.consumed = true;
+    this.#consumed = true;
   }
 
-  private serializeTransforms(formData: StreamableFormData): void {
+  #serializeTransforms(formData: StreamableFormData): void {
     const transforms: (TargetedTransform | DrawCommand)[] = [];
 
     // image 0 is the canvas, so the first draw_image has index 1
@@ -170,11 +189,11 @@ class ImageTransformerImpl implements ImageTransformer {
         } else {
           // Drawn child image
           // Set the input for the drawn image on the form
-          const drawImageIndex = appendDrawImage(transform.child.stream);
+          const drawImageIndex = appendDrawImage(transform.child.#stream);
 
           // Tell the backend to run any transforms (possibly involving more draws)
           // required to build this child
-          walkTransforms(drawImageIndex, transform.child.transforms);
+          walkTransforms(drawImageIndex, transform.child.#transforms);
 
           // Draw the child image on to the canvas
           transforms.push({
@@ -186,7 +205,7 @@ class ImageTransformerImpl implements ImageTransformer {
       }
     }
 
-    walkTransforms(0, this.transforms);
+    walkTransforms(0, this.#transforms);
     formData.append('transforms', JSON.stringify(transforms));
   }
 }
@@ -200,15 +219,26 @@ function isDrawTransformer(input: unknown): input is DrawTransformer {
 }
 
 class ImagesBindingImpl implements ImagesBinding {
-  public constructor(private readonly fetcher: Fetcher) {}
+  readonly #fetcher: Fetcher;
 
-  public async info(
-    stream: ReadableStream<Uint8Array>
+  constructor(fetcher: Fetcher) {
+    this.#fetcher = fetcher;
+  }
+
+  async info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
     const body = new StreamableFormData();
-    body.append('image', stream, { type: 'file' });
 
-    const response = await this.fetcher.fetch(
+    const decodedStream =
+      options?.encoding === 'base64'
+        ? stream.pipeThrough(createBase64DecoderTransformStream())
+        : stream;
+
+    body.append('image', decodedStream, { type: 'file' });
+
+    const response = await this.#fetcher.fetch(
       'https://js.images.cloudflare.com/info',
       {
         method: 'POST',
@@ -235,17 +265,24 @@ class ImagesBindingImpl implements ImagesBinding {
     return r;
   }
 
-  public input(stream: ReadableStream<Uint8Array>): ImageTransformer {
-    return new ImageTransformerImpl(this.fetcher, stream);
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
+  ): ImageTransformer {
+    const decodedStream =
+      options?.encoding === 'base64'
+        ? stream.pipeThrough(createBase64DecoderTransformStream())
+        : stream;
+
+    return new ImageTransformerImpl(this.#fetcher, decodedStream);
   }
 }
 
 class ImagesErrorImpl extends Error implements ImagesError {
-  public constructor(
-    message: string,
-    public readonly code: number
-  ) {
+  readonly code: number;
+  constructor(message: string, code: number) {
     super(message);
+    this.code = code;
   }
 }
 
@@ -276,135 +313,4 @@ async function throwErrorIfErrorResponse(
 
 export default function makeBinding(env: { fetcher: Fetcher }): ImagesBinding {
   return new ImagesBindingImpl(env.fetcher);
-}
-
-function chainStreams<T>(streams: ReadableStream<T>[]): ReadableStream<T> {
-  const outputStream = new ReadableStream<T>({
-    async start(controller): Promise<void> {
-      for (const stream of streams) {
-        const reader = stream.getReader();
-
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (value !== undefined) controller.enqueue(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-      }
-
-      controller.close();
-    },
-  });
-
-  return outputStream;
-}
-
-const CRLF = '\r\n';
-
-function isReadableStream(obj: unknown): obj is ReadableStream {
-  return !!(
-    obj &&
-    typeof obj === 'object' &&
-    'getReader' in obj &&
-    typeof obj.getReader === 'function'
-  );
-}
-
-type EntryOptions = { type: 'file' | 'string' };
-class StreamableFormData {
-  private entries: {
-    field: string;
-    value: ReadableStream;
-    options: EntryOptions;
-  }[];
-  private boundary: string;
-
-  public constructor() {
-    this.entries = [];
-
-    this.boundary = '--------------------------';
-    for (let i = 0; i < 24; i++) {
-      this.boundary += Math.floor(Math.random() * 10).toString(16);
-    }
-  }
-
-  public append(
-    field: string,
-    value: ReadableStream | string,
-    options?: EntryOptions
-  ): void {
-    let valueStream: ReadableStream;
-    if (isReadableStream(value)) {
-      valueStream = value;
-    } else {
-      valueStream = new Blob([value]).stream();
-    }
-
-    this.entries.push({
-      field,
-      value: valueStream,
-      options: options || { type: 'string' },
-    });
-  }
-
-  private multipartBoundary(): ReadableStream {
-    return new Blob(['--', this.boundary, CRLF]).stream();
-  }
-
-  private multipartHeader(
-    name: string,
-    type: 'file' | 'string'
-  ): ReadableStream {
-    let filenamePart;
-
-    if (type === 'file') {
-      filenamePart = `; filename="${name}"`;
-    } else {
-      filenamePart = '';
-    }
-
-    return new Blob([
-      `content-disposition: form-data; name="${name}"${filenamePart}`,
-      CRLF,
-      CRLF,
-    ]).stream();
-  }
-
-  private multipartBody(stream: ReadableStream): ReadableStream {
-    return chainStreams([stream, new Blob([CRLF]).stream()]);
-  }
-
-  private multipartFooter(): ReadableStream {
-    return new Blob(['--', this.boundary, '--', CRLF]).stream();
-  }
-
-  public contentType(): string {
-    return `multipart/form-data; boundary=${this.boundary}`;
-  }
-
-  public stream(): ReadableStream {
-    const streams: ReadableStream[] = [this.multipartBoundary()];
-
-    const valueStreams = [];
-    for (const { field, value, options } of this.entries) {
-      valueStreams.push(this.multipartHeader(field, options.type));
-      valueStreams.push(this.multipartBody(value));
-      valueStreams.push(this.multipartBoundary());
-    }
-
-    if (valueStreams.length) {
-      // Remove last boundary as we want a footer instead
-      valueStreams.pop();
-    }
-
-    streams.push(...valueStreams);
-
-    streams.push(this.multipartFooter());
-
-    return chainStreams(streams);
-  }
 }

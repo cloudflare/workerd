@@ -65,7 +65,7 @@ wd_cc_library(
     srcs = glob(["r2*.c++"]),
     hdrs = glob(["r2*.h"]),
     implementation_deps = [
-        "//src/workerd/api:r2-api_capnp",
+        ":r2-api_capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -84,6 +84,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "//src/workerd/util:checked-queue",
         "//src/workerd/util:uuid",
     ],
 )
@@ -160,6 +161,10 @@ wd_cc_library(
         "//src/pyodide:pyodide_static",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
+        "@capnp-cpp//src/kj:kj-async",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@capnp-cpp//src/kj/compat:kj-tls",
     ],
 )
 
@@ -278,13 +283,27 @@ wd_cc_library(
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
-        "headers-test.c++",
-        "form-data-memory-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
         "util-test.c++",
     ]
 ]
+
+# TODO(cleanup): Reenable test when we reenable string accounting
+# kj_test(
+#     src = "form-data-memory-test.c++",
+#     deps = [
+#         "//src/workerd/io",
+#     ],
+# )
+
+# TODO(cleanup): Reenable test when we reenable string accounting
+# kj_test(
+#     src = "headers-test.c++",
+#     deps = [
+#         "//src/workerd/io",
+#     ],
+# )
 
 kj_test(
     src = "data-url-test.c++",
@@ -327,6 +346,19 @@ kj_test(
 )
 
 kj_test(
+    src = "base64-test.c++",
+    deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "ser-errors-test.c++",
+    deps = [
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
 )
@@ -358,6 +390,7 @@ wd_test(
         "tail-worker-test-receiver.js",
         "tail-worker-test-dummy.js",
         "tail-worker-test-invalid.js",
+        "tail-worker-test-jsrpc.js",
         "tests/websocket-hibernation.js",
     ],
 )
@@ -396,7 +429,10 @@ wd_test(
 wd_test(
     src = "kv-test.wd-test",
     args = ["--experimental"],
-    data = ["kv-test.js"],
+    data = [
+        "kv-instrumentation-test.js",
+        "kv-test.js",
+    ],
 )
 
 wd_test(
@@ -552,6 +588,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "tests/htmlrewriter-test.wd-test",
     args = ["--experimental"],
     data = ["tests/htmlrewriter-test.js"],
@@ -654,6 +691,27 @@ wd_test(
     ],
 )
 
+js_binary(
+    name = "http-socket-server",
+    entry_point = "tests/http-socket-server.js",
+)
+
+wd_test(
+    src = "tests/http-socket-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/http-socket-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "http-socket-server",
+    sidecar_port_bindings = [
+        "HTTP_SOCKET_SERVER_PORT",
+        "SOCKET_PARTIALLY_WRITTEN",
+        "STARTTLS_SOCKET",
+        "FLUSH_HELLO_SOCKET",
+    ],
+)
+
 wd_test(
     src = "tests/js-rpc-socket-test.wd-test",
     args = [
@@ -742,4 +800,68 @@ wd_test(
     src = "tests/request-signal-passthrough.wd-test",
     args = ["--experimental"],
     data = ["tests/request-signal-passthrough.js"],
+)
+
+wd_test(
+    size = "large",
+    src = "worker-loader-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-test.js"],
+)
+
+wd_test(
+    src = "tests/leak-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/leak-fetch-test.js"],
+)
+
+wd_test(
+    src = "tests/messageport-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/messageport-test.js"],
+)
+
+js_binary(
+    name = "starttls-nodejs-server",
+    entry_point = "tests/starttls-nodejs-server.js",
+)
+
+wd_test(
+    src = "tests/starttls-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/starttls-nodejs-test.js",
+        "tests/starttls-server.pem",
+    ],
+    sidecar = "starttls-nodejs-server",
+    sidecar_port_bindings = [
+        "STARTTLS_CA_PORT",
+    ],
+)
+
+wd_test(
+    src = "tests/streams-circ-ref-regression-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/streams-circ-ref-regression-test.js"],
+)
+
+wd_test(
+    src = "tests/experimental-eval-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/experimental-eval-test.js"],
+)
+
+wd_test(
+    src = "tests/fetch-redirect-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/fetch-redirect-test.js"],
+)
+
+wd_test(
+    src = "tests/rpc-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "tests/rpc-error-test.js",
+        "tests/rpc-error-test.rpc.js",
+    ],
 )

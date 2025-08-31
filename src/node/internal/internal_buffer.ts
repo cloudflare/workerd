@@ -37,7 +37,7 @@ import { validateString } from 'node-internal:validators';
 
 import internalUtil from 'node-internal:util';
 import {
-  InspectOptionsStylized,
+  type InspectOptionsStylized,
   inspect as utilInspect,
 } from 'node-internal:internal_inspect';
 
@@ -477,8 +477,8 @@ export function SlowBuffer(length: number) {
 Object.setPrototypeOf(SlowBuffer.prototype, Uint8Array.prototype);
 Object.setPrototypeOf(SlowBuffer, Uint8Array);
 
-Buffer.isBuffer = function isBuffer(b: unknown) {
-  return b != null && (b as any)[kIsBuffer] && b !== Buffer.prototype;
+Buffer.isBuffer = function isBuffer(b: unknown): b is Buffer {
+  return b instanceof Buffer;
 };
 
 export function compare(a: Buffer | Uint8Array, b: Buffer | Uint8Array) {
@@ -675,11 +675,12 @@ Buffer.prototype.inspect = function inspect(
   ctx: InspectOptionsStylized
 ) {
   let str = '';
-  const max = INSPECT_MAX_BYTES;
+  const max = Math.min(this.byteLength, INSPECT_MAX_BYTES);
+
   str = this.toString('hex', 0, max)
     .replace(/(.{2})/g, '$1 ')
     .trim();
-  const remaining = this.length - max;
+  const remaining = this.byteLength - max;
   if (remaining > 0) {
     str += ` ... ${remaining} more byte${remaining > 1 ? 's' : ''}`;
   }

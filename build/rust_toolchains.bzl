@@ -20,6 +20,15 @@ def rust_toolchains():
     rust_register_toolchains(
         edition = "2024",
         extra_target_triples = RUST_TARGET_TRIPLES,
+        extra_rustc_flags = {
+            # Enable ISA extensions matching the ones used for C++. The clmul feature is included as
+            # it is still "unstable" as of 1.86.0.
+            "x86_64-unknown-linux-gnu": ["-Ctarget-feature=+sse4.2"],
+            "x86_64-apple-darwin": ["-Ctarget-feature=+sse4.2"],
+            "x86_64-pc-windows-msvc": ["-Ctarget-feature=+sse4.2"],
+            "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
+            # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
+        },
         versions = [
             RUST_STABLE_VERSION,
             RUST_NIGHTLY_VERSION,

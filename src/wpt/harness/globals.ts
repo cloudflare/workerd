@@ -56,16 +56,13 @@ function relativizeRequest(
 }
 
 globalThis.Request = class _Request extends Request {
-  public constructor(input: RequestInfo | URL, init?: RequestInit) {
+  constructor(input: RequestInfo | URL, init?: RequestInit) {
     super(relativizeRequest(input, init));
   }
 };
 
 globalThis.Response = class _Response extends Response {
-  public static override redirect(
-    url: string | URL,
-    status?: number
-  ): Response {
+  static override redirect(url: string | URL, status?: number): Response {
     return super.redirect(relativizeUrl(url), status);
   }
 };
@@ -91,7 +88,7 @@ globalThis.fetch = async (
 };
 
 class _Location {
-  public get ancestorOrigins(): DOMStringList {
+  get ancestorOrigins(): DOMStringList {
     return {
       length: 0,
       item(_index: number): string | null {
@@ -103,53 +100,53 @@ class _Location {
     };
   }
 
-  public get hash(): string {
+  get hash(): string {
     return globalThis.state.testUrl.hash;
   }
 
-  public get host(): string {
+  get host(): string {
     return globalThis.state.testUrl.host;
   }
 
-  public get hostname(): string {
+  get hostname(): string {
     return globalThis.state.testUrl.hostname;
   }
 
-  public get href(): string {
+  get href(): string {
     return globalThis.state.testUrl.href;
   }
 
-  public get origin(): string {
+  get origin(): string {
     return globalThis.state.testUrl.origin;
   }
 
-  public get pathname(): string {
+  get pathname(): string {
     return globalThis.state.testUrl.pathname;
   }
 
-  public get port(): string {
+  get port(): string {
     return globalThis.state.testUrl.port;
   }
 
-  public get protocol(): string {
+  get protocol(): string {
     return globalThis.state.testUrl.protocol;
   }
 
-  public get search(): string {
+  get search(): string {
     return globalThis.state.testUrl.search;
   }
 
-  public assign(url: string): void {
+  assign(url: string): void {
     globalThis.state.testUrl = new URL(url);
   }
 
-  public reload(): void {}
+  reload(): void {}
 
-  public replace(url: string): void {
+  replace(url: string): void {
     globalThis.state.testUrl = new URL(url);
   }
 
-  public toString(): string {
+  toString(): string {
     return globalThis.state.testUrl.href;
   }
 }

@@ -5,12 +5,12 @@ import {
   rejects,
   strictEqual,
   deepStrictEqual,
-} from 'assert';
+} from 'assert'; // Intentionally omit the 'node:' prefix
 import { foo, default as def } from 'foo';
 import { default as fs } from 'node:fs';
-import { Buffer } from 'buffer';
+import { Buffer } from 'buffer'; // Intentionally omit the 'node:' prefix
 import { foo as foo2, default as def2 } from 'bar';
-import { createRequire } from 'module';
+import { createRequire } from 'module'; // Intentionally omit the 'node:' prefix
 
 // Verify that import.meta.url is correct here.
 strictEqual(import.meta.url, 'file:///bundle/worker');
@@ -75,6 +75,7 @@ deepStrictEqual(json.default, { foo: 1 });
 // Synchronously resolved promises can be awaited.
 await Promise.resolve();
 
+// CommonJS modules can be imported and should work as expected.
 import { default as cjs2 } from 'cjs2';
 strictEqual(cjs2.foo, 1);
 strictEqual(cjs2.bar, 2);
@@ -87,11 +88,17 @@ import { foo as cjs1foo, bar as cjs1bar } from 'cjs1';
 strictEqual(cjs1foo, 1);
 strictEqual(cjs1bar, 2);
 
+// The createRequire API works as expected.
 const myRequire = createRequire(import.meta.url);
 const customRequireCjs = myRequire('cjs1');
 strictEqual(customRequireCjs.foo, cjs1foo);
 strictEqual(customRequireCjs.bar, cjs1bar);
 
+const customRequireCjs2 = myRequire(import.meta.resolve('cjs2'));
+strictEqual(customRequireCjs2.foo, cjs2.foo);
+
+// When the module being imported throws an error during evaluation,
+// the error is propagated correctly.
 await rejects(import('file:///bundle/cjs3'), {
   message: 'boom',
 });
@@ -130,6 +137,7 @@ export const alsPropagationDynamicImport = {
     globalThis.als = new AsyncLocalStorage();
     const res = await globalThis.als.run(123, () => import('als'));
     strictEqual(res.default, 123);
+    delete globalThis.als;
   },
 };
 

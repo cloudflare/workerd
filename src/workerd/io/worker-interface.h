@@ -6,9 +6,11 @@
 
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/util/http-util.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <kj/compat/http.h>
+#include <kj/debug.h>
 
 namespace workerd {
 
@@ -177,11 +179,13 @@ class LazyWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
+    throwIfInvalidHeaderValue(headers);
     ensureResolve();
     KJ_IF_SOME(w, worker) {
       co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
+      throwIfInvalidHeaderValue(headers);
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }

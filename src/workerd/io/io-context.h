@@ -42,6 +42,9 @@ class HttpOverCapnpFactory;
 
 namespace workerd {
 
+// This wishes it were IoContext::Runnable::Exceptional.
+WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
+
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
 class IoContext;
@@ -158,6 +161,11 @@ class IoContext_IncomingRequest final {
   enum class FinishScheduledResult { COMPLETED, ABORTED, TIMEOUT };
   kj::Promise<FinishScheduledResult> finishScheduled();
 
+  // Access the event loop's current time point. This will remain constant between ticks. This is
+  // used to implement IoContext::now(), which should be preferred so that time can be adjusted
+  // based on setTimeout() when needed.
+  kj::Date now();
+
   RequestObserver& getMetrics() {
     return *metrics;
   }
@@ -257,7 +265,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().metrics;
   }
 
-  const kj::Maybe<BaseTracer&> getWorkerTracer() {
+  kj::Maybe<BaseTracer&> getWorkerTracer() {
     if (incomingRequests.empty()) return kj::none;
     return getCurrentIncomingRequest().getWorkerTracer();
   }
@@ -435,6 +443,35 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   template <typename T, typename Func>
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
+
+  // Attach the objects to the promise by creating a continuation that holds them.
+  // This ensures the attachments stay alive until the promise resolves.
+  // This should ONLY be used with TraceContext or SpanBuilder objects.
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpans(jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments)
+    requires(... &&
+        (kj::isSameType<Attachments, SpanBuilder>() || kj::isSameType<Attachments, TraceContext>()))
+  {
+    return attachSpansInternalOnly(js, kj::mv(promise), kj::fwd<Attachments>(attachments)...);
+  }
+
+  // public for tests
+  template <typename T, typename... Attachments>
+  jsg::Promise<T> attachSpansInternalOnly(
+      jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments) {
+    auto attachmentTuple = addObject(kj::heap(kj::tuple(kj::fwd<Attachments>(attachments)...)));
+
+    if constexpr (kj::isSameType<T, void>()) {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&) {
+        // The attachments are kept alive in this lambda's capture
+      });
+    } else {
+      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&, T result) {
+        // The attachments are kept alive in this lambda's capture
+        return result;
+      });
+    }
+  }
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
@@ -681,7 +718,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Access the event loop's current time point. This will remain constant between ticks.
   kj::Date now();
 
-  const TmpDirStoreScope& getTmpDirStoreScope() {
+  TmpDirStoreScope& getTmpDirStoreScope() {
     return *tmpDirStoreScope;
   }
 
@@ -741,6 +778,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     // The name to use for the request's span if tracing is turned on.
     kj::Maybe<kj::ConstString> operationName;
+
+    // The tracing context to use for the subrequest if tracing is enabled.
+    kj::Maybe<TraceContext&> existingTraceContext;
   };
 
   kj::Own<WorkerInterface> getSubrequestNoChecks(
@@ -780,6 +820,27 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
 
+  // Get WorkerInterface objects to use for subrequests.
+  //
+  // `channel` specifies which outgoing channel to use. The special channel 0 refers to the "null"
+  // binding (used for fetches where `request.fetcher` is not set), and channel 1 refers to the
+  // "next" binding (used when request.fetcher is carried over from the incoming request).
+  // Named bindings, e.g. Worker2Worker bindings, will have indices starting from 2. Fetcher
+  // bindings declared via Worker::Global::Fetcher have a corresponding `channel` property to refer
+  // to these outgoing bindings.
+  //
+  // `isInHouse` is true if this client represents an "in house" endpoint, i.e. some API provided
+  // by the Workers platform. For example, KV namespaces are in-house. This primarily affects
+  // metrics and limits:
+  // - In-house requests do not count as "subrequests" for metrics and logging purposes.
+  // - In-house requests are not subject to the same limits on the number of subrequests per
+  //   request.
+  // - In preview, in-house requests do not show up in the network tab.
+  //
+  // `traceContext` is the trace context to use for the subrequest, if tracing is turned on.
+  kj::Own<WorkerInterface> getSubrequestChannel(
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
+
   kj::Own<WorkerInterface> getSubrequestChannelWithSpans(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
@@ -798,6 +859,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
       kj::ConstString operationName);
+
+  kj::Own<kj::HttpClient> getHttpClient(
+      uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
 
   // As above, but with list of span tags to add, analogous to getSubrequestChannelWithSpans().
   kj::Own<kj::HttpClient> getHttpClientWithSpans(uint channel,
@@ -996,13 +1060,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   class Runnable {
    public:
+    using Exceptional = IoContext_Runnable_Exceptional;
     virtual void run(Worker::Lock& lock) = 0;
   };
   void runImpl(Runnable& runnable,
-      bool takePendingEvent,
       Worker::LockType lockType,
       kj::Maybe<InputGate::Lock> inputLock,
-      bool allowPermanentException);
+      Runnable::Exceptional exceptional);
 
   void abortFromHang(Worker::AsyncLock& asyncLock);
 
@@ -1139,7 +1203,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       };
 
       RunnableImpl runnable(kj::fwd<Func>(func));
-      runImpl(runnable, true, lock, kj::mv(inputLock), false);
+      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
     } else {
       struct RunnableImpl: public Runnable {
         Func func;
@@ -1152,7 +1216,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       };
 
       RunnableImpl runnable{kj::fwd<Func>(func)};
-      runImpl(runnable, true, lock, kj::mv(inputLock), false);
+      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
       KJ_IF_SOME(r, runnable.result) {
         return kj::mv(r);
       } else {

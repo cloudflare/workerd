@@ -11,6 +11,10 @@
 // The implementation provides concepts and helpers to determine which types and methods
 // are compatible with Fast API, handling both primitive types that can be passed directly
 // and wrapped objects that require conversion between JavaScript and C++.
+//
+// We don't add FastOneByteString because any GC call before FastOneByteString being copied
+// will corrupt the string data and cause catastrophic failures with almost zero stack trace.
+// For more information, see https://github.com/cloudflare/workerd/pull/4625.
 
 #include <v8-fast-api-calls.h>
 #include <v8-local-handle.h>
@@ -26,14 +30,8 @@ class ByteString;
 class DOMString;
 class Lock;
 class USVString;
-
-// Update this list whenever a new string type is added.
-// TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
 template <typename T>
-concept StringLike =
-    kj::isSameType<kj::String, T>() || kj::isSameType<kj::ArrayPtr<const char>, T>() ||
-    kj::isSameType<kj::Array<const char>, T>() || kj::isSameType<ByteString, T>() ||
-    kj::isSameType<USVString, T>() || kj::isSameType<DOMString, T>();
+class Promise;
 
 template <typename T>
 constexpr bool isFunctionCallbackInfo = false;
@@ -47,6 +45,12 @@ constexpr bool isKjPromise = false;
 template <typename T>
 constexpr bool isKjPromise<kj::Promise<T>> = true;
 
+template <typename T>
+constexpr bool isJsgPromise = false;
+
+template <typename T>
+constexpr bool isJsgPromise<jsg::Promise<T>> = true;
+
 // These types are passed by fast api as is and do not require wrapping/unwrapping.
 template <typename T>
 concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>() ||
@@ -56,7 +60,7 @@ concept FastApiPrimitive = kj::isSameType<T, void>() || kj::isSameType<T, bool>(
 // Helper to determine if a type can be used as a parameter in V8 Fast API
 template <typename T>
 concept FastApiParam = !isFunctionCallbackInfo<kj::RemoveConst<kj::Decay<T>>> &&
-    !isKjPromise<kj::RemoveConst<kj::Decay<T>>>;
+    !isKjPromise<kj::RemoveConst<kj::Decay<T>>> && !isJsgPromise<kj::RemoveConst<kj::Decay<T>>>;
 
 // Helper to determine if a type can be used as a return value in a V8 Fast API
 template <typename T>
@@ -96,12 +100,6 @@ constexpr bool isFastApiCompatible<Ret(jsg::Lock&, Args...)> = FastApiMethod<Ret
 template <typename T>
 struct FastApiJSGToV8 {
   using value = v8::Local<v8::Value>;
-};
-
-template <typename T>
-  requires StringLike<kj::RemoveConst<kj::Decay<T>>>
-struct FastApiJSGToV8<T> {
-  using value = const v8::FastOneByteString&;
 };
 
 template <typename T>

@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Erik Corry <erikcorry@chromium.org>
+Date: Mon, 2 Dec 2024 14:16:37 +0100
+Subject: Add another slot in the isolate for embedder
+
+Signed-off-by: James M Snell <jsnell@cloudflare.com>
+
+diff --git a/include/v8-internal.h b/include/v8-internal.h
+index 1259a220e7b0d9b7e4aa15989e9389fbc44d20de..98375fbf3791c4369ca410c685a36e12de6c8b1d 100644
+--- a/include/v8-internal.h
++++ b/include/v8-internal.h
+@@ -910,7 +910,7 @@ class Internals {
+   static const int kExternalTwoByteRepresentationTag = 0x02;
+   static const int kExternalOneByteRepresentationTag = 0x0a;
+ 
+-  static const uint32_t kNumIsolateDataSlots = 4;
++  static const uint32_t kNumIsolateDataSlots = 5;
+   static const int kStackGuardSize = 8 * kApiSystemPointerSize;
+   static const int kNumberOfBooleanFlags = 6;
+   static const int kErrorMessageParamSize = 1;

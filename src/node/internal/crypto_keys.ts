@@ -140,16 +140,16 @@ function validateExportOptions(
 }
 
 export abstract class KeyObject {
-  public [kHandle]: CryptoKey;
+  [kHandle]: CryptoKey;
 
-  public constructor() {
+  constructor() {
     // KeyObjects cannot be created with new ... use one of the
     // create or generate methods, or use from to get from a
     // CryptoKey.
     throw new Error('Illegal constructor');
   }
 
-  public static from(key: CryptoKey): KeyObject {
+  static from(key: CryptoKey): KeyObject {
     if (!(key instanceof CryptoKey)) {
       throw new ERR_INVALID_ARG_TYPE('key', 'CryptoKey', key);
     }
@@ -181,7 +181,7 @@ export abstract class KeyObject {
     }
   }
 
-  public export(options: ExportOptions = {}): KeyExportResult {
+  export(options: ExportOptions = {}): KeyExportResult {
     validateObject(options, 'options');
 
     validateExportOptions(options, this.type);
@@ -207,7 +207,7 @@ export abstract class KeyObject {
     return ret;
   }
 
-  public equals(otherKeyObject: KeyObject): boolean {
+  equals(otherKeyObject: KeyObject): boolean {
     if (this === otherKeyObject || this[kHandle] === otherKeyObject[kHandle])
       return true;
     if (this.type !== otherKeyObject.type) return false;
@@ -221,9 +221,9 @@ export abstract class KeyObject {
     return cryptoImpl.equals(this[kHandle], otherKeyObject[kHandle]);
   }
 
-  public abstract get type(): KeyObjectType;
+  abstract get type(): KeyObjectType;
 
-  public get [Symbol.toStringTag](): string {
+  get [Symbol.toStringTag](): string {
     return 'KeyObject';
   }
 }
@@ -237,7 +237,7 @@ export function getKeyObjectHandle(obj: KeyObject): CryptoKey {
 }
 
 abstract class AsymmetricKeyObject extends KeyObject {
-  public get asymmetricKeyDetails(): AsymmetricKeyDetails {
+  get asymmetricKeyDetails(): AsymmetricKeyDetails {
     const detail = cryptoImpl.getAsymmetricKeyDetail(this[kHandle]);
     if (isArrayBuffer(detail.publicExponent)) {
       detail.publicExponent = arrayBufferToUnsignedBigInt(
@@ -247,16 +247,16 @@ abstract class AsymmetricKeyObject extends KeyObject {
     return detail;
   }
 
-  public get asymmetricKeyType(): AsymmetricKeyType {
+  get asymmetricKeyType(): AsymmetricKeyType {
     return cryptoImpl.getAsymmetricKeyType(this[kHandle]);
   }
 
-  public toCryptoKey(): void {
+  toCryptoKey(): void {
     // TODO(soon): Implement the toCryptoKey API (added in Node.js 23.0.0)
     throw new ERR_METHOD_NOT_IMPLEMENTED('toCryptoKey');
   }
 
-  public [kInspect](
+  [kInspect](
     depth: number,
     options: {
       depth?: number;
@@ -280,39 +280,39 @@ abstract class AsymmetricKeyObject extends KeyObject {
 }
 
 export class PublicKeyObject extends AsymmetricKeyObject {
-  public override export(options?: PublicKeyExportOptions): KeyExportResult {
+  override export(options?: PublicKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  public get type(): KeyObjectType {
+  get type(): KeyObjectType {
     return 'public';
   }
 }
 
 export class PrivateKeyObject extends AsymmetricKeyObject {
-  public override export(options?: PrivateKeyExportOptions): KeyExportResult {
+  override export(options?: PrivateKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  public get type(): KeyObjectType {
+  get type(): KeyObjectType {
     return 'private';
   }
 }
 
 export class SecretKeyObject extends KeyObject {
-  public get symmetricKeySize(): number {
+  get symmetricKeySize(): number {
     return (this[kHandle].algorithm as unknown as string).length | 0;
   }
 
-  public override export(options?: SecretKeyExportOptions): KeyExportResult {
+  override export(options?: SecretKeyExportOptions): KeyExportResult {
     return super.export(options);
   }
 
-  public get type(): KeyObjectType {
+  get type(): KeyObjectType {
     return 'secret';
   }
 
-  public [kInspect](depth: number, options: { depth?: number }): string | this {
+  [kInspect](depth: number, options: { depth?: number }): string | this {
     if (depth < 0) return this;
 
     const opts = {

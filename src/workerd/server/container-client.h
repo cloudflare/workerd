@@ -8,12 +8,10 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
-#include <capnp/message.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/string.h>
-#include <kj/tuple.h>
 
 namespace workerd::server {
 
@@ -28,7 +26,10 @@ class ContainerClient final: public rpc::Container::Server {
       kj::Network& network,
       kj::String dockerPath,
       kj::String containerName,
-      kj::String imageName);
+      kj::String imageName,
+      kj::TaskSet& waitUntilTasks);
+
+  ~ContainerClient() noexcept(false);
 
   // Implement rpc::Container::Server interface
   kj::Promise<void> status(StatusContext context) override;
@@ -46,6 +47,13 @@ class ContainerClient final: public rpc::Container::Server {
   kj::String dockerPath;
   kj::String containerName;
   kj::String imageName;
+  kj::TaskSet& waitUntilTasks;
+
+  static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
+    "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
+    "CLOUDFLARE_LOCATION=loc01"_kj, "CLOUDFLARE_REGION=REGN"_kj,
+    "CLOUDFLARE_APPLICATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
+    "CLOUDFLARE_DURABLE_OBJECT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"_kj};
 
   // Docker-specific Port implementation
   class DockerPort;
@@ -61,14 +69,18 @@ class ContainerClient final: public rpc::Container::Server {
   };
 
   // Docker API v1.50 helper methods
-  kj::Promise<Response> dockerApiRequest(
-      kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body = kj::none);
+  static kj::Promise<Response> dockerApiRequest(kj::Network& network,
+      kj::String dockerPath,
+      kj::HttpMethod method,
+      kj::String endpoint,
+      kj::Maybe<kj::String> body = kj::none);
   kj::Promise<InspectResponse> inspectContainer();
   kj::Promise<void> createContainer(kj::Maybe<capnp::List<capnp::Text>::Reader> entrypoint,
       kj::Maybe<capnp::List<capnp::Text>::Reader> environment);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
+  kj::Promise<void> destroyContainer();
 };
 
 }  // namespace workerd::server

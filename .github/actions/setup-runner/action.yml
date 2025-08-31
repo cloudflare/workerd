@@ -1,0 +1,50 @@
+name: 'Setup runner environment'
+description: 'Sets up runner environment with proper toolchain for building workerd'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Linux
+      shell: bash
+      if: runner.os == 'Linux'
+      run: |
+        export DEBIAN_FRONTEND=noninteractive
+        wget https://apt.llvm.org/llvm.sh
+        sed -i '/apt-get install/d' llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 19
+        # keep in sync with build/ci.bazelrc
+        sudo apt-get install -y -qq --no-install-recommends \
+          clang-19 \
+          lld-19 \
+          libunwind-19 \
+          libc++abi1-19 \
+          libc++1-19 \
+          libc++-19-dev \
+          libclang-rt-19-dev \
+          llvm-19
+        sudo ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
+        echo "build:linux --action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+        echo "build:linux --host_action_env=CC=/usr/lib/llvm-19/bin/clang" >> .bazelrc
+        echo "build:linux --linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
+        echo "build:linux --host_linkopt=--ld-path=/usr/lib/llvm-19/bin/ld.lld" >> .bazelrc
+        echo "build:linux --action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+        echo "build:linux --host_action_env=AR=/usr/lib/llvm-19/bin/llvm-ar" >> .bazelrc
+    - name: Setup Windows
+      shell: pwsh
+      if: runner.os == 'Windows'
+      # Set a custom output root directory to avoid long file name issues.
+      run: |
+        git config --global core.symlinks true
+        git config --show-scope --show-origin core.symlinks
+        git config --system core.longpaths true
+        [System.IO.File]::WriteAllLines((Join-Path -Path $env:USERPROFILE -ChildPath '.bazelrc'), 'startup --output_user_root=\\\\?\\C:\\tmp')
+    - name: Setup macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Build using Xcode 16.3 (equivalent to Clang 19)
+        sudo xcode-select -s "/Applications/Xcode_16.3.app"
+    - name: Configure git hooks
+      shell: bash
+      # Configure git to quell an irrelevant warning for runners (they never commit / push).
+      run: git config core.hooksPath githooks

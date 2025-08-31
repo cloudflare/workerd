@@ -91,17 +91,17 @@ URLPattern::URLPatternInit URLPattern::createURLPatternInit(
 URLPattern::URLPatternComponentResult URLPattern::createURLPatternComponentResult(
     jsg::Lock& js, const ada::url_pattern_component_result& other) {
   auto result = URLPatternComponentResult{
-    .input = js.str(kj::ArrayPtr(other.input.c_str(), other.input.size())),
-    .groups = js.obj(),
+    .input = jsg::JsRef(js, js.str(kj::ArrayPtr(other.input.c_str(), other.input.size()))),
+    .groups = jsg::JsRef(js, js.obj()),
   };
 
   for (auto& [key, value]: other.groups) {
     auto k = js.str(kj::ArrayPtr(key.c_str(), key.size()));
 
     if (value) {
-      result.groups.set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
+      result.groups.getHandle(js).set(js, k, js.str(kj::ArrayPtr(value->c_str(), value->size())));
     } else {
-      result.groups.set(js, k, js.undefined());
+      result.groups.getHandle(js).set(js, k, js.undefined());
     }
   }
   return result;
@@ -119,12 +119,13 @@ URLPattern::URLPatternResult URLPattern::createURLPatternResult(
 #undef V
   };
 
-  auto vecInputs = kj::heapArray<kj::OneOf<jsg::JsString, URLPatternInit>>(other.inputs.size());
+  auto vecInputs =
+      kj::heapArray<kj::OneOf<jsg::JsRef<jsg::JsString>, URLPatternInit>>(other.inputs.size());
   size_t i = 0;
   for (const auto& input: other.inputs) {
     if (std::holds_alternative<std::string_view>(input)) {
       auto raw = std::get<std::string_view>(input);
-      vecInputs[i] = js.str(kj::ArrayPtr(raw.data(), raw.size()));
+      vecInputs[i] = jsg::JsRef(js, js.str(kj::ArrayPtr(raw.data(), raw.size())));
     } else {
       KJ_DASSERT(std::holds_alternative<ada::url_pattern_init>(input));
       auto obj = std::get<ada::url_pattern_init>(input);

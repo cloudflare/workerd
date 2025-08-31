@@ -5,6 +5,19 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//:build/wd_test.bzl", "wd_test")
 
+PORT_BINDINGS = [
+    "HTTP_PORT",
+    "HTTPS_PORT",
+    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway
+    "HTTP_PORT_2",
+    "HTTPS_PORT_2",
+    "HTTP_PUBLIC_PORT",
+    "HTTPS_PUBLIC_PORT",
+    "HTTP_LOCAL_PORT",
+    "WSS_PORT",
+    "WS_PORT",
+]
+
 ### wpt_test macro
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
@@ -51,7 +64,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         compat_date_path = compat_date_path,
         autogates = autogates,
         wpt_cacert = wpt_cacert,
-        compat_flags = compat_flags + ["experimental", "nodejs_compat"],
+        compat_flags = compat_flags + ["experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
     data = [
@@ -69,7 +82,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         name = "{}".format(name),
         src = wd_test_gen_rule,
         args = ["--experimental"],
-        sidecar_port_bindings = ["HTTP_PORT", "HTTPS_PORT"] if start_server else [],
+        sidecar_port_bindings = PORT_BINDINGS if start_server else [],
         sidecar = "@wpt//:entrypoint" if start_server else None,
         data = data,
         **kwargs
@@ -284,6 +297,7 @@ const unitTests :Workerd.Config = (
         bindings = [
           (name = "wpt", service = "wpt"),
           (name = "unsafe", unsafeEval = void),
+          (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "HTTP_PORT", fromEnvironment = "HTTP_PORT"),
           (name = "HTTPS_PORT", fromEnvironment = "HTTPS_PORT"),
           (name = "GEN_TEST_CONFIG", fromEnvironment = "GEN_TEST_CONFIG"),
@@ -383,11 +397,16 @@ export PATH="$PATH:/usr/sbin"
 cd $(dirname $0)
 {python} wpt.py serve --no-h2 --config /dev/stdin <<EOF
 {{
-  "server_host": "localhost",
+  "server_host": "$SIDECAR_HOSTNAME",
   "check_subdomains": false,
   "ports": {{
-    "http": [$HTTP_PORT, "auto"],
-    "https": [$HTTPS_PORT, "auto"]
+    "http": [$HTTP_PORT, $HTTP_PORT_2],
+    "https": [$HTTPS_PORT, $HTTPS_PORT_2],
+    "http-public": [$HTTP_PUBLIC_PORT],
+    "https-public": [$HTTPS_PUBLIC_PORT],
+    "http-local": [$HTTP_LOCAL_PORT],
+    "wss": [$WSS_PORT],
+    "ws": [$WS_PORT]
   }}
 }}
 EOF

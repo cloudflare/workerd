@@ -273,7 +273,7 @@ kj::Array<FormData::EntryWithoutLock> FormData::parseWithoutLock(
         } else {
           data.add(FormData::EntryWithoutLock{
             .name = kj::str(name),
-            .value = kj::str(message),
+            .value = kj::heapArray<kj::byte>(message),
           });
         }
       });

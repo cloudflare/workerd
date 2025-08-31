@@ -15,7 +15,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/server/server.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
@@ -169,6 +168,9 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   }
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
+  kj::Duration consumeTimeElapsedForPeriodicLogging() override {
+    return 0 * kj::SECONDS;
+  }
 };
 
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
@@ -224,6 +226,7 @@ struct MockErrorReporter final: public Worker::ValidationErrorReporter {
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {}
   void addActorClass(kj::StringPtr exportName) override {}
+  void addWorkflowClass(kj::StringPtr exportName, kj::Array<kj::String> methods) override {}
 };
 
 inline server::config::Worker::Reader buildConfig(
@@ -332,8 +335,7 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
           defaultPythonConfig,
-          kj::none /* new module registry */,
-          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()))),
+          kj::none /* new module registry */)),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
@@ -341,11 +343,16 @@ TestFixture::TestFixture(SetupParams&& params)
           Worker::Isolate::InspectorPolicy::DISALLOW)),
       workerScript(kj::atomicRefcounted<Worker::Script>(kj::atomicAddRef(*workerIsolate),
           scriptId,
-          server::WorkerdApi::extractSource(mainModuleName, config, *errorReporter),
+          server::WorkerdApi::extractSource(mainModuleName,
+              config,
+              params.featureFlags.orDefault(CompatibilityFlags::Reader()),
+              *errorReporter),
           IsolateObserver::StartType::COLD,
           false,
           kj::none,
-          kj::none)),
+          kj::none,
+          SpanParent(nullptr),
+          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()))),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
@@ -376,7 +383,7 @@ TestFixture::TestFixture(SetupParams&& params)
 }
 
 void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environment&)>&& callback,
-    kj::ArrayPtr<kj::StringPtr> errorsToIgnore) {
+    const kj::ArrayPtr<const kj::StringPtr> errorsToIgnore) {
   auto ignoreDescription = [&errorsToIgnore](kj::StringPtr description) {
     return std::any_of(errorsToIgnore.begin(), errorsToIgnore.end(),
         [&description](auto error) { return description.contains(error); });

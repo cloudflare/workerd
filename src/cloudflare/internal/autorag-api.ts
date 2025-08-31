@@ -7,28 +7,28 @@ interface Fetcher {
 }
 
 export class AutoRAGInternalError extends Error {
-  public constructor(message: string, name = 'AutoRAGInternalError') {
+  constructor(message: string, name = 'AutoRAGInternalError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AutoRAGNotFoundError extends Error {
-  public constructor(message: string, name = 'AutoRAGNotFoundError') {
+  constructor(message: string, name = 'AutoRAGNotFoundError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AutoRAGUnauthorizedError extends Error {
-  public constructor(message: string, name = 'AutoRAGUnauthorizedError') {
+  constructor(message: string, name = 'AutoRAGUnauthorizedError') {
     super(message);
     this.name = name;
   }
 }
 
 export class AutoRAGNameNotSetError extends Error {
-  public constructor(message: string, name = 'AutoRAGNameNotSetError') {
+  constructor(message: string, name = 'AutoRAGNameNotSetError') {
     super(message);
     this.name = name;
   }
@@ -76,6 +76,7 @@ export type AutoRagSearchRequest = {
 
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
+  system_prompt?: string;
 };
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
@@ -119,12 +120,12 @@ export class AutoRAG {
   readonly #fetcher: Fetcher;
   readonly #autoragId: string | null;
 
-  public constructor(fetcher: Fetcher, autoragId?: string) {
+  constructor(fetcher: Fetcher, autoragId?: string) {
     this.#fetcher = fetcher;
     this.#autoragId = autoragId || null;
   }
 
-  public async list(): Promise<AutoRagListResponse> {
+  async list(): Promise<AutoRagListResponse> {
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/autorag/rags`,
       {
@@ -144,9 +145,7 @@ export class AutoRAG {
     return data.result;
   }
 
-  public async search(
-    params: AutoRagSearchRequest
-  ): Promise<AutoRagSearchResponse> {
+  async search(params: AutoRagSearchRequest): Promise<AutoRagSearchResponse> {
     if (!this.#autoragId) {
       throw new AutoRAGNameNotSetError('AutoRAG name not defined');
     }
@@ -180,13 +179,11 @@ export class AutoRAG {
     return data.result;
   }
 
-  public async aiSearch(
-    params: AutoRagAiSearchRequestStreaming
-  ): Promise<Response>;
-  public async aiSearch(
+  async aiSearch(params: AutoRagAiSearchRequestStreaming): Promise<Response>;
+  async aiSearch(
     params: AutoRagAiSearchRequest
   ): Promise<AutoRagAiSearchResponse>;
-  public async aiSearch(
+  async aiSearch(
     params: AutoRagAiSearchRequest
   ): Promise<AutoRagAiSearchResponse | Response> {
     if (!this.#autoragId) {

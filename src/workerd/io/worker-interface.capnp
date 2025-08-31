@@ -196,6 +196,7 @@ struct Trace @0x8e8d911203762d34 {
       fetch @3 :FetchEventInfo;
       jsRpc @4 :JsRpcEventInfo;
     }
+    parentSpanId @5 :UInt64;
   }
 
   struct SpanClose {
@@ -203,17 +204,6 @@ struct Trace @0x8e8d911203762d34 {
     # Once emitted, no further mark events should occur within the closed
     # span.
     outcome @0 :EventOutcome;
-  }
-
-  struct Resume {
-    # A resume event indicates that we are resuming a previously hibernated
-    # tail session.
-
-    attachment @0 :Data;
-    # When a tail session is hibernated, the tail worker is given the opportunity
-    # to provide some additional data that will be serialized and stored with the
-    # hibernated state. When the stream is resumed, if the tail worker has provided
-    # such data, it will be passed back to the worker in the resume event.
   }
 
   struct Onset {
@@ -244,11 +234,11 @@ struct Trace @0x8e8d911203762d34 {
       email @5 :EmailEventInfo;
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
-      resume @8 :Resume;
-      custom @9 :CustomEventInfo;
+      custom @8 :CustomEventInfo;
     }
     }
     info @8: Info;
+    attributes @9 :List(Attribute);
   }
 
   struct Outcome {
@@ -257,22 +247,11 @@ struct Trace @0x8e8d911203762d34 {
     wallTime @2 :UInt64;
   }
 
-  struct Hibernate {
-    # A hibernate event indicates that the tail session is being hibernated.
-  }
-
-  struct Link {
-    # A link to another invocation span context.
-    label @0 :Text;
-    context @1 :InvocationSpanContext;
-  }
-
   struct TailEvent {
-    # A streaming tail worker receives a series of Tail Events. Tail events always
-    # occur within an InvocationSpanContext. The first TailEvent delivered to a
-    # streaming tail session is always an Onset. The final TailEvent delivered is
-    # always an Outcome or Hibernate. Between those can be any number of SpanOpen,
-    # SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
+    # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
+    # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
+    # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
+    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
     # unless the stream was abruptly terminated.
     context @0 :InvocationSpanContext;
     timestampNs @1 :Int64;
@@ -280,19 +259,13 @@ struct Trace @0x8e8d911203762d34 {
     event :union {
       onset @3 :Onset;
       outcome @4 :Outcome;
-      hibernate @5 :Hibernate;
-      spanOpen @6 :SpanOpen;
-      spanClose @7 :SpanClose;
-      attribute @8 :List(Attribute);
-      return @9 :Return;
-      diagnosticChannelEvent @10 :DiagnosticChannelEvent;
-      exception @11 :Exception;
-      log @12 :Log;
-      link @13 :Link;
-      # While invocation span context (EW-8821) is not fully implemented, send completed spans as
-      # events so that we can provide timestamps and parent span definitions properly. Can be
-      # removed once that is done and span API is finalized.
-      completedSpan @14 :UserSpanData;
+      spanOpen @5 :SpanOpen;
+      spanClose @6 :SpanClose;
+      attribute @7 :List(Attribute);
+      return @8 :Return;
+      diagnosticChannelEvent @9 :DiagnosticChannelEvent;
+      exception @10 :Exception;
+      log @11 :Log;
     }
   }
 }
@@ -398,6 +371,11 @@ enum SerializationTag {
   # without breaking things).
 
   abortSignal @9;
+
+  nativeError @10;
+  # A JavaScript native error, such as Error, TypeError, etc. These are typically
+  # not handled as host objects in V8 but we handle them as such in workers in
+  # order to preserve additional information that we may attach to them.
 }
 
 enum StreamEncoding {
@@ -648,12 +626,12 @@ interface EventDispatcher @0xf20697475ec1752d {
   #
   # In C++, we use `WorkerInterface::customEvent()` to dispatch this event.
 
-  tailStreamSession @10 () -> (topLevel :TailStreamTarget) $Cxx.allowCancellation;
+  tailStreamSession @10 () -> (topLevel :TailStreamTarget, result :EventOutcome) $Cxx.allowCancellation;
   # Opens a streaming tail session. The call does not return until the session is complete.
   #
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return
-  # until after the call completes.
+  # until after the call completes. result is accessed after the session is complete.
 
   obsolete5 @5();
   obsolete6 @6();

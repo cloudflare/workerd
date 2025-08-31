@@ -25,6 +25,7 @@ class SqlStorage;
 class DurableObject;
 class DurableObjectId;
 class WebSocket;
+class DurableObjectClass;
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 
@@ -386,6 +387,45 @@ class DurableObjectTransaction final: public jsg::Object, public DurableObjectSt
   friend DurableObjectStorage;
 };
 
+class DurableObjectFacets: public jsg::Object {
+ public:
+  DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
+      : facetManager(kj::mv(facetManager)) {}
+
+  struct StartupOptions {
+    jsg::Ref<DurableObjectClass> $class;
+    jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
+
+    JSG_STRUCT($class, id);
+  };
+
+  // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
+  // only if the facet wasn't already running, to get information needed to start the facet.
+  //
+  // Returns a `Fetcher` instead of a `DurableObject` becasue the returend stub does not have the
+  // `id` or `name` methods that a DO stub normally has.
+  jsg::Ref<Fetcher> get(jsg::Lock& js,
+      kj::String name,
+      jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions);
+
+  void abort(jsg::Lock& js, kj::String name, jsg::JsValue reason);
+  void delete_(jsg::Lock& js, kj::String name);
+
+  JSG_RESOURCE_TYPE(DurableObjectFacets) {
+    JSG_METHOD(get);
+    JSG_METHOD(abort);
+    JSG_METHOD_NAMED(delete, delete_);
+  }
+
+ private:
+  kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
+
+  Worker::Actor::FacetManager& getFacetManager() {
+    return *JSG_REQUIRE_NONNULL(
+        facetManager, Error, "This Durable Object does not support creating facets.");
+  }
+};
+
 // The type placed in event.actorState (pre-modules API).
 // NOTE: It hasn't been renamed under the assumption that it will only be
 // used for colo-local namespaces.
@@ -476,7 +516,8 @@ class DurableObjectState: public jsg::Object {
       jsg::JsRef<jsg::JsValue> exports,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
-      bool containerRunning);
+      bool containerRunning,
+      kj::Maybe<Worker::Actor::FacetManager&> facetManager);
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -492,6 +533,10 @@ class DurableObjectState: public jsg::Object {
 
   jsg::Optional<jsg::Ref<Container>> getContainer() {
     return container.map([](jsg::Ref<Container>& c) { return c.addRef(); });
+  }
+
+  jsg::Ref<DurableObjectFacets> getFacets(jsg::Lock& js) {
+    return js.alloc<DurableObjectFacets>(facetManager);
   }
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> blockConcurrencyWhile(
@@ -564,6 +609,10 @@ class DurableObjectState: public jsg::Object {
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
+    if (flags.getWorkerdExperimental()) {
+      // Experimental new API, details may change!
+      JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
+    }
     JSG_METHOD(blockConcurrencyWhile);
     JSG_METHOD(acceptWebSocket);
     JSG_METHOD(getWebSockets);
@@ -604,6 +653,7 @@ class DurableObjectState: public jsg::Object {
   jsg::JsRef<jsg::JsValue> exports;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
+  kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;
 
   // Limits for Hibernatable WebSocket tags.
 
@@ -618,6 +668,7 @@ class DurableObjectState: public jsg::Object {
       api::DurableObjectStorageOperations::GetOptions,                                             \
       api::DurableObjectStorageOperations::GetAlarmOptions,                                        \
       api::DurableObjectStorageOperations::PutOptions,                                             \
-      api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair
+      api::DurableObjectStorageOperations::SetAlarmOptions, api::WebSocketRequestResponsePair,     \
+      api::DurableObjectFacets, api::DurableObjectFacets::StartupOptions
 
 }  // namespace workerd::api

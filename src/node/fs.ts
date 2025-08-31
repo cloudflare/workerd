@@ -5,12 +5,16 @@
 import * as promises from 'node-internal:internal_fs_promises';
 import * as constants from 'node-internal:internal_fs_constants';
 import * as callbackMethods from 'node-internal:internal_fs_callback';
-import { WriteStream, ReadStream } from 'node-internal:internal_fs_streams';
 import { Dirent, Dir } from 'node-internal:internal_fs';
 import { Stats } from 'node-internal:internal_fs_utils';
 
 export * from 'node-internal:internal_fs_callback';
-
+import {
+  ReadStream,
+  WriteStream,
+  createReadStream,
+  createWriteStream,
+} from 'node-internal:internal_fs_streams';
 import {
   accessSync,
   existsSync,
@@ -27,7 +31,7 @@ import {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,
@@ -55,15 +59,24 @@ import {
   writeFileSync,
   writeSync,
   writevSync,
+  openAsBlob,
 } from 'node-internal:internal_fs_sync';
+
+const { F_OK, R_OK, W_OK, X_OK } = constants;
+
+// Node.js exports these as aliases
+export const FileWriteStream = WriteStream;
+export const FileReadStream = ReadStream;
 
 export {
   constants,
+  F_OK,
+  R_OK,
+  W_OK,
+  X_OK,
   promises,
   Dirent,
   Dir,
-  WriteStream,
-  ReadStream,
   accessSync,
   existsSync,
   appendFileSync,
@@ -79,7 +92,7 @@ export {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,
@@ -108,15 +121,22 @@ export {
   writeSync,
   writevSync,
   Stats,
+  ReadStream,
+  WriteStream,
+  createReadStream,
+  createWriteStream,
+  openAsBlob,
 };
 
 export default {
   constants,
+  F_OK,
+  R_OK,
+  W_OK,
+  X_OK,
   promises,
   Dirent,
   Dir,
-  WriteStream,
-  ReadStream,
   Stats,
   ...callbackMethods,
   accessSync,
@@ -134,7 +154,7 @@ export default {
   fsyncSync,
   ftruncateSync,
   futimesSync,
-  //globSync
+  globSync,
   lchmodSync,
   lchownSync,
   lutimesSync,
@@ -162,4 +182,11 @@ export default {
   writeFileSync,
   writeSync,
   writevSync,
+  WriteStream,
+  ReadStream,
+  FileWriteStream,
+  FileReadStream,
+  createReadStream,
+  createWriteStream,
+  openAsBlob,
 };

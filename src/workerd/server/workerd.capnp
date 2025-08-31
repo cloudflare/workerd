@@ -35,7 +35,7 @@
 # to execute!
 
 # Any capnp files imported here must be:
-# 1. embedded into workerd-meta.capnp
+# 1. embedded using wd_cc_embed
 # 2. added to `tryImportBulitin` in workerd.c++ (grep for '"/workerd/workerd.capnp"').
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::config");
@@ -84,6 +84,12 @@ struct Config {
   # A list of gates which are enabled.
   # These are used to gate features/changes in workerd and in our internal repo. See the equivalent
   # config definition in our internal repo for more details.
+
+  structuredLogging @5 :Bool = false;
+  # If true, logs will be emitted as JSON for structured logging.
+  # When false, logs use the traditional human-readable format.
+  # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
+  # This won't work for logs coming from service worker syntax workers with the old module registry.
 }
 
 # ========================================================================================
@@ -354,6 +360,10 @@ struct Worker {
       service @9 :ServiceDesignator;
       # Binding to a named service (possibly, a worker).
 
+      durableObjectClass @26 :ServiceDesignator;
+      # A Durable Object class binding, without an actual storage namespace. This can be used to
+      # implement a facet.
+
       durableObjectNamespace @10 :DurableObjectNamespaceDesignator;
       # Binding to the durable object namespace implemented by the given class.
       #
@@ -415,6 +425,22 @@ struct Worker {
         limits @25 :MemoryCacheLimits;
       }
 
+      workerLoader :group {
+        # A binding representing the ability to dynamically load Workers from code presented at
+        # runtime.
+        #
+        # A Worker loader is not just a function that loads a Worker, but also serves as a
+        # cache of Workers, automatically unloading Workers that are not in use. To that end, each
+        # Worker must have a name, and if a Worker with that name already exists, it'll be reused.
+
+        id @27 :Text;
+        # Optional: The identifier associated with this Worker loader. Multiple Workers can bind to
+        # the same ID in order to access the same loader, so that if they request the same name
+        # from it, they'll end up sharing the same loaded Worker.
+        #
+        # (If omitted, the binding will not share a cache with any other binding.)
+      }
+
       # TODO(someday): dispatch, other new features
     }
 
@@ -438,6 +464,7 @@ struct Worker {
         queue @11 :Void;
         analyticsEngine @12 : Void;
         hyperdrive @13: Void;
+        durableObjectClass @14: Void;
       }
     }
 

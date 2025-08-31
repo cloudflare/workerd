@@ -157,7 +157,6 @@ KJ_TEST("jsgImpl") {
   KJ_EXPECT(tType<jsg::Lock>() == "(jsgImpl = (type = jsgLock))");
   KJ_EXPECT(tType<jsg::SelfRef>() == "(jsgImpl = (type = jsgSelfRef))");
   KJ_EXPECT(tType<jsg::Unimplemented>() == "(jsgImpl = (type = jsgUnimplemented))");
-  KJ_EXPECT(tType<jsg::Varargs>() == "(jsgImpl = (type = jsgVarargs))");
   KJ_EXPECT(tType<v8::Isolate*>() == "(jsgImpl = (type = v8Isolate))");
   KJ_EXPECT(tType<MockConfig>() == "(jsgImpl = (type = configuration))");
   KJ_EXPECT(tType<jsg::TypeHandler<kj::Date>>() == "(jsgImpl = (type = jsgTypeHandler))");
@@ -289,24 +288,6 @@ KJ_TEST("constant members") {
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestConstant\", "
       "tsRoot = false, disposable = false, asyncDisposable = false)");
-}
-
-struct TestLazyJsProperty: jsg::Object {
-  JSG_RESOURCE_TYPE(TestLazyJsProperty) {
-    JSG_CONTEXT_JS_BUNDLE(TEST_BUNDLE);
-    JSG_LAZY_JS_INSTANCE_PROPERTY(JsProperty, "js-module");
-    JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(JsReadonlyProperty, "js-readonly-module");
-  };
-};
-
-KJ_TEST("lazyJsProperty") {
-  KJ_EXPECT(tStructure<TestLazyJsProperty>() ==
-      "(name = \"TestLazyJsProperty\", members = ["
-      "(property = (name = \"JsProperty\", type = (jsBuiltin = (module = \"js-module\", export = \"JsProperty\")), readonly = false, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
-      "(property = (name = \"JsReadonlyProperty\", type = (jsBuiltin = (module = \"js-readonly-module\", export = \"JsReadonlyProperty\")), readonly = true, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false))], "
-      "iterable = false, asyncIterable = false, fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestLazyJsProperty\", tsRoot = false, "
-      "builtinModules = [(specifier = \"testBundle:internal\", tsDeclarations = \"foo: string\")], "
-      "disposable = false, asyncDisposable = false)");
 }
 
 struct TestStruct {

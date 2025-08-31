@@ -11,7 +11,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
+#include <workerd/util/http-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -243,6 +243,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
+  throwIfInvalidHeaderValue(headers);
   TRACE_EVENT("workerd", "WorkerEntrypoint::request()", "url", url.cStr(),
       PERFETTO_FLOW_FROM_POINTER(this));
   auto incomingRequest =
@@ -406,7 +407,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         // We've already logged it here, the only thing that matters to the client is that we failed
         // due to an internal error. Note that this does not need to be labeled "remote." since jsg
         // will sanitize it as an internal error. Note that we use `setDescription()` to preserve
-        // the exception type for `cjfs::makeInternalError(...)` downstream.
+        // the exception type for `jsg::exceptionToJs(...)` downstream.
         exception.setDescription(
             kj::str("worker_do_not_log; Request failed due to internal error"));
         return kj::mv(exception);
@@ -710,6 +711,9 @@ kj::Promise<bool> WorkerEntrypoint::test() {
   incomingRequest->delivered();
 
   auto& context = incomingRequest->getContext();
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setEventInfo(context.getInvocationSpanContext(), context.now(), tracing::CustomEventInfo());
+  }
 
   context.addWaitUntil(context.run([entrypointName = entrypointName, props = kj::mv(props),
                                        &context, &metrics = incomingRequest->getMetrics()](
@@ -726,6 +730,21 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       [](IoContext& context, kj::Own<IoContext::IncomingRequest> request) -> kj::Promise<bool> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() waitForFinished()");
     auto result = co_await request->finishScheduled();
+
+    if (result == IoContext_IncomingRequest::FinishScheduledResult::ABORTED) {
+      // If the test handler throws an exception (without aborting - just a regular exception),
+      // then `outcome` ends up being EventOutcome::EXCEPTION, which causes us to return false.
+      // But in that case we are separately relying on the exception being logged as an uncaught
+      // exception, rather than throwing it.
+      // This is why we don't rethrow the exception but rather log it as an uncaught exception.
+      try {
+        co_await context.onAbort();
+      } catch (...) {
+        auto exception = kj::getCaughtExceptionAsKj();
+        KJ_LOG(ERROR, exception);
+      }
+    }
+
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
     co_return outcome == EventOutcome::OK;

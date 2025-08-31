@@ -3,22 +3,37 @@
 # programming language.
 import datetime
 import functools
-import http.client
+import inspect
 import json
+from asyncio import create_task, gather
 from collections.abc import Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
 from types import LambdaType
-from typing import Any, TypedDict, Unpack
+from typing import Any, Never, TypedDict, Unpack
 
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
 import js
+from js import Object
+from workers.workflows import NonRetryableError
 
 import pyodide.http
+from pyodide import __version__ as pyodide_version
 from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
 from pyodide.http import pyfetch
+
+try:
+    from pyodide.ffi import jsnull
+except ImportError:
+    jsnull = None
+
+
+def _jsnull_to_none(x):
+    if x is jsnull:
+        return None
+    return x
 
 
 def import_from_javascript(module_name: str) -> Any:
@@ -103,6 +118,7 @@ class FetchKwargs(TypedDict, total=False):
     method: HTTPMethod | None
     redirect: str | None
     cf: RequestInitCfProperties | None
+    fetcher: type[pyfetch] | None
 
 
 # TODO: Pyodide's FetchResponse.headers returns a dict[str, str] which means
@@ -116,7 +132,7 @@ class FetchResponse(pyodide.http.FetchResponse):
         """
         Returns the body as a JavaScript ReadableStream from the JavaScript Response instance.
         """
-        return self.js_response.body
+        return _jsnull_to_none(self.js_response.body)
 
     @property
     def js_object(self) -> "js.Response":
@@ -143,28 +159,95 @@ class FetchResponse(pyodide.http.FetchResponse):
         except JsException as exc:
             raise _to_python_exception(exc) from exc
 
-    def replace_body(self, body: Body) -> "FetchResponse":
+    def replace_body(self, body: Body) -> "Response":
         """
         Returns a new Response object with the same options (status, headers, etc) as
         the original but with an updated body.
         """
         b = body.js_object if isinstance(body, FormData) else body
         js_resp = js.Response.new(b, self.js_response)
-        return FetchResponse(js_resp.url, js_resp)
+        return Response(js_resp)
 
     async def blob(self) -> "Blob":
         self._raise_if_failed()
         return Blob(await self.js_object.blob())
 
+    """
+    Static methods defined below. The `error` static method is not implemented as
+    it is not useful for the Workers use case.
+    """
+
+    @staticmethod
+    def redirect(url: str, status: HTTPStatus | int = HTTPStatus.FOUND):
+        code = status.value if isinstance(status, HTTPStatus) else status
+        try:
+            return js.Response.redirect(url, code)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+    @staticmethod
+    def from_json(
+        data: str | dict[str, Any] | list[Any] | JsProxy,
+        status: HTTPStatus | int = HTTPStatus.OK,
+        status_text="",
+        headers: Headers = None,
+    ):
+        options = Response._create_options(status, status_text, headers)
+        js_resp = None
+        try:
+            if isinstance(data, JsProxy):
+                js_resp = js.Response.json(data, **options)
+            else:
+                if "headers" not in options:
+                    options["headers"] = _to_js_headers(
+                        {"content-type": "application/json"}
+                    )
+                elif not options["headers"].has("content-type"):
+                    options["headers"].set("content-type", "application/json")
+                js_resp = js.Response.new(json.dumps(data), **options)
+        except JsException as exc:
+            raise _to_python_exception(exc) from exc
+
+        return Response(js_resp)
+
+    def json(self, *args: Never, **kwargs: Never):
+        if isinstance(self, Response):
+            return super().json()
+        # For compatibility, allow static use of Response.json() to mean Response.from_json().
+        data = self
+        return Response.from_json(data, *args, **kwargs)
+
+
+if pyodide_version == "0.26.0a2":
+
+    async def _pyfetch_patched(
+        request: "str | js.Request", **kwargs: Any
+    ) -> "Response":
+        # This is copied from https://github.com/pyodide/pyodide/blob/d3f99e1d/src/py/pyodide/http.py
+        custom_fetch = kwargs["fetcher"] if "fetcher" in kwargs else js.fetch
+        kwargs["fetcher"] = None
+        try:
+            return Response(
+                await custom_fetch(
+                    request, to_js(kwargs, dict_converter=Object.fromEntries)
+                ),
+            )
+        except JsException as e:
+            raise OSError(e.message) from None
+else:
+    _pyfetch_patched = pyfetch
+
 
 async def fetch(
-    resource: str,
+    resource: "str | Request | js.Request",
     **other_options: Unpack[FetchKwargs],
-) -> FetchResponse:
+) -> "Response":
+    if isinstance(resource, Request):
+        resource = resource.js_object
     if "method" in other_options and isinstance(other_options["method"], HTTPMethod):
         other_options["method"] = other_options["method"].value
-    resp = await pyfetch(resource, **other_options)
-    return FetchResponse(resp.url, resp.js_response)
+    resp = await _pyfetch_patched(resource, **other_options)
+    return Response(resp.js_response)
 
 
 def _to_python_exception(exc: JsException) -> Exception:
@@ -174,6 +257,24 @@ def _to_python_exception(exc: JsException) -> Exception:
         return TypeError(exc.message)
     else:
         return exc
+
+
+def _from_js_error(exc: JsException) -> Exception:
+    # convert into Python exception after a full round trip
+    # Python - JS - Python
+    if not exc.message or not exc.message.startswith("PythonError"):
+        return _to_python_exception(exc)
+
+    # extract the Python exception type from the traceback
+    error_message_last_line = exc.message.split("\n")[-2]
+    if error_message_last_line.startswith("TypeError"):
+        return TypeError(error_message_last_line)
+    elif error_message_last_line.startswith("ValueError"):
+        return ValueError(error_message_last_line)
+    elif error_message_last_line.startswith("workers.workflows.NonRetryableError"):
+        return NonRetryableError(error_message_last_line)
+    else:
+        return _to_python_exception(exc)
 
 
 @contextmanager
@@ -205,10 +306,6 @@ class Response(FetchResponse):
     """
     This class represents the response to an HTTP request, with a similar API to that of the web
     `Response` API: https://developer.mozilla.org/en-US/docs/Web/API/Response.
-
-    This is a static class to enable defining `FetchResponse` using a constructor more similar to
-    JS. All non-static methods for this class should be defined on the `FetchResponse` class it
-    extends.
     """
 
     def __init__(
@@ -217,6 +314,7 @@ class Response(FetchResponse):
         status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
+        web_socket: "js.WebSocket | None" = None,
     ):
         """
         Represents the response to a request.
@@ -239,7 +337,7 @@ class Response(FetchResponse):
                 raise TypeError(
                     f"Unsupported type in Response: {body.constructor.name}"
                 )
-        elif not isinstance(body, str | FormData):
+        elif not isinstance(body, str | FormData) and body is not None:
             raise TypeError(f"Unsupported type in Response: {type(body).__name__}")
 
         # Handle constructing a Response from a JS Response.
@@ -265,6 +363,7 @@ class Response(FetchResponse):
         status: HTTPStatus | int | None = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
+        web_socket: "js.WebSocket | None" = None,
     ):
         options = {}
         if status:
@@ -275,46 +374,9 @@ class Response(FetchResponse):
             options["statusText"] = status_text
         if headers:
             options["headers"] = _to_js_headers(headers)
-
+        if web_socket:
+            options["webSocket"] = web_socket
         return options
-
-    """
-    Static methods defined below. The `error` static method is not implemented as
-    it is not useful for the Workers use case.
-    """
-
-    @staticmethod
-    def redirect(url: str, status: HTTPStatus | int = HTTPStatus.FOUND):
-        code = status.value if isinstance(status, HTTPStatus) else status
-        try:
-            return js.Response.redirect(url, code)
-        except JsException as exc:
-            raise _to_python_exception(exc) from exc
-
-    @staticmethod
-    def json(
-        data: str | dict[str, Any] | list[Any] | JsProxy,
-        status: HTTPStatus | int = HTTPStatus.OK,
-        status_text="",
-        headers: Headers = None,
-    ):
-        options = Response._create_options(status, status_text, headers)
-        js_resp = None
-        try:
-            if isinstance(data, JsProxy):
-                js_resp = js.Response.json(data, **options)
-            else:
-                if "headers" not in options:
-                    options["headers"] = _to_js_headers(
-                        {"content-type": "application/json"}
-                    )
-                elif not options["headers"].has("content-type"):
-                    options["headers"].set("content-type", "application/json")
-                js_resp = js.Response.new(json.dumps(data), **options)
-        except JsException as exc:
-            raise _to_python_exception(exc) from exc
-
-        return FetchResponse(js_resp.url, js_resp)
 
 
 FormDataValue = "str | js.Blob | Blob"
@@ -520,7 +582,8 @@ class Blob:
         end: int | None = None,
         content_type: str | None = None,
     ):
-        return self.js_object.slice(start, end, content_type)
+        js_sliced_blob = self.js_object.slice(start, end, content_type)
+        return Blob([js_sliced_blob])
 
 
 class File(Blob):
@@ -572,7 +635,7 @@ class File(Blob):
 
     @property
     def last_modified(self) -> int:
-        return self._js_blob.last_modified
+        return self._js_blob.lastModified
 
 
 class Request:
@@ -624,7 +687,14 @@ class Request:
         return self.js_object.destination
 
     @property
-    def headers(self) -> http.client.HTTPMessage:
+    def headers(self):
+        # This is imported here because it costs a lot of CPU time when imported at the top-level.
+        # At least it does when we do so in our validator tests, doesn't seem to cause trouble in
+        # production. So as a workaround we do the import here.
+        #
+        # TODO(later): when dedicated snapshots are default we can move this import to the top-level.
+        import http.client
+
         result = http.client.HTTPMessage()
 
         for key, val in self.js_object.headers:
@@ -760,6 +830,11 @@ def python_from_rpc(obj: "JsProxy"):
     if not hasattr(obj, "constructor"):
         return obj
 
+    if obj.constructor.name == "TestController":
+        # This object currently has no methods defined on it. If this changes we should
+        # implement a Python wrapper for it, but for now we'll just pass in None.
+        return None
+
     result = obj.to_py(default_converter=_python_from_rpc_default_converter)
 
     return result
@@ -827,9 +902,6 @@ class _FetcherWrapper:
 
     def _getattr_helper(self, name):
         attr = getattr(self._binding, name)
-        if name == "fetch":
-            # TODO: Implement python native fetch for bindings.
-            return attr
 
         if not callable(attr):
             return attr
@@ -851,6 +923,20 @@ class _FetcherWrapper:
         setattr(self, name, result)
         return result
 
+    def fetch(self, *args, **kwargs):
+        return fetch(*args, fetcher=self._binding.fetch, **kwargs)
+
+
+class _DurableObjectNamespaceWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    def get(self, *args, **kwargs):
+        return _FetcherWrapper(self._binding.get(*args, **kwargs))
+
 
 class _EnvWrapper:
     def __init__(self, env):
@@ -860,6 +946,9 @@ class _EnvWrapper:
         binding = getattr(self._env, name)
         if _is_js_instance(binding, "Fetcher"):
             return _FetcherWrapper(binding)
+
+        if _is_js_instance(binding, "DurableObjectNamespace"):
+            return _DurableObjectNamespaceWrapper(binding)
 
         # TODO: Implement APIs for bindings.
         return binding
@@ -881,15 +970,101 @@ def handler(func):
     def wrapper(*args, **kwargs):
         # TODO: support transforming kwargs
         if len(args) > 0 and _is_js_instance(args[0], "Request"):
-            args = (Request(args[0]),) + args[1:]
+            args = (Request(args[0]), *args[1:])
 
         # Wrap `env` so that bindings can be used without to_js.
         if len(args) > 1:
-            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+            args = (args[0], _EnvWrapper(args[1]), *args[2:])
 
         return func(*args, **kwargs)
 
     return wrapper
+
+
+class _WorkflowStepWrapper:
+    def __init__(self, js_step):
+        self._js_step = js_step
+        self._memoized_dependencies = {}
+        self._in_flight = {}
+
+    def do(self, name, depends=None, concurrent=False, config=None):
+        def decorator(func):
+            async def wrapper():
+                if concurrent:
+                    results = await gather(
+                        *[self._resolve_dependency(dep) for dep in depends or []]
+                    )
+                else:
+                    results = [
+                        await self._resolve_dependency(dep) for dep in depends or []
+                    ]
+                python_results = [python_from_rpc(result) for result in results]
+                return await _do_call(self, name, config, func, *python_results)
+
+            wrapper._step_name = name
+            return wrapper
+
+        return decorator
+
+    def sleep(self, *args, **kwargs):
+        # all types should be primitives - no need for explicit translation
+        return self._js_step.sleep(*args, **kwargs)
+
+    def sleep_until(self, name, timestamp):
+        if not isinstance(timestamp, str):
+            timestamp = python_to_rpc(timestamp)
+
+        return self._js_step.sleepUntil(name, timestamp)
+
+    def wait_for_event(self, name, event_type, /, timeout="24 hours"):
+        return self._js_step.waitForEvent(
+            name,
+            to_js(
+                {"type": event_type, "timeout": timeout},
+                dict_converter=Object.fromEntries,
+            ),
+        )
+
+    async def _resolve_dependency(self, dep):
+        if dep._step_name in self._memoized_dependencies:
+            return self._memoized_dependencies[dep._step_name]
+        elif dep._step_name in self._in_flight:
+            return await self._in_flight[dep._step_name]
+
+        return await dep()
+
+
+async def _do_call(entrypoint, name, config, callback, *results):
+    async def _callback():
+        result = callback(*results)
+
+        if inspect.iscoroutine(result):
+            result = await result
+        return to_js(result, dict_converter=Object.fromEntries)
+
+    async def _closure():
+        try:
+            if config is None:
+                coroutine = await entrypoint._js_step.do(name, _callback)
+            else:
+                coroutine = await entrypoint._js_step.do(
+                    name, to_js(config, dict_converter=Object.fromEntries), _callback
+                )
+
+            return python_from_rpc(coroutine)
+        except Exception as exc:
+            raise _from_js_error(exc) from exc
+
+    task = create_task(_closure())
+    entrypoint._in_flight[name] = task
+
+    try:
+        result = await task
+        entrypoint._memoized_dependencies[name] = result
+    finally:
+        del entrypoint._in_flight[name]
+
+    return result
 
 
 def _wrap_subclass(cls):
@@ -897,12 +1072,42 @@ def _wrap_subclass(cls):
     original_init = cls.__init__
 
     def wrapped_init(self, *args, **kwargs):
+        if len(args) > 0:
+            _pyodide_entrypoint_helper.patchWaitUntil(args[0])
         if len(args) > 1:
-            args = (args[0], _EnvWrapper(args[1])) + args[2:]
+            args = list(args)
+            args[1] = _EnvWrapper(args[1])
 
         original_init(self, *args, **kwargs)
 
     cls.__init__ = wrapped_init
+
+
+def _wrap_workflow_step(cls):
+    run_fn = getattr(cls, "run", None)
+    if run_fn is None:
+        return
+
+    # Only patch `on_run` for subclasses of WorkflowEntrypoint.
+    if not issubclass(cls, WorkflowEntrypoint):
+        # Not a workflow subclass, so don't wrap `on_run`.
+        return
+
+    @functools.wraps(run_fn)
+    async def wrapped_run(self, event=None, step=None, /, *args, **kwargs):
+        if event is not None:
+            event = python_from_rpc(event)
+        if step is not None:
+            step = _WorkflowStepWrapper(step)
+
+        result = run_fn(self, event, step, *args, **kwargs)
+
+        if inspect.iscoroutine(result):
+            result = await result
+
+        return result
+
+    cls.run = wrapped_run
 
 
 class DurableObject:
@@ -942,3 +1147,4 @@ class WorkflowEntrypoint:
 
     def __init_subclass__(cls, **_kwargs):
         _wrap_subclass(cls)
+        _wrap_workflow_step(cls)

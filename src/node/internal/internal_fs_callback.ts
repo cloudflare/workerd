@@ -40,6 +40,7 @@ import {
   validateChmodArgs,
   validateStatArgs,
   validateMkDirArgs,
+  validateOpendirArgs,
   validateRmArgs,
   validateRmDirArgs,
   validateReaddirArgs,
@@ -53,6 +54,7 @@ import {
   type SymlinkType,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
   getValidatedFd,
   validateBufferArray,
   stringToFlags,
@@ -76,14 +78,17 @@ import { Buffer } from 'node-internal:internal_buffer';
 import { isArrayBufferView } from 'node-internal:internal_types';
 import {
   parseFileMode,
+  validateBoolean,
   validateObject,
-  validateEncoding,
   validateOneOf,
   validateUint32,
 } from 'node-internal:validators';
 import type {
   BigIntStatsFs,
   CopySyncOptions,
+  GlobOptions,
+  GlobOptionsWithFileTypes,
+  GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
   ReadAsyncOptions,
@@ -93,9 +98,13 @@ import type {
   WriteFileOptions,
 } from 'node:fs';
 
-type ErrorOnlyCallback = (err: unknown) => void;
-type SingleArgCallback<T> = (err: unknown, result?: T) => void;
-type DoubleArgCallback<T, U> = (err: unknown, result1?: T, result2?: U) => void;
+export type ErrorOnlyCallback = (err: unknown) => void;
+export type SingleArgCallback<T> = (err: unknown, result?: T) => void;
+export type DoubleArgCallback<T, U> = (
+  err: unknown,
+  result1?: T,
+  result2?: U
+) => void;
 
 function callWithErrorOnlyCallback(
   fn: () => void,
@@ -277,8 +286,69 @@ export function cp(
   } else {
     options = optionsOrCallback;
   }
+
+  validateObject(options, 'options');
+  const {
+    dereference = false,
+    errorOnExist = false,
+    force = true,
+    filter,
+    mode = 0,
+    preserveTimestamps = false,
+    recursive = false,
+    verbatimSymlinks = false,
+  } = options;
+
+  validateBoolean(dereference, 'options.dereference');
+  validateBoolean(errorOnExist, 'options.errorOnExist');
+  validateBoolean(force, 'options.force');
+  validateBoolean(preserveTimestamps, 'options.preserveTimestamps');
+  validateBoolean(recursive, 'options.recursive');
+  validateBoolean(verbatimSymlinks, 'options.verbatimSymlinks');
+  validateUint32(mode, 'options.mode');
+
+  if (mode & COPYFILE_FICLONE_FORCE) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'options.mode',
+      'COPYFILE_FICLONE_FORCE is not supported'
+    );
+  }
+
+  if (filter !== undefined) {
+    if (typeof filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+    }
+    // We do not implement the filter option currently. There's a bug in the Node.js
+    // implementation of fs.cp and the option.filter in which non-UTF-8 encoded file
+    // names are not handled correctly and the option.filter fails when the src or
+    // dest is passed in as a Buffer. Fixing this bug in Node.js will require a breaking
+    // change to the API or a new API that appropriately handles Buffer inputs and non
+    // UTF-8 encoded names. We want to avoid implementing the filter option for now
+    // until Node.js settles on a better implementation and API.
+    throw new ERR_UNSUPPORTED_OPERATION();
+  }
+
+  const exclusive = Boolean(mode & COPYFILE_EXCL);
+  // We're not current implementing the exclusive flag. We're validating
+  // it here just to use it so the compiler doesn't complain.
+  validateBoolean(exclusive, '');
+
+  // We're not current implementing verbatimSymlinks in any meaningful way.
+  // Our symlinks are always fully qualfied. That is, they always point to
+  // an absolute path and never to a relative path, so there is no distinction
+  // between verbatimSymlinks and non-verbatimSymlinks. We validate the option
+  // value above but otherwise we ignore it.
+
+  src = normalizePath(src);
+  dest = normalizePath(dest);
+
   callWithErrorOnlyCallback(() => {
-    fssync.cpSync(src, dest, options);
+    cffs.cp(src, dest, {
+      deferenceSymlinks: dereference,
+      recursive,
+      force,
+      errorOnExist,
+    });
   }, callback);
 }
 
@@ -353,6 +423,8 @@ export function ftruncate(
   } else {
     len = lenOrCallback;
   }
+  fd = getValidatedFd(fd);
+  validateUint32(len, 'len');
   callWithErrorOnlyCallback(() => {
     fssync.ftruncateSync(fd, len);
   }, callback);
@@ -437,8 +509,19 @@ export function lstat(
   } else {
     options = optionsOrCallback;
   }
-  validateStatArgs(path, options);
-  callWithSingleArgCallback(() => fssync.lstatSync(path, options), callback);
+  const {
+    pathOrFd: normalizedPath,
+    bigint,
+    throwIfNoEntry,
+  } = validateStatArgs(path, options);
+  callWithSingleArgCallback(
+    () =>
+      fssync.lstatSync(normalizedPath as FilePath, {
+        bigint,
+        throwIfNoEntry,
+      }),
+    callback
+  );
 }
 
 export function mkdir(
@@ -465,16 +548,32 @@ export function mkdir(
 
 export function mkdtemp(
   prefix: FilePath,
-  optionsOrCallback: SingleArgCallback<string> | MkdirTempSyncOptions,
+  optionsOrCallback:
+    | SingleArgCallback<string>
+    | MkdirTempSyncOptions
+    | ValidEncoding,
   callback?: SingleArgCallback<string>
 ): void {
-  let options: MkdirTempSyncOptions;
+  let options: MkdirTempSyncOptions | ValidEncoding;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+  validateObject(options, 'options');
+  const { encoding = null } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
   callWithSingleArgCallback(
     () => fssync.mkdtempSync(prefix, options),
     callback
@@ -523,7 +622,19 @@ export function opendir(
   } else {
     options = optionsOrCallback;
   }
-  callWithSingleArgCallback(() => fssync.opendirSync(path, options), callback);
+
+  const {
+    path: validatedPath,
+    encoding,
+    recursive,
+  } = validateOpendirArgs(path, options);
+
+  callWithSingleArgCallback(() => {
+    return fssync.opendirSync(validatedPath, {
+      encoding: encoding as BufferEncoding,
+      recursive,
+    });
+  }, callback);
 }
 
 // read has a complex polymorphic signature so this is a bit gnarly.
@@ -803,10 +914,13 @@ export function read<T extends NodeJS.ArrayBufferView>(
 
 export function readdir(
   path: FilePath,
-  optionsOrCallback: SingleArgCallback<ReadDirResult> | ReadDirOptions,
+  optionsOrCallback:
+    | SingleArgCallback<ReadDirResult>
+    | ReadDirOptions
+    | ValidEncoding,
   callback?: SingleArgCallback<ReadDirResult>
 ): void {
-  let options: ReadDirOptions;
+  let options: ReadDirOptions | ValidEncoding;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {
@@ -836,18 +950,31 @@ export function readFile(
   path: FilePath,
   optionsOrCallback:
     | SingleArgCallback<string | Buffer>
-    | BufferEncoding
-    | null
+    | ValidEncoding
     | ReadFileSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadFileSyncOptions;
+  let options: ValidEncoding | ReadFileSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
+
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+  validateObject(options, 'options');
+  const { encoding = null } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
   callWithSingleArgCallback(() => fssync.readFileSync(path, options), callback);
 }
 
@@ -855,24 +982,32 @@ export function readlink(
   path: FilePath,
   optionsOrCallback:
     | SingleArgCallback<string | Buffer>
-    | BufferEncoding
-    | null
+    | ValidEncoding
     | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadLinkSyncOptions;
+  let options: ValidEncoding | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
   } else {
     options = optionsOrCallback;
   }
-  path = normalizePath(path);
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+  const normalizedPath = normalizePath(path);
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   callWithSingleArgCallback(
-    () => fssync.readlinkSync(path, { encoding }),
+    () => fssync.readlinkSync(normalizedPath, { encoding }),
     callback
   );
 }
@@ -909,12 +1044,11 @@ export function realpath(
   path: FilePath,
   optionsOrCallback:
     | SingleArgCallback<string | Buffer>
-    | BufferEncoding
-    | null
+    | ValidEncoding
     | ReadLinkSyncOptions,
   callback?: SingleArgCallback<string | Buffer>
 ): void {
-  let options: BufferEncoding | null | ReadLinkSyncOptions;
+  let options: ValidEncoding | ReadLinkSyncOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {};
@@ -922,12 +1056,24 @@ export function realpath(
     options = optionsOrCallback;
   }
 
+  if (typeof options === 'string' || options == null) {
+    options = { encoding: options };
+  }
+
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
+
+  const normalizedPath = normalizePath(path);
 
   callWithSingleArgCallback(
-    () => fssync.realpathSync(path, { encoding }),
+    () => fssync.realpathSync(normalizedPath, { encoding }),
     callback
   );
 }
@@ -998,8 +1144,19 @@ export function stat(
   } else {
     options = optionsOrCallback;
   }
-  validateStatArgs(path, options);
-  callWithSingleArgCallback(() => fssync.statSync(path, options), callback);
+  const {
+    pathOrFd: normalizedPath,
+    bigint,
+    throwIfNoEntry,
+  } = validateStatArgs(path, options);
+  callWithSingleArgCallback(
+    () =>
+      fssync.statSync(normalizedPath as FilePath, {
+        bigint,
+        throwIfNoEntry,
+      }),
+    callback
+  );
 }
 
 export function statfs(
@@ -1016,7 +1173,21 @@ export function statfs(
   } else {
     options = optionsOrCallback;
   }
-  callWithSingleArgCallback(() => fssync.statfsSync(path, options), callback);
+  const normalizedPath = normalizePath(path);
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (options !== undefined) {
+    validateObject(options, 'options');
+    const { bigint } = options;
+    if (bigint !== undefined) {
+      validateBoolean(bigint, 'options.bigint');
+    }
+  }
+
+  callWithSingleArgCallback(
+    () => fssync.statfsSync(normalizedPath, options),
+    callback
+  );
 }
 
 export function symlink(
@@ -1054,9 +1225,10 @@ export function truncate(
   } else {
     len = lenOrCallback;
   }
+  const normalizedPath = normalizePath(path);
   validateUint32(len, 'len');
   callWithErrorOnlyCallback(() => {
-    fssync.truncateSync(path, len);
+    fssync.truncateSync(normalizedPath, len);
   }, callback);
 }
 
@@ -1075,9 +1247,9 @@ export function utimes(
 ): void {
   atime = getDate(atime);
   mtime = getDate(mtime);
-  path = normalizePath(path);
+  const normalizedPath = normalizePath(path);
   callWithErrorOnlyCallback(() => {
-    fssync.utimesSync(path, atime, mtime);
+    fssync.utimesSync(normalizedPath, atime, mtime);
   }, callback);
 }
 
@@ -1090,13 +1262,13 @@ export function write<T extends NodeJS.ArrayBufferView>(
     | DoubleArgCallback<number, T>,
   encodingLengthOrCallback?:
     | number
-    | BufferEncoding
+    | ValidEncoding
     | DoubleArgCallback<number, T>,
   positionOrCallback?: Position | DoubleArgCallback<number, T>,
   callback?: DoubleArgCallback<number, T>
 ): void {
   let offsetOrOptions: WriteSyncOptions | Position | undefined;
-  let lengthOrEncoding: number | BufferEncoding | null | undefined;
+  let lengthOrEncoding: number | ValidEncoding | undefined;
   let position: Position | undefined;
   if (typeof offsetOptionsPositionOrCallback === 'function') {
     callback = offsetOptionsPositionOrCallback;
@@ -1162,14 +1334,10 @@ export function write<T extends NodeJS.ArrayBufferView>(
 export function writeFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  optionsOrCallback:
-    | ErrorOnlyCallback
-    | BufferEncoding
-    | null
-    | WriteFileOptions,
+  optionsOrCallback: ErrorOnlyCallback | ValidEncoding | WriteFileOptions,
   callback?: ErrorOnlyCallback
 ): void {
-  let options: BufferEncoding | null | WriteFileOptions;
+  let options: ValidEncoding | WriteFileOptions;
   if (typeof optionsOrCallback === 'function') {
     callback = optionsOrCallback;
     options = {
@@ -1227,24 +1395,32 @@ export function writev<T extends NodeJS.ArrayBufferView>(
 
 export function unwatchFile(): void {
   // We currently do not implement file watching.
-  throw new Error('Not implemented');
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
 export function watch(): void {
   // We currently do not implement file watching.
-  throw new Error('Not implemented');
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
 export function watchFile(): void {
   // We currently do not implement file watching.
-  throw new Error('Not implemented');
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
-export function createReadStream(): void {
-  throw new Error('Not implemented');
-}
-export function createWriteStream(): void {
-  throw new Error('Not implemented');
+export function glob(
+  _pattern: string | readonly string[],
+  _options:
+    | GlobOptions
+    | GlobOptionsWithFileTypes
+    | GlobOptionsWithoutFileTypes,
+  _callback: ErrorOnlyCallback
+): void {
+  // We do not yet implement the globSync function. In Node.js, this
+  // function depends heavily on the third party minimatch library
+  // which is not yet available in the workers runtime. This will be
+  // explored for implementation separately in the future.
+  throw new ERR_UNSUPPORTED_OPERATION();
 }
 
 // An API is considered stubbed if it is not implemented by the function
@@ -1305,13 +1481,14 @@ export function createWriteStream(): void {
 // [x][x][x][x] fs.write(fd, string[, position[, encoding]], callback)
 // [x][x][x][x] fs.writeFile(file, data[, options], callback)
 // [x][x][x][x] fs.writev(fd, buffers[, position], callback)//
+// [x][x][x][x] fs.opendir(path[, options], callback)
 // [-][-][-][-] fs.unwatchFile(filename[, listener])
 // [-][-][-][-] fs.watch(filename[, options][, listener])
 // [-][-][-][-] fs.watchFile(filename[, options], listener)
+// [x][x][x][x] fs.cp(src, dest[, options], callback)
 //
-// [x][x][ ][ ] fs.cp(src, dest[, options], callback)
 // [ ][ ][ ][ ] fs.createReadStream(path[, options])
 // [ ][ ][ ][ ] fs.createWriteStream(path[, options])
+//
 // [ ][ ][ ][ ] fs.glob(pattern[, options], callback)
 // [ ][ ][ ][ ] fs.openAsBlob(path[, options])
-// [x][x][ ][ ] fs.opendir(path[, options], callback)

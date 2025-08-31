@@ -70,31 +70,33 @@ const D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED = 'first-unconstrained';
 const D1_SESSION_COMMIT_TOKEN_HTTP_HEADER = 'x-cf-d1-session-commit-token';
 
 class D1Database {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
   protected readonly fetcher: Fetcher;
 
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     this.fetcher = fetcher;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
       this.fetcher
     );
   }
 
-  public prepare(query: string): D1PreparedStatement {
+  prepare(query: string): D1PreparedStatement {
     return new D1PreparedStatement(this.alwaysPrimarySession, query);
   }
 
-  public async batch<T = unknown>(
+  async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     return this.alwaysPrimarySession.batch(statements);
   }
 
-  public async exec(query: string): Promise<D1ExecResult> {
+  async exec(query: string): Promise<D1ExecResult> {
     return this.alwaysPrimarySession.exec(query);
   }
 
-  public withSession(
+  withSession(
     constraintOrBookmark?: D1SessionBookmarkOrConstraint
   ): D1DatabaseSession {
     constraintOrBookmark = constraintOrBookmark?.trim();
@@ -107,7 +109,7 @@ class D1Database {
   /**
    * @deprecated
    */
-  public async dump(): Promise<ArrayBuffer> {
+  async dump(): Promise<ArrayBuffer> {
     return this.alwaysPrimarySession.dump();
   }
 }
@@ -116,7 +118,7 @@ class D1DatabaseSession {
   protected fetcher: Fetcher;
   protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint;
 
-  public constructor(
+  constructor(
     fetcher: Fetcher,
     bookmarkOrConstraint: D1SessionBookmarkOrConstraint
   ) {
@@ -152,11 +154,11 @@ class D1DatabaseSession {
     return this.getBookmark();
   }
 
-  public prepare(sql: string): D1PreparedStatement {
+  prepare(sql: string): D1PreparedStatement {
     return new D1PreparedStatement(this, sql);
   }
 
-  public async batch<T = unknown>(
+  async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     const exec = (await this._sendOrThrow(
@@ -170,7 +172,7 @@ class D1DatabaseSession {
 
   // Returns the latest bookmark we received from all responses processed so far.
   // It does not return constraints that might have be passed during the session creation.
-  public getBookmark(): D1SessionBookmark | null {
+  getBookmark(): D1SessionBookmark | null {
     switch (this.bookmarkOrConstraint) {
       // First to any replica, and then anywhere that satisfies the bookmark.
       case D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED:
@@ -212,7 +214,7 @@ class D1DatabaseSession {
     });
   }
 
-  public async _sendOrThrow<T = unknown>(
+  async _sendOrThrow<T = unknown>(
     endpoint: string,
     query: string | string[],
     params: unknown[],
@@ -229,7 +231,7 @@ class D1DatabaseSession {
     }
   }
 
-  public async _send<T = unknown>(
+  async _send<T = unknown>(
     endpoint: string,
     query: string | string[],
     params: unknown[],
@@ -281,14 +283,14 @@ class D1DatabaseSession {
 }
 
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
-  public constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher) {
     // Will always go to primary, since we won't be ever updating this constraint.
     super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
   }
 
   // We ignore bookmarks for this special type of session,
   // since all queries are sent to the primary.
-  public override _updateBookmark(
+  override _updateBookmark(
     _newBookmark: D1SessionBookmark
   ): D1SessionBookmark | null {
     return null;
@@ -296,7 +298,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 
   // There is no bookmark returned ever by this special type of session,
   // since all queries are sent to the primary.
-  public override getBookmark(): D1SessionBookmark | null {
+  override getBookmark(): D1SessionBookmark | null {
     return null;
   }
 
@@ -305,7 +307,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   // For backwards compatibility they always go to the primary database.
   //
 
-  public async exec(query: string): Promise<D1ExecResult> {
+  async exec(query: string): Promise<D1ExecResult> {
     const lines = query.trim().split('\n');
     const _exec = await this._send('/execute', lines, [], 'NONE');
     const exec = Array.isArray(_exec) ? _exec : [_exec];
@@ -339,7 +341,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
    * DEPRECATED, TO BE REMOVED WITH NEXT BREAKING CHANGE
    * Only applies to the deprecated v1 alpha databases.
    */
-  public async dump(): Promise<ArrayBuffer> {
+  async dump(): Promise<ArrayBuffer> {
     const response = await this._wrappedFetch('http://d1/dump', {
       method: 'POST',
       headers: {
@@ -363,11 +365,13 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
 }
 
 class D1PreparedStatement {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private readonly dbSession: D1DatabaseSession;
-  public readonly statement: string;
-  public readonly params: unknown[];
+  readonly statement: string;
+  readonly params: unknown[];
 
-  public constructor(
+  constructor(
     dbSession: D1DatabaseSession,
     statement: string,
     values?: unknown[]
@@ -377,7 +381,7 @@ class D1PreparedStatement {
     this.params = values || [];
   }
 
-  public bind(...values: unknown[]): D1PreparedStatement {
+  bind(...values: unknown[]): D1PreparedStatement {
     // Validate value types
     const transformedValues = values.map((r: unknown): unknown => {
       const rType = typeof r;
@@ -421,9 +425,9 @@ class D1PreparedStatement {
     );
   }
 
-  public async first<T = unknown>(colName: string): Promise<T | null>;
-  public async first<T = Record<string, unknown>>(): Promise<T | null>;
-  public async first<T = unknown>(
+  async first<T = unknown>(colName: string): Promise<T | null>;
+  async first<T = Record<string, unknown>>(): Promise<T | null>;
+  async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
     const info = firstIfArray(
@@ -453,7 +457,7 @@ class D1PreparedStatement {
   }
 
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
-  public async run<T = Record<string, unknown>>(): Promise<D1Response> {
+  async run<T = Record<string, unknown>>(): Promise<D1Response> {
     return firstIfArray(
       await this.dbSession._sendOrThrow<T>(
         '/execute',
@@ -464,7 +468,7 @@ class D1PreparedStatement {
     );
   }
 
-  public async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
+  async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
     return toArrayOfObjects(
       firstIfArray(
         await this.dbSession._sendOrThrow<T[]>(
@@ -477,7 +481,7 @@ class D1PreparedStatement {
     );
   }
 
-  public async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
+  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
     const s = firstIfArray(
       await this.dbSession._sendOrThrow<Record<string, unknown>>(
         '/query',

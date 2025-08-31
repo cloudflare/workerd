@@ -42,4 +42,6 @@ def wd_cc_binary(
             "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name),
             "//conditions:default": name,
         }),
+        # Propagate InstrumentedFilesInfo through the alias for coverage support
+        testonly = kwargs.get("testonly", False),
     )

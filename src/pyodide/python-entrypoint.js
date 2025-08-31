@@ -18,11 +18,7 @@ import * as cloudflareSocketsModule from 'cloudflare:sockets';
 // python-entrypoint-helper is a BUILTIN and so cannot import `DurableObject` et al.
 // (which are also builtins). As a workaround we call `makeEntrypointClass` here and pass it the
 // appropriate class.
-import {
-  pythonEntrypointClasses,
-  makeEntrypointClass,
-  setDoAnImport,
-} from 'pyodide:python-entrypoint-helper';
+import { setDoAnImport, initPython } from 'pyodide:python-entrypoint-helper';
 
 // Function to dynamically import JavaScript modules from Python
 async function doAnImport(name) {
@@ -30,7 +26,16 @@ async function doAnImport(name) {
 }
 
 // Pass the import function to the helper
-setDoAnImport(doAnImport, cloudflareWorkersModule, cloudflareSocketsModule);
+setDoAnImport(
+  doAnImport,
+  cloudflareWorkersModule,
+  cloudflareSocketsModule,
+  WorkerEntrypoint
+);
+
+// Initialise Python only after the import function has been set above.
+const { handlers, pythonEntrypointClasses, makeEntrypointClass } =
+  await initPython();
 
 function makeEntrypointClassFromNames(classes, baseClass) {
   return classes.map(({ className, methodNames }) => [
@@ -53,4 +58,4 @@ const pythonEntrypoints = Object.fromEntries(
 );
 
 export { pythonEntrypoints };
-export { default } from 'pyodide:python-entrypoint-helper';
+export default 'default' in handlers ? handlers['default'] : handlers;

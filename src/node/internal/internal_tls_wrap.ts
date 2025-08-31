@@ -25,7 +25,7 @@
 
 import {
   Socket,
-  SocketOptions,
+  type SocketOptions,
   _normalizeArgs,
   onConnectionOpened,
   onConnectionClosed,
@@ -66,10 +66,10 @@ const kIsVerified = Symbol('verified');
 
 // @ts-expect-error TS2323 Cannot redeclare error.
 export declare class TLSSocket extends Socket {
-  public _hadError: boolean;
-  public _handle: Socket['_handle'];
-  public _init(): void;
-  public _tlsOptions: TlsOptions &
+  _hadError: boolean;
+  _handle: Socket['_handle'];
+  _init(): void;
+  _tlsOptions: TlsOptions &
     ConnectionOptions &
     SocketOptions &
     TcpSocketConnectOpts & {
@@ -78,62 +78,56 @@ export declare class TLSSocket extends Socket {
       server?: unknown;
       onread?: OnReadOpts;
     };
-  public _secureEstablished: boolean;
-  public _securePending: boolean;
-  public _newSessionPending: boolean;
-  public _controlReleased: boolean;
-  public authorized: boolean;
-  public encrypted: boolean;
-  public handle: ReturnType<TLSSocket['_wrapHandle']>;
-  public servername: null | string;
-  public secureConnecting: boolean;
-  public ssl: TLSSocket['_handle'];
-  public [kRes]: null | Socket['_handle'];
-  public [kIsVerified]: boolean;
-  public [kPendingSession]: null | Buffer;
-  public [kErrorEmitted]: boolean;
-  public [kConnectOptions]?: NormalizedConnectionOptions;
+  _secureEstablished: boolean;
+  _securePending: boolean;
+  _newSessionPending: boolean;
+  _controlReleased: boolean;
+  authorized: boolean;
+  encrypted: boolean;
+  handle: ReturnType<TLSSocket['_wrapHandle']>;
+  servername: null | string;
+  secureConnecting: boolean;
+  ssl: TLSSocket['_handle'];
+  [kRes]: null | Socket['_handle'];
+  [kIsVerified]: boolean;
+  [kPendingSession]: null | Buffer;
+  [kErrorEmitted]: boolean;
+  [kConnectOptions]?: NormalizedConnectionOptions;
 
-  public constructor(
+  constructor(
     socket: Socket | Duplex | undefined,
     opts: TLSSocket['_tlsOptions']
   );
-  public prototype: TLSSocket;
+  prototype: TLSSocket;
 
-  public _destroySSL(): void;
-  public _emitTLSError(error: Error): void;
-  public _finishInit(): void;
-  public _handleTimeout(): void;
-  public _releaseControl(): boolean;
-  public _start(): void;
-  public _tlsError(error: Error): Error | null;
-  public _wrapHandle(
+  _destroySSL(): void;
+  _emitTLSError(error: Error): void;
+  _finishInit(): void;
+  _handleTimeout(): void;
+  _releaseControl(): boolean;
+  _start(): void;
+  _tlsError(error: Error): Error | null;
+  _wrapHandle(
     wrap: null | Socket,
     handle: Socket['_handle'] | null | undefined,
     wrapHasActiveWriteFromPrevOwner: boolean
   ): unknown;
-  public disableRenegotiation(): void;
-  public getX509Certificate(): ReturnType<TLSSocketType['getX509Certificate']>;
-  public setKeyCert(context: unknown): void;
-  public setServername(name: string): void;
-  public setSession(session: string | Buffer): void;
-  public setMaxSendFragment(size: number): boolean;
-  public getCertificate(): ReturnType<TLSSocketType['getCertificate']>;
-  public getPeerX509Certificate(): ReturnType<
-    TLSSocketType['getPeerX509Certificate']
-  >;
-  public renegotiate(
+  disableRenegotiation(): void;
+  getX509Certificate(): ReturnType<TLSSocketType['getX509Certificate']>;
+  setKeyCert(context: unknown): void;
+  setServername(name: string): void;
+  setSession(session: string | Buffer): void;
+  setMaxSendFragment(size: number): boolean;
+  getCertificate(): ReturnType<TLSSocketType['getCertificate']>;
+  getPeerX509Certificate(): ReturnType<TLSSocketType['getPeerX509Certificate']>;
+  renegotiate(
     options: {
       rejectUnauthorized?: boolean | undefined;
       requestCert?: boolean | undefined;
     },
     callback?: (error: Error | null) => void
   ): boolean;
-  public exportKeyingMaterial(
-    length: number,
-    label: string,
-    context?: Buffer
-  ): Buffer;
+  exportKeyingMaterial(length: number, label: string, context?: Buffer): Buffer;
 }
 
 function onnewsessionclient(
@@ -528,7 +522,10 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
     this._handle.socket.closed.then(
       onConnectionClosed.bind(this),
-      this.destroy.bind(socket)
+      (error: unknown): void => {
+        // Do not call this.destroy.bind(this) since user can override it.
+        this.destroy(error as Error);
+      }
     );
   } catch (error) {
     this.destroy(error as Error);
@@ -719,7 +716,7 @@ export function connect(...args: unknown[]): TLSSocket {
     lookup: options.lookup,
     rejectUnauthorized:
       options.rejectUnauthorized !== undefined
-        ? Boolean(options.rejectUnauthorized)
+        ? Boolean(options.rejectUnauthorized) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
         : true,
   });
 

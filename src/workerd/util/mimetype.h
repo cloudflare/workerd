@@ -6,7 +6,6 @@
 #include <workerd/jsg/memory.h>
 
 #include <kj/common.h>
-#include <kj/exception.h>
 #include <kj/map.h>
 #include <kj/string.h>
 

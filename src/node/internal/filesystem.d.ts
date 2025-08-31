@@ -93,8 +93,25 @@ export function readdir(
   options: { recursive: boolean }
 ): DirEntryHandle[];
 
+export function cp(
+  src: URL,
+  dest: URL,
+  options: {
+    deferenceSymlinks: boolean;
+    recursive: boolean;
+    force: boolean;
+    errorOnExist: boolean;
+  }
+): void;
+
 interface FdHandle {
   close(): void;
 }
 
 export function getFdHandle(fd: number): FdHandle;
+
+export interface OpenAsBlobOptions {
+  type?: string | undefined;
+}
+
+export function openAsBlob(path: URL, options: OpenAsBlobOptions): Blob;

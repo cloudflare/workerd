@@ -274,7 +274,9 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -345,7 +347,7 @@ kj_test(
 kj_test(
     src = "multiple-typewrappers-test.c++",
     deps = [
+        ":jsg",
         "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
     ],
 )

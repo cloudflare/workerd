@@ -42,8 +42,7 @@ import {
   finished,
   kOnConstructed,
 } from 'node-internal:streams_util';
-
-import * as process from 'node-internal:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import { EventEmitter } from 'node-internal:events';
 
@@ -76,8 +75,6 @@ import {
 
 import { StringDecoder } from 'node-internal:internal_stringdecoder';
 
-import { isDuplexInstance } from 'node-internal:streams_duplex';
-
 // ======================================================================================
 // ReadableState
 
@@ -87,7 +84,6 @@ export function ReadableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream.
   // These options can be provided separately as readableXXX and writableXXX.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag. Used to make read(n) ignore n and to
   // make all the buffer merging and length checks go away.
@@ -195,16 +191,13 @@ Object.setPrototypeOf(Readable, Stream);
 export function Readable(options) {
   if (!(this instanceof Readable)) return new Readable(options);
 
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the ReadableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  this._readableState = new ReadableState(options, this, isDuplex);
+  this._readableState = new ReadableState(options, this, false);
   if (options) {
     if (typeof options.read === 'function') this._read = options.read;
     if (typeof options.destroy === 'function') this._destroy = options.destroy;
     if (typeof options.construct === 'function')
       this._construct = options.construct;
-    if (options.signal && !isDuplex) addAbortSignal(options.signal, this);
+    if (options.signal) addAbortSignal(options.signal, this);
   }
   Stream.call(this, options);
   construct(this, () => {
@@ -547,7 +540,7 @@ function emitReadable(stream) {
   state.needReadable = false;
   if (!state.emittedReadable) {
     state.emittedReadable = true;
-    process.nextTick(emitReadable_, stream);
+    nextTick(emitReadable_, stream);
   }
 }
 
@@ -578,7 +571,7 @@ function emitReadable_(stream) {
 function maybeReadMore(stream, state) {
   if (!state.readingMore && state.constructed) {
     state.readingMore = true;
-    process.nextTick(maybeReadMore_, stream, state);
+    nextTick(maybeReadMore_, stream, state);
   }
 }
 
@@ -643,7 +636,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   state.pipes.push(dest);
   const doEnd = !pipeOpts || pipeOpts.end !== false;
   const endFn = doEnd ? onend : unpipe;
-  if (state.endEmitted) process.nextTick(endFn);
+  if (state.endEmitted) nextTick(endFn);
   else src.once('end', endFn);
   dest.on('unpipe', onunpipe);
   function onunpipe(readable, unpipeInfo) {
@@ -835,7 +828,7 @@ Readable.prototype.on = function (ev, fn) {
       if (state.length) {
         emitReadable(this);
       } else if (!state.reading) {
-        process.nextTick(nReadingNextTick, this);
+        nextTick(nReadingNextTick, this);
       }
     }
   }
@@ -851,7 +844,7 @@ Readable.prototype.removeListener = function (ev, fn) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -865,7 +858,7 @@ Readable.prototype.removeAllListeners = function (ev) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -908,7 +901,7 @@ Readable.prototype.resume = function () {
 function resume(stream, state) {
   if (!state.resumeScheduled) {
     state.resumeScheduled = true;
-    process.nextTick(resume_, stream, state);
+    nextTick(resume_, stream, state);
   }
 }
 
@@ -1225,7 +1218,7 @@ function endReadable(stream) {
   const state = stream._readableState;
   if (!state.endEmitted) {
     state.ended = true;
-    process.nextTick(endReadableNT, state, stream);
+    nextTick(endReadableNT, state, stream);
   }
 }
 
@@ -1240,7 +1233,7 @@ function endReadableNT(state, stream) {
     state.endEmitted = true;
     stream.emit('end');
     if (stream.writable && stream.allowHalfOpen === false) {
-      process.nextTick(endWritableNT, stream);
+      nextTick(endWritableNT, stream);
     } else if (state.autoDestroy) {
       // In case of duplex streams we need a way to detect
       // if the writable side is ready for autoDestroy as well.
@@ -1344,8 +1337,8 @@ export function from(Readable, iterable, opts) {
   };
   readable._destroy = function (error, cb) {
     close(error).then(
-      () => process.nextTick(cb, error),
-      (err) => process.nextTick(cb, err || error)
+      () => nextTick(cb, error),
+      (err) => nextTick(cb, err || error)
     );
   };
   async function close(error) {
@@ -1605,7 +1598,6 @@ async function forEach(fn, options) {
     await fn(value, options);
     return kEmpty;
   }
-  // eslint-disable-next-line no-unused-vars
   for await (const _ of map.call(this, forEachFn, options));
 }
 

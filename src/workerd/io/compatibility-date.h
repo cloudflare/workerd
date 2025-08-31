@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/io/compatibility-date.capnp.h>
-#include <workerd/io/supported-compatibility-date.capnp.h>
 #include <workerd/io/worker.h>
 
 namespace workerd {
@@ -34,6 +33,12 @@ enum class CompatibilityDateValidation {
 
 void compileCompatibilityFlags(kj::StringPtr compatDate,
     capnp::List<capnp::Text>::Reader compatFlags,
+    CompatibilityFlags::Builder output,
+    Worker::ValidationErrorReporter& errorReporter,
+    bool allowExperimentalFeatures,
+    CompatibilityDateValidation dateValidation);
+void compileCompatibilityFlags(kj::StringPtr compatDate,
+    kj::ArrayPtr<const kj::String> compatFlags,
     CompatibilityFlags::Builder output,
     Worker::ValidationErrorReporter& errorReporter,
     bool allowExperimentalFeatures,

@@ -1,9 +1,9 @@
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-VERSION = "13.7.152.7"
+VERSION = "14.0.365.4"
 
-INTEGRITY = "sha256-ijPP9GLRviiG16iKmcgyPUt9nP2GZdPv0KRRSwilnUY="
+INTEGRITY = "sha256-rw6N1X1qhhGlhYpUyvkuQ9dDRuoSPXCn0tuYq6uJSbw="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -16,21 +16,24 @@ PATCHES = [
     "0008-increase-visibility-of-virtual-method.patch",
     "0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch",
     "0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch",
-    "0011-Revert-TracedReference-deref-API-removal.patch",
-    "0012-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
-    "0013-Update-illegal-invocation-error-message-in-v8.patch",
-    "0014-Implement-cross-request-context-promise-resolve-hand.patch",
-    "0015-Add-another-slot-in-the-isolate-for-embedder.patch",
-    "0016-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
-    "0017-Disable-memory-leak-assert-when-shutting-down-V8.patch",
-    "0018-Enable-V8-shared-linkage.patch",
-    "0019-Modify-where-to-look-for-fast_float-and-simdutf.patch",
-    "0020-Remove-unneded-latomic-linker-flag.patch",
-    "0021-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0022-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
-    "0023-Add-more-sandbox-APIs.patch",
-    "0024-bazel-Port-concurrent-mksnapshot-support.patch",
-    "0025-bazel-Port-V8_USE_ZLIB-support.patch",
+    "0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch",
+    "0012-Update-illegal-invocation-error-message-in-v8.patch",
+    "0013-Implement-cross-request-context-promise-resolve-hand.patch",
+    "0014-Add-another-slot-in-the-isolate-for-embedder.patch",
+    "0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch",
+    "0016-Disable-memory-leak-assert-when-shutting-down-V8.patch",
+    "0017-Enable-V8-shared-linkage.patch",
+    "0018-Modify-where-to-look-for-fast_float-and-simdutf.patch",
+    "0019-Remove-unneded-latomic-linker-flag.patch",
+    "0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
+    "0021-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
+    "0022-Port-concurrent-mksnapshot-support.patch",
+    "0023-Port-V8_USE_ZLIB-support.patch",
+    "0024-Modify-where-to-look-for-dragonbox.patch",
+    "0025-Disable-slow-handle-check.patch",
+    "0026-Workaround-for-builtin-can-allocate-issue.patch",
+    "0027-Implement-additional-Exception-construction-methods.patch",
+    "0028-Export-icudata-file-to-facilitate-embedding-it.patch",
 ]
 
 # V8 and its dependencies
@@ -59,7 +62,7 @@ def deps_v8():
     git_repository(
         name = "com_googlesource_chromium_icu",
         build_file = "@v8//:bazel/BUILD.icu",
-        commit = "4c8cc4b365a505ce35be1e0bd488476c5f79805d",
+        commit = "1b2e3e8a421efae36141a7b932b41e315b089af8",
         patch_cmds = ["find source -name BUILD.bazel | xargs rm"],
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
@@ -67,9 +70,9 @@ def deps_v8():
 
     http_archive(
         name = "perfetto",
-        integrity = "sha256-wiMNBHkOtQIxpYYWo/H/bc93LY4iAzOncRYF+Zxcbbk=",
-        strip_prefix = "perfetto-50.1",
-        url = "https://github.com/google/perfetto/archive/refs/tags/v50.1.tar.gz",
+        integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
+        strip_prefix = "perfetto-51.2",
+        url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
     )
 
     # For use with perfetto

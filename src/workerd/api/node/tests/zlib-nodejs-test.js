@@ -2631,3 +2631,30 @@ export const compatFlagTest = {
     ]);
   },
 };
+
+export const stateSizeTest = {
+  test() {
+    const Uint32Array_orig = Uint32Array;
+    assert.throws(
+      () => {
+        const message = 'Come on, Fhqwhgads.';
+        const buffer = Buffer.from(message);
+        globalThis.Uint32Array = function (...args) {
+          if (args.length == 1 && arguments[0] == 2) {
+            return new Uint32Array_orig(new ArrayBuffer(32), 32);
+          }
+          return new Uint32Array_orig(...args);
+        };
+
+        const zipper = new zlib.Gzip();
+        const zipped = zipper._processChunk(buffer, zlib.constants.FINISH);
+        const unzipper = new zlib.Gunzip();
+        unzipper._processChunk(zipped, zlib.constants.FINISH);
+      },
+      {
+        message: /Invalid write result buffer/,
+      }
+    );
+    globalThis.Uint32Array = Uint32Array_orig;
+  },
+};

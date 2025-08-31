@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "nodejs-process-legacy-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "process-legacy-nodejs-test.js"),
+        ],
+        compatibilityDate = "2024-12-28",
+        compatibilityFlags = [
+          "nodejs_compat_populate_process_env",
+          "nodejs_compat",
+          "experimental"
+        ],
+        bindings = [
+          (name = "FOO", text = "BAR"),
+        ],
+      )
+    ),
+  ],
+);

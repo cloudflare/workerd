@@ -221,7 +221,7 @@ class MemoryTracker final {
       kj::Maybe<kj::StringPtr> nodeName = kj::none);
 
   template <typename T,
-      typename test = typename std::enable_if<std::numeric_limits<T>::is_specialized, bool>::type,
+      typename test = typename std::enable_if_t<std::numeric_limits<T>::is_specialized, bool>,
       typename dummy = bool>
   inline void trackField(kj::StringPtr edgeName,
       const kj::Array<T>& value,

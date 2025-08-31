@@ -997,7 +997,7 @@ struct DeserializeInvoker<TypeWrapper,
 // SFINAE to detect if a type has a static method called `constructor`.
 template <typename T, typename Constructor = decltype(&T::constructor)>
 constexpr bool hasConstructorMethod(T*) {
-  static_assert(!std::is_member_function_pointer<Constructor>::value,
+  static_assert(!std::is_member_function_pointer_v<Constructor>,
       "JSG resource type `constructor` member functions must be static.");
   // TODO(cleanup): Write our own isMemberFunctionPointer and put it in KJ so we don't have to pull
   //   in <type_traits>. (See the "Motivation" section of Boost.CallableTraits for why I didn't just
@@ -1378,9 +1378,6 @@ struct ResourceTypeBuilder {
     instance->SetLazyDataProperty(v8Name, &Gcb::callback, v8::Local<v8::Value>(), attributes);
   }
 
-  template <const char* name, const char* moduleName, bool readonly>
-  inline void registerLazyJsInstanceProperty() { /* implemented in second stage */ }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() {
     using Gcb = GetterCallback<TypeWrapper, name, Getter, getter, isContext>;
@@ -1493,36 +1490,6 @@ struct JsSetup {
     ModuleRegistryImpl<TypeWrapper>::from(js)->addBuiltinBundle(bundle);
   }
 
-  template <const char* moduleName>
-  struct LazyJsInstancePropertyCallback {
-    static void callback(
-        v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
-      liftKj(info, [&]() {
-        static const auto path = kj::Path::parse(moduleName);
-
-        auto& js = Lock::from(info.GetIsolate());
-        auto context = js.v8Context();
-        auto& moduleInfo = KJ_REQUIRE_NONNULL(ModuleRegistry::from(js)->resolve(js, path, kj::none,
-                                                  ModuleRegistry::ResolveOption::INTERNAL_ONLY),
-            "Could not resolve bootstrap module", moduleName);
-        auto module = moduleInfo.module.getHandle(js);
-        jsg::instantiateModule(js, module);
-
-        auto moduleNs = check(module->GetModuleNamespace()->ToObject(context));
-        auto result = check(moduleNs->Get(context, property));
-        return result;
-      });
-    }
-  };
-
-  template <const char* propertyName, const char* moduleName, bool readonly>
-  inline void registerLazyJsInstanceProperty() {
-    using Callback = LazyJsInstancePropertyCallback<moduleName>;
-    check(context->Global()->SetLazyDataProperty(context, v8StrIntern(js.v8Isolate, propertyName),
-        Callback::callback, v8::Local<v8::Value>(),
-        readonly ? v8::PropertyAttribute::ReadOnly : v8::PropertyAttribute::None));
-  }
-
   // the rest of the callbacks are empty
 
   template <typename Type>
@@ -1591,6 +1558,8 @@ class ModuleRegistryBase {
   virtual ~ModuleRegistryBase() noexcept(false) {}
   virtual kj::Own<void> attachToIsolate(
       Lock& js, const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT = 0;
+
+  virtual const capnp::SchemaLoader& getSchemaLoader() const = 0;
 };
 
 struct NewContextOptions {
@@ -1747,11 +1716,13 @@ class ResourceWrapper {
     }
 
     // Store a pointer to this object in slot 1, to be extracted in callbacks.
-    context->SetAlignedPointerInEmbedderData(1, ptr.get());
+    jsg::setAlignedPointerInEmbedderData(
+        context, jsg::ContextPointerSlot::GLOBAL_WRAPPER, ptr.get());
     // We need to set the highest used index in every context we create to be a nullptr
     // This is because we might later on call GetAlignedPointerFromEmbedderData which fails with
     // a fatal error if the array is smaller than the given index.
-    context->SetAlignedPointerInEmbedderData(3, nullptr);
+    jsg::setAlignedPointerInEmbedderData(
+        context, jsg::ContextPointerSlot::MAX_POINTER_SLOT, nullptr);
 
     // (Note: V8 docs say: "Note that index 0 currently has a special meaning for Chrome's
     // debugger." We aren't Chrome, but it does appear that some versions of V8 will mess with
@@ -1761,20 +1732,26 @@ class ResourceWrapper {
     // Expose the type of the global scope in the global scope itself.
     exposeGlobalScopeType(isolate, context);
 
-    kj::Maybe<kj::Own<void>> maybeNewModuleRegistry;
-    KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
-      JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-        // The context must be current for attachToIsolate to succeed.
-        maybeNewModuleRegistry = newModuleRegistry.attachToIsolate(js, compilationObserver);
-      });
-    } else {
-      ptr->setModuleRegistry(
-          ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver));
-    }
+    ptr->setModuleRegistryBackingOwner(([&]() -> kj::Own<void> {
+      KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
+        return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
+          // The new module registry actually owns the schema loader here and
+          // will keep it alive for the necessay lifetime. We can pass a fake
+          // own here that does not actually own the loader in this case.
+          ptr->setSchemaLoader(kj::Own<const capnp::SchemaLoader>(
+              &newModuleRegistry.getSchemaLoader(), kj::NullDisposer::instance));
+
+          // The context must be current for attachToIsolate to succeed.
+          return newModuleRegistry.attachToIsolate(js, compilationObserver);
+        });
+      } else {
+        return ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
+      }
+    })());
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       setupJavascript(js);
-      return JsContext<T>(context, kj::mv(ptr), kj::mv(maybeNewModuleRegistry));
+      return JsContext<T>(context, kj::mv(ptr));
     });
   }
 

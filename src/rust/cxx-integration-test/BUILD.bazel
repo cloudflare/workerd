@@ -15,7 +15,7 @@ wd_rust_crate(
         "//src/rust/cxx-integration",
         "@crates_vendor//:tokio",
         "@crates_vendor//:tracing",
-        "@kj-rs//:kj-rs",
+        "@workerd-cxx//kj-rs",
     ],
 )
 
@@ -26,6 +26,6 @@ kj_test(
         "//deps/rust:runtime",
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/kj:kj-async",
-        "@kj-rs//:kj-rs",
+        "@workerd-cxx//kj-rs",
     ],
 )

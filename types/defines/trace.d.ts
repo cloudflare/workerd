@@ -9,7 +9,7 @@ interface FetchEventInfo {
   readonly type: "fetch";
   readonly method: string;
   readonly url: string;
-  readonly cfJson: string;
+  readonly cfJson?: object;
   readonly headers: Header[];
 }
 
@@ -66,11 +66,6 @@ interface HibernatableWebSocketEventInfo {
                  HibernatableWebSocketEventInfoMessage;
 }
 
-interface Resume {
-  readonly type: "resume";
-  readonly attachment?: any;
-}
-
 interface CustomEventInfo {
   readonly type: "custom";
 }
@@ -98,6 +93,7 @@ interface Trigger {
 
 interface Onset {
   readonly type: "onset";
+  readonly attributes: Attribute[];
   readonly dispatchNamespace?: string;
   readonly entrypoint?: string;
   readonly executionModel: string;
@@ -108,7 +104,7 @@ interface Onset {
   readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
                  AlarmEventInfo | QueueEventInfo | EmailEventInfo |
                  TraceEventInfo | HibernatableWebSocketEventInfo |
-                 Resume | CustomEventInfo;
+                 CustomEventInfo;
 }
 
 interface Outcome {
@@ -116,10 +112,6 @@ interface Outcome {
   readonly outcome: EventOutcome;
   readonly cpuTime: number;
   readonly wallTime: number;
-}
-
-interface Hibernate {
-  readonly type: "hibernate";
 }
 
 interface SpanOpen {
@@ -149,20 +141,12 @@ interface Exception {
 interface Log {
   readonly type: "log";
   readonly level: "debug" | "error" | "info" | "log" | "warn";
-  readonly message: string;
+  readonly message: object;
 }
 
 interface Return {
   readonly type: "return";
   readonly info?: FetchResponseInfo;
-}
-
-interface Link {
-  readonly type: "link";
-  readonly label?: string;
-  readonly traceId: string;
-  readonly invocationId: string;
-  readonly spanId: string;
 }
 
 interface Attribute {
@@ -175,19 +159,39 @@ interface Attributes {
   readonly info: Attribute[];
 }
 
-interface TailEvent {
-  readonly traceId: string;
+type EventType =
+  | Onset
+  | Outcome
+  | SpanOpen
+  | SpanClose
+  | DiagnosticChannelEvent
+  | Exception
+  | Log
+  | Return
+  | Attributes;
+
+interface TailEvent<Event extends EventType> {
   readonly invocationId: string;
   readonly spanId: string;
   readonly timestamp: Date;
   readonly sequence: number;
-  readonly event: Onset | Outcome | Hibernate | SpanOpen | SpanClose | DiagnosticChannelEvent | Exception | Log | Return | Link | Attributes;
+  readonly event: Event;
 }
 
-type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-type TailEventHandlerName = "outcome" | "hibernate" | "spanOpen" | "spanClose" |
-                            "diagnosticChannel" | "exception" | "log" | "return" | "link" | "attributes";
-type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
-type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
+type TailEventHandler<Event extends EventType = EventType> = (
+  event: TailEvent<Event>
+) => void | Promise<void>;
 
+type TailEventHandlerObject = {
+  outcome?: TailEventHandler<Outcome>;
+  spanOpen?: TailEventHandler<SpanOpen>;
+  spanClose?: TailEventHandler<SpanClose>;
+  diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+  exception?: TailEventHandler<Exception>;
+  log?: TailEventHandler<Log>;
+  return?: TailEventHandler<Return>;
+  attributes?: TailEventHandler<Attributes>;
+};
+
+type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }

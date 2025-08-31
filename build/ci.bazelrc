@@ -43,7 +43,7 @@ build:ci-test --config=v8-codegen-opt
 # LLVM produces a bit more debug info on macOS by default to facilitate debugging with
 # LLDB. This is not needed for this use case, so disable it using -fno-standalone-debug –
 # this is already the default for Linux/Windows.
-build:ci-limit-storage --build_tag_filters=-off-by-default,-benchmark
+build:ci-limit-storage --build_tag_filters=-off-by-default,-workerd-benchmark
 build:ci-limit-storage --copt="-g1"
 build:ci-limit-storage --copt="-fno-standalone-debug"
 
@@ -79,6 +79,9 @@ build:ci-macOS --copt=-UDEBUG
 
 build:ci-macOS-debug --config=debug
 
+# Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
+test:ci-macOS --spawn_strategy=local
+
 build:ci-windows --config=windows_no_dbg
 build:ci-windows-debug --config=debug
 
@@ -89,6 +92,14 @@ test:ci-linux --test_size_filters=
 test:ci-macOS --test_size_filters=
 test:ci-windows --test_size_filters=
 
-# Enable reporting for WPT tests
-test:ci-test --test_env=GEN_TEST_REPORT=1
-test:ci-test --test_env=GEN_TEST_STATS=1
+# Enable reporting whenever WPT tests are run
+test:ci-test --config=wpt-test
+common:wpt-test --test_env=GEN_TEST_REPORT=1
+common:wpt-test --test_env=GEN_TEST_STATS=1
+
+# Config to produce a full WPT report (also disables test caching)
+common:wpt-report --config=wpt-test
+common:wpt-report --cache_test_results=no
+
+# Let tests know they're running in CI
+test:ci-test --test_env=CI=true

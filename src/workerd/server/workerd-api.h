@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "workerd/api/pyodide/pyodide.h"
+
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
@@ -41,13 +43,10 @@ class WorkerdApi final: public Worker::Api {
       kj::Own<JsgIsolateObserver> observer,
       api::MemoryCacheProvider& memoryCacheProvider,
       const PythonConfig& pythonConfig,
-      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry,
-      kj::Own<VirtualFileSystem> vfs);
+      kj::Maybe<kj::Own<jsg::modules::ModuleRegistry>> newModuleRegistry);
   ~WorkerdApi() noexcept(false);
 
   static const WorkerdApi& from(const Worker::Api&);
-
-  const VirtualFileSystem& getVirtualFileSystem() const override;
 
   kj::Own<jsg::Lock> lock(jsg::V8StackScope& stackScope) const override;
   CompatibilityFlags::Reader getFeatureFlags() const override;
@@ -67,14 +66,14 @@ class WorkerdApi final: public Worker::Api {
 
   static Worker::Script::Source extractSource(kj::StringPtr name,
       config::Worker::Reader conf,
+      CompatibilityFlags::Reader featureFlags,
       Worker::ValidationErrorReporter& errorReporter);
-
-  kj::Maybe<const api::pyodide::EmscriptenRuntime&> getEmscriptenRuntime() const override;
 
   void compileModules(jsg::Lock& lock,
       const Worker::Script::ModulesSource& source,
       const Worker::Isolate& isolate,
-      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const override;
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+      SpanParent parentSpan) const override;
 
   kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& lock,
       const Worker::Script::ScriptSource& source,
@@ -226,6 +225,23 @@ class WorkerdApi final: public Worker::Api {
       }
     };
     struct UnsafeEval {};
+
+    struct ActorClass {
+      uint channel;
+
+      ActorClass clone() const {
+        return *this;
+      }
+    };
+
+    struct WorkerLoader {
+      uint channel;
+
+      WorkerLoader clone() const {
+        return *this;
+      }
+    };
+
     kj::String name;
     kj::OneOf<Json,
         Fetcher,
@@ -242,7 +258,9 @@ class WorkerdApi final: public Worker::Api {
         AnalyticsEngine,
         Hyperdrive,
         UnsafeEval,
-        MemoryCache>
+        MemoryCache,
+        ActorClass,
+        WorkerLoader>
         value;
 
     Global clone() const;
@@ -266,6 +284,7 @@ class WorkerdApi final: public Worker::Api {
   // Convert a module definition from workerd config to a Worker::Script::Module (which may contain
   // string pointers into the config).
   static Worker::Script::Module readModuleConf(config::Worker::Module::Reader conf,
+      CompatibilityFlags::Reader featureFlags,
       kj::Maybe<Worker::ValidationErrorReporter&> errorReporter = kj::none);
 
   using ModuleFallbackCallback = Worker::Api::ModuleFallbackCallback;
@@ -279,14 +298,18 @@ class WorkerdApi final: public Worker::Api {
       const PythonConfig& pythonConfig,
       const jsg::Url& bundleBase,
       capnp::List<config::Extension>::Reader extensions,
-      kj::Maybe<kj::String> fallbackService = kj::none);
+      kj::Maybe<kj::String> fallbackService = kj::none,
+      kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts = kj::none);
 
  private:
   struct Impl;
   kj::Own<Impl> impl;
 };
 
-kj::Maybe<jsg::Bundle::Reader> fetchPyodideBundle(
-    const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version);
+kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
+
+// Helper method for defining actor storage server treating all reads as empty, defined here to be
+// used by test-fixture and server.
+kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

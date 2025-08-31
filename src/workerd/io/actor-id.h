@@ -36,6 +36,9 @@ class ActorIdFactory {
     // to it. Otherwise, returns null.
     virtual kj::Maybe<kj::StringPtr> getName() const = 0;
 
+    // Get the jurisdiction that was used when creating this ID.
+    virtual kj::Maybe<kj::StringPtr> getJurisdiction() const = 0;
+
     // Compare with another ID.
     //
     // This is allowed to assume the other ID was created by some other ActorIdFactory passed to
@@ -50,7 +53,8 @@ class ActorIdFactory {
   virtual kj::Own<ActorId> idFromName(kj::String name) = 0;
   virtual kj::Own<ActorId> idFromString(kj::String str) = 0;
   virtual bool matchesJurisdiction(const ActorId& id) = 0;
-  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(kj::StringPtr jurisdiction) = 0;
+  virtual kj::Own<ActorIdFactory> cloneWithJurisdiction(
+      kj::Maybe<kj::StringPtr> maybeJurisdiction) = 0;
 };
 
 }  // namespace workerd

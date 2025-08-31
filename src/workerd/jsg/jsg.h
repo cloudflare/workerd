@@ -13,6 +13,7 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/macro-meta.h>
 #include <workerd/jsg/memory.h>
+#include <workerd/util/strong-bool.h>
 
 #include <v8-external-memory-accounter.h>
 #include <v8-forward.h>
@@ -20,6 +21,7 @@
 #include <v8-profiler.h>
 #include <v8-regexp.h>
 
+#include <capnp/schema-loader.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
 #include <kj/function.h>
@@ -402,25 +404,6 @@ namespace workerd::jsg {
         true>();                                                                                   \
   } while (false)
 
-// A lazy property which value will be supplied by javascript implementation.
-// On first property access given module name is instantiated and its export with a
-// given property name is used for the value.
-// Common use-case is to supply class or function implementations.
-#define JSG_LAZY_JS_INSTANCE_PROPERTY(name, moduleName)                                            \
-  do {                                                                                             \
-    static const char NAME[] = #name;                                                              \
-    static const char MODULE_NAME[] = moduleName;                                                  \
-    registry.template registerLazyJsInstanceProperty<NAME, MODULE_NAME, false>();                  \
-  } while (false)
-
-// JSG_LAZY_JS_INSTANCE_PROPERTY variant that does not let the property be changed by user script.
-#define JSG_LAZY_JS_INSTANCE_READONLY_PROPERTY(name, moduleName)                                   \
-  do {                                                                                             \
-    static const char NAME[] = #name;                                                              \
-    static const char MODULE_NAME[] = moduleName;                                                  \
-    registry.template registerLazyJsInstanceProperty<NAME, MODULE_NAME, true>();                   \
-  } while (false)
-
 // Use inside a JSG_RESOURCE_TYPE block to declare a property that should be shown when calling
 // `node:util`'s `inspect()` function on values of this type. These properties will be shown when
 // `console.log()`ing too, and should be used to expose internal state useful for debugging.
@@ -783,6 +766,7 @@ enum SetDataIndex {
 // These types can be used in C++ to represent various JavaScript idioms / Web IDL types.
 
 class Lock;
+WD_STRONG_BOOL(RequireEsm);
 
 // Arbitrary V8 data, wrapped for storage from C++. You can't do much with it, so instead you
 // should probably use V8Ref<T>, a version of this that's strongly typed.
@@ -1044,6 +1028,9 @@ class LenientOptional: public kj::Maybe<T> {
 class SelfRef: public V8Ref<v8::Object> {
  public:
   using V8Ref::V8Ref;
+
+  // Convert the V8Ref<v8::Object> to a V8Ref<v8::Value>
+  inline Value asValue(Lock& js) const;
 };
 
 // TODO(cleanup): This class was meant to be a ByteString (characters in the range [0,255]), but
@@ -1163,73 +1150,6 @@ template <typename T>
 constexpr bool isArguments() {
   return IsArguments_<T>::value;
 }
-
-// An array of local values placed on the end of a parameter list to capture all trailing values
-class Varargs {
-  // TODO(cleanup): Can all use cases of this be replaced with Arguments<Value>?
- public:
-  Varargs(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args)
-      : startIndex(index),
-        args(args) {
-    if (index > args.Length()) {
-      this->length = 0;
-    } else {
-      this->length = args.Length() - index;
-    }
-  }
-  Varargs(Varargs&&) = default;
-  KJ_DISALLOW_COPY(Varargs);
-
-  size_t size() {
-    return length;
-  }
-
-  Value operator[](size_t index) {
-    return Value(args.GetIsolate(), args[startIndex + index]);
-  }
-
-  class Iterator {
-    // TODO(cleanup): This is similar to capnp::_::IndexingIterator. Maybe a common utility class should be added to KJ.
-   public:
-    inline Iterator(size_t index, const v8::FunctionCallbackInfo<v8::Value>& args)
-        : index(index),
-          args(args) {}
-
-    inline Value operator*() const {
-      return Value(args.GetIsolate(), args[index]);
-    }
-    inline Iterator& operator++() {
-      ++index;
-      return *this;
-    }
-    inline Iterator operator++(int) {
-      return Iterator(index++, args);
-    }
-    inline ptrdiff_t operator-(const Iterator& other) const {
-      return index - other.index;
-    }
-
-    inline bool operator==(const Iterator& other) const {
-      return index == other.index && &args == &other.args;
-    }
-
-   private:
-    size_t index;
-    const v8::FunctionCallbackInfo<v8::Value>& args;
-  };
-
-  Iterator begin() {
-    return Iterator(startIndex, args);
-  }
-  Iterator end() {
-    return Iterator(startIndex + length, args);
-  };
-
- private:
-  size_t startIndex;
-  size_t length;
-  const v8::FunctionCallbackInfo<v8::Value>& args;
-};
 
 template <typename T>
 constexpr bool resourceNeedsGcTracing();
@@ -1786,16 +1706,19 @@ class ContextGlobal {
 
   KJ_DISALLOW_COPY_AND_MOVE(ContextGlobal);
 
-  ModuleRegistry& getModuleRegistry() {
-    return *moduleRegistry;
-  }
+  const capnp::SchemaLoader& getSchemaLoader();
 
  private:
-  kj::Own<ModuleRegistry> moduleRegistry;
+  // This opaque owner is used to keep the ModuleRegistry alive as long as the ContextGlobal
+  // object is alive. This may be the legacy or new module registry, depending which one is
+  // in use. We don't care about the actual type here, just that it is kept alive.
+  kj::Own<void> moduleRegistryBackingOwner;
+  kj::Maybe<kj::Own<const capnp::SchemaLoader>> maybeSchemaLoader;
 
-  void setModuleRegistry(kj::Own<ModuleRegistry> registry) {
-    moduleRegistry = kj::mv(registry);
+  void setModuleRegistryBackingOwner(kj::Own<void> registry) {
+    moduleRegistryBackingOwner = kj::mv(registry);
   }
+  void setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader);
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -1810,12 +1733,9 @@ class JsContext {
   static_assert(
       std::is_base_of_v<ContextGlobal, T>, "context global type must extend jsg::ContextGlobal");
 
-  JsContext(v8::Local<v8::Context> handle,
-      Ref<T> object,
-      kj::Maybe<kj::Own<void>> maybeNewRegistryHandle = kj::none)
+  JsContext(v8::Local<v8::Context> handle, Ref<T> object)
       : handle(v8::Isolate::GetCurrent(), handle),
-        object(kj::mv(object)),
-        maybeNewRegistryHandle(kj::mv(maybeNewRegistryHandle)) {}
+        object(kj::mv(object)) {}
 
   JsContext(JsContext&&) = default;
   KJ_DISALLOW_COPY(JsContext);
@@ -1835,7 +1755,6 @@ class JsContext {
  private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
-  kj::Maybe<kj::Own<void>> maybeNewRegistryHandle;
 };
 
 class BufferSource;
@@ -2270,7 +2189,8 @@ class JsMessage;
   V(Map)                                                                                           \
   V(Set)                                                                                           \
   V(Promise)                                                                                       \
-  V(Proxy)
+  V(Proxy)                                                                                         \
+  V(Function)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
@@ -2312,6 +2232,7 @@ class ExternalMemoryTarget: public kj::AtomicRefcounted,
 
  private:
   void maybeDeferAdjustment(ssize_t amount) const;
+  void adjustNow(Lock& js, ssize_t amount) const;
 
   // Mutable so that it can be set null when the isolate is destroyed.
   mutable std::atomic<v8::Isolate*> isolate;
@@ -2339,9 +2260,15 @@ class ExternalMemoryAdjustment final {
   // Adjust the amount of external memory report up or down.
   void adjust(ssize_t amount);
 
+  // Like adjust, except that the adjustment is applied immediately with no deferral.
+  void adjustNow(Lock& js, ssize_t amount);
+
   // Set a specific amount of external memory to be attributed, overriding
   // the previous amount.
   void set(size_t amount);
+
+  // Like set(), except that the adjustment is applied immediately with no deferral.
+  void setNow(Lock& js, size_t amount);
 
   inline size_t getAmount() const {
     return amount;
@@ -2492,9 +2419,9 @@ class Lock {
   // error, this reproduces the original error. If it is not a tunneled error, then it is treated
   // as an internal error: the KJ exception message is logged to stderr, and a JavaScript error
   // is returned with a generic description.
-  Value exceptionToJs(kj::Exception&& exception);
+  Value exceptionToJs(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
-  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception);
+  JsRef<JsValue> exceptionToJsValue(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Encodes the given JavaScript exception into a KJ exception, formatting the description in
   // such a way that hopefully exceptionToJs() can reproduce something equivalent to the original
@@ -2511,8 +2438,8 @@ class Lock {
   // via JSG understand how to handle this and propagate the exception back to JavaScript.
   [[noreturn]] void throwException(Value&& exception);
 
-  [[noreturn]] void throwException(kj::Exception&& exception) {
-    throwException(exceptionToJs(kj::mv(exception)));
+  [[noreturn]] void throwException(kj::Exception&& exception, ExceptionToJsOptions options = {}) {
+    throwException(exceptionToJs(kj::mv(exception), options));
   }
 
   [[noreturn]] void throwException(const JsValue& exception);
@@ -2532,7 +2459,11 @@ class Lock {
   // func() and errorHandler() must return the same type; the value they return will be returned
   // from `tryCatch()` itself.
   template <typename Func, typename ErrorHandler>
-  auto tryCatch(Func&& func, ErrorHandler&& errorHandler) -> decltype(func()) {
+  auto tryCatch(Func&& func,
+      ErrorHandler&& errorHandler,
+      // If an exception occurs, convert KJ exceptions to JS exceptions
+      // using these options.
+      ExceptionToJsOptions options = {}) -> decltype(func()) {
     Value error = nullptr;
 
     {
@@ -2555,7 +2486,7 @@ class Lock {
 
         error = Value(v8Isolate, tryCatch.Exception());
       } catch (kj::Exception& e) {
-        error = exceptionToJs(kj::mv(e));
+        error = exceptionToJs(kj::mv(e), options);
       }
     }
 
@@ -2599,11 +2530,11 @@ class Lock {
 
   // Construct an immediately-rejected promise throwing the given exception.
   template <typename T>
-  Promise<T> rejectedPromise(kj::Exception&& exception);
+  Promise<T> rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Like above, but return a pure-JS promise, not a typed Promise.
   JsPromise rejectedJsPromise(jsg::JsValue exception);
-  JsPromise rejectedJsPromise(kj::Exception&& exception);
+  JsPromise rejectedJsPromise(kj::Exception&& exception, ExceptionToJsOptions options = {});
 
   // Like `kj::evalNow()`, but returns a jsg::Promise for the result. Synchronous exceptions are
   // caught and returned as a rejected promise.
@@ -2711,8 +2642,11 @@ class Lock {
   void installJspi();
 
   void setCaptureThrowsAsRejections(bool capture);
+  void setUsingEnhancedErrorSerialization();
+  bool isUsingEnhancedErrorSerialization() const;
 
   void setNodeJsCompatEnabled();
+  void setNodeJsProcessV2Enabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
   void setToStringTag();
@@ -2816,6 +2750,13 @@ class Lock {
   // not in the right sandbox.
   BufferSource arrayBuffer(kj::Array<kj::byte> data) KJ_WARN_UNUSED_RESULT;
 
+  enum class AllocOption { ZERO_INITIALIZED, UNINITIALIZED };
+
+  // Utility method to safely allocate a v8::BackingStore with allocation failure handling.
+  // Throws a javascript error if allocation fails.
+  std::unique_ptr<v8::BackingStore> allocBackingStore(
+      size_t size, AllocOption init_mode = AllocOption::ZERO_INITIALIZED) KJ_WARN_UNUSED_RESULT;
+
   enum RegExpFlags {
     kNONE = v8::RegExp::Flags::kNone,
     kGLOBAL = v8::RegExp::Flags::kGlobal,
@@ -2882,7 +2823,17 @@ class Lock {
 
   // Resolve a module namespace from the given specifier.
   // This variation includes modules from the worker bundle.
-  kj::Maybe<JsObject> resolveModule(kj::StringPtr specifier);
+  kj::Maybe<JsObject> resolveModule(
+      kj::StringPtr specifier, RequireEsm requireEsm = RequireEsm::NO);
+
+  // Returns the capnp::SchemaLoader for this isolate/context
+  template <typename T>
+  const capnp::SchemaLoader& getCapnpSchemaLoader() const {
+    return KJ_ASSERT_NONNULL(
+        jsg::getAlignedPointerFromEmbedderData<T>(
+            v8Isolate->GetCurrentContext(), ContextPointerSlot::GLOBAL_WRAPPER))
+        .getSchemaLoader();
+  }
 
  private:
   // Mark the jsg::Lock as being disallowed from being passed as a parameter into
@@ -3032,6 +2983,10 @@ inline v8::Local<v8::Data> Data::getHandle(jsg::Lock& js) const {
 template <typename T>
 inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
   return handle.Get(js.v8Isolate);
+}
+
+inline Value SelfRef::asValue(Lock& js) const {
+  return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
 }
 
 }  // namespace workerd::jsg

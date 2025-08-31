@@ -2,9 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 //
-/* eslint-disable */
-
-// prettier-ignore
 import {
   Writable,
   WritableState,
@@ -12,11 +9,5 @@ import {
   toWeb,
 } from 'node-internal:streams_writable';
 
-// prettier-ignore
-export {
-  Writable,
-  WritableState,
-  fromWeb,
-  toWeb,
-};
+export { Writable, WritableState, fromWeb, toWeb };
 export default Writable;

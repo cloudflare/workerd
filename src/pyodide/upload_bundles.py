@@ -1,15 +1,16 @@
+import argparse
 import json
+import re
 import subprocess
 import sys
-from base64 import b64encode
 from copy import deepcopy
+from dataclasses import dataclass
 from functools import cache
-from hashlib import file_digest
 from os import environ
 from pathlib import Path
 
 import requests
-from boto3 import client
+from tool_utils import b64digest
 
 
 def cquery(rule):
@@ -56,7 +57,7 @@ def bundle_url(**kwds):
 def get_backport(ver):
     info = bundle_version_info()[ver]
     backport = int(info["backport"])
-    for b in range(backport + 1, backport + 10):
+    for b in range(backport + 1, backport + 20):
         info["backport"] = b
         url = bundle_url(**info)
         res = requests.head(url)
@@ -65,7 +66,75 @@ def get_backport(ver):
         res.raise_for_status()
 
 
-def main():
+def _get_replacer(backport, integrity):
+    def replace_values(match):
+        prefix = match.group(1)
+        backport_key = match.group(2)
+        middle = match.group(3)
+        integrity_key = match.group(4)
+        return (
+            f'{prefix}{backport_key}"{backport}",{middle}{integrity_key}"{integrity}",'
+        )
+
+    return replace_values
+
+
+@dataclass
+class BundleInfo:
+    version: str
+    backport: int
+    integrity: str
+    path: Path
+
+
+def update_python_metadata_bzl(bundles: list[BundleInfo]) -> None:
+    """Update python_metadata.bzl file with new backport and integrity values."""
+    metadata_path = (
+        Path(__file__).parent.parent.parent / "build" / "python_metadata.bzl"
+    )
+    content = metadata_path.read_text()
+
+    for info in bundles:
+        # Find the version block and update backport and integrity
+        version_pattern = rf'(\s+{{\s*\n\s*"name":\s*"{re.escape(info.version)}",.*?)("backport":\s*)"[^"]*",(.*?)("integrity":\s*)"[^"]*",'
+
+        content = re.sub(
+            version_pattern,
+            _get_replacer(info.backport, info.integrity),
+            content,
+            flags=re.DOTALL,
+        )
+
+    metadata_path.write_text(content)
+
+
+def print_info(info: BundleInfo) -> None:
+    print(f"Uploading version {info.version} backport {info.backport}")
+    i = " " * 8
+    print("Update python_metadata.bzl with:\n")
+    print(i + f'"backport": "{info.backport}",')
+    print(i + f'"integrity": "{info.integrity}",')
+    print()
+
+
+def make_bundles(update_released: bool) -> list[BundleInfo]:
+    result = []
+    for ver, info in bundle_version_info().items():
+        if ver.startswith("dev"):
+            continue
+        if not update_released and info.get("released", False):
+            continue
+        path = Path(get_pyodide_bin_path(ver)).resolve()
+        b = get_backport(ver)
+        info["backport"] = b
+        integrity = b64digest(path)
+        result.append(BundleInfo(ver, b, integrity, path))
+    return result
+
+
+def upload_bundles(bundles: list[BundleInfo]):
+    from boto3 import client
+
     s3 = client(
         "s3",
         endpoint_url=f"https://{environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
@@ -74,24 +143,31 @@ def main():
         region_name="auto",
     )
 
-    for ver, info in bundle_version_info().items():
-        if ver.startswith("dev"):
-            continue
+    for bundle in bundles:
+        ver = bundle.version
         path = Path(get_pyodide_bin_path(ver)).resolve()
         b = get_backport(ver)
+        info = bundle_version_info()[ver]
         info["backport"] = b
         key = bundle_key(**info)
-        print(f"Uploading version {ver} backport {b}")
-        shasum = (
-            "sha256-"
-            + b64encode(file_digest(path.open("rb"), "sha256").digest()).decode()
-        )
-        i = " " * 8
-        print("Update python_metadata.bzl with:\n")
-        print(i + f'"backport": "{b}",')
-        print(i + f'"integrity": "{shasum}",')
-        print()
         s3.upload_file(str(path), "pyodide-capnp-bin", key)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Upload Pyodide bundles and update metadata"
+    )
+    parser.add_argument(
+        "--update-released",
+        action="store_true",
+        help="Update already released versions?",
+    )
+    args = parser.parse_args()
+    bundles = make_bundles(args.update_released)
+    for bundle in bundles:
+        print_info(bundle)
+    update_python_metadata_bzl(bundles)
+    upload_bundles(bundles)
     return 0
 
 

@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -29,12 +28,26 @@ namespace workerd::api::node {
 //   console.log(als.getStore());  // undefined
 class AsyncLocalStorage final: public jsg::Object {
  public:
-  AsyncLocalStorage(): key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {}
+  struct AsyncLocalStorageOptions {
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> defaultValue;
+    jsg::Optional<kj::String> name;
+    JSG_STRUCT(defaultValue, name)
+  };
+
+  AsyncLocalStorage(jsg::Optional<AsyncLocalStorageOptions> options = kj::none)
+      : key(kj::refcounted<jsg::AsyncContextFrame::StorageKey>()) {
+    KJ_IF_SOME(opt, options) {
+      defaultValue = kj::mv(opt.defaultValue);
+      name = kj::mv(opt.name);
+    }
+  }
+
   ~AsyncLocalStorage() noexcept(false) {
     key->reset();
   }
 
-  static jsg::Ref<AsyncLocalStorage> constructor(jsg::Lock& js);
+  static jsg::Ref<AsyncLocalStorage> constructor(
+      jsg::Lock& js, jsg::Optional<AsyncLocalStorageOptions> options);
 
   v8::Local<v8::Value> run(jsg::Lock& js,
       v8::Local<v8::Value> store,
@@ -64,6 +77,8 @@ class AsyncLocalStorage final: public jsg::Object {
     JSG_FAIL_REQUIRE(Error, "asyncLocalStorage.disable() is not implemented");
   }
 
+  kj::StringPtr getName();
+
   JSG_RESOURCE_TYPE(AsyncLocalStorage) {
     JSG_METHOD(run);
     JSG_METHOD(exit);
@@ -72,8 +87,11 @@ class AsyncLocalStorage final: public jsg::Object {
     JSG_METHOD(disable);
     JSG_STATIC_METHOD(bind);
     JSG_STATIC_METHOD(snapshot);
+    JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
 
     JSG_TS_OVERRIDE(AsyncLocalStorage<T> {
+      constructor(options?: AsyncLocalStorageAsyncLocalStorageOptions);
+      readonly name: string;
       getStore(): T | undefined;
       run<R, TArgs extends any[]>(store: T, callback: (...args: TArgs) => R, ...args: TArgs): R;
       exit<R, TArgs extends any[]>(callback: (...args: TArgs) => R, ...args: TArgs): R;
@@ -88,6 +106,8 @@ class AsyncLocalStorage final: public jsg::Object {
 
  private:
   kj::Own<jsg::AsyncContextFrame::StorageKey> key;
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> defaultValue;
+  kj::Maybe<kj::String> name;
 };
 
 // Note: The AsyncResource class is provided for Node.js backwards compatibility.
@@ -152,18 +172,6 @@ class AsyncResource final: public jsg::Object {
   static jsg::Ref<AsyncResource> constructor(
       jsg::Lock& js, jsg::Optional<kj::String> type, jsg::Optional<Options> options = kj::none);
 
-  // The Node.js API uses numeric identifiers for all async resources. We do not
-  // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented asyncId() {
-    return {};
-  }
-
-  // The Node.js API uses numeric identifiers for all async resources. We do not
-  // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented triggerAsyncId() {
-    return {};
-  }
-
   static v8::Local<v8::Function> staticBind(jsg::Lock& js,
       v8::Local<v8::Function> fn,
       jsg::Optional<kj::String> type,
@@ -182,18 +190,37 @@ class AsyncResource final: public jsg::Object {
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       jsg::Arguments<jsg::Value>);
 
+  // The Node.js API uses numeric identifiers for all async resources. We do not
+  // implement that part of their API. Always returns 0.
+  inline int asyncId() {
+    return 0;
+  }
+
+  // The Node.js API uses numeric identifiers for all async resources. We do not
+  // implement that part of their API. Always returns 0.
+  inline int triggerAsyncId() {
+    return 0;
+  }
+
+  // No-op. We do not track resource lifetimes. This is provided only for API compatibility.
+  void emitDestroy(jsg::Lock&) {};
+
   JSG_RESOURCE_TYPE(AsyncResource) {
     JSG_STATIC_METHOD_NAMED(bind, staticBind);
     JSG_METHOD(asyncId);
     JSG_METHOD(triggerAsyncId);
     JSG_METHOD(bind);
     JSG_METHOD(runInAsyncScope);
+    JSG_METHOD(emitDestroy);
 
     JSG_TS_OVERRIDE(AsyncResource {
       constructor(type: string, options?: AsyncResourceOptions);
       static bind<Func extends (this: ThisArg, ...args: any[]) => any, ThisArg>(fn: Func, type?: string, thisArg?: ThisArg): Func;
       bind<Func extends (...args: any[]) => any>(fn: Func): Func;
       runInAsyncScope<This, Result>(fn: (this: This, ...args: any[]) => Result, thisArg?: This, ...args: any[]): Result;
+      asyncId(): number;
+      triggerAsyncId(): number;
+      emitDestroy(): void;
     });
   }
 
@@ -228,6 +255,6 @@ class AsyncHooksModule final: public jsg::Object {
 
 #define EW_NODE_ASYNCHOOKS_ISOLATE_TYPES                                                           \
   api::node::AsyncHooksModule, api::node::AsyncResource, api::node::AsyncResource::Options,        \
-      api::node::AsyncLocalStorage
+      api::node::AsyncLocalStorage, api::node::AsyncLocalStorage::AsyncLocalStorageOptions
 
 }  // namespace workerd::api::node

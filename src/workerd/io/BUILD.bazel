@@ -1,7 +1,7 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("//:build/capnp_embed.bzl", "capnp_embed")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -33,6 +33,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":io",
+        "//src/workerd/util:checked-queue",
         "//src/workerd/util:completion-membrane",
     ],
 )
@@ -45,6 +46,7 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
+        "bundle-fs.c++",
         "compatibility-date.c++",
         "features.c++",
         "hibernation-manager.c++",
@@ -56,6 +58,7 @@ wd_cc_library(
         "worker-fs.c++",
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
+        "bundle-fs.h",
         "compatibility-date.h",
         "features.h",
         "hibernation-manager.h",
@@ -67,6 +70,7 @@ wd_cc_library(
         "tracer.h",
         "worker.h",
         "worker-fs.h",
+        "worker-source.h",
     ] + ["//src/workerd/api:hdrs"],
     # global CPU-specific options are inconvenient to specify with bazel – just set the options we
     # need for CRC32C in this target for now.
@@ -98,9 +102,10 @@ wd_cc_library(
         ":io-helpers",
         ":limit-enforcer",
         ":observer",
-        ":supported-compatibility-date_capnp",
+        ":supported-compatibility-date",
         ":trace",
         ":worker-interface",
+        "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",
@@ -108,12 +113,15 @@ wd_cc_library(
         "//src/workerd/api:url",
         "//src/workerd/api:urlpattern",
         "//src/workerd/api:urlpattern-standard",
+        "//src/workerd/api/node:exceptions",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
+        "//src/workerd/util:checked-queue",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:exception",
         "//src/workerd/util:sqlite",
+        "//src/workerd/util:strong-bool",
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/capnp:capnp-rpc",
@@ -241,6 +249,7 @@ wd_cc_library(
     deps = [
         ":frankenvalue_capnp",
         ":worker-interface_capnp",
+        "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
@@ -263,19 +272,24 @@ genrule(
     visibility = ["//visibility:public"],
 )
 
-capnp_embed(
-    name = "trimmed-supported-compatibility-date",
-    src = ":trimmed-supported-compatibility-date-gen",
+# Newest compatibility date that can safely be set using code compiled from this repo. Trying to
+# run a Worker with a newer compatibility date than this will fail.
+#
+# This should be updated to the current date on a regular basis. The reason this exists is so that
+# if you build an old version of the code and try to run a new Worker with it, you get an
+# appropriate error, rather than have the code run with the wrong compatibility mode.
+#
+# Note that the production Cloudflare Workers upload API always accepts any date up to the current
+# date regardless of this constant, on the assumption that Cloudflare is always running the latest
+# version of the code. This constant is more to protect users who are self-hosting the runtime and
+# could be running an older version.
+wd_cc_embed(
+    name = "supported-compatibility-date",
+    src = ":trimmed-supported-compatibility-date.txt",
+    base_name = "supported-compatibility-date",
 )
 
 wd_capnp_library(src = "cdp.capnp")
-
-wd_capnp_library(
-    src = "supported-compatibility-date.capnp",
-    deps = [
-        ":trimmed-supported-compatibility-date",
-    ],
-)
 
 wd_capnp_library(
     src = "worker-interface.capnp",
@@ -382,4 +396,12 @@ wd_test(
     src = "io-context-test.wd-test",
     args = ["--experimental"],
     data = ["io-context-test.js"],
+)
+
+kj_test(
+    src = "bundle-fs-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
 )

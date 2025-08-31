@@ -15,6 +15,10 @@ import {
   createPrivateKey,
   getCiphers,
   getCipherInfo,
+  createCipher,
+  createDecipher,
+  Cipher,
+  Decipher,
 } from 'node:crypto';
 
 import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
@@ -363,5 +367,14 @@ export const test_cipher_info4 = {
       keyLength: -1,
     });
     strictEqual(info, undefined);
+  },
+};
+
+export const testUnimplemented = {
+  async test() {
+    strictEqual(typeof Cipher, 'function');
+    strictEqual(typeof Decipher, 'function');
+    strictEqual(typeof createCipher, 'function');
+    strictEqual(typeof createDecipher, 'function');
   },
 };

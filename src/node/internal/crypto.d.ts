@@ -31,55 +31,55 @@ export interface CheckOptions {
 }
 
 export class X509Certificate {
-  public static parse(data: ArrayBuffer | ArrayBufferView): X509Certificate;
-  public get subject(): string | undefined;
-  public get subjectAltName(): string | undefined;
-  public get infoAccess(): string | undefined;
-  public get issuer(): string | undefined;
-  public get issuerCert(): X509Certificate | undefined;
-  public get validFrom(): string | undefined;
-  public get validTo(): string | undefined;
-  public get fingerprint(): string | undefined;
-  public get fingerprint256(): string | undefined;
-  public get fingerprint512(): string | undefined;
-  public get keyUsage(): string[] | undefined;
-  public get serialNumber(): string | undefined;
-  public get pem(): string | undefined;
-  public get raw(): ArrayBuffer | undefined;
-  public get publicKey(): CryptoKey | undefined;
-  public get isCA(): boolean;
-  public checkHost(host: string, options?: CheckOptions): string | undefined;
-  public checkEmail(email: string, options?: CheckOptions): string | undefined;
-  public checkIp(ip: string, options?: CheckOptions): string | undefined;
-  public checkIssued(cert: X509Certificate): boolean;
-  public checkPrivateKey(key: CryptoKey): boolean;
-  public verify(key: CryptoKey): boolean;
-  public toLegacyObject(): object;
+  static parse(data: ArrayBuffer | ArrayBufferView): X509Certificate;
+  get subject(): string | undefined;
+  get subjectAltName(): string | undefined;
+  get infoAccess(): string | undefined;
+  get issuer(): string | undefined;
+  get issuerCert(): X509Certificate | undefined;
+  get validFrom(): string | undefined;
+  get validTo(): string | undefined;
+  get fingerprint(): string | undefined;
+  get fingerprint256(): string | undefined;
+  get fingerprint512(): string | undefined;
+  get keyUsage(): string[] | undefined;
+  get serialNumber(): string | undefined;
+  get pem(): string | undefined;
+  get raw(): ArrayBuffer | undefined;
+  get publicKey(): CryptoKey | undefined;
+  get isCA(): boolean;
+  checkHost(host: string, options?: CheckOptions): string | undefined;
+  checkEmail(email: string, options?: CheckOptions): string | undefined;
+  checkIp(ip: string, options?: CheckOptions): string | undefined;
+  checkIssued(cert: X509Certificate): boolean;
+  checkPrivateKey(key: CryptoKey): boolean;
+  verify(key: CryptoKey): boolean;
+  toLegacyObject(): object;
 }
 
 // Hash and Hmac
 export class HashHandle {
-  public constructor(algorithm: string, xofLen: number);
-  public update(data: Buffer | ArrayBufferView): number;
-  public digest(): ArrayBuffer;
-  public copy(xofLen: number): HashHandle;
+  constructor(algorithm: string, xofLen: number);
+  update(data: Buffer | ArrayBufferView): number;
+  digest(): ArrayBuffer;
+  copy(xofLen: number): HashHandle;
 }
 
 export class SignHandle {
-  public constructor(algorithm: string);
-  public update(data: Buffer | ArrayBufferView): void;
-  public sign(
+  constructor(algorithm: string);
+  update(data: Buffer | ArrayBufferView): void;
+  sign(
     key: CryptoKey,
     rsaPadding?: number,
     pssSaltLength?: number,
     dsaSigEnc?: number
-  ): ArrayBuffer;
+  ): Uint8Array;
 }
 
 export class VerifyHandle {
-  public constructor(algorithm: string);
-  public update(data: Buffer | ArrayBufferView): void;
-  public verify(
+  constructor(algorithm: string);
+  update(data: Buffer | ArrayBufferView): void;
+  verify(
     key: CryptoKey,
     signature: ArrayBufferView,
     rsaPadding?: number,
@@ -107,22 +107,19 @@ export function verifyOneShot(
 ): boolean;
 
 export class CipherHandle {
-  public constructor(
+  constructor(
     mode: 'cipher' | 'decipher',
     algorithm: string,
     key: CryptoKey,
     iv: ArrayBuffer | ArrayBufferView,
     authTagLength?: number
   );
-  public update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
-  public final(): ArrayBuffer;
-  public setAAD(
-    data: ArrayBuffer | ArrayBufferView,
-    plaintextLength?: number
-  ): void;
-  public setAutoPadding(autoPadding: boolean): void;
-  public getAuthTag(): ArrayBuffer | undefined;
-  public setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
+  update(data: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+  final(): ArrayBuffer;
+  setAAD(data: ArrayBuffer | ArrayBufferView, plaintextLength?: number): void;
+  setAutoPadding(autoPadding: boolean): void;
+  getAuthTag(): ArrayBuffer | undefined;
+  setAuthTag(tag: ArrayBuffer | ArrayBufferView): void;
 }
 
 export interface PublicPrivateCipherOptions {
@@ -185,9 +182,9 @@ export function getCipherInfo(
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {
-  public constructor(algorithm: string, key: ArrayLike | CryptoKey);
-  public update(data: Buffer | ArrayBufferView): number;
-  public digest(): ArrayBuffer;
+  constructor(algorithm: string, key: ArrayLike | CryptoKey);
+  update(data: Buffer | ArrayBufferView): number;
+  digest(): ArrayBuffer;
 }
 
 // hkdf
@@ -459,32 +456,32 @@ export interface GenerateKeyPairOptions {
 
 // DiffieHellman
 export class DiffieHellmanHandle {
-  public constructor(
+  constructor(
     sizeOrKey: number | ArrayBuffer | ArrayBufferView,
     generator: number | ArrayBuffer | ArrayBufferView
   );
-  public setPublicKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
-  public setPrivateKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
-  public getPublicKey(): ArrayBuffer;
-  public getPrivateKey(): ArrayBuffer;
-  public getGenerator(): ArrayBuffer;
-  public getPrime(): ArrayBuffer;
+  setPublicKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
+  setPrivateKey(data: ArrayBuffer | ArrayBufferView | Buffer): void;
+  getPublicKey(): ArrayBuffer;
+  getPrivateKey(): ArrayBuffer;
+  getGenerator(): ArrayBuffer;
+  getPrime(): ArrayBuffer;
 
-  public computeSecret(key: ArrayBuffer | ArrayBufferView): ArrayBuffer;
-  public generateKeys(): ArrayBuffer;
+  computeSecret(key: ArrayBuffer | ArrayBufferView): ArrayBuffer;
+  generateKeys(): ArrayBuffer;
 
-  public getVerifyError(): number;
+  getVerifyError(): number;
 }
 
 export type ECDHFormat = 'compressed' | 'uncompressed' | 'hybrid';
 export class ECDHHandle {
-  public constructor(curveName: string);
-  public computeSecret(otherPublicKey: ArrayBufferView): ArrayBuffer;
-  public generateKeys(): ArrayBuffer;
-  public getPrivateKey(): ArrayBuffer;
-  public getPublicKey(format: ECDHFormat): ArrayBuffer;
-  public setPrivateKey(key: ArrayBufferView): void;
-  public static convertKey(
+  constructor(curveName: string);
+  computeSecret(otherPublicKey: ArrayBufferView): ArrayBuffer;
+  generateKeys(): ArrayBuffer;
+  getPrivateKey(): ArrayBuffer;
+  getPublicKey(format: ECDHFormat): ArrayBuffer;
+  setPrivateKey(key: ArrayBufferView): void;
+  static convertKey(
     key: ArrayBufferView,
     curveName: string,
     format: ECDHFormat

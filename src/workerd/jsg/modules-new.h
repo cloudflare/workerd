@@ -15,6 +15,7 @@
 
 #include <v8.h>
 
+#include <capnp/schema-loader.h>
 #include <kj/common.h>
 #include <kj/function.h>
 #include <kj/map.h>
@@ -252,11 +253,10 @@ class Module {
   // Determines if this module can be resolved in the given context.
   virtual bool evaluateContext(const ResolveContext& context) const KJ_WARN_UNUSED_RESULT;
 
-  // Instantiates the given module. The return value follows the established v8
-  // rules for Maybe. If the returned maybe is empty, then an exception should
+  // Instantiates the given module. If false is returned, then an exception should
   // have been scheduled on the isolate via the lock. Do not throw C++ exceptions
   // from this method unless they are fatal.
-  v8::Maybe<bool> instantiate(Lock& js,
+  bool instantiate(Lock& js,
       v8::Local<v8::Module> module,
       const CompilationObserver& observer) const KJ_WARN_UNUSED_RESULT;
 
@@ -614,6 +614,10 @@ class ModuleRegistry final: public ModuleRegistryBase {
 
     Builder& setEvalCallback(EvalCallback callback) KJ_LIFETIMEBOUND;
 
+    capnp::SchemaLoader& getSchemaLoader() {
+      return *schemaLoader;
+    }
+
    private:
     bool allowsFallback() const;
 
@@ -624,6 +628,7 @@ class ModuleRegistry final: public ModuleRegistryBase {
     const Options options;
     kj::Vector<kj::Own<ModuleBundle>> bundles_[ModuleRegistry::kBundleCount];
     kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
+    kj::Own<capnp::SchemaLoader> schemaLoader;
     friend class ModuleRegistry;
   };
 
@@ -669,6 +674,10 @@ class ModuleRegistry final: public ModuleRegistryBase {
     return bundleBase;
   }
 
+  const capnp::SchemaLoader& getSchemaLoader() const override {
+    return *schemaLoader;
+  }
+
  private:
   const ResolveObserver& observer;
   const jsg::Url& bundleBase;
@@ -676,6 +685,7 @@ class ModuleRegistry final: public ModuleRegistryBase {
   // One slot for each of ModuleBundle::Type
   kj::Array<kj::Own<ModuleBundle>> bundles_[kBundleCount];
   kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
+  kj::Own<capnp::SchemaLoader> schemaLoader;
 };
 
 constexpr ModuleRegistry::Builder::Options operator|(

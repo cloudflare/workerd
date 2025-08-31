@@ -69,6 +69,13 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "checked-queue",
+    hdrs = ["checked-queue.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -98,6 +105,15 @@ wd_cc_library(
     hdrs = ["string-buffer.h"],
     visibility = ["//visibility:public"],
     deps = [":strings"],
+)
+
+wd_cc_library(
+    name = "strong-bool",
+    hdrs = ["strong-bool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
 )
 
 wd_cc_library(
@@ -263,6 +279,13 @@ kj_test(
 )
 
 kj_test(
+    src = "strong-bool-test.c++",
+    deps = [
+        ":strong-bool",
+    ],
+)
+
+kj_test(
     src = "mimetype-test.c++",
     deps = [
         ":mimetype",
@@ -304,4 +327,9 @@ kj_test(
     deps = [
         ":uuid",
     ],
+)
+
+kj_test(
+    src = "checked-queue-test.c++",
+    deps = [":checked-queue"],
 )

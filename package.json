@@ -1,32 +1,25 @@
 {
   "name": "@cloudflare/workerd-root",
   "private": true,
-  "scripts": {
-    "lint": "eslint types/src",
-    "format": "prettier"
-  },
+  "scripts": {},
   "dependencies": {
-    "prettier": "^3.5.3",
+    "prettier": "^3.6.2",
     "typescript": "5.8.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.25.1",
-    "@types/debug": "^4.1.12",
-    "@types/node": "^22.15.3",
-    "capnp-es": "^0.0.11",
+    "@eslint/js": "^9.32.0",
+    "@types/node": "^24.2.0",
+    "capnp-es": "0.0.11",
     "chrome-remote-interface": "^0.33.3",
-    "esbuild": "^0.25.3",
-    "eslint": "^9.25.1",
-    "expect-type": "^1.2.1",
-    "typescript-eslint": "^8.31.1"
+    "esbuild": "^0.25.8",
+    "eslint": "^9.32.0",
+    "expect-type": "^1.2.2",
+    "typescript-eslint": "^8.39.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ],
-    "patchedDependencies": {
-      "capnp-es@0.0.11": "patches/capnp-es@0.0.11.patch"
-    }
+    ]
   },
-  "packageManager": "pnpm@10.10.0"
+  "packageManager": "pnpm@10.14.0"
 }

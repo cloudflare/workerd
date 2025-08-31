@@ -1,11 +1,12 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
+import { PythonRuntimeError } from 'pyodide-internal:util';
 
 if (typeof FinalizationRegistry === 'undefined') {
   // @ts-expect-error cannot assign to globalThis
   globalThis.FinalizationRegistry = class FinalizationRegistry {
-    public register(): void {}
-    public unregister(): void {}
+    register(): void {}
+    unregister(): void {}
   };
 }
 
@@ -182,7 +183,7 @@ function checkCallee(): void {
   }
   if (!isOkay) {
     console.warn('Invalid call to `WebAssembly.Module`', funcName);
-    throw new Error();
+    throw new PythonRuntimeError('Invalid call to `WebAssembly.Module`');
   }
 }
 
@@ -210,7 +211,12 @@ function prepareStackTrace(
       return [false, funcName];
     }
     return [
-      ['loadModule', 'convertJsFunctionToWasm', 'generate'].includes(funcName),
+      [
+        'loadModule',
+        'convertJsFunctionToWasm',
+        'generate',
+        'getPyEMCountArgsPtr',
+      ].includes(funcName),
       funcName,
     ];
   } catch (e) {

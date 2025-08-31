@@ -8,6 +8,7 @@
 #include <workerd/io/features.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/completion-membrane.h>
 
 #include <capnp/membrane.h>
@@ -212,6 +213,14 @@ DeserializeResult deserializeJsValue(
       jsg::Deserializer::Options{
         .version = 15,
         .readHeader = true,
+        // Previously, while these are passing over an RPC boundary, we preserved stack
+        // traces in errors that happened to get passed through rather than thrown.
+        // This was mainly due, I believe, to a misunderstanding about whether or not
+        // v8 serialization preserved the stacks or not. When enhanced error serialization
+        // is disabled, stacks are preserved and this flag has no effect. When enhanced
+        // error serialization is enabled, then we'll switch to not preserving stacks in
+        // passed-through errors.
+        .preserveStackInErrors = false,
         .externalHandler = externalHandler,
       });
 
@@ -979,20 +988,41 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
   // Hook for recording trace information.
-  virtual void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) = 0;
+  virtual void addTrace(IoContext& ioctx, kj::StringPtr methodName) = 0;
 
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
+    auto params = callContext.getParams();
+    // Method name suitable for use in trace and error messages. May be a pointer into the RPC
+    // params reader.
+    kj::ConstString methodNameForTrace;
+
+    // Retrieve the method name and report onset event info if tracing is enabled.
+    switch (params.which()) {
+      case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
+        methodNameForTrace = params.getMethodName().attach();
+        break;
+      }
+      case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
+        auto path = params.getMethodPath();
+        auto n = path.size();
+
+        if (n == 0) {
+          // Call the target itself as a function.
+          methodNameForTrace = "(this)"_kjc;
+        } else {
+          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
+        }
+        break;
+      }
+    }
+    addTrace(ctx, methodNameForTrace);
 
     auto targetInfo = getTargetInfo(lock, ctx);
 
-    auto params = callContext.getParams();
-
     // We will try to get the function, if we can't we'll throw an error to the client.
-    auto [propHandle, thisArg, methodNameForTrace] =
-        tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties);
-
-    addTrace(js, ctx, methodNameForTrace);
+    auto [propHandle, thisArg] =
+        tryGetProperty(lock, targetInfo.target, params, targetInfo.allowInstanceProperties, ctx);
 
     auto op = params.getOperation();
 
@@ -1155,10 +1185,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   struct GetPropResult {
     v8::Local<v8::Value> handle;
     v8::Local<v8::Object> thisArg;
-
-    // Method name suitable for use in trace and error messages. May be a pointer into the RPC
-    // params reader.
-    kj::ConstString methodNameForTrace;
   };
 
   [[noreturn]] static void failLookup(kj::StringPtr kjName) {
@@ -1169,7 +1195,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   GetPropResult tryGetProperty(jsg::Lock& js,
       jsg::JsObject object,
       rpc::JsRpcTarget::CallParams::Reader callParams,
-      bool allowInstanceProperties) {
+      bool allowInstanceProperties,
+      IoContext& ctx) {
     auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
 
     // Get the named property of `object`.
@@ -1204,13 +1231,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     };
 
     kj::Maybe<jsg::JsValue> result;
-    kj::ConstString methodNameForTrace;
 
     switch (callParams.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
-        kj::StringPtr methodName = callParams.getMethodName();
-        result = getProperty(methodName);
-        methodNameForTrace = methodName.attach();
+        result = getProperty(callParams.getMethodName());
         break;
       }
 
@@ -1221,7 +1245,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         if (n == 0) {
           // Call the target itself as a function.
           result = object;
-          methodNameForTrace = "(this)"_kjc;
         } else {
           bool inStub = false;
           for (auto i: kj::zeroTo(n - 1)) {
@@ -1237,11 +1260,33 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
               failLookup(name);
             }
 
+            // If the object is a Proxy, then `isInstanceOf<JsRpcTarget>()` won't actually work,
+            // because the Proxy is not an instance of any native type. But for our purposes,
+            // RpcTarget is only a marker used to indicate what semantics are desired.
+            bool isProxyOfRpcTarget = false;
+            if (jsg::JsValue(object).isProxy()) {
+              // Unfortunatley in this case we need to follow the prototype chain manually, looking
+              // for `JsRpcTarget`.
+              js.withinHandleScope([&]() {
+                auto proto = object.getPrototype(js);
+                auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
+
+                for (;;) {
+                  auto objProto = KJ_UNWRAP_OR(proto.tryCast<jsg::JsObject>(), break);
+                  if (objProto == prototypeOfRpcTarget) {
+                    isProxyOfRpcTarget = true;
+                    break;
+                  }
+                  proto = objProto.getPrototype(js);
+                }
+              });
+            }
+
             // Decide whether the new object is a suitable RPC target.
             if (object.getPrototype(js) == prototypeOfObject) {
               // Yes. It's a simple object.
               allowInstanceProperties = true;
-            } else if (object.isInstanceOf<JsRpcTarget>(js)) {
+            } else if (isProxyOfRpcTarget || object.isInstanceOf<JsRpcTarget>(js)) {
               // Yes. It's a JsRpcTarget.
               allowInstanceProperties = false;
             } else if (object.isInstanceOf<JsRpcStub>(js) ||
@@ -1266,7 +1311,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           }
 
           result = getProperty(path[n - 1]);
-          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
         }
 
         break;
@@ -1276,7 +1320,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     return {
       .handle = KJ_ASSERT_NONNULL(result, "unknown CallParams type", (uint)callParams.which()),
       .thisArg = object,
-      .methodNameForTrace = kj::mv(methodNameForTrace),
     };
   }
 
@@ -1510,8 +1553,10 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     return false;
   }
 
-  void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
-    // TODO(someday): Trace non-top-level calls?
+  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
+    // TODO(someday): Trace non-top-level calls? Note that this would have to be done differently
+    // than with EntrypointJsRpcTarget since we will already have an onset event set here – creating
+    // a span might be the right approach, but we'd have to end it at the right time too.
   }
 };
 
@@ -1594,15 +1639,63 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
   });
 }
 
-jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::Ref<JsRpcTarget> object) {
+// RpcStub are allowed to wrap:
+// * RpcTargets
+// * Functions
+// * Plain objects (only when created explicitly via `new RpcStub`)
+//
+// This function checks for these and returns:
+// * kj::none if it's not a valid type to be wrapped in as tub.
+// * The value for allowInstanceProperties if it is.
+kj::Maybe<bool> checkStubType(jsg::Lock& js, jsg::JsObject handle) {
+  return js.withinHandleScope([&]() -> kj::Maybe<bool> {
+    // TODO(perf): We should really cache `prototypeOfObject` somewhere so we don't have to create
+    //   an object to get it. (We do this other places in this file, too...)
+    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
+    auto proto = handle.getPrototype(js);
+    if (proto == prototypeOfObject) {
+      // A regular object. Allow access to instance properties.
+      return true;
+    } else {
+      // Walk the prototype chain looking for RpcTarget.
+      //
+      // (Note we can't simply use handle.isInstanceOf<JsRpcTarget>() because that doesn't work
+      // correctly for proxies. Since RpcTarget is only used as a marker, we don't really need
+      // the object to be an instance of it -- we just care if it's in the prototype chain, even
+      // if the prototype chain is faked by the Proxy.)
+      //
+      // TODO(someday): Consider whether `new RpcStub(obj)` should work on arbitrary types. This
+      //   could be a useful way to say: "I am explicitly opting into treating this like an
+      //   RpcTarget even though I do not have the ability to make its type extend RpcTarget."
+      for (;;) {
+        if (proto == prototypeOfRpcTarget) {
+          // An RpcTarget, don't allow instance properties.
+          return false;
+        }
+
+        KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
+          proto = protoObj.getPrototype(js);
+        } else if (isFunctionForRpc(js, handle)) {
+          // This is NOT an RpcTarget, but it IS callable as a function, so treat it as such.
+          return true;
+        } else {
+          // End of prototype chain, and didn't find RpcTarget.
+          return kj::none;
+        }
+      }
+    }
+  });
+}
+
+jsg::Ref<JsRpcStub> JsRpcStub::constructor(jsg::Lock& js, jsg::JsObject object) {
   auto& ioctx = IoContext::current();
 
-  // We really only took `jsg::Ref<JsRpcTarget>` as the input type for type-checking reasons, but
-  // we'd prefer to store the JS handle. There definitely must be one since we just received this
-  // object from JS.
-  auto handle = jsg::JsObject(KJ_ASSERT_NONNULL(object.tryGetHandle(js)));
+  bool allowInstanceProperties = JSG_REQUIRE_NONNULL(checkStubType(js, object), TypeError,
+      "RpcStubs can only wrap plain objects, functions, and RpcTarget derivatives.");
 
-  rpc::JsRpcTarget::Client cap = kj::heap<TransientJsRpcTarget>(js, ioctx, handle);
+  rpc::JsRpcTarget::Client cap =
+      kj::heap<TransientJsRpcTarget>(js, ioctx, object, allowInstanceProperties);
 
   return js.alloc<JsRpcStub>(ioctx.addObject(kj::heap(kj::mv(cap))));
 }
@@ -1642,61 +1735,30 @@ void RpcSerializerExternalHandler::serializeFunction(
 
 void RpcSerializerExternalHandler::serializeProxy(
     jsg::Lock& js, jsg::Serializer& serializer, v8::Local<v8::Proxy> proxy) {
-  js.withinHandleScope([&]() {
-    auto handle = jsg::JsObject(proxy);
+  auto handle = jsg::JsObject(proxy);
 
-    // Proxies are only allowed to wrap objects that would normally be serialized by writing a
-    // stub, e.g. plain objects and RpcTargets. In such cases, we can write a stub pointing to the
-    // proxy.
-    //
-    // However, note that we don't actually want to test the Proxy's *target* directly, because
-    // it's possible the Proxy is trying to disguise the target as something else. Instead, we must
-    // determine the type by following the prototype chain. That way, if the Proxy overrides
-    // getPrototype(), we will honor that override.
-    //
-    // Note that we don't support functions. This is because our isFunctionForRpc() check is not
-    // prototype-based, and as such it's unclear how exactly we should go about checking for a
-    // function here. Luckily, you really don't need to use a `Proxy` to wrap a function... you
-    // can just use a function.
+  // Proxies are allowed to present themselves as anything that you could pass to `new RpcStub`.
+  //
+  // Note there's an intentional quirk here: If the Proxy presents itself as a plain object, we
+  // wrap it in a stub, rather than serialize the object. This enables the Proxy to continue
+  // intercepting property accesses when they happen, rather than have all the properties accessed
+  // and serialized upfront. However, in retrospect, this may haev been a bad choice, as it means a
+  // Proxy on a plain object cannot have exactly the same behavior as a plain object would have.
+  // Note that apps which explicitly want to prevent a plain object from being serialized over
+  // RPC can simply use `new RpcStub(object)` to explicitly wrap it in a stub -- no need to use
+  // a Proxy for that.
+  auto allowInstanceProperties = JSG_REQUIRE_NONNULL(checkStubType(js, handle), DOMDataCloneError,
+      "Proxy could not be serialized because it is not a valid RPC receiver type. The "
+      "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
+      "Proxy's prototype chain.");
 
-    // TODO(perf): We should really cache `prototypeOfObject` somewhere so we don't have to create
-    //   an object to get it. (We do this other places in this file, too...)
-    auto prototypeOfObject = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
-    auto prototypeOfRpcTarget = js.getPrototypeFor<JsRpcTarget>();
-    bool allowInstanceProperties = false;
-    auto proto = handle.getPrototype(js);
-    if (proto == prototypeOfObject) {
-      // A regular object. Allow access to instance properties.
-      allowInstanceProperties = true;
-    } else {
-      // Walk the prototype chain looking for RpcTarget.
-      for (;;) {
-        if (proto == prototypeOfRpcTarget) {
-          // An RpcTarget, don't allow instance properties.
-          allowInstanceProperties = false;
-          break;
-        }
+  // Great, we've concluded we can indeed point a stub at this proxy.
+  serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
 
-        KJ_IF_SOME(protoObj, proto.tryCast<jsg::JsObject>()) {
-          proto = protoObj.getPrototype(js);
-        } else {
-          // End of prototype chain, and didn't find RpcTarget.
-          JSG_FAIL_REQUIRE(DOMDataCloneError,
-              "Proxy could not be serialized because it is not a valid RPC receiver type. The "
-              "Proxy must emulate either a plain object or an RpcTarget, as indicated by the "
-              "Proxy's prototype chain.");
-        }
-      }
-    }
-
-    // Great, we've concluded we can indeed point a stub at this proxy.
-    serializer.writeRawUint32(static_cast<uint>(rpc::SerializationTag::JS_RPC_STUB));
-
-    rpc::JsRpcTarget::Client cap =
-        kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
-    write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
-      builder.setRpcTarget(kj::mv(cap));
-    });
+  rpc::JsRpcTarget::Client cap =
+      kj::heap<TransientJsRpcTarget>(js, IoContext::current(), handle, allowInstanceProperties);
+  write([cap = kj::mv(cap)](rpc::JsValue::External::Builder builder) mutable {
+    builder.setRpcTarget(kj::mv(cap));
   });
 }
 
@@ -1707,12 +1769,14 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   EntrypointJsRpcTarget(IoContext& ioCtx,
       kj::Maybe<kj::StringPtr> entrypointName,
       Frankenvalue props,
+      kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Own<BaseTracer>> tracer)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
         entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
         props(kj::mv(props)),
+        wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)) {}
 
   TargetInfo getTargetInfo(Worker::Lock& lock, IoContext& ioCtx) override {
@@ -1731,13 +1795,44 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
           "\"cloudflare:workers\".");
     }
 
-    TargetInfo targetInfo{.target = jsg::JsObject(handler->self.getHandle(lock)),
+    auto target = jsg::JsObject(handler->self.getHandle(lock));
+
+    KJ_IF_SOME(moduleName, wrapperModule) {
+      // We've been asked to apply a wrapper module to the handler. This is a builtin module whose
+      // default export is a class. The class is constructed with the constructor arguments being
+      // the ctx and env objects and the original DO instance.
+
+      // This mechanism probably won't work very well on anything other than Durable Objects, so
+      // block such usage for now. We could reconsider this if we have a use case in the future.
+      auto& actor = JSG_REQUIRE_NONNULL(
+          ioCtx.getActor(), Error, "Wrapper modules can only be applied to Durable Objects.");
+
+      auto module = JSG_REQUIRE_NONNULL(
+          js.resolveInternalModule(moduleName), Error, "Unknown internal module: ", moduleName);
+      v8::Local<v8::Value> defaultExport = module.get(js, "default"_kj);
+      JSG_REQUIRE(defaultExport->IsFunction(), TypeError,
+          "Internal module's default export is not a function.");
+      auto func = defaultExport.As<v8::Function>();
+
+      v8::Local<v8::Value> args[3] = {actor.getCtx(js), actor.getEnv(js), target};
+      auto jsContext = js.v8Context();
+      v8::Local<v8::Value> result = jsg::check(func->NewInstance(jsContext, 3, args));
+      JSG_REQUIRE(result->IsObject(), TypeError,
+          "Internal module wrapper function did not return an object.");
+      target = jsg::JsObject(result.As<v8::Object>());
+    }
+
+    // clang-format off
+    TargetInfo targetInfo{
+      .target = target,
       .envCtx = handler->ctx.map([&](jsg::Ref<ExecutionContext>& execCtx) -> EnvCtx {
-      return {
-        .env = handler->env.getHandle(js),
-        .ctx = lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()),
-      };
-    })};
+        return {
+          .env = handler->env.getHandle(js),
+          .ctx = lock.getWorker().getIsolate().getApi().wrapExecutionContext(js, execCtx.addRef()),
+        };
+      })
+    };
+    // clang-format on
 
     // `targetInfo.envCtx` is present when we're invoking a freestanding function, and therefore
     // `env` and `ctx` need to be passed as parameters. In that case, we our method lookup
@@ -1753,7 +1848,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
  private:
   kj::Maybe<kj::String> entrypointName;
   Frankenvalue props;
+  kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
+  bool addedTracer = false;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
@@ -1775,8 +1872,15 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     return false;
   }
 
-  void addTrace(jsg::Lock& js, IoContext& ioctx, kj::StringPtr methodName) override {
+  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
     KJ_IF_SOME(t, tracer) {
+      // TODO(felix): This should not be necessary, still check since we now add traces in a
+      // different place. Remove after a few days if it proves stable.
+      if (addedTracer) {
+        LOG_WARNING_PERIODICALLY("NOSENTRY tried to add JsRpc trace onset twice"_kj);
+        return;
+      }
+      addedTracer = true;
       t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
           tracing::JsRpcEventInfo(kj::str(methodName)));
     }
@@ -1838,8 +1942,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  EntrypointJsRpcTarget target(
-      ioctx, entrypointName, kj::mv(props), mapAddRef(incomingRequest->getWorkerTracer()));
+  EntrypointJsRpcTarget target(ioctx, entrypointName, kj::mv(props), kj::mv(wrapperModule),
+      mapAddRef(incomingRequest->getWorkerTracer()));
   capnp::RevocableServer<rpc::JsRpcTarget> revcableTarget(target);
 
   try {
@@ -1913,51 +2017,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
-}
-
-// =======================================================================================
-
-jsg::Ref<WorkerEntrypoint> WorkerEntrypoint::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args, jsg::JsObject ctx, jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<WorkerEntrypoint>();
-}
-
-jsg::Ref<DurableObjectBase> DurableObjectBase::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<DurableObjectState> ctx,
-    jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<DurableObjectBase>();
-}
-
-jsg::Ref<WorkflowEntrypoint> WorkflowEntrypoint::constructor(
-    const v8::FunctionCallbackInfo<v8::Value>& args,
-    jsg::Ref<ExecutionContext> ctx,
-    jsg::JsObject env) {
-  // HACK: We take `FunctionCallbackInfo` mostly so that we can set properties directly on
-  //   `This()`. There ought to be a better way to get access to `this` in a constructor.
-  //   We *also* declare `ctx` and `env` params more explicitly just for the sake of type checking.
-  jsg::Lock& js = jsg::Lock::from(args.GetIsolate());
-
-  jsg::JsObject self(args.This());
-  self.set(js, "ctx", jsg::JsValue(args[0]));
-  self.set(js, "env", jsg::JsValue(args[1]));
-  return js.alloc<WorkflowEntrypoint>();
 }
 
 };  // namespace workerd::api

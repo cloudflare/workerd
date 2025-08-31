@@ -1,4 +1,4 @@
-export type { addAbortSignal } from 'node:stream';
+export { addAbortSignal } from 'node:stream';
 import type { FinishedOptions } from 'node:stream';
 
 // Exported symbols
@@ -185,19 +185,19 @@ export function getHighWaterMark(
 
 // BufferList class
 export class BufferList {
-  public head: BufferListNode | null;
-  public tail: BufferListNode | null;
-  public length: number;
+  head: BufferListNode | null;
+  tail: BufferListNode | null;
+  length: number;
 
-  public push(v: Buffer | string): void;
-  public unshift(v: Buffer | string): void;
-  public shift(): Buffer | string | undefined;
-  public clear(): void;
-  public join(s: string): string;
-  public concat(n: number): Buffer;
-  public consume(n: number, hasStrings?: boolean): Buffer | string;
-  public first(): Buffer | string;
-  public [Symbol.iterator](): IterableIterator<Buffer | string>;
+  push(v: Buffer | string): void;
+  unshift(v: Buffer | string): void;
+  shift(): Buffer | string | undefined;
+  clear(): void;
+  join(s: string): string;
+  concat(n: number): Buffer;
+  consume(n: number, hasStrings?: boolean): Buffer | string;
+  first(): Buffer | string;
+  [Symbol.iterator](): IterableIterator<Buffer | string>;
 }
 
 interface BufferListNode {
@@ -228,7 +228,7 @@ export function destroy(
 export function undestroy(this: NodeStreamLike): void;
 export function errorOrDestroy(
   stream: NodeStreamLike,
-  err: Error,
+  err: unknown,
   sync?: boolean
 ): void;
 export function construct(

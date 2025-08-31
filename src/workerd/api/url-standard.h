@@ -4,8 +4,7 @@
 
 #pragma once
 
-#include <kj/hash.h>
-#include "form-data.h"
+#include <kj/one-of.h>
 #include <workerd/api/blob.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>

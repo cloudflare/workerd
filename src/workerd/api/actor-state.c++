@@ -127,7 +127,7 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(
     auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
-    for (auto entry: value) {
+    for (const auto& entry: value) {
       auto& bytesRef =
           entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedReadBytes : uncachedReadBytes;
       bytesRef += entry.key.size() + entry.value.size();
@@ -164,7 +164,7 @@ getMultipleResultsToMap(size_t numInputKeys) {
       auto map = js.map();
       uint32_t cachedUnits = 0;
       uint32_t uncachedUnits = 0;
-      for (auto entry: value) {
+      for (const auto& entry: value) {
         auto& unitsRef =
             entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedUnits : uncachedUnits;
         unitsRef += billingUnits(entry.key.size() + entry.value.size());
@@ -820,6 +820,101 @@ void DurableObjectTransaction::maybeRollback() {
   rolledBack = true;
 }
 
+class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
+ public:
+  FacetOutgoingFactory(Worker::Actor::FacetManager& facetManager,
+      kj::String name,
+      kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo)
+      : facetManager(facetManager),
+        name(kj::mv(name)),
+        getStartInfo(kj::mv(getStartInfo)) {}
+
+  kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
+    auto& context = IoContext::current();
+
+    return context.getMetrics().wrapActorSubrequestClient(context.getSubrequest(
+        [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+      if (tracing.span.isObserved()) {
+        tracing.span.setTag("facet_name"_kjc, kj::str(name));
+      }
+
+      // Lazily initialize actorChannel
+      if (actorChannel == kj::none) {
+        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
+      }
+
+      return KJ_REQUIRE_NONNULL(actorChannel)
+          ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+    },
+        {.inHouse = true,
+          .wrapMetrics = true,
+          .operationName = kj::ConstString("facet_subrequest"_kjc)}));
+  }
+
+ private:
+  Worker::Actor::FacetManager& facetManager;
+  kj::String name;
+
+  // This is moved away when `actorChannel` is initialized.
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
+
+  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+};
+
+jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
+    kj::String name,
+    jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions) {
+  auto& fm = getFacetManager();
+  auto& ioCtx = IoContext::current();
+
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
+      ioCtx.makeReentryCallback(
+          [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
+    return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
+      Worker::Actor::Id id;
+      KJ_IF_SOME(i, options.id) {
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(doId, jsg::Ref<DurableObjectId>) {
+            id = doId->getInner().clone();
+          }
+          KJ_CASE_ONEOF(strId, kj::String) {
+            id = kj::mv(strId);
+          }
+        }
+      } else {
+        // Child inherits parent ID.
+        id = ioCtx.getActorOrThrow().cloneId();
+      }
+
+      auto actorClass = options.$class->getChannel(ioCtx);
+
+      return Worker::Actor::FacetManager::StartInfo{
+        .actorClass = kj::mv(actorClass),
+        .id = kj::mv(id),
+      };
+    });
+  });
+
+  kj::Own<Fetcher::OutgoingFactory> factory =
+      kj::heap<FacetOutgoingFactory>(fm, kj::mv(name), kj::mv(getStartInfo));
+
+  auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
+      ? Fetcher::RequiresHostAndProtocol::YES
+      : Fetcher::RequiresHostAndProtocol::NO;
+
+  // We return a plain Fetcher, not a DurableObject, because we don't want the stub to have
+  // `name` or `id` properties.
+  return js.alloc<Fetcher>(ioCtx.addObject(kj::mv(factory)), requiresHost, true /* isInHouse */);
+}
+
+void DurableObjectFacets::abort(jsg::Lock& js, kj::String name, jsg::JsValue reason) {
+  getFacetManager().abortFacet(name, js.exceptionToKj(reason));
+}
+
+void DurableObjectFacets::delete_(jsg::Lock& js, kj::String name) {
+  getFacetManager().deleteFacet(name);
+}
+
 ActorState::ActorState(Worker::Actor::Id actorId,
     kj::Maybe<jsg::JsRef<jsg::JsValue>> transient,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> persistent)
@@ -844,13 +939,16 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
     jsg::JsRef<jsg::JsValue> exports,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
-    bool containerRunning)
+    bool containerRunning,
+    kj::Maybe<Worker::Actor::FacetManager&> facetManager)
     : id(kj::mv(actorId)),
       exports(kj::mv(exports)),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
         return js.alloc<Container>(kj::mv(cap), containerRunning);
-      })) {}
+      })),
+      facetManager(facetManager.map(
+          [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })) {}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));

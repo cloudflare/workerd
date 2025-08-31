@@ -46,6 +46,6 @@ rust_library(
     ],
     version = "0.8.35",
     deps = [
-        "@crates_vendor__cfg-if-1.0.0//:cfg_if",
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
     ],
 )

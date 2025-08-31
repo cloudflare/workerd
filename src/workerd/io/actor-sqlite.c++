@@ -8,6 +8,7 @@
 #include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <sqlite3.h>
@@ -36,7 +37,8 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       hooks(hooks),
       kv(*db),
       metadata(*db),
-      commitTasks(*this) {
+      commitTasks(*this),
+      alarmLaterTasks(alarmLaterErrorHandler) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
@@ -202,6 +204,8 @@ void ActorSqlite::onCriticalError(
     kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
+    // TODO(someday): If we are setting the broken exception, do we also need to explicitly break
+    // the output gate?
     KJ_IF_SOME(e, maybeException) {
       e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
       broken.emplace(kj::mv(e));
@@ -337,16 +341,29 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // it to match the db state.  We don't need to hold open the output gate, so we add the
   // scheduling request to commitTasks.
   if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
-    commitTasks.add(requestScheduledAlarm(alarmStateForCommit));
+    alarmLaterTasks.add(requestScheduledAlarm(alarmStateForCommit));
   }
 }
 
+void ActorSqlite::AlarmLaterErrorHandler::taskFailed(kj::Exception&& exception) {
+  // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
+  // eventually fire at the earlier time, and the rescheduling will be retried.
+  //
+  // TODO(cleanup): Logging is here for short-term debugging, but could be removed; occasional
+  // alarm scheduling failures are expected during shutdowns or extreme load.
+  LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", exception);
+}
+
 void ActorSqlite::taskFailed(kj::Exception&& exception) {
-  // The output gate should already have been broken since it wraps all commits tasks. So, we
-  // don't have to report anything here, the exception will already propagate elsewhere. We
-  // should block further operations, though.
+  // The output gate should already have been broken since it wraps all commit tasks that can
+  // throw. So, we don't have to report anything here, the exception will already propagate
+  // elsewhere. We should block further operations, though.
   if (broken == kj::none) {
     broken = kj::mv(exception);
+    if (!outputGate.isBroken()) {
+      LOG_PERIODICALLY(
+          ERROR, "SQLite actor recorded broken exception without breaking output gate");
+    }
   }
 }
 
@@ -457,9 +474,34 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
-
-  for (auto& pair: pairs) {
-    kv.put(pair.key, pair.value);
+  // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
+  if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
+    if (currentTxn.is<NoTxn>()) {
+      // If we are not in a transcation, let's use an ExplicitTxn, which should rollback automatically
+      // if some put fails.
+      auto txn = startTransaction();
+      txn->put(kj::mv(pairs), options);
+      txn->commit();
+    } else {
+      // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
+      db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
+      for (const auto& pair: pairs) {
+        try {
+          kv.put(pair.key, pair.value);
+        } catch (kj::Exception e) {
+          // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
+          db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+          db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+          kj::throwFatalException(kj::mv(e));
+        }
+      }
+      // We're done here. RELEASE the savepoint.
+      db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+    }
+  } else {
+    for (auto& pair: pairs) {
+      kv.put(pair.key, pair.value);
+    }
   }
   return kj::none;
 }

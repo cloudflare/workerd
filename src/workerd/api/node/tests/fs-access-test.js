@@ -15,6 +15,12 @@ import {
   exists,
   promises,
   constants,
+  fstatSync,
+  closeSync,
+  openSync,
+  writeSync,
+  writeFileSync,
+  readSync,
 } from 'node:fs';
 
 const { F_OK, R_OK, W_OK, X_OK } = constants;
@@ -291,4 +297,58 @@ export const existsCallbackTest = {
   },
 };
 
+export const stdioFds = {
+  test() {
+    let stat1 = fstatSync(0);
+    let stat2 = fstatSync(1);
+    let stat3 = fstatSync(2);
+    ok(stat1.isFile());
+    ok(stat2.isFile());
+    ok(stat3.isFile());
+    closeSync(0);
+    closeSync(1);
+    closeSync(2);
+    // After closing the stdio file descriptors, they can still be used.
+    // That is, we don't actually close them.
+    stat1 = fstatSync(0);
+    stat2 = fstatSync(1);
+    stat3 = fstatSync(2);
+    ok(stat1.isFile());
+    ok(stat2.isFile());
+    ok(stat3.isFile());
+
+    // Writing to the stdio file descriptors is permitted, always in append mode.
+    // Position is ignored.
+    writeSync(0, 'Hello, stdin!\n', 1000);
+    writeSync(0, 'test', 500);
+    writeSync(1, 'Hello, stdin!\n', 1000);
+    writeSync(1, 'test', 500);
+    writeSync(2, 'Hello, stdin!\n', 1000);
+    writeSync(2, 'test', 500);
+
+    stat1 = fstatSync(0);
+    strictEqual(stat1.size, 0);
+
+    const buf = Buffer.alloc(20);
+    const bytesRead = readSync(0, buf, { position: 1000 });
+
+    const fd = openSync('/tmp/test.txt', 'w');
+    strictEqual(fd, 3);
+  },
+};
 // There is no promise version of exists in Node.js, so no test for it here.
+
+export const fsPercentEncodingTest = {
+  test() {
+    // The ? and # in the string path will be percent-encoded as part of the
+    // normalization, and the empty // in the path will be replaced as /.
+    // the %FF is left as is.
+    const path = '/tmp//?#a%FF';
+    ok(!existsSync('/tmp/%3F%23a%FF'));
+    writeFileSync(path, 'test');
+
+    // The casing of the percent-encoded characters is not significant.
+    ok(existsSync('/tmp/%3f%23a%FF'));
+    ok(existsSync('/tmp/%3F%23a%ff'));
+  },
+};

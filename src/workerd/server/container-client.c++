@@ -106,13 +106,21 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Network& network,
     kj::String dockerPath,
     kj::String containerName,
-    kj::String imageName)
+    kj::String imageName,
+    kj::TaskSet& waitUntilTasks)
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
       dockerPath(kj::mv(dockerPath)),
       containerName(kj::encodeUriComponent(kj::mv(containerName))),
-      imageName(kj::mv(imageName)) {}
+      imageName(kj::mv(imageName)),
+      waitUntilTasks(waitUntilTasks) {}
+
+ContainerClient::~ContainerClient() noexcept(false) {
+  waitUntilTasks.add(dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::DELETE,
+      kj::str("/containers/", containerName, "?force=true"))
+                         .ignoreResult());
+}
 
 // Docker-specific Port implementation that implements rpc::Container::Port::Server
 class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
@@ -161,17 +169,20 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server {
   kj::Maybe<kj::Promise<void>> pumpTask;
 };
 
-kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(
-    kj::HttpMethod method, kj::StringPtr endpoint, kj::Maybe<kj::StringPtr> body) {
+kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Network& network,
+    kj::String dockerPath,
+    kj::HttpMethod method,
+    kj::String endpoint,
+    kj::Maybe<kj::String> body) {
   kj::HttpHeaderTable headerTable;
   auto address = co_await network.parseAddress(dockerPath);
   auto connection = co_await address->connect();
   auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
   kj::HttpHeaders headers(headerTable);
-  headers.set(kj::HttpHeaderId::HOST, "localhost");
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
 
   KJ_IF_SOME(requestBody, body) {
-    headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
     headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
 
     auto req = httpClient->request(method, endpoint, headers, requestBody.size());
@@ -195,7 +206,8 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
   // Docker API: GET /containers/{id}/json
   auto endpoint = kj::str("/containers/", containerName, "/json");
 
-  auto response = co_await dockerApiRequest(kj::HttpMethod::GET, endpoint);
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::GET, kj::mv(endpoint));
   // We check if the container with the given name exist, and if it's not,
   // we simply return false while avoiding an unnecessary error.
   if (response.statusCode == 404) {
@@ -226,7 +238,7 @@ kj::Promise<ContainerClient::InspectResponse> ContainerClient::inspectContainer(
       auto array = portMapping.getValue().getArray();
       JSG_REQUIRE(array.size() > 0, Error, "Malformed ContainerInspect port mapping response");
       auto obj = array[0].getObject();
-      JSG_REQUIRE(array.size() > 1, Error, "Malformed ContainerInspect port mapping object");
+      JSG_REQUIRE(obj.size() > 1, Error, "Malformed ContainerInspect port mapping object");
       auto mappedPort = obj[1].getValue().getString();
       number = mappedPort.asString().parseAs<uint16_t>();
     }
@@ -259,12 +271,17 @@ kj::Promise<void> ContainerClient::createContainer(
     }
   }
 
-  // Add environment variables if provided
+  auto envSize = environment.map([](auto& env) { return env.size(); }).orDefault(0);
+  auto jsonEnv = jsonRoot.initEnv(envSize + kj::size(defaultEnv));
+
   KJ_IF_SOME(env, environment) {
-    auto jsonEnv = jsonRoot.initEnv(env.size());
     for (uint32_t i: kj::zeroTo(env.size())) {
       jsonEnv.set(i, env[i]);
     }
+  }
+
+  for (uint32_t i: kj::zeroTo(kj::size(defaultEnv))) {
+    jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
@@ -274,27 +291,32 @@ kj::Promise<void> ContainerClient::createContainer(
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
 
-  // Encode to JSON string
-  kj::String jsonBody = codec.encode(jsonRoot);
-  const auto endpoint = kj::str("/containers/create?name=", containerName);
-  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, jsonBody.asPtr());
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
+
+  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
+  // In that case we destroy and re-create the container.
+  if (response.statusCode == 409) {
+    co_await destroyContainer();
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
+  }
 
   // statusCode 201 refers to "container created successfully"
-  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
-  // Both are fine, so long as the container exists. Though we might want to call destroy and
-  // recreate on 409 in the future.
-  if (response.statusCode != 201 && response.statusCode != 409) {
+  if (response.statusCode != 201) {
     JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", imageName);
-    JSG_FAIL_REQUIRE(Error, "Create container failed with: ", response.body);
+    JSG_REQUIRE(response.statusCode != 409, Error, "Container already exists");
+    JSG_FAIL_REQUIRE(
+        Error, "Create container failed with [", response.statusCode, "] ", response.body);
   }
 }
 
 kj::Promise<void> ContainerClient::startContainer() {
   // Docker API: POST /containers/{id}/start
-  const auto endpoint = kj::str("/containers/", containerName, "/start");
+  auto endpoint = kj::str("/containers/", containerName, "/start");
   // We have to send an empty body since docker API will throw an error if we don't.
-  kj::StringPtr body = "";
-  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint, body);
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), kj::str(""));
   // statusCode 304 refers to "container already started"
   JSG_REQUIRE(response.statusCode != 304, Error, "Container already started");
   // statusCode 204 refers to "no error"
@@ -303,8 +325,9 @@ kj::Promise<void> ContainerClient::startContainer() {
 
 kj::Promise<void> ContainerClient::stopContainer() {
   // Docker API: POST /containers/{id}/stop
-  const auto endpoint = kj::str("/containers/", containerName, "/stop");
-  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
+  auto endpoint = kj::str("/containers/", containerName, "/stop");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
   // statusCode 204 refers to "no error"
   // statusCode 304 refers to "container already stopped"
   // Both are fine to avoid when stop container is called.
@@ -314,13 +337,35 @@ kj::Promise<void> ContainerClient::stopContainer() {
 
 kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
   // Docker API: POST /containers/{id}/kill
-  const auto endpoint =
-      kj::str("/containers/", containerName, "/kill?signal=", signalToString(signal));
-  auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
+  auto endpoint = kj::str("/containers/", containerName, "/kill?signal=", signalToString(signal));
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
   // statusCode 409 refers to "container is not running"
   // We should not throw an error when the container is already not running.
   JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 409, Error,
       "Stopping container failed with: ", response.body);
+}
+
+// Destroys the container.
+// No-op when the container does not exist.
+// Wait for the container to actually be stopped and removed when it exists.
+kj::Promise<void> ContainerClient::destroyContainer() {
+  auto endpoint = kj::str("/containers/", containerName, "?force=true");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  // statusCode 204 refers to "no error"
+  // statusCode 404 refers to "no such container"
+  // Both of which are fine for us since we're tearing down the container anyway.
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+      "Removing a container failed with: ", response.body);
+  // Do not send a wait request if container doesn't exist. This avoids sending an
+  // unnecessary request.
+  if (response.statusCode == 204) {
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/", containerName, "/wait?condition=removed"));
+    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+        "Waiting for container removal failed with: ", response.statusCode, response.body);
+  }
 }
 
 kj::Promise<void> ContainerClient::status(StatusContext context) {
@@ -347,13 +392,16 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
 }
 
 kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
-  // Docker API: POST /containers/{id}/wait - wait for container to exit
-  const auto endpoint = kj::str("/containers/", containerName, "/wait");
   // Monitor is often called right after start but the api layer's start does not await the RPC's
   // start response. That means that the createContainer call might not have even started yet.
   // If it hasn't, we'll give it 3 tries before failing.
+  auto results = context.getResults();
   for (int i = 0; i < 3; i++) {
-    auto response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
+    // Docker API: POST /containers/{id}/wait - wait for container to exit
+    auto endpoint = kj::str("/containers/", containerName, "/wait");
+
+    auto response = co_await dockerApiRequest(
+        network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
     if (response.statusCode == 404) {
       co_await timer.afterDelay(1 * kj::SECONDS);
       continue;
@@ -363,30 +411,14 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code ", statusCode);
+    results.setExitCode(statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
-  const auto [running, _ports] = co_await inspectContainer();
-  if (running) {
-    co_await stopContainer();
-    auto endpoint = kj::str("/containers/", containerName, "?force=true");
-    auto response = co_await dockerApiRequest(kj::HttpMethod::DELETE, endpoint);
-    // statusCode 204 refers to "no error"
-    // statusCode 404 refers to "no such container"
-    // Both of which are fine for us since we're tearing down the container anyway.
-    JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-        "Removing a container failed with: ", response.body);
-    {
-      endpoint = kj::str("/containers/", containerName, "/wait");
-      response = co_await dockerApiRequest(kj::HttpMethod::POST, endpoint);
-      JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
-          "Waiting for container removal failed with: ", response.statusCode, response.body);
-    }
-  }
+  co_await destroyContainer();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {

@@ -4,6 +4,7 @@
 
 import collections.abc
 import json
+from asyncio import Future, sleep
 from datetime import datetime
 from http import HTTPMethod
 from unittest import TestCase
@@ -15,6 +16,8 @@ from pyodide.ffi import JsException, JsProxy, to_js
 
 assertRaises = TestCase().assertRaises
 assertRaisesRegex = TestCase().assertRaisesRegex
+
+testFuture = Future()
 
 
 class PythonRpcTester(WorkerEntrypoint):
@@ -51,8 +54,17 @@ class PythonRpcTester(WorkerEntrypoint):
         curr_date = datetime.now()
         py_date = await self.env.PythonRpc.identity(curr_date)
         assert isinstance(py_date, datetime)
-        assert py_date == curr_date
+        # JavaScript Date objects only have millisecond precision
+        assert abs((py_date - curr_date).microseconds) < 1e6
+
         return True
+
+    async def sleep_then_set_result(self):
+        await sleep(0.1)
+        testFuture.set_result(100)
+
+    async def test_wait_until_coroutine_lifetime(self):
+        self.ctx.waitUntil(self.sleep_then_set_result())
 
 
 class CustomType:
@@ -119,7 +131,8 @@ async def test(ctrl, env, ctx):
     curr_date = datetime.now()
     py_date = await env.PythonRpc.identity(curr_date)
     assert isinstance(py_date, datetime)
-    assert py_date == curr_date
+    # JavaScript Date objects only have millisecond precision
+    assert abs((py_date - curr_date).microseconds) < 1e6
 
     py_date_list = await env.PythonRpc.identity([datetime.now(), datetime.now()])
     for d in py_date_list:
@@ -256,3 +269,10 @@ async def test(ctrl, env, ctx):
 
     # Verify that the `env` in the DO is correctly wrapped.
     assert await env.PythonRpc.check_env()
+
+    # Check that the coroutine returned by sleep_then_set_result() lasts long enough.
+    # sleep_then_set_result() resolves testFuture after sleeping for 100ms.
+    await env.PythonRpc.test_wait_until_coroutine_lifetime()
+    assert not testFuture.done()
+    await sleep(0.2)
+    assert testFuture.result() == 100

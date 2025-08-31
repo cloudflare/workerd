@@ -30,15 +30,12 @@ def _copy_to_generated(src, version = None, out_name = None, name = None):
         name += "@" + version
     copy_file(name = name, src = src, out = _out_path(out_name, version))
 
-def _copy_and_capnp_embed(src, version = None, out_name = None):
-    out_name = out_name or _out_name(src)
-    name = out_name + "@capnp"
-    if version:
-        name += "@" + version
-    _copy_to_generated(src, out_name = out_name, version = version)
+def _copy_and_capnp_embed(src):
+    out_name = _out_name(src)
+    _copy_to_generated(src)
     capnp_embed(
-        name = name,
-        src = _out_path(out_name, version),
+        name = out_name + "@capnp",
+        src = _out_path(out_name, None),
         deps = [out_name + "@copy"],
     )
 
@@ -63,7 +60,6 @@ def _fmt_python_snapshot_release(
     return "(%s)" % content
 
 def pyodide_extra():
-    _copy_and_capnp_embed("python-entrypoint.js")
     _copy_to_generated(
         "pyodide_extra.capnp",
         out_name = "pyodide_extra_tmpl.capnp",
@@ -89,12 +85,6 @@ def pyodide_extra():
         template = "generated/pyodide_extra_tmpl.capnp",
     )
 
-    capnp_embed(
-        name = "pyodide_extra_file_embed",
-        src = "generated/pyodide_extra.capnp",
-        deps = ["pyodide_extra_expand_template@rule"],
-    )
-
     for tag in package_tags:
         _copy_and_capnp_embed("@pyodide-lock_" + tag + ".json//file")
 
@@ -103,8 +93,6 @@ def pyodide_extra():
         srcs = ["generated/pyodide_extra.capnp"],
         visibility = ["//visibility:public"],
         deps = [
-            ":pyodide_extra_file_embed",
-            ":python-entrypoint.js@capnp",
         ] + [
             ":pyodide-lock_%s.json@capnp" % tag
             for tag in package_tags
@@ -257,6 +245,11 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_js = None, p
         [
             "function _PyEM_CountFuncParams(func){",
             "function _PyEM_CountFuncParams(func){ return patched_PyEM_CountFuncParams(Module, func);",
+        ],
+        [
+            "var tableBase=metadata.tableSize?wasmTable.length:0;",
+            "var tableBase=metadata.tableSize?wasmTable.length:0;" +
+            "Module.snapshotDebug && console.log('loadWebAssemblyModule', libName, memoryBase, tableBase);",
         ],
     ]
 

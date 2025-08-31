@@ -87,29 +87,29 @@ export class TracingChannel {
   private [kAsyncEnd]?: ChannelType;
   private [kError]?: ChannelType;
 
-  public constructor() {
+  constructor() {
     throw new Error(
       'Use diagnostic_channel.tracingChannels() to create TracingChannel'
     );
   }
 
-  public get start(): ChannelType | undefined {
+  get start(): ChannelType | undefined {
     return this[kStart];
   }
-  public get end(): ChannelType | undefined {
+  get end(): ChannelType | undefined {
     return this[kEnd];
   }
-  public get asyncStart(): ChannelType | undefined {
+  get asyncStart(): ChannelType | undefined {
     return this[kAsyncStart];
   }
-  public get asyncEnd(): ChannelType | undefined {
+  get asyncEnd(): ChannelType | undefined {
     return this[kAsyncEnd];
   }
-  public get error(): ChannelType | undefined {
+  get error(): ChannelType | undefined {
     return this[kError];
   }
 
-  public subscribe(subscriptions: TracingChannelSubscriptions): void {
+  subscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
       this[kStart]?.subscribe(subscriptions.start);
     if (subscriptions.end !== undefined)
@@ -122,7 +122,7 @@ export class TracingChannel {
       this[kError]?.subscribe(subscriptions.error);
   }
 
-  public unsubscribe(subscriptions: TracingChannelSubscriptions): void {
+  unsubscribe(subscriptions: TracingChannelSubscriptions): void {
     if (subscriptions.start !== undefined)
       this[kStart]?.unsubscribe(subscriptions.start);
     if (subscriptions.end !== undefined)
@@ -135,7 +135,7 @@ export class TracingChannel {
       this[kError]?.unsubscribe(subscriptions.error);
   }
 
-  public traceSync(
+  traceSync(
     fn: (...args: unknown[]) => unknown,
     context: Record<string, unknown> = {},
     thisArg: unknown = globalThis,
@@ -162,7 +162,7 @@ export class TracingChannel {
     );
   }
 
-  public tracePromise(
+  tracePromise(
     fn: (...args: unknown[]) => unknown,
     context: Record<string, unknown> = {},
     thisArg: unknown = globalThis,
@@ -207,7 +207,7 @@ export class TracingChannel {
     );
   }
 
-  public traceCallback(
+  traceCallback(
     fn: (...args: unknown[]) => unknown,
     position = -1,
     context: Record<string, unknown> = {},

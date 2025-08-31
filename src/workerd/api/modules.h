@@ -4,13 +4,14 @@
 
 #pragma once
 
+#include <workerd/api/base64.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/rtti.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/unsafe.h>
-#include <workerd/api/worker-rpc.h>
+#include <workerd/api/workers-module.h>
 #include <workerd/jsg/modules-new.h>
 
 #include <cloudflare/cloudflare.capnp.h>
@@ -48,8 +49,9 @@ void registerModules(Registry& registry, auto featureFlags) {
     registerUnsafeModule(registry);
   }
   registerSocketsModule(registry, featureFlags);
+  registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
-  registerRpcModules(registry, featureFlags);
+  registerWorkersModule(registry, featureFlags);
   registry.template addBuiltinModule<EnvModule>(
       "cloudflare-internal:env", workerd::jsg::ModuleRegistry::Type::INTERNAL);
   registry.template addBuiltinModule<FileSystemModule>(
@@ -61,6 +63,7 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
   builder.add(node::getInternalNodeJsCompatModuleBundle<TypeWrapper>(featureFlags));
   builder.add(node::getExternalNodeJsCompatModuleBundle(featureFlags));
   builder.add(getInternalSocketModuleBundle<TypeWrapper>(featureFlags));
+  builder.add(getInternalBase64ModuleBundle<TypeWrapper>(featureFlags));
   builder.add(getInternalRpcModuleBundle<TypeWrapper>(featureFlags));
 
   builder.add(getInternalUnsafeModuleBundle<TypeWrapper>(featureFlags));

@@ -82,9 +82,9 @@ function isError(e: unknown): e is Error {
 }
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array).prototype;
-const typedArrayPrototypeLength: (this: internal.TypedArray) => number =
+const typedArrayPrototypeLength: (this: NodeJS.TypedArray) => number =
   Object.getOwnPropertyDescriptor(typedArrayPrototype, 'length')!.get!;
-const typedArrayPrototypeToStringTag: (this: internal.TypedArray) => string =
+const typedArrayPrototypeToStringTag: (this: NodeJS.TypedArray) => string =
   Object.getOwnPropertyDescriptor(
     typedArrayPrototype,
     Symbol.toStringTag
@@ -2231,7 +2231,7 @@ function formatArray(
 }
 
 function formatTypedArray(
-  value: internal.TypedArray,
+  value: NodeJS.TypedArray,
   length: number,
   ctx: Context,
   _ignored: unknown,
@@ -2971,11 +2971,29 @@ export function stripVTControlCharacters(str: string): string {
 
 // Called from C++ on `console.log()`s to format values
 export function formatLog(
-  ...args: [...values: unknown[], colors: boolean]
+  ...args: [
+    ...values: unknown[],
+    colors: boolean,
+    structuredLogging: boolean,
+    level: string,
+  ]
 ): string {
-  const inspectOptions: InspectOptions = { colors: args.pop() as boolean };
+  const level = args.pop() as string;
+  const structuredLogging = args.pop() as boolean;
+  const colors = args.pop() as boolean;
+  const inspectOptions: InspectOptions = { colors };
+
   try {
-    return formatWithOptions(inspectOptions, ...args);
+    const message = formatWithOptions(inspectOptions, ...args);
+    if (structuredLogging) {
+      return JSON.stringify({
+        timestamp: Date.now(),
+        level,
+        message,
+      });
+    } else {
+      return message;
+    }
   } catch (err) {
     return `<Formatting threw (${isError(err) ? err.stack : String(err)})>`;
   }

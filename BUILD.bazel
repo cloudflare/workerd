@@ -1,17 +1,19 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
-load("@capnp-cpp//src/capnp:cc_capnp_library.bzl", "cc_capnp_library")
-load("@npm//:capnp-es/package_json.bzl", capnp_es_binary = "bin")
+load("@npm//:capnp-es/package_json.bzl", capnp_es_bins = "bin")
 load("@npm//:defs.bzl", "npm_link_all_packages")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 
-cc_capnp_library(
+# This is used to embed the ICU data file which libicu needs at runtime to do its thing.
+# We bake this file into the binary to avoid shipping it separately. (V8's normal GN build can
+# actually do this for us, but we use the Bazel build which doesn't have this option.) Using #embed
+# makes this very fast and convenient.
+wd_cc_embed(
     name = "icudata-embed",
-    srcs = ["icudata-embed.capnp"],
-    data = ["@com_googlesource_chromium_icu//:icudata"],
-    defines = ["WORKERD_ICU_DATA_EMBED"],
-    include_prefix = ".",
+    src = "@com_googlesource_chromium_icu//:common/icudtl.dat",
+    base_name = "icu-data-file",
+    strip_include_prefix = "",
     visibility = ["//visibility:public"],
 )
 
@@ -23,8 +25,15 @@ npm_link_package(
     package = "@workerd/jsg",
 )
 
-capnp_es_binary.capnp_es_binary(
-    name = "capnpc_es",
+# Plugin to generate .js files
+capnp_es_bins.capnpc_js_binary(
+    name = "capnpc_js_plugin",
+    visibility = ["//visibility:public"],
+)
+
+# Plugin to generate .ts files
+capnp_es_bins.capnpc_ts_binary(
+    name = "capnpc_ts_plugin",
     visibility = ["//visibility:public"],
 )
 

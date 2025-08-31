@@ -320,9 +320,9 @@ KJ_TEST("throw tunneled exception") {
   e.expectEval("throwTunneledCompileError()", "throws",
       "CompileError: thrown from throwTunneledCompileError");
   e.expectEval(
-      "throwTunneledLinkError()", "throws", "CompileError: thrown from throwTunneledLinkError");
+      "throwTunneledLinkError()", "throws", "LinkError: thrown from throwTunneledLinkError");
   e.expectEval("throwTunneledRuntimeError()", "throws",
-      "CompileError: thrown from throwTunneledRuntimeError");
+      "RuntimeError: thrown from throwTunneledRuntimeError");
   e.expectEval(
       "throwTunneledDOMException()", "throws", "Some error: thrown from throwTunneledDOMException");
   {
@@ -347,63 +347,63 @@ KJ_TEST("isTunneledException") {
   try {
     context.throwTunneledTypeError();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledTypeErrorWithoutMessage();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledTypeErrorLateColon();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledTypeErrorWithExpectation();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledOperationError();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledOperationErrorLateColon();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwTunneledOperationErrorWithExpectation();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(isTunneledException(e.getDescription()), e.getDescription());
   }
 
   try {
     context.throwBadTunneledError();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
   try {
     context.throwBadTunneledErrorWithExpectation();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
 
   try {
     context.throwRemoteCpuExceededError();
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
     KJ_EXPECT(isDoNotLogException(e.getDescription()), e.getDescription());
   }
@@ -411,7 +411,7 @@ KJ_TEST("isTunneledException") {
   try {
     JSG_FAIL_REQUIRE(InternalDOMOperationError, "foo");
     KJ_UNREACHABLE;
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
   }
 }

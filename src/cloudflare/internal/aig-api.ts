@@ -24,6 +24,13 @@ export type GatewayOptions = {
   retries?: GatewayRetries;
 };
 
+export type UniversalGatewayOptions = Exclude<GatewayOptions, 'id'> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
+};
+
 export type AiGatewayPatchLog = {
   score?: number | null;
   feedback?: -1 | 1 | null;
@@ -110,14 +117,14 @@ export type AIGatewayUniversalRequest = {
 };
 
 export class AiGatewayInternalError extends Error {
-  public constructor(message: string) {
+  constructor(message: string) {
     super(message);
     this.name = 'AiGatewayInternalError';
   }
 }
 
 export class AiGatewayLogNotFound extends Error {
-  public constructor(message: string) {
+  constructor(message: string) {
     super(message);
     this.name = 'AiGatewayLogNotFound';
   }
@@ -145,13 +152,13 @@ export class AiGateway {
   readonly #fetcher: Fetcher;
   readonly #gatewayId: string;
 
-  public constructor(fetcher: Fetcher, gatewayId: string) {
+  constructor(fetcher: Fetcher, gatewayId: string) {
     this.#fetcher = fetcher;
     this.#gatewayId = gatewayId;
   }
 
   // eslint-disable-next-line
-  public async getUrl(provider?: AIGatewayProviders | string): Promise<string> {
+  async getUrl(provider?: AIGatewayProviders | string): Promise<string> {
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/url/${provider ?? 'universal'}`,
       { method: 'GET' }
@@ -166,7 +173,7 @@ export class AiGateway {
     return data.result.url;
   }
 
-  public async getLog(logId: string): Promise<AiGatewayLog> {
+  async getLog(logId: string): Promise<AiGatewayLog> {
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`,
       {
@@ -192,7 +199,7 @@ export class AiGateway {
     }
   }
 
-  public async patchLog(logId: string, data: AiGatewayPatchLog): Promise<void> {
+  async patchLog(logId: string, data: AiGatewayPatchLog): Promise<void> {
     const res = await this.#fetcher.fetch(
       `https://workers-binding.ai/ai-gateway/gateways/${this.#gatewayId}/logs/${logId}`,
       {
@@ -217,13 +224,13 @@ export class AiGateway {
     }
   }
 
-  public run(
+  run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: GatewayOptions; extraHeaders?: object }
+    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
 
-    const headers = this.getHeadersFromOptions(
+    const headers = this.#getHeadersFromOptions(
       options?.gateway,
       options?.extraHeaders
     );
@@ -250,8 +257,8 @@ export class AiGateway {
     );
   }
 
-  private getHeadersFromOptions(
-    options?: GatewayOptions,
+  #getHeadersFromOptions(
+    options?: UniversalGatewayOptions,
     extraHeaders?: object
   ): Headers {
     const headers = new Headers();
@@ -309,11 +316,11 @@ export class AiGateway {
           headers.set('cf-aig-backoff', options.retries.backoff);
         }
       }
+    }
 
-      if (extraHeaders) {
-        for (const [key, value] of Object.entries(extraHeaders)) {
-          headers.set(key, value as string);
-        }
+    if (extraHeaders) {
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        headers.set(key, value as string);
       }
     }
 

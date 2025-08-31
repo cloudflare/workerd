@@ -2,7 +2,7 @@ import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
 import { default as UnsafeEval } from 'internal:unsafe-eval';
 import { default as DiskCache } from 'pyodide-internal:disk_cache';
-import { FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
+import { type FilePath, VIRTUALIZED_DIR } from 'pyodide-internal:setupPackages';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 import {
   SHOULD_SNAPSHOT_TO_DISK,
@@ -11,9 +11,16 @@ import {
   REQUIREMENTS,
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
+  IS_DEDICATED_SNAPSHOT_ENABLED,
+  compatibilityFlags,
 } from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  simpleRunPython,
+} from 'pyodide-internal:util';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
+import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 // A handle is the pointer into the linear memory returned by dlopen. Multiple dlopens will return
 // multiple pointers.
@@ -43,6 +50,8 @@ type OldSnapshotMeta = DsoHandles & {
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
 type SnapshotMeta = {
+  // We just store importedModulesList to help with testing and introspection
+  readonly importedModulesList: ReadonlyArray<string> | undefined;
   readonly hiwire: SnapshotConfig | undefined;
   readonly dsoHandles: DsoHandles;
   readonly settings: { readonly baselineSnapshot: boolean };
@@ -68,9 +77,19 @@ type LoadedSnapshotExtras = {
 type LoadedSnapshotMeta = SnapshotMeta & LoadedSnapshotExtras;
 
 /**
+ * Constants
+ */
+// "\x00snp"
+const SNAPSHOT_MAGIC = 0x706e7300;
+const CREATE_SNAPSHOT_VERSION = 2;
+const HEADER_SIZE = 4 * 4;
+
+/**
  * Global variables for the memory snapshot.
  */
-let LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined;
+const LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined = decodeSnapshot(
+  MEMORY_SNAPSHOT_READER
+);
 const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
@@ -203,6 +222,55 @@ function getMemoryPatched(
   }
 }
 
+function loadDynlibFromTarFs(
+  Module: Module,
+  base: string,
+  node: TarFSInfo | undefined,
+  soFile: string[]
+): void {
+  for (const part of soFile) {
+    node = node?.children?.get(part);
+  }
+  if (!node?.contentsOffset) {
+    node = VIRTUALIZED_DIR.getDynlibRoot();
+    for (const part of soFile) {
+      node = node?.children?.get(part);
+    }
+  }
+  if (!node?.contentsOffset) {
+    throw Error(`fs node could not be found for ${soFile.join('/')}`);
+  }
+  const { contentsOffset, size } = node;
+  if (contentsOffset === undefined) {
+    throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
+  }
+  const wasmModuleData = new Uint8Array(size);
+  (node.reader ?? EmbeddedPackagesTarReader).read(
+    contentsOffset,
+    wasmModuleData
+  );
+  const path = base + soFile.join('/');
+  loadDynlib(Module, path, wasmModuleData);
+}
+
+function loadDynlibFromVendor(
+  Module: Module,
+  soFile: string[],
+  userBundleNames: string[]
+): void {
+  const path = soFile.slice(3).join('/');
+  const index = userBundleNames.indexOf(path);
+  if (index == -1) {
+    throw new PythonRuntimeError(
+      `Could not find ${path} in user bundle, which is required by the snapshot.`
+    );
+  }
+  // The MetadataReader holds the user bundle's contents.
+  const buffer = new Uint8Array(MetadataReader.getSizes()[index]!);
+  MetadataReader.read(index, 0, buffer);
+  loadDynlib(Module, path, buffer);
+}
+
 /**
  * This loads all dynamic libraries visible in the site-packages directory. They
  * are loaded before the runtime is initialized outside of the heap, using the
@@ -218,53 +286,63 @@ export function preloadDynamicLibs(Module: Module): void {
   Module.noInitialRun = isRestoringSnapshot();
   Module.getMemoryPatched = getMemoryPatched;
   Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
-  let SO_FILES_TO_LOAD: string[][] = [];
   const sitePackages = Module.FS.sessionSitePackages + '/';
+  const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
   if (Module.API.version === '0.26.0a2') {
     const loadedBaselineSnapshot =
       LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
+    let SO_FILES_TO_LOAD: string[][];
     if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
       SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
     } else {
       SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
     }
-  } else if (LOADED_SNAPSHOT_META?.loadOrder) {
-    SO_FILES_TO_LOAD = LOADED_SNAPSHOT_META.loadOrder.map((x) => {
-      // We need the path relative to the site-packages directory, not relative to the root of the file
-      // system.
-      if (x.startsWith(sitePackages)) {
-        x = x.slice(sitePackages.length);
-      }
-      return x.split('/');
-    });
+    for (const soFile of SO_FILES_TO_LOAD) {
+      loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
+    }
+    return;
   }
+  if (!LOADED_SNAPSHOT_META?.loadOrder) {
+    return;
+  }
+  // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
+  // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
+  // could drop this patch because we are now on Emscripten 4.0.9.
+  // https://github.com/pyodide/pyodide/blob/main/cpython/patches/0008-Fix-Emscripten-call-trampoline-compatibility-with-Em.patch
+  //
+  // Unfortunately, this initializer allocates a function table slot and is called before dynamic
+  // loading when taking the snapshot but after when restoring the snapshot. Thus, when restoring a
+  // snapshot, before loading dynamic libraries we reserve a function pointer for the
+  // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
+  // used at the right moment.
+  const PyEMCountArgsPtr = Module.getEmptyTableSlot();
 
-  for (const soFile of SO_FILES_TO_LOAD) {
-    let node: TarFSInfo | undefined = VIRTUALIZED_DIR.getSitePackagesRoot();
-    for (const part of soFile) {
-      node = node?.children?.get(part);
+  const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
+  const dynlibPath = '/usr/lib/';
+  const userBundleNames = MetadataReader.getNames();
+  for (let path of LOADED_SNAPSHOT_META.loadOrder) {
+    let root = sitePackagesRoot;
+    if (path.startsWith(sitePackages)) {
+      path = path.slice(sitePackages.length);
+    } else if (path.startsWith(dynlibPath)) {
+      path = path.slice(dynlibPath.length);
+      root = dynlibRoot;
     }
-    if (!node?.contentsOffset) {
-      node = VIRTUALIZED_DIR.getDynlibRoot();
-      for (const part of soFile) {
-        node = node?.children?.get(part);
-      }
+
+    const pathSplit = path.split('/');
+    if (pathSplit[0] == '') {
+      // This is a file path beginning with `/`, like /session/metadata/vendor/pkg/lib.so. So we
+      // are loading the vendored package's dynlibs here.
+      //
+      // TODO(EW-9508): support .so's in user bundle outside vendor dir.
+      loadDynlibFromVendor(Module, pathSplit, userBundleNames);
+    } else {
+      // This is a file path relative to the site-packages directory, like pkg/lib.so. So we are
+      // loading the built-in package's dynlibs here.
+      loadDynlibFromTarFs(Module, sitePackages, root, pathSplit);
     }
-    if (!node?.contentsOffset) {
-      throw Error(`fs node could not be found for ${soFile.join('/')}`);
-    }
-    const { contentsOffset, size } = node;
-    if (contentsOffset === undefined) {
-      throw Error(`contentsOffset not defined for ${soFile.join('/')}`);
-    }
-    const wasmModuleData = new Uint8Array(size);
-    (node.reader ?? EmbeddedPackagesTarReader).read(
-      contentsOffset,
-      wasmModuleData
-    );
-    const path = sitePackages + soFile.join('/');
-    loadDynlib(Module, path, wasmModuleData);
   }
+  Module.freeTableIndexes.push(PyEMCountArgsPtr);
 }
 
 /**
@@ -279,9 +357,7 @@ function recordDsoHandles(Module: Module): DsoHandles {
     if (handle === 0) {
       continue;
     }
-    if (!(name in dylinkInfo)) {
-      dylinkInfo[name] = { handles: [] };
-    }
+    dylinkInfo[name] ??= { handles: [] };
     dylinkInfo[name].handles.push(handle);
   }
   return dylinkInfo;
@@ -345,33 +421,112 @@ function memorySnapshotDoImports(Module: Module): string[] {
   return deduplicatedModules;
 }
 
+function describeValue(val: any): string {
+  try {
+    const out = [];
+
+    const type = typeof val;
+    const isObject = type === 'object';
+    out.push(`Value: ${val}`);
+    out.push(`Type: ${type}`);
+
+    if (val && isObject) {
+      try {
+        out.push(
+          `Keys: ${Object.keys(val as Record<string, unknown>)
+            .slice(0, 10)
+            .join(', ')}`
+        );
+      } catch {
+        // Ignore errors when getting keys
+      }
+    }
+
+    try {
+      if (val && isObject && typeof (val as Error).stack === 'string') {
+        out.push(`Stack:\n${(val as Error).stack}`);
+      }
+    } catch {
+      // Ignore errors when getting stack
+    }
+
+    try {
+      out.push(`Prototype: ${Object.prototype.toString.call(val)}`);
+    } catch {
+      // Ignore errors when getting object type
+    }
+
+    try {
+      const contents = JSON.stringify(val);
+      if (contents?.length > 100) {
+        out.push(`Contents: ${contents.slice(0, 100)}...`);
+      } else if (contents) {
+        out.push(`Contents: ${contents}`);
+      }
+    } catch {
+      // Ignore JSON stringify errors
+    }
+
+    return out.join('\n');
+  } catch (err) {
+    return `Error describing value: ${err}`;
+  }
+}
+
+/**
+ * When we create a dedicated memory snapshot, we capture all the globals in the user's top-level
+ * scope. If those globals refer to JS objects, then we may fail to serialise them. This function
+ * creates a user error to inform the user of this issue.
+ *
+ * It's important that we give the user as much information about this as possible, so they can
+ * understand what they need to change in order to resolve the problem on their end.
+ */
+function createUnserializableObjectError(obj: any): PythonUserError {
+  // TODO: Create docs for this and link them here.
+  const error = `Can't serialize top-level variable.
+Please review any global variables you or your imported modules create at the top-level of your code, and consider deleting them.
+
+Description of the value:
+${describeValue(obj)}
+`;
+  return new PythonUserError(error);
+}
+
 /**
  * Create memory snapshot by importing SNAPSHOT_IMPORTS to ensure these packages
  * are initialized in the linear memory snapshot and then saving a copy of the
  * linear memory into MEMORY.
  */
-function makeLinearMemorySnapshot(Module: Module): Uint8Array {
+function makeLinearMemorySnapshot(
+  Module: Module,
+  importedModulesList: string[],
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+): Uint8Array {
+  const customHiwireStateSerializer = (obj: any): Record<string, boolean> => {
+    if (obj === pyodide_entrypoint_helper) {
+      return { pyodide_entrypoint_helper: true };
+    }
+    throw createUnserializableObjectError(obj);
+  };
+
   const dsoHandles = recordDsoHandles(Module);
   const hiwire =
     Module.API.version === '0.26.0a2'
       ? undefined
-      : Module.API.serializeHiwireState(Module);
+      : Module.API.serializeHiwireState(customHiwireStateSerializer);
   const settings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
+    compatFlags: compatibilityFlags,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
     dsoHandles,
     hiwire,
+    importedModulesList,
     settings,
     ...CREATED_SNAPSHOT_META,
   });
 }
-
-// "\x00snp"
-const SNAPSHOT_MAGIC = 0x706e7300;
-const CREATE_SNAPSHOT_VERSION = 2;
-const HEADER_SIZE = 4 * 4;
 
 /**
  * Encode heap and dsoJSON into the memory snapshot artifact that we'll upload
@@ -396,41 +551,30 @@ function encodeSnapshot(heap: Uint8Array, meta: SnapshotMeta): Uint8Array {
   return toUpload;
 }
 
-let TEST_SNAPSHOT: Uint8Array | undefined = undefined;
-(function (): void {
-  // Lookup memory snapshot from artifact store.
-  if (!MEMORY_SNAPSHOT_READER) {
-    // snapshots are disabled or there isn't one yet
-    return;
-  }
-
-  // Simple sanity check to ensure this snapshot isn't corrupted.
-  //
-  // TODO(later): we need better detection when this is corrupted. Right now the isolate will
-  // just die.
-  const snapshotSize = MEMORY_SNAPSHOT_READER.getMemorySnapshotSize();
-  if (snapshotSize <= 100) {
-    TEST_SNAPSHOT = new Uint8Array(snapshotSize);
-    MEMORY_SNAPSHOT_READER.readMemorySnapshot(0, TEST_SNAPSHOT);
-    return;
-  }
-  LOADED_SNAPSHOT_META = decodeSnapshot(MEMORY_SNAPSHOT_READER);
-})();
-
 /**
  * Decode heap and dsoJSON from the memory snapshot reader
  */
-function decodeSnapshot(reader: SnapshotReader): LoadedSnapshotMeta {
+function decodeSnapshot(
+  reader: SnapshotReader | undefined
+): LoadedSnapshotMeta | undefined {
+  if (!reader) {
+    return undefined;
+  }
+  if (reader.getMemorySnapshotSize() === 0) {
+    throw new PythonRuntimeError(
+      `SnapshotReader returned memory snapshot size of 0`
+    );
+  }
   const header = new Uint32Array(4);
   reader.readMemorySnapshot(0, header);
   if (header[0] !== SNAPSHOT_MAGIC) {
-    throw new Error(
+    throw new PythonRuntimeError(
       `Invalid magic number ${header[0]}, expected ${SNAPSHOT_MAGIC}`
     );
   }
   // buf[1] is SNAPSHOT_VERSION (unused currently)
-  const snapshotOffset = header[2];
-  const jsonByteLength = header[3];
+  const snapshotOffset = header[2]!;
+  const jsonByteLength = header[3]!;
 
   const snapshotSize = reader.getMemorySnapshotSize() - snapshotOffset;
   const jsonBuf = new Uint8Array(jsonByteLength);
@@ -446,6 +590,7 @@ function decodeSnapshot(reader: SnapshotReader): LoadedSnapshotMeta {
   if (!meta?.version) {
     return {
       version: 1,
+      importedModulesList: undefined,
       dsoHandles: meta,
       hiwire: undefined,
       loadOrder: [],
@@ -477,16 +622,70 @@ export function maybeRestoreSnapshot(Module: Module): void {
   );
 }
 
-export function finishSnapshotSetup(pyodide: Pyodide): void {
-  // This is just here for our test suite. Ugly but just about the only way to test this.
-  if (TEST_SNAPSHOT) {
-    const snapshotString = new TextDecoder().decode(TEST_SNAPSHOT);
-    pyodide.registerJsModule('cf_internal_test_utils', {
-      snapshot: snapshotString,
-    });
+function collectSnapshot(
+  Module: Module,
+  importedModulesList: string[],
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+): void {
+  if (IS_EW_VALIDATING) {
+    const snapshot = makeLinearMemorySnapshot(
+      Module,
+      importedModulesList,
+      pyodide_entrypoint_helper
+    );
+    ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
+  } else if (SHOULD_SNAPSHOT_TO_DISK) {
+    const snapshot = makeLinearMemorySnapshot(
+      Module,
+      importedModulesList,
+      pyodide_entrypoint_helper
+    );
+    DiskCache.put('snapshot.bin', snapshot);
+  } else {
+    throw new PythonRuntimeError(
+      "Attempted to collect snapshot outside of context where it's supported."
+    );
   }
 }
 
+/**
+ * Collects a dedicated snapshot. This is only called after the top-level of the worker has been
+ * run.
+ */
+export function maybeCollectDedicatedSnapshot(
+  Module: Module,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+): void {
+  if (!IS_CREATING_SNAPSHOT) {
+    return;
+  }
+
+  if (!IS_DEDICATED_SNAPSHOT_ENABLED) {
+    return;
+  }
+
+  if (Module.API.version == '0.26.0a2') {
+    // 0.26.0a2 does not support serialisation of the hiwire state, so it cannot support dedicated
+    // snapshots.
+    throw new PythonRuntimeError(
+      'Dedicated snapshot is not supported for Python runtime version 0.26.0a2'
+    );
+  }
+
+  if (!pyodide_entrypoint_helper) {
+    throw new PythonRuntimeError(
+      'pyodide_entrypoint_helper is required for dedicated snapshot'
+    );
+  }
+  collectSnapshot(Module, [], pyodide_entrypoint_helper);
+}
+
+/**
+ * Collects either a baseline or package snapshot. This is called prior to running the top-level
+ * of the worker and crucially before the worker files are mounted.
+ *
+ * Dedicated snapshots are collected in `maybeCollectDedicatedSnapshot`.
+ */
 export function maybeCollectSnapshot(Module: Module): void {
   // In order to surface any problems that occur in `memorySnapshotDoImports` to
   // users in local development, always call it even if we aren't actually
@@ -494,19 +693,41 @@ export function maybeCollectSnapshot(Module: Module): void {
   if (!IS_CREATING_SNAPSHOT) {
     return;
   }
-  if (IS_EW_VALIDATING) {
-    const snapshot = makeLinearMemorySnapshot(Module);
-    ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
-  } else if (SHOULD_SNAPSHOT_TO_DISK) {
-    const snapshot = makeLinearMemorySnapshot(Module);
-    DiskCache.put('snapshot.bin', snapshot);
+
+  if (IS_DEDICATED_SNAPSHOT_ENABLED) {
+    // We are not interested in collecting a baseline/package snapshot here if this feature flag
+    // is enabled.
+    return;
   }
+
+  collectSnapshot(Module, importedModulesList, null);
 }
 
-export function finalizeBootstrap(Module: Module): void {
+export function finalizeBootstrap(
+  Module: Module,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
+): void {
+  const customHiwireStateDeserializer = (obj: any): any => {
+    if ('pyodide_entrypoint_helper' in obj) {
+      return pyodide_entrypoint_helper;
+    }
+    throw new PythonRuntimeError(`Can't deserialize ${obj}`);
+  };
+
   Module.API.config._makeSnapshot =
     IS_CREATING_SNAPSHOT && Module.API.version !== '0.26.0a2';
   enterJaegerSpan('finalize_bootstrap', () => {
-    Module.API.finalizeBootstrap(LOADED_SNAPSHOT_META?.hiwire);
+    Module.API.finalizeBootstrap(
+      LOADED_SNAPSHOT_META?.hiwire,
+      customHiwireStateDeserializer
+    );
+  });
+  if (IS_CREATING_SNAPSHOT) {
+    return;
+  }
+  Module.API.public_api.registerJsModule('_cf_internal_snapshot_info', {
+    loadedSnapshot: !!LOADED_SNAPSHOT_META,
+    loadedBaselineSnapshot: LOADED_SNAPSHOT_META?.settings.baselineSnapshot,
+    importedModulesList: LOADED_SNAPSHOT_META?.importedModulesList,
   });
 }

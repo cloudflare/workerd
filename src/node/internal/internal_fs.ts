@@ -7,113 +7,182 @@ import {
   UV_DIRENT_FIFO,
   UV_DIRENT_SOCKET,
 } from 'node-internal:internal_fs_constants';
-import { getOptions } from 'node-internal:internal_fs_utils';
-import { validateFunction, validateUint32 } from 'node-internal:validators';
-import { ERR_MISSING_ARGS } from 'node-internal:internal_errors';
-import type { Buffer } from 'node-internal:internal_buffer';
+import {
+  type FilePath,
+  type ValidEncoding,
+} from 'node-internal:internal_fs_utils';
+import {
+  default as cffs,
+  type DirEntryHandle,
+} from 'cloudflare-internal:filesystem';
+import {
+  validateFunction,
+  validateObject,
+  validateString,
+} from 'node-internal:validators';
+import {
+  ERR_DIR_CLOSED,
+  ERR_MISSING_ARGS,
+} from 'node-internal:internal_errors';
+import { Buffer } from 'node-internal:internal_buffer';
 const kType = Symbol('type');
 
 export class Dirent {
-  public name: string | Buffer;
-  public parentPath: string | Buffer;
+  name: string | Buffer;
+  parentPath: string | Buffer;
   private [kType]: number;
 
-  public constructor(
-    name: string | Buffer,
-    type: number,
-    path: string | Buffer
-  ) {
+  constructor(name: string | Buffer, type: number, path: string | Buffer) {
     this.name = name;
     this.parentPath = path;
     this[kType] = type;
   }
 
-  public isDirectory(): boolean {
+  isDirectory(): boolean {
     return this[kType] === UV_DIRENT_DIR;
   }
 
-  public isFile(): boolean {
+  isFile(): boolean {
     return this[kType] === UV_DIRENT_FILE;
   }
 
-  public isBlockDevice(): boolean {
+  isBlockDevice(): boolean {
     return this[kType] === UV_DIRENT_BLOCK;
   }
 
-  public isCharacterDevice(): boolean {
+  isCharacterDevice(): boolean {
     return this[kType] === UV_DIRENT_CHAR;
   }
 
-  public isSymbolicLink(): boolean {
+  isSymbolicLink(): boolean {
     return this[kType] === UV_DIRENT_LINK;
   }
 
-  public isFIFO(): boolean {
+  isFIFO(): boolean {
     return this[kType] === UV_DIRENT_FIFO;
   }
 
-  public isSocket(): boolean {
+  isSocket(): boolean {
     return this[kType] === UV_DIRENT_SOCKET;
   }
 }
 
-export class Dir {
-  // @ts-expect-error TS6133 Value is not read.
-  #handle: unknown; // eslint-disable-line no-unused-private-class-members
-  #path: string;
-  #options: Record<string, unknown>;
+export interface DirOptions {
+  encoding?: ValidEncoding | undefined;
+}
 
-  public constructor(
-    handle: unknown,
-    path: string,
-    options: Record<string, unknown>
+export type DirentReadCallback = (
+  err: Error | null,
+  dirent: Dirent | null
+) => void;
+
+export class Dir {
+  // Unlike our Node.js counterpart, we do not not use an underlying
+  // native handle for the directory. Instead we use a simple array
+  // of DirEntryHandle objects just like the one used in the readdir
+  // API.
+  #handle: DirEntryHandle[] | undefined;
+  #encoding: ValidEncoding | undefined;
+  #path: FilePath;
+
+  constructor(
+    handle: cffs.DirEntryHandle[] | undefined,
+    path: FilePath,
+    options: DirOptions
   ) {
     if (handle == null) {
       throw new ERR_MISSING_ARGS('handle');
     }
     this.#handle = handle;
     this.#path = path;
-    this.#options = {
-      bufferSize: 32,
-      ...getOptions(options, {
-        encoding: 'utf8',
-      }),
-    };
 
-    validateUint32(this.#options.bufferSize, 'options.bufferSize', true);
+    validateObject(options, 'options');
+    const { encoding = 'utf8' } = options;
+    validateString(encoding, 'options.encoding');
+    this.#encoding = encoding as BufferEncoding;
   }
 
-  public get path(): string {
+  get path(): FilePath {
     return this.#path;
   }
 
-  public read(callback: unknown): void {
-    validateFunction(callback, 'callback');
-    throw new Error('Not implemented');
+  read(): Promise<Dirent | null>;
+  read(callback: DirentReadCallback): void;
+  read(callback?: DirentReadCallback): Promise<Dirent | null> | undefined {
+    if (typeof callback === 'function') {
+      validateFunction(callback, 'callback');
+      try {
+        const ent = this.readSync();
+        queueMicrotask(() => {
+          callback(null, ent);
+        });
+      } catch (err) {
+        queueMicrotask(() => {
+          callback(err as Error, null);
+        });
+      }
+      return;
+    }
+
+    try {
+      const ent = this.readSync();
+      return Promise.resolve(ent);
+    } catch (err: unknown) {
+      return Promise.reject(err as Error);
+    }
   }
 
-  public processReadResult(): void {
-    throw new Error('Not implemented');
+  readSync(): Dirent | null {
+    if (this.#handle === undefined) throw new ERR_DIR_CLOSED();
+    const ent = this.#handle.shift();
+    if (ent == null) return null;
+    const buf = Buffer.from(ent.name);
+    if (this.#encoding === 'buffer') {
+      return new Dirent(buf, ent.type, ent.parentPath);
+    }
+    return new Dirent(
+      buf.toString(this.#encoding != null ? this.#encoding : undefined),
+      ent.type,
+      ent.parentPath
+    );
   }
 
-  public readSyncRecursive(): void {
-    throw new Error('Not implemented');
+  close(callback?: (err: unknown) => void): Promise<void> | undefined {
+    this.closeSync();
+    if (typeof callback === 'function') {
+      validateFunction(callback, 'callback');
+      queueMicrotask(() => {
+        callback(null);
+      });
+      return undefined;
+    }
+    return Promise.resolve();
   }
 
-  public readSync(): void {
-    throw new Error('Not implemented');
+  closeSync(): void {
+    if (this.#handle === undefined) {
+      throw new ERR_DIR_CLOSED();
+    }
+    this.#handle = undefined;
   }
 
-  public close(): void {
-    throw new Error('Not implemented');
+  async *entries(): AsyncGenerator<Dirent, unknown, unknown> {
+    for (;;) {
+      const ent = await this.read();
+      if (ent == null) return;
+      yield ent;
+    }
   }
 
-  public closeSync(): void {
-    throw new Error('Not implemented');
+  [Symbol.asyncIterator](): AsyncGenerator<Dirent, unknown, unknown> {
+    return this.entries();
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await,require-yield
-  public async *entries(): AsyncGenerator<unknown, unknown, unknown> {
-    throw new Error('Not implemented');
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
+  [Symbol.dispose](): void {
+    this.closeSync();
   }
 }

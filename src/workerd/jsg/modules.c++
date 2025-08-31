@@ -50,6 +50,19 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
       }
     }
 
+    // Handle process module redirection based on enable_nodejs_process_v2 flag
+    if (spec == "node:process") {
+      auto specifierPath =
+          kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                       : "node-internal:legacy_process"_kj);
+      KJ_IF_SOME(info,
+          registry->resolve(
+              js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+        result = info.module.getHandle(js.v8Isolate);
+        return;
+      }
+    }
+
     // If the referrer module is a built-in, it is only permitted to resolve
     // internal modules. If the worker bundle provided an override for a builtin,
     // then internalOnly will be false.
@@ -226,7 +239,7 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
   })) {
     // V8 doc comments say in the case of an error, throw the error and return an empty Maybe.
     // I.e. NOT a rejected promise. OK...
-    js.v8Isolate->ThrowException(makeInternalError(js.v8Isolate, kj::mv(exception)));
+    js.v8Isolate->ThrowException(js.exceptionToJsValue(kj::mv(exception)).getHandle(js));
     result = v8::Local<v8::Promise>();
   }
 
@@ -236,8 +249,8 @@ v8::MaybeLocal<v8::Value> evaluateSyntheticModuleCallback(
 }  // namespace
 
 ModuleRegistry* getModulesForResolveCallback(v8::Isolate* isolate) {
-  return static_cast<ModuleRegistry*>(
-      isolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(2));
+  return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+      isolate->GetCurrentContext(), jsg::ContextPointerSlot::MODULE_REGISTRY));
 }
 
 void instantiateModule(

@@ -1030,3 +1030,9 @@ export const testTlsStreamwrapBuffersize = {
     strictEqual(onCloseFn.mock.callCount(), 1);
   },
 };
+
+export const testEOLMethods = {
+  async test() {
+    strictEqual(typeof tls.createSecurePair, 'function');
+  },
+};

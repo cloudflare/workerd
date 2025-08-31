@@ -31,72 +31,72 @@ export type PromiseTestFn = () => Promise<unknown>;
 
 export class FilterList {
   // Matches any input
-  private matchesAll: boolean = false;
+  #matchesAll: boolean = false;
 
   // List of strings to match exactly
-  private strings: Set<string> = new Set();
+  #strings: Set<string> = new Set();
 
   // List of regexps to match against
-  private regexps: RegExp[] = [];
+  #regexps: RegExp[] = [];
 
   // Regexes which never matched any of the inputs
   // We keep this set so we can warn the user about this.
-  private unmatchedRegexps: Set<RegExp> = new Set();
+  #unmatchedRegexps: Set<RegExp> = new Set();
 
-  public constructor(filters: (string | RegExp)[] | true | undefined) {
+  constructor(filters: (string | RegExp)[] | true | undefined) {
     if (filters === undefined) {
       return;
     }
 
     if (filters === true) {
-      this.matchesAll = true;
+      this.#matchesAll = true;
       return;
     }
 
     for (const filter of filters) {
       if (typeof filter === 'string') {
-        this.strings.add(filter);
+        this.#strings.add(filter);
       } else {
-        this.regexps.push(filter);
+        this.#regexps.push(filter);
       }
     }
 
-    this.unmatchedRegexps = new Set(this.regexps);
+    this.#unmatchedRegexps = new Set(this.#regexps);
   }
 
-  public has(input: string): boolean {
-    if (this.matchesAll) {
+  has(input: string): boolean {
+    if (this.#matchesAll) {
       return true;
     }
 
-    if (this.strings.has(input)) {
+    if (this.#strings.has(input)) {
       return true;
     }
 
-    return this.regexps.some((r) => r.test(input));
+    return this.#regexps.some((r) => r.test(input));
   }
 
-  public delete(input: string): boolean {
-    if (this.matchesAll) {
+  delete(input: string): boolean {
+    if (this.#matchesAll) {
       return true;
     }
 
-    if (this.strings.delete(input)) {
+    if (this.#strings.delete(input)) {
       return true;
     }
 
-    const maybeMatch = this.regexps.find((r) => r.test(input));
+    const maybeMatch = this.#regexps.find((r) => r.test(input));
 
     if (maybeMatch !== undefined) {
-      this.unmatchedRegexps.delete(maybeMatch);
+      this.#unmatchedRegexps.delete(maybeMatch);
       return true;
     }
 
     return false;
   }
 
-  public getUnmatched(): Set<string | RegExp> {
-    return this.strings.union(this.unmatchedRegexps);
+  getUnmatched(): Set<string | RegExp> {
+    return this.#strings.union(this.#unmatchedRegexps);
   }
 }
 
@@ -106,18 +106,27 @@ export function sanitize_unpaired_surrogates(str: string): string {
   // FFFE, and FFFF".
   // See https://www.w3.org/TR/REC-xml/#NT-Char
 
-  return str.replace(
-    /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
-    function (_, low?: string, prefix?: string, high?: string) {
-      let output = prefix || ''; // prefix may be undefined
-      const string: string = low || high || ''; // only one of these alternates can match
+  return str
+    .replace(
+      /([\ud800-\udbff]+)(?![\udc00-\udfff])|(^|[^\ud800-\udbff])([\udc00-\udfff]+)/g,
+      function (_, low?: string, prefix?: string, high?: string) {
+        let output = prefix || ''; // prefix may be undefined
+        const string: string = low || high || ''; // only one of these alternates can match
 
-      for (const ch of string) {
+        for (const ch of string) {
+          output += code_unit_str(ch);
+        }
+        return output;
+      }
+    )
+    .replace(/(\uffff|\ufffe)/g, function (_, invalid_chars?: string) {
+      let output = '';
+
+      for (const ch of invalid_chars || '') {
         output += code_unit_str(ch);
       }
       return output;
-    }
-  );
+    });
 }
 
 function code_unit_str(char: string): string {

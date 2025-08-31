@@ -41,6 +41,7 @@ import {
 } from 'node-internal:streams_util';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import { nextTick } from 'node-internal:internal_process';
 
 import {
   ERR_INVALID_ARG_TYPE,
@@ -52,8 +53,6 @@ import {
 import { normalizeEncoding } from 'node-internal:internal_utils';
 
 import { validateBoolean, validateObject } from 'node-internal:validators';
-
-import * as process from 'node-internal:process';
 
 const encoder = new TextEncoder();
 
@@ -220,7 +219,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy.call(writable, error));
+          nextTick(() => destroy.call(writable, error));
         }
       }
 
@@ -271,7 +270,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => {
+          nextTick(() => {
             throw error;
           });
         }
@@ -299,7 +298,7 @@ export function newStreamWritableFromWritableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy.call(writable, error));
+          nextTick(() => destroy.call(writable, error));
         }
       }
 
@@ -491,7 +490,7 @@ export function newStreamReadableFromReadableStream(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => {
+          nextTick(() => {
             throw error;
           });
         }
@@ -641,7 +640,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroy.call(duplex, error));
         }
       }
 
@@ -693,7 +692,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => destroy.call(duplex, error));
+          nextTick(() => destroy.call(duplex, error));
         }
       }
 
@@ -725,7 +724,7 @@ export function newStreamDuplexFromReadableWritablePair(
           // thrown we don't want those to cause an unhandled
           // rejection. Let's just escape the promise and
           // handle it separately.
-          process.nextTick(() => {
+          nextTick(() => {
             throw error;
           });
         }

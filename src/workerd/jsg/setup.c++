@@ -20,7 +20,8 @@
 #endif
 
 #ifdef WORKERD_ICU_DATA_EMBED
-#include <icudata-embed.capnp.h>
+#include "icu-data-file.embed.h"
+
 #include <unicode/udata.h>
 #endif
 
@@ -171,10 +172,10 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
 
 #ifdef WORKERD_ICU_DATA_EMBED
   // V8's bazel build files currently don't support the option to embed ICU data, so we do it
-  // ourselves. `WORKERD_ICU_DATA_EMBED`, if defined, will refer to a `kj::ArrayPtr<const byte>`
-  // containing the data.
+  // ourselves. `ICU_DATA_FILE`, if defined, will refer to a `kj::ArrayPtr<const byte>` containing
+  // the data.
   UErrorCode err = U_ZERO_ERROR;
-  udata_setCommonData(EMBEDDED_ICU_DATA_FILE->begin(), &err);
+  udata_setCommonData(ICU_DATA_FILE.begin(), &err);
   udata_setFileAccess(UDATA_ONLY_PACKAGES, &err);
   KJ_ASSERT(err == U_ZERO_ERROR);
 #else
@@ -238,7 +239,7 @@ void IsolateBase::terminateExecution() const {
 }
 
 void IsolateBase::applyDeferredActions() {
-  // Clear the deferred desturction queue.
+  // Clear the deferred destruction queue.
   {
     // Safe to destroy the popped batch outside of the lock because the lock is only actually used
     // to guard the push buffer.
@@ -297,8 +298,9 @@ HeapTracer& HeapTracer::getTracer(v8::Isolate* isolate) {
 void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
-  auto& wrappable =
-      *static_cast<Wrappable*>(handle.As<v8::Object>()->GetAlignedPointerFromInternalField(
+  v8::HandleScope scope(isolate);
+  auto& wrappable = *static_cast<Wrappable*>(
+      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
@@ -377,6 +379,11 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetFatalErrorHandler(&fatalError);
     ptr->SetOOMErrorHandler(&oomError);
+    // We also set the global OOM error handler.  This is a bit of
+    // a hack: Later in the run the allocation of a sandbox may fail
+    // due to OOM.  In that case we want our handler to be called
+    // even though there is no current isolate.
+    v8::V8::SetFatalMemoryErrorCallback(&oomError);
 
     ptr->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     ptr->SetData(SET_DATA_ISOLATE_BASE, this);
@@ -490,8 +497,15 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  IsolateBase* self = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
-  return {.codegen_allowed = self->evalAllowed, .modified_source = {}};
+  auto& base = IsolateBase::from(isolate);
+  if (base.evalAllowed) {
+    // If eval is allowed, notify the observer so that it can take any action necessary.
+    // Once possible action is logging the source to be evaluated for auditing purposes.
+    // TODO(cleanup): Consider making it so that `onDynamicEval()` returns true or false
+    // depending on whether eval should be allowed or not.
+    base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
+  }
+  return {.codegen_allowed = base.evalAllowed, .modified_source = {}};
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
@@ -704,6 +718,9 @@ kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scra
       break;
     case v8::StateTag::IDLE:
       vmState = "idle";
+      break;
+    case v8::StateTag::IDLE_EXTERNAL:
+      vmState = "idle_external";
       break;
     case v8::StateTag::LOGGING:
       vmState = "logging";

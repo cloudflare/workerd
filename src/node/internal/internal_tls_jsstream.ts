@@ -53,13 +53,13 @@ const kPendingClose = Symbol('kPendingClose');
  * "real" JavaScript stream. JSStreamSocket is exactly this.
  */
 export class JSStreamSocket extends Socket {
-  public stream: Duplex;
-  public [kCurrentWriteRequest]: null | unknown;
-  public [kCurrentShutdownRequest]: null | unknown;
-  public [kPendingShutdownRequest]: null | unknown;
-  public [kPendingClose]: boolean;
+  stream: Duplex;
+  [kCurrentWriteRequest]: null | unknown;
+  [kCurrentShutdownRequest]: null | unknown;
+  [kPendingShutdownRequest]: null | unknown;
+  [kPendingClose]: boolean;
 
-  public constructor(stream: Duplex) {
+  constructor(stream: Duplex) {
     // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
     const closePromise = Promise.withResolvers<void>();
     const openPromise = Promise.withResolvers<SocketInfo>();
@@ -152,21 +152,21 @@ export class JSStreamSocket extends Socket {
     this.read(0);
   }
 
-  public isClosing(): boolean {
+  isClosing(): boolean {
     return !this.readable || !this.writable;
   }
 
-  public readStart(): number {
+  readStart(): number {
     this.stream.resume();
     return 0;
   }
 
-  public readStop(): number {
+  readStop(): number {
     this.stream.pause();
     return 0;
   }
 
-  public doShutdown(req: unknown): number {
+  doShutdown(req: unknown): number {
     // TODO(addaleax): It might be nice if we could get into a state where
     // DoShutdown() is not called on streams while a write is still pending.
     //
@@ -199,7 +199,7 @@ export class JSStreamSocket extends Socket {
     return 0;
   }
 
-  public doClose(): void {
+  doClose(): void {
     this[kPendingClose] = true;
 
     const handle = this._handle;

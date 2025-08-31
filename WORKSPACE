@@ -18,11 +18,7 @@ deps_gen()
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-NODE_VERSION = "22.15.1"
-
-load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
-
-bazel_skylib_workspace()
+NODE_VERSION = "22.18.0"
 
 # ========================================================================================
 # Simple dependencies
@@ -35,6 +31,7 @@ http_archive(
         "//:patches/sqlite/0001-row-counts-plain.patch",
         "//:patches/sqlite/0002-macOS-missing-PATH-fix.patch",
         "//:patches/sqlite/0003-sqlite-complete-early-exit.patch",
+        "//:patches/sqlite/0004-invalid-wal-on-rollback-fix.patch",
     ],
     sha256 = "f59c349bedb470203586a6b6d10adb35f2afefa49f91e55a672a36a09a8fedf7",
     strip_prefix = "sqlite-src-3470000",
@@ -66,10 +63,6 @@ http_archive(
     url = "https://github.com/nodejs/ncrypto/archive/refs/tags/1.0.1.tar.gz",
 )
 
-load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
-
-dep_pyodide()
-
 # ========================================================================================
 # tcmalloc
 http_archive(
@@ -79,6 +72,18 @@ http_archive(
     strip_prefix = "google-tcmalloc-cf3dc2d",
     type = "tgz",
     url = "https://github.com/google/tcmalloc/tarball/cf3dc2d98bd64cb43f4f98db0acaf5028a7b81eb",
+)
+
+git_repository(
+    name = "dragonbox",
+    build_file_content = """cc_library(
+            name = "dragonbox",
+            hdrs = glob(["include/dragonbox/*.h"]),
+            visibility = ["//visibility:public"],
+            include_prefix = "third_party/dragonbox/src",
+        )""",
+    commit = "6c7c925b571d54486b9ffae8d9d18a822801cbda",
+    remote = "https://github.com/jk-jeon/dragonbox.git",
 )
 
 git_repository(
@@ -180,6 +185,7 @@ python_register_toolchains(
     ignore_root_user_error = True,
     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
     python_version = "3.13",
+    register_coverage_tool = True,
 )
 
 load("@rules_python//python:pip.bzl", "pip_parse")
@@ -222,7 +228,26 @@ new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
+        defines = ["WORKERD_ICU_DATA_EMBED"],
         deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
+        visibility = ["//visibility:public"])""",
+    path = "empty",
+)
+
+# Tell workerd code where to find google-benchmark with CodSpeed.
+#
+# We indirect through `@workerd-google-benchmark` to allow dependents to override how and where
+# google-benchmark is built, similar to the v8 setup above.
+new_local_repository(
+    name = "workerd-google-benchmark",
+    build_file_content = """cc_library(
+        name = "benchmark",
+        deps = [ "@codspeed//google_benchmark:benchmark" ],
+        visibility = ["//visibility:public"])
+
+cc_library(
+        name = "benchmark_main",
+        deps = [ "@codspeed//google_benchmark:benchmark_main" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
 )
@@ -234,3 +259,7 @@ new_local_repository(
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
+
+load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
+
+dep_pyodide()

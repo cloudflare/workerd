@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// TODO(soon): Fallthrough have false positives here. Investigate this.
+/* eslint-disable no-fallthrough */
+
 import assert from 'node:assert';
 import {
   Constant,
@@ -207,7 +210,6 @@ function createInterfaceMemberNode(
     }
     case Member_Which.CONSTRUCTOR: {
       assert.fail('Unexpected constructor member inside interface');
-      break;
     }
     default: {
       assert.fail(`Unknown member: ${which satisfies never}`);
