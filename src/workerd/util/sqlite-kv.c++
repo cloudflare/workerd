@@ -80,6 +80,47 @@ SqliteKv::Initialized& SqliteKv::ensureInitialized() {
   KJ_UNREACHABLE;
 }
 
+kj::Own<SqliteKv::ListCursor> SqliteKv::list(
+    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order) {
+  if (!tableCreated) return kj::heap<ListCursor>(nullptr);
+  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr));
+
+  if (order == Order::FORWARD) {
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
+      }
+    } else {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
+      }
+    }
+  } else {
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse, begin, e, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
+      }
+    } else {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
+      }
+    }
+  }
+}
+
 kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
   auto& state = KJ_UNWRAP_OR(this->state, return kj::none);
   if (first) {
