@@ -29,17 +29,15 @@ class SyncKvStorage: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(SyncKvListOptions);  // Rename from SyncKvStorageListOptions
   };
 
-  jsg::JsValue get(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys);
+  jsg::JsValue get(jsg::Lock& js, kj::String key);
 
   JSG_ITERATOR_TYPE(ListIterator, jsg::JsArray, IoOwn<SqliteKv::ListCursor>, listNext);
 
   jsg::Ref<ListIterator> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
-  void put(jsg::Lock& js,
-      kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
-      jsg::Optional<jsg::JsValue> value);
+  void put(jsg::Lock& js, kj::String key, jsg::JsValue value);
 
-  kj::OneOf<bool, int> delete_(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys);
+  kj::OneOf<bool, int> delete_(jsg::Lock& js, kj::String key);
 
   JSG_RESOURCE_TYPE(SyncKvStorage) {
     JSG_METHOD(get);
@@ -49,15 +47,12 @@ class SyncKvStorage: public jsg::Object {
 
     JSG_TS_OVERRIDE({
       get<T = unknown>(key: string): T | undefined;
-      get<T = unknown>(keys: string[]): Map<string, T>;
 
       list<T = unknown>(options?: SyncKvStorageListOptions): Iterable<[string, T]>;
 
       put<T>(key: string, value: T): void;
-      put<T>(entries: Record<string, T>): void;
 
       delete(key: string): boolean;
-      delete(keys: string[]): number;
     });
   }
 

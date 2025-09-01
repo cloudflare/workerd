@@ -10,31 +10,16 @@
 
 namespace workerd::api {
 
-jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys) {
+jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
   SqliteKv& sqliteKv = getSqliteKv(js);
 
-  KJ_SWITCH_ONEOF(keys) {
-    KJ_CASE_ONEOF(key, kj::String) {
-      kj::Maybe<jsg::JsValue> result;
-      if (sqliteKv.get(key, [&](kj::ArrayPtr<const byte> value) {
-        result = deserializeV8Value(js, key, value);
-      })) {
-        return KJ_ASSERT_NONNULL(result);
-      } else {
-        return js.undefined();
-      }
-    }
-    KJ_CASE_ONEOF(multi, kj::Array<kj::String>) {
-      auto result = js.map();
-      for (auto& key: multi) {
-        sqliteKv.get(key, [&](kj::ArrayPtr<const byte> value) {
-          result.set(js, js.str(key), deserializeV8Value(js, key, value));
-        });
-      }
-      return result;
-    }
+  kj::Maybe<jsg::JsValue> result;
+  if (sqliteKv.get(key,
+          [&](kj::ArrayPtr<const byte> value) { result = deserializeV8Value(js, key, value); })) {
+    return KJ_ASSERT_NONNULL(result);
+  } else {
+    return js.undefined();
   }
-  KJ_UNREACHABLE;
 }
 
 jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
@@ -80,46 +65,16 @@ kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::L
   }
 }
 
-void SyncKvStorage::put(jsg::Lock& js,
-    kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
-    jsg::Optional<jsg::JsValue> maybeValue) {
+void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
   SqliteKv& sqliteKv = getSqliteKv(js);
 
-  KJ_SWITCH_ONEOF(keyOrEntries) {
-    KJ_CASE_ONEOF(key, kj::String) {
-      auto value = JSG_REQUIRE_NONNULL(maybeValue, TypeError,
-          "When the first argument to put() is a string, a second argument is required.");
-
-      sqliteKv.put(key, serializeV8Value(js, value));
-    }
-    KJ_CASE_ONEOF(multi, jsg::Dict<jsg::JsValue>) {
-      JSG_REQUIRE(maybeValue == kj::none, TypeError,
-          "When the first argument to put() is an object, there should be no second argument.");
-
-      for (auto& pair: multi.fields) {
-        sqliteKv.put(pair.name, serializeV8Value(js, pair.value));
-      }
-    }
-  }
+  sqliteKv.put(key, serializeV8Value(js, value));
 }
 
-kj::OneOf<bool, int> SyncKvStorage::delete_(
-    jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys) {
+kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
   SqliteKv& sqliteKv = getSqliteKv(js);
 
-  KJ_SWITCH_ONEOF(keys) {
-    KJ_CASE_ONEOF(one, kj::String) {
-      return sqliteKv.delete_(one);
-    }
-    KJ_CASE_ONEOF(multi, kj::Array<kj::String>) {
-      int count = 0;
-      for (auto& key: multi) {
-        count += sqliteKv.delete_(key);
-      }
-      return count;
-    }
-  }
-  KJ_UNREACHABLE;
+  return sqliteKv.delete_(key);
 }
 
 }  // namespace workerd::api

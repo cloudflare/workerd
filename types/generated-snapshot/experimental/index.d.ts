@@ -3351,12 +3351,9 @@ interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
 interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
 interface SyncKvStorage {
   get<T = unknown>(key: string): T | undefined;
-  get<T = unknown>(keys: string[]): Map<string, T>;
   list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
   put<T>(key: string, value: T): void;
-  put<T>(entries: Record<string, T>): void;
   delete(key: string): boolean;
-  delete(keys: string[]): number;
 }
 interface SyncKvListOptions {
   start?: string;

@@ -98,26 +98,6 @@ export class MyActor extends DurableObject {
       [['baz', false]]
     );
 
-    // Test multi-get.
-    assert.deepEqual(
-      [...kv.get(['bar', 'foo'])],
-      [
-        ['bar', 'abc'],
-        ['foo', 123],
-      ]
-    );
-
-    // Return iteration order is same as input order.
-    // NOTE: This differs from the async interface, which always returned sorted results. Probably
-    //   nobody cares, so I took the opportunity to remove the need for the sort.
-    assert.deepEqual(
-      [...kv.get(['foo', 'bar'])],
-      [
-        ['foo', 123],
-        ['bar', 'abc'],
-      ]
-    );
-
     // Test delete.
     assert.strictEqual(kv.delete('qux'), false);
     assert.strictEqual(kv.delete('bar'), true);
@@ -128,10 +108,6 @@ export class MyActor extends DurableObject {
         ['foo', 123],
       ]
     );
-
-    // Multi-delete.
-    assert.strictEqual(kv.delete(['foo', 'bar', 'baz']), 2);
-    assert.deepEqual([...kv.list()], []);
   }
 }
 
