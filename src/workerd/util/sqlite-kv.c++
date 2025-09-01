@@ -42,6 +42,17 @@ SqliteKv::SqliteKv(SqliteDatabase& db): ResetListener(db) {
   }
 }
 
+SqliteKv::~SqliteKv() noexcept(false) {
+  cancelCurrentCursor();
+}
+
+void SqliteKv::cancelCurrentCursor() {
+  KJ_IF_SOME(c, currentCursor) {
+    c.state = kj::none;
+    c.canceled = true;
+  }
+}
+
 SqliteKv::Initialized& SqliteKv::ensureInitialized() {
   if (!tableCreated) {
     db.run(R"(
@@ -67,6 +78,21 @@ SqliteKv::Initialized& SqliteKv::ensureInitialized() {
     }
   }
   KJ_UNREACHABLE;
+}
+
+kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
+  auto& state = KJ_UNWRAP_OR(this->state, return kj::none);
+  if (first) {
+    first = false;
+  } else {
+    state.query.nextRow();
+  }
+  if (state.query.isDone()) {
+    this->state = kj::none;
+    return kj::none;
+  }
+
+  return KeyValuePair{state.query.getText(0), state.query.getBlob(1)};
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value) {

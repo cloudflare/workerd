@@ -13,29 +13,40 @@ export class MyActor extends DurableObject {
     kv.put('bar', 'abc');
     assert.strictEqual(kv.get('bar'), 'abc');
 
-    {
-      let map = kv.list();
-      assert.strictEqual(map.size, 2);
-      assert.strictEqual(map.get('foo'), 123);
-      assert.strictEqual(map.get('bar'), 'abc');
+    // Iterates in alphabetical order.
+    assert.deepEqual(
+      [...kv.list()],
+      [
+        ['bar', 'abc'],
+        ['foo', 123],
+      ]
+    );
 
-      // Iterates in alphabetical order.
+    assert.deepEqual(
+      [...kv.list({ reverse: true })],
+      [
+        ['foo', 123],
+        ['bar', 'abc'],
+      ]
+    );
+
+    // A new call to kv.list() invalidates any previous iterator.
+    {
+      let cursor1 = kv.list();
+      let cursor2 = kv.list();
+
+      assert.throws(() => [...cursor1], {
+        name: 'Error',
+        message:
+          'kv.list() iterator was invalidated because a new call to kv.list() was sarted. ' +
+          'Only one kv.list() iterator can exist at a time.',
+      });
+
       assert.deepEqual(
-        [...map],
+        [...cursor2],
         [
           ['bar', 'abc'],
           ['foo', 123],
-        ]
-      );
-    }
-
-    {
-      let map = kv.list({ reverse: true });
-      assert.deepEqual(
-        [...map],
-        [
-          ['foo', 123],
-          ['bar', 'abc'],
         ]
       );
     }
@@ -43,94 +54,69 @@ export class MyActor extends DurableObject {
     kv.put('baz', false);
 
     // Try a prefix.
-    {
-      let map = kv.list({ prefix: 'ba' });
-      assert.strictEqual(map.size, 2);
-      assert.strictEqual(map.has('foo'), false);
-      assert.strictEqual(map.get('bar'), 'abc');
-      assert.strictEqual(map.get('baz'), false);
-      assert.deepEqual(
-        [...map],
-        [
-          ['bar', 'abc'],
-          ['baz', false],
-        ]
-      );
-    }
+    assert.deepEqual(
+      [...kv.list({ prefix: 'ba' })],
+      [
+        ['bar', 'abc'],
+        ['baz', false],
+      ]
+    );
 
     // Try a limit.
-    {
-      let map = kv.list({ limit: 1 });
-      assert.deepEqual([...map], [['bar', 'abc']]);
-    }
+    assert.deepEqual([...kv.list({ limit: 1 })], [['bar', 'abc']]);
 
     // Try a reverse limit.
-    {
-      let map = kv.list({ limit: 1, reverse: true });
-      assert.deepEqual([...map], [['foo', 123]]);
-    }
+    assert.deepEqual([...kv.list({ limit: 1, reverse: true })], [['foo', 123]]);
 
     // Try a range.
-    {
-      let map = kv.list({ start: 'b', end: 'c' });
-      assert.deepEqual(
-        [...map],
-        [
-          ['bar', 'abc'],
-          ['baz', false],
-        ]
-      );
-    }
+    assert.deepEqual(
+      [...kv.list({ start: 'b', end: 'c' })],
+      [
+        ['bar', 'abc'],
+        ['baz', false],
+      ]
+    );
 
     // End is exclusive.
-    {
-      let map = kv.list({ start: 'b', end: 'baz' });
-      assert.deepEqual([...map], [['bar', 'abc']]);
-    }
+    assert.deepEqual(
+      [...kv.list({ start: 'b', end: 'baz' })],
+      [['bar', 'abc']]
+    );
 
     // Start is inclusive.
-    {
-      let map = kv.list({ start: 'bar', end: 'c' });
-      assert.deepEqual(
-        [...map],
-        [
-          ['bar', 'abc'],
-          ['baz', false],
-        ]
-      );
-    }
+    assert.deepEqual(
+      [...kv.list({ start: 'bar', end: 'c' })],
+      [
+        ['bar', 'abc'],
+        ['baz', false],
+      ]
+    );
 
     // Except when it's not.
-    {
-      let map = kv.list({ startAfter: 'bar', end: 'c' });
-      assert.deepEqual([...map], [['baz', false]]);
-    }
+    assert.deepEqual(
+      [...kv.list({ startAfter: 'bar', end: 'c' })],
+      [['baz', false]]
+    );
 
     // Test multi-get.
-    {
-      let map = kv.get(['bar', 'foo']);
-      assert.deepEqual(
-        [...map],
-        [
-          ['bar', 'abc'],
-          ['foo', 123],
-        ]
-      );
-    }
+    assert.deepEqual(
+      [...kv.get(['bar', 'foo'])],
+      [
+        ['bar', 'abc'],
+        ['foo', 123],
+      ]
+    );
 
     // Return iteration order is same as input order.
     // NOTE: This differs from the async interface, which always returned sorted results. Probably
     //   nobody cares, so I took the opportunity to remove the need for the sort.
-    {
-      let map = kv.get(['foo', 'bar']);
-      assert.deepEqual(
-        [...map],
-        [
-          ['foo', 123],
-          ['bar', 'abc'],
-        ]
-      );
-    }
+    assert.deepEqual(
+      [...kv.get(['foo', 'bar'])],
+      [
+        ['foo', 123],
+        ['bar', 'abc'],
+      ]
+    );
 
     // Test delete.
     assert.strictEqual(kv.delete('qux'), false);

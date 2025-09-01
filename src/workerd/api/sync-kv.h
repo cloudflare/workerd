@@ -7,10 +7,8 @@
 #include "actor-state.h"
 
 #include <workerd/jsg/jsg.h>
-
-namespace workerd {
-class SqliteKv;
-}
+#include <workerd/jsg/iterator.h>
+#include <workerd/util/sqlite-kv.h>
 
 namespace workerd::api {
 
@@ -33,7 +31,9 @@ class SyncKvStorage: public jsg::Object {
 
   jsg::JsValue get(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<kj::String>> keys);
 
-  jsg::JsValue list(jsg::Lock& js, jsg::Optional<ListOptions> options);
+  JSG_ITERATOR_TYPE(ListIterator, jsg::JsArray, IoOwn<SqliteKv::ListCursor>, listNext);
+
+  jsg::Ref<ListIterator> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
   void put(jsg::Lock& js,
       kj::OneOf<kj::String, jsg::Dict<jsg::JsValue>> keyOrEntries,
@@ -51,7 +51,7 @@ class SyncKvStorage: public jsg::Object {
       get<T = unknown>(key: string): T | undefined;
       get<T = unknown>(keys: string[]): Map<string, T>;
 
-      list<T = unknown>(options?: SyncKvStorageListOptions): Map<string, T>;
+      list<T = unknown>(options?: SyncKvStorageListOptions): Iterable<[string, T]>;
 
       put<T>(key: string, value: T): void;
       put<T>(entries: Record<string, T>): void;
@@ -67,8 +67,11 @@ class SyncKvStorage: public jsg::Object {
   SqliteKv& getSqliteKv(jsg::Lock& js) {
     return storage->getSqliteKv(js);
   }
+
+  static kj::Maybe<jsg::JsArray> listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state);
 };
 
-#define EW_SYNC_KV_ISOLATE_TYPES api::SyncKvStorage, api::SyncKvStorage::ListOptions
+#define EW_SYNC_KV_ISOLATE_TYPES api::SyncKvStorage, api::SyncKvStorage::ListOptions,              \
+    api::SyncKvStorage::ListIterator, api::SyncKvStorage::ListIterator::Next
 
 }  // namespace workerd::api

@@ -37,7 +37,8 @@ jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::OneOf<kj::String, kj::Array<k
   KJ_UNREACHABLE;
 }
 
-jsg::JsValue SyncKvStorage::list(jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
+    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   // Convert our options to DurableObjectStorageOperations::ListOptions (which also have the
@@ -56,15 +57,27 @@ jsg::JsValue SyncKvStorage::list(jsg::Lock& js, jsg::Optional<ListOptions> maybe
   auto [start, end, reverse, limit] =
       KJ_UNWRAP_OR(DurableObjectStorageOperations::compileListOptions(asyncOptions), {
         // Key range is empty. Return empty map.
-        return js.map();
+        return js.alloc<SyncKvStorage::ListIterator>(
+            IoContext::current().addObject(kj::heap<SqliteKv::ListCursor>(nullptr)));
       });
 
-  auto result = js.map();
-  sqliteKv.list(start, end, limit, reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD,
-      [&](kj::StringPtr key, kj::ArrayPtr<const byte> value) {
-    result.set(js, js.str(key), deserializeV8Value(js, key, value));
-  });
-  return result;
+  auto cursor = sqliteKv.list(start, end, limit, reverse ? SqliteKv::REVERSE : SqliteKv::FORWARD)
+                    .attach(kj::mv(start), kj::mv(end));
+
+  return js.alloc<SyncKvStorage::ListIterator>(IoContext::current().addObject(kj::mv(cursor)));
+}
+
+kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::ListCursor>& state) {
+  auto& stateRef = *state;
+  KJ_IF_SOME(pair, stateRef.next()) {
+    return js.arr(js.str(pair.key), deserializeV8Value(js, pair.key, pair.value));
+  } else if (stateRef.wasCanceled()) {
+    JSG_FAIL_REQUIRE(Error,
+        "kv.list() iterator was invalidated because a new call to kv.list() was sarted. Only one "
+        "kv.list() iterator can exist at a time.");
+  } else {
+    return kj::none;
+  }
 }
 
 void SyncKvStorage::put(jsg::Lock& js,
