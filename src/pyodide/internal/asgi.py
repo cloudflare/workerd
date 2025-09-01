@@ -1,8 +1,11 @@
 from asyncio import Event, Future, Queue, create_task, ensure_future, sleep
+from collections.abc import Awaitable
 from contextlib import contextmanager
 from inspect import isawaitable
+from typing import Any
 
-from workers import Request
+import js
+from workers import Context, Request
 
 ASGI = {"spec_version": "2.0", "version": "3.0"}
 
@@ -10,7 +13,7 @@ ASGI = {"spec_version": "2.0", "version": "3.0"}
 background_tasks = set()
 
 
-def run_in_background(coro):
+def run_in_background(coro: Awaitable[Any]) -> None:
     fut = ensure_future(coro)
     background_tasks.add(fut)
     fut.add_done_callback(background_tasks.discard)
@@ -104,7 +107,9 @@ async def start_application(app):
     return shutdown
 
 
-async def process_request(app, req, env, ctx):
+async def process_request(
+    app: Any, req: "Request | js.Request", env: Any, ctx: Context
+) -> js.Response:
     from js import Object, Response, TransformStream
 
     from pyodide.ffi import create_proxy
@@ -223,7 +228,7 @@ async def process_request(app, req, env, ctx):
     return response
 
 
-async def process_websocket(app, req):
+async def process_websocket(app: Any, req: "Request | js.Request") -> js.Response:
     from js import Response, WebSocketPair
 
     client, server = WebSocketPair.new().object_values()
@@ -275,14 +280,16 @@ async def process_websocket(app, req):
     return Response.new(None, status=101, webSocket=client)
 
 
-async def fetch(app, req, env, ctx=None):
+async def fetch(
+    app: Any, req: "Request | js.Request", env: Any, ctx: Context | None = None
+) -> js.Response:
     shutdown = await start_application(app)
     result = await process_request(app, req, env, ctx)
     await shutdown()
     return result
 
 
-async def websocket(app, req):
+async def websocket(app: Any, req: "Request | js.Request") -> js.Response:
     return await process_websocket(app, req)
 
 
