@@ -6,12 +6,12 @@ import functools
 import inspect
 import json
 from asyncio import create_task, gather
-from collections.abc import Generator, Iterable, MutableMapping
+from collections.abc import Awaitable, Generator, Iterable, MutableMapping
 from contextlib import ExitStack, contextmanager
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
 from types import LambdaType
-from typing import Any, Never, TypedDict, Unpack
+from typing import Any, Never, Protocol, TypedDict, Unpack
 
 # Get globals modules and import function from the entrypoint-helper
 import _pyodide_entrypoint_helper
@@ -21,8 +21,20 @@ from workers.workflows import NonRetryableError
 
 import pyodide.http
 from pyodide import __version__ as pyodide_version
-from pyodide.ffi import JsException, JsProxy, create_proxy, destroy_proxies, to_js
+from pyodide.ffi import (
+    JsBuffer,
+    JsException,
+    JsProxy,
+    create_proxy,
+    destroy_proxies,
+    to_js,
+)
 from pyodide.http import pyfetch
+
+
+class Context(Protocol):
+    def waitUntil(self, other: Awaitable[Any]) -> None: ...
+
 
 try:
     from pyodide.ffi import jsnull
@@ -84,12 +96,11 @@ def import_from_javascript(module_name: str) -> Any:
         raise
 
 
-JSBody = (
-    "js.Blob | js.ArrayBuffer | js.TypedArray | js.DataView | js.FormData |"
-    "js.ReadableStream | js.URLSearchParams"
+type JSBody = (
+    "js.Blob | JsBuffer | js.FormData | js.ReadableStream | js.URLSearchParams"
 )
-Body = "str | FormData | JSBody"
-Headers = "dict[str, str] | list[tuple[str, str]] | js.Headers"
+type Body = "str | FormData | JSBody"
+type Headers = "dict[str, str] | list[tuple[str, str]] | js.Headers"
 
 
 # https://developers.cloudflare.com/workers/runtime-apis/request/#the-cf-property-requestinitcfproperties
@@ -191,7 +202,7 @@ class FetchResponse(pyodide.http.FetchResponse):
         status: HTTPStatus | int = HTTPStatus.OK,
         status_text="",
         headers: Headers = None,
-    ):
+    ) -> "Response":
         options = Response._create_options(status, status_text, headers)
         js_resp = None
         try:
@@ -310,7 +321,7 @@ class Response(FetchResponse):
 
     def __init__(
         self,
-        body: "Body | js.Response | None" = None,
+        body: Body = None,
         status: HTTPStatus | int | None = None,
         status_text="",
         headers: Headers = None,
@@ -939,7 +950,7 @@ class _DurableObjectNamespaceWrapper:
 
 
 class _EnvWrapper:
-    def __init__(self, env):
+    def __init__(self, env: Any):
         self._env = env
 
     def _getattr_helper(self, name):
@@ -1115,7 +1126,7 @@ class DurableObject:
     Base class used to define a Durable Object.
     """
 
-    def __init__(self, ctx, env):
+    def __init__(self, ctx: Context, env: Any):
         self.ctx = ctx
         self.env = env
 
@@ -1128,11 +1139,11 @@ class WorkerEntrypoint:
     Base class used to define a Worker Entrypoint.
     """
 
-    def __init__(self, ctx, env):
+    def __init__(self, ctx: Context, env: Any):
         self.ctx = ctx
         self.env = env
 
-    def __init_subclass__(cls, **_kwargs):
+    def __init_subclass__(cls, **_kwargs: Any):
         _wrap_subclass(cls)
 
 
@@ -1141,10 +1152,10 @@ class WorkflowEntrypoint:
     Base class used to define a Workflow Entrypoint.
     """
 
-    def __init__(self, ctx, env):
+    def __init__(self, ctx: Context, env: Any):
         self.ctx = ctx
         self.env = env
 
-    def __init_subclass__(cls, **_kwargs):
+    def __init_subclass__(cls, **_kwargs: Any):
         _wrap_subclass(cls)
         _wrap_workflow_step(cls)
