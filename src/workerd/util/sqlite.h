@@ -25,6 +25,8 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
+kj::String namedAuthorizerActionCode(int actionCode);
+
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
  public:
@@ -203,6 +205,10 @@ class SqliteDatabase {
     onWriteCallback = kj::mv(callback);
   }
 
+  void onUpdate(kj::Function<void(int, kj::String, kj::String, int64_t)> callback) {
+    onUpdateCallback = kj::mv(callback);
+  }
+
   void onCriticalError(
       kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>
           callback) {
@@ -320,6 +326,7 @@ class SqliteDatabase {
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
   kj::Maybe<kj::Function<void()>> onWriteCallback;
+  kj::Maybe<kj::Function<void(int, kj::String, kj::String, int64_t)>> onUpdateCallback;
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
       onCriticalErrorCallback;
   kj::Maybe<kj::Function<void(SqliteDatabase&)>> afterResetCallback;

@@ -461,6 +461,52 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 // =======================================================================================
 
+// These action codes come from https://sqlite.org/c3ref/c_alter_table.html.
+kj::String namedAuthorizerActionCode(int actionCode) {
+#define LITERAL(name, action)                                                                              \
+  case name:                                                                                       \
+    return kj::str(action);
+  switch (actionCode) {
+    LITERAL(SQLITE_CREATE_INDEX, "createIndex"_kj)
+    LITERAL(SQLITE_CREATE_TABLE, "createTable"_kj)
+    LITERAL(SQLITE_CREATE_TEMP_INDEX, "createTempIndex"_kj)
+    LITERAL(SQLITE_CREATE_TEMP_TABLE, "createTempTable"_kj)
+    LITERAL(SQLITE_CREATE_TEMP_TRIGGER, "createTempTrigger"_kj)
+    LITERAL(SQLITE_CREATE_TEMP_VIEW, "createTempView"_kj)
+    LITERAL(SQLITE_CREATE_TRIGGER, "createTrigger"_kj)
+    LITERAL(SQLITE_CREATE_VIEW, "createView"_kj)
+    LITERAL(SQLITE_DELETE, "delete"_kj)
+    LITERAL(SQLITE_DROP_INDEX, "dropIndex"_kj)
+    LITERAL(SQLITE_DROP_TABLE, "dropTable"_kj)
+    LITERAL(SQLITE_DROP_TEMP_INDEX, "dropTempIndex"_kj)
+    LITERAL(SQLITE_DROP_TEMP_TABLE, "dropTempTable"_kj)
+    LITERAL(SQLITE_DROP_TEMP_TRIGGER, "dropTempTrigger"_kj)
+    LITERAL(SQLITE_DROP_TEMP_VIEW, "dropTempView"_kj)
+    LITERAL(SQLITE_DROP_TRIGGER, "dropTrigger"_kj)
+    LITERAL(SQLITE_DROP_VIEW, "dropView"_kj)
+    LITERAL(SQLITE_INSERT, "insert"_kj)
+    LITERAL(SQLITE_PRAGMA, "pragma"_kj)
+    LITERAL(SQLITE_READ, "read"_kj)
+    LITERAL(SQLITE_SELECT, "select"_kj)
+    LITERAL(SQLITE_TRANSACTION, "transaction"_kj)
+    LITERAL(SQLITE_UPDATE, "update"_kj)
+    LITERAL(SQLITE_ATTACH, "attach"_kj)
+    LITERAL(SQLITE_DETACH, "detach"_kj)
+    LITERAL(SQLITE_ALTER_TABLE, "alterTable"_kj)
+    LITERAL(SQLITE_REINDEX, "reindex"_kj)
+    LITERAL(SQLITE_ANALYZE, "analyze"_kj)
+    LITERAL(SQLITE_CREATE_VTABLE, "createVtable"_kj)
+    LITERAL(SQLITE_DROP_VTABLE, "dropVtable"_kj)
+    LITERAL(SQLITE_FUNCTION, "function"_kj)
+    LITERAL(SQLITE_SAVEPOINT, "savepoint"_kj)
+    LITERAL(SQLITE_COPY, "copy"_kj)
+    LITERAL(SQLITE_RECURSIVE, "recursive"_kj)
+    default:
+      return kj::str("SQLITE_UNKNOWN_AUTHORIZED_ACTION_CODE(", actionCode, ")");
+  }
+#undef LITERAL
+}
+
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
 constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
@@ -514,6 +560,12 @@ void SqliteDatabase::init(kj::Maybe<kj::WriteMode> maybeMode) {
           sqlite3_open_v2(path.toString().cStr(), &db, SQLITE_OPEN_READONLY, vfs.getName().cStr()));
     }
   }
+
+  sqlite3_update_hook(db, [](void * userdata, int actionCode, char const* dbName, char const* tableName, sqlite3_int64 rowId) {
+    KJ_IF_SOME(callback, static_cast<SqliteDatabase*>(userdata)->onUpdateCallback) {
+      callback(actionCode, kj::str(dbName), kj::str(tableName), rowId);
+    }
+  }, this);
 
   KJ_ON_SCOPE_FAILURE(sqlite3_close_v2(db));
 
