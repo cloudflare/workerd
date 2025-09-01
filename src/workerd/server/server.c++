@@ -1588,18 +1588,8 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     try {
       SimpleResponseObserver responseWrapper(&fetchStatus, response);
       co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
-      KJ_IF_SOME(t, tracer) {
-        if (fetchStatus != 0) {
-          t->setReturn(tracing::FetchResponseInfo(fetchStatus));
-        } else {
-          t->setReturn();
-        }
-      }
     } catch (...) {
       fetchStatus = 500;
-      KJ_IF_SOME(t, tracer) {
-        t->setReturn(tracing::FetchResponseInfo(fetchStatus));
-      }
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
       kj::throwFatalException(kj::mv(exception));

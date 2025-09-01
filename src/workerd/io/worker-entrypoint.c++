@@ -134,6 +134,9 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   bool isSent() const {
     return sent;
   }
+  uint getHttpResponseStatus() const {
+    return httpResponseStatus;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -142,7 +145,10 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
     TRACE_EVENT(
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
-    return inner.send(statusCode, statusText, headers, expectedBodySize);
+    httpResponseStatus = statusCode;
+    auto response = inner.send(statusCode, statusText, headers, expectedBodySize);
+
+    return response;
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
@@ -152,6 +158,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   }
 
  private:
+  uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
   bool sent = false;
 };
@@ -310,14 +317,23 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
                          ->getSignal());
     }
 
-    return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-        cfBlobJson, lock,
-        lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
-  })
-      .then([this](api::DeferredProxy<void> deferredProxy) {
-    TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
-        PERFETTO_FLOW_FROM_POINTER(this));
-    proxyTask = kj::mv(deferredProxy.proxyTask);
+    return lock.getGlobalScope()
+        .request(method, url, headers, requestBody, wrappedResponse, cfBlobJson, lock,
+            lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()),
+            kj::mv(signal))
+        .then([this, &context, &wrappedResponse](api::DeferredProxy<void> deferredProxy) {
+      TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
+          PERFETTO_FLOW_FROM_POINTER(this));
+      proxyTask = kj::mv(deferredProxy.proxyTask);
+      KJ_IF_SOME(t, context.getWorkerTracer()) {
+        auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
+        if (httpResponseStatus != 0) {
+          t.setReturn(tracing::FetchResponseInfo(httpResponseStatus), context.now());
+        } else {
+          t.setReturn(kj::none, context.now());
+        }
+      }
+    });
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
@@ -764,12 +780,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 
+  // TODO: Trying to use this as a replacement for setting return in server customEvent results in
+  // tail-worker-test missing out on some return events – is exception handling responsible?
+  /*KJ_DEFER({
+    KJ_IF_SOME(t, context.getWorkerTracer()) {
+      t.setReturn(kj::none, context.now());
+    }
+  });*/
   // TODO(cleanup): In theory `context` may have been destroyed by now if `event->run()` dropped
   //   the `incomingRequest` synchronously. No current implementation does that, and
   //   maybeAddGcPassForTest() is a no-op outside of tests, so I'm ignoring the theoretical problem
   //   for now. Otherwise we will need to `atomicAddRef()` the `Worker` at some point earlier on
   //   but I'd like to avoid that in the non-test case.
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  co_return result;
 }
 
 #ifdef KJ_DEBUG
