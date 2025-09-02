@@ -52,7 +52,7 @@ def wd_ts_bundle(
     ts_config(
         name = name + "@tsconfig",
         src = tsconfig_json,
-        deps = ["//tools:base-tsconfig"],
+        deps = ["@workerd//tools:base-tsconfig"],
     )
 
     srcs = modules + internal_modules

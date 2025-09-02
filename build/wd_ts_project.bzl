@@ -7,7 +7,7 @@ def wd_ts_project(name, srcs, deps, tsconfig_json, eslintrc_json = None, source_
     ts_config(
         name = name + "@tsconfig",
         src = tsconfig_json,
-        deps = ["//tools:base-tsconfig"],
+        deps = ["@workerd//tools:base-tsconfig"],
     )
 
     ts_project(
