@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
 
 // -------------------------------------------------------
@@ -800,9 +800,19 @@ export const processCwd = {
 
     process.chdir('/tmp');
     assert.strictEqual(process.cwd(), '/tmp');
+    writeFileSync('foo', 'foo');
 
     process.chdir(originalCwd);
     assert.strictEqual(process.cwd(), originalCwd);
+
+    assert.throws(
+      () => {
+        readFileSync('foo');
+      },
+      { code: 'ENOENT' }
+    );
+
+    assert.strictEqual(readFileSync('/tmp/foo', 'utf8'), 'foo');
 
     assert.throws(
       () => {

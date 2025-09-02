@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { Readable, Writable } from 'node:stream';
 import assert from 'node:assert';
+import process from 'node:process';
 
 export const processStdioPropertiesTest = {
   test() {
