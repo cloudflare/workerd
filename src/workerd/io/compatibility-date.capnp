@@ -240,8 +240,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat")
-      $impliedByAfterDate(name = "enableNodeJsProcessV2", date = "2000-01-01");
+      $compatDisableFlag("no_nodejs_compat");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
@@ -466,7 +465,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
       $compatDisableFlag("no_nodejs_compat_v2")
-      $impliedByAfterDate(names = ["nodeJsCompat", "enableNodeJsProcessV2"], date = "2024-09-23");
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
@@ -851,11 +850,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   enableNodeJsProcessV2 @97 :Bool
       $compatEnableFlag("enable_nodejs_process_v2")
-      $experimental;
+      $compatDisableFlag("disable_nodejs_process_v2")
+      $impliedByAfterDate(name = "nodeJsCompat", date="2025-09-15");
   # Switches from the partial process implementation with only "nextTick", "env", "exit",
   # "getBuiltinModule", "platform" and "features" property implementations, to the full-featured
   # Node.js-compatibile process implementation with all process properties either stubbed or
-  # implemented. Implies nodejs_compat + nodejs_compat_v2 (which sets the process global).
+  # implemented. It is required to use this flag with nodejs_compat (or nodejs_compat_v2).
 
   setEventTargetThis @98 :Bool
       $compatEnableFlag("set_event_target_this")
