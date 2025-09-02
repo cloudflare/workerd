@@ -294,7 +294,7 @@ struct DynamicWorkerSource {
   bool ownContentIsRpcResponse = true;
 };
 
-// A Frakenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
+// A Frankenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
 // valid to use when the `Frankenvalue` is being deserialized as the `env` object of an isolate.
 // The caller should use frankenvalue.rewriteCaps() to rewrite the cap table entries into
 // IoChannelCapTableEntry, building the I/O channel table as it goes.

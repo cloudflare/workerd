@@ -177,7 +177,7 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
 
     if (properties.size() > 0) {
       jsg::JsObject obj = KJ_REQUIRE_NONNULL(
-          result.tryCast<jsg::JsObject>(), "non-object Frakenvalue can't have properties");
+          result.tryCast<jsg::JsObject>(), "non-object Frankenvalue can't have properties");
 
       for (auto& property: properties) {
         obj.set(js, property.name,

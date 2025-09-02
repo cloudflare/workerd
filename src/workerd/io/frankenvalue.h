@@ -42,7 +42,7 @@ class Frankenvalue {
 
   // Convert to/from JavaScript values. Note that round trips here don't produce the exact same
   // Frankenvalue representation: toJs() puts all the contents together into a single value, and
-  // fromJs() always returns a Frakenvalue containing a single V8-serialized value.
+  // fromJs() always returns a Frankenvalue containing a single V8-serialized value.
   jsg::JsValue toJs(jsg::Lock& js);
   static Frankenvalue fromJs(jsg::Lock& js, jsg::JsValue value);
 
@@ -50,9 +50,9 @@ class Frankenvalue {
   // not represent an object. This is used to populate `env` in particular.
   void populateJsObject(jsg::Lock& js, jsg::JsObject target);
 
-  // Construct a Frakenvalue from JSON.
+  // Construct a Frankenvalue from JSON.
   //
-  // (It's not possible to convert a Frakenvalue back to JSON, except by evaluating it in JS and
+  // (It's not possible to convert a Frankenvalue back to JSON, except by evaluating it in JS and
   // then JSON-stringifying from there.)
   static Frankenvalue fromJson(kj::String json);
 
@@ -70,8 +70,8 @@ class Frankenvalue {
   // A Frankenvalue can contain capabilities (typically ServiceStubs). When serializing from
   // JavaScript, these will be encoded as integer indexes into a separate table -- the CapTable.
 
-  // The Frakenvalue itself doesn't know how these "capabilities" are implemneted, so leaves this
-  // up to a higher layer. It simply manitains a table of `CapTableEntry` objects. `CapTableEntry`
+  // The Frankenvalue itself doesn't know how these "capabilities" are implemneted, so leaves this
+  // up to a higher layer. It simply maintains a table of `CapTableEntry` objects. `CapTableEntry`
   // serves as a generic base class for multiple representations which serializers and
   // deserializers for specific types will need to support through downcasting.
   //
@@ -79,15 +79,15 @@ class Frankenvalue {
   // - Typically, the type is `IoChannelFactory::SubrequestChannel`.
   // - When a Frankenvalue is being used to initialize the `env` of a dynamically-loaded isolate,
   //   each CapTableEntry may simply contain an I/O channel number.
-  // - In some environments, a CapTableEntry might some sort of description of how to load a Worker
-  //   that implements the capability.
+  // - In some environments, a CapTableEntry might be some sort of description of how to load a
+  //   Worker that implements the capability.
   class CapTableEntry {
    public:
-    // Clone the entry, used when `Frakenvalue::clone()` is called. Many implementations may
+    // Clone the entry, used when `Frankenvalue::clone()` is called. Many implementations may
     // implement this using addRef().
     virtual kj::Own<CapTableEntry> clone() = 0;
 
-    // Like `clone()` but works on const values. Used only when `Frakenvalue::threadSafeClone()`
+    // Like `clone()` but works on const values. Used only when `Frankenvalue::threadSafeClone()`
     // is called. The default implementation throws an exception.
     virtual kj::Own<CapTableEntry> threadSafeClone() const;
   };
