@@ -37,7 +37,7 @@ def wd_test(
         ts_config(
             name = name + "@ts_config",
             src = "tsconfig.json",
-            deps = ["//tools:base-tsconfig"],
+            deps = ["@workerd//tools:base-tsconfig"],
         )
         ts_project(
             name = name + "@ts_project",
