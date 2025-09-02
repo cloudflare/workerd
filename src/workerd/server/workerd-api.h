@@ -116,9 +116,15 @@ class WorkerdApi final: public Worker::Api {
     };
     struct R2Bucket {
       uint subrequestChannel;
+      kj::String bucket;
+      kj::String bindingName;
 
       R2Bucket clone() const {
-        return *this;
+        return R2Bucket{
+          .subrequestChannel = subrequestChannel,
+          .bucket = kj::str(bucket),
+          .bindingName = kj::str(bindingName),
+        };
       }
     };
     struct R2Admin {
