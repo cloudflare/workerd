@@ -24,20 +24,6 @@
 #include <regex>
 
 namespace workerd::api::public_beta {
-kj::Own<kj::HttpClient> r2GetClient(
-    IoContext& context, uint subrequestChannel, R2UserTracing user) {
-  kj::Vector<Span::Tag> tags;
-  tags.add("rpc.service"_kjc, kj::str("r2"_kjc));
-  tags.add(user.method.key, kj::str(user.method.value));
-  KJ_IF_SOME(b, user.bucket) {
-    tags.add("cloudflare.r2.bucket"_kjc, kj::str(b));
-  }
-  KJ_IF_SOME(tag, user.extraTag) {
-    tags.add(tag.key, kj::str(tag.value));
-  }
-
-  return context.getHttpClientWithSpans(subrequestChannel, true, kj::none, user.op, kj::mv(tags));
-}
 
 static bool isWholeNumber(double x) {
   double intpart;
@@ -964,7 +950,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       }
       if (responseBuilder.hasDelimitedPrefixes()) {
         result.delimitedPrefixes =
-            KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
+          KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
       return kj::mv(result);
