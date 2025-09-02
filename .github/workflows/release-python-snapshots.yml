@@ -1,0 +1,108 @@
+name: Make Python Snapshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      update-released:
+        description: 'Update already released versions?'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build-linux:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04
+      os_name: linux
+      arch_name: 'X64'
+      suffix: ''
+      run_tests: false
+      extra_bazel_args: '--config=ci-linux --config=ci-test'
+      upload_binary: true
+    secrets:
+      BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
+      WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
+
+  build:
+    needs: [build-linux]
+    runs-on: ubuntu-22.04
+    name: Build and upload Python memory snapshots
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Setup Runner
+        uses: ./.github/actions/setup-runner
+      - name: Download workerd binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-X64-binary
+          path: /tmp
+
+      - name: Make workerd binary executable
+        run: chmod +x /tmp/workerd
+
+      - name: Build and upload Python memory snapshots
+        env:
+          PROD_R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
+          PROD_R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
+          PROD_R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
+          TEST_R2_ACCOUNT_ID: ${{ secrets.R2_EW_SNAPSHOT_TESTS_ACCOUNT_ID }}
+          TEST_R2_ACCESS_KEY_ID: ${{ secrets.R2_EW_SNAPSHOT_TESTS_ACCESS_KEY_ID }}
+          TEST_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_EW_SNAPSHOT_TESTS_SECRET_ACCESS_KEY }}
+          WORKERD_BINARY: "/tmp/workerd"
+        run: |
+          bazel build @workerd//src/pyodide:bundle_version_info
+          # boto3 v1.36.0 fails with:
+          # NotImplemented error occurred in CreateMultipartUpload operation: Header 'x-amz-checksum-algorithm' with value 'CRC32' not implemented
+          pip install 'boto3<1.36.0' requests
+          python3 src/pyodide/make_snapshots.py ${{ inputs.update-released == true && '--update-released' || '' }}
+
+      - name: Check for open PR and commit changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Commit changes to python_metadata.bzl and push to branch
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "release-python-snapshots.yml GitHub Action"
+
+          # Get current branch name
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $BRANCH_NAME"
+
+          # Check if there are changes to python_metadata.bzl
+          if git diff --quiet build/python_metadata.bzl; then
+            echo "No changes to python_metadata.bzl"
+            exit 0
+          fi
+
+          echo "Changes detected in python_metadata.bzl"
+
+          # Check if there's an open PR for this branch
+          PR_COUNT=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq length)
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+            echo "No open PR found for branch $BRANCH_NAME, skipping commit"
+            exit 0
+          fi
+
+          echo "Found open PR for branch $BRANCH_NAME"
+
+          # Commit and push the changes
+          git add build/python_metadata.bzl
+          git commit --fixup HEAD -m "Update python_metadata.bzl with new snapshot info
+
+          This commit updates the snapshot values in python_metadata.bzl based on the latest
+          snapshot uploads.
+
+          🤖 Generated automatically by release-python-snapshots workflow"
+
+          # --no-verify because 'git merge-base origin/main HEAD' fails in pre-commit.
+          # There shouldn't be formatting errors anyways and if there are CI will catch it.
+          git push origin "$BRANCH_NAME" --no-verify
+          echo "Changes committed and pushed to $BRANCH_NAME"
