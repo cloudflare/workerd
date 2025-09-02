@@ -497,6 +497,9 @@ interface AlarmInvocationInfo {
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
+declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
+}
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
@@ -527,7 +530,7 @@ interface DurableObjectId {
   readonly name?: string;
   readonly jurisdiction?: string;
 }
-interface DurableObjectNamespace<
+declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -568,10 +571,11 @@ type DurableObjectLocationHint =
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-interface DurableObjectClass {}
+declare abstract class DurableObjectClass {}
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   exports: any;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -704,7 +708,10 @@ interface DurableObjectFacets {
   delete(name: string): void;
 }
 interface DurableObjectFacetsStartupOptions {
-  $class: DurableObjectClass;
+  $class:
+    | DurableObjectClass
+    | LoopbackDurableObjectNamespace
+    | LoopbackColoLocalActorNamespace;
   id?: DurableObjectId | string;
 }
 interface AnalyticsEngineDataset {
@@ -3339,6 +3346,8 @@ declare class MessageChannel {
 interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
+interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
 type AiImageClassificationInput = {
   image: number[];
 };

@@ -523,7 +523,7 @@ export interface DurableObjectId {
   equals(other: DurableObjectId): boolean;
   readonly name?: string;
 }
-export interface DurableObjectNamespace<
+export declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -562,6 +562,7 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;

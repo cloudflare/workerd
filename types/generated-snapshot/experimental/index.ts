@@ -502,6 +502,9 @@ export interface AlarmInvocationInfo {
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
+export declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
+}
 export interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
@@ -532,7 +535,7 @@ export interface DurableObjectId {
   readonly name?: string;
   readonly jurisdiction?: string;
 }
-export interface DurableObjectNamespace<
+export declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -573,10 +576,11 @@ export type DurableObjectLocationHint =
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-export interface DurableObjectClass {}
+export declare abstract class DurableObjectClass {}
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   exports: any;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -709,7 +713,10 @@ export interface DurableObjectFacets {
   delete(name: string): void;
 }
 export interface DurableObjectFacetsStartupOptions {
-  $class: DurableObjectClass;
+  $class:
+    | DurableObjectClass
+    | LoopbackDurableObjectNamespace
+    | LoopbackColoLocalActorNamespace;
   id?: DurableObjectId | string;
 }
 export interface AnalyticsEngineDataset {
@@ -3350,6 +3357,10 @@ export declare class MessageChannel {
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+export interface LoopbackDurableObjectNamespace
+  extends DurableObjectNamespace {}
+export interface LoopbackColoLocalActorNamespace
+  extends ColoLocalActorNamespace {}
 export type AiImageClassificationInput = {
   image: number[];
 };
