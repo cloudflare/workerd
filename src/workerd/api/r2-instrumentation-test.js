@@ -69,14 +69,14 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'basicKey',
+        'cloudflare.r2.key': 'basicKey',
         closed: true,
       },
       {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'basicKey',
+        'cloudflare.r2.key': 'basicKey',
         closed: true,
       },
       {
@@ -172,7 +172,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'httpMetadata',
+        'cloudflare.r2.key': 'httpMetadata',
         closed: true,
       },
       {
@@ -210,7 +210,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'httpMetadata',
+        'cloudflare.r2.key': 'httpMetadata',
         closed: true,
       },
       {
@@ -248,7 +248,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'customMetadata',
+        'cloudflare.r2.key': 'customMetadata',
         closed: true,
       },
       {
@@ -286,7 +286,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'classDefault',
+        'cloudflare.r2.key': 'classDefault',
         closed: true,
       },
       {
@@ -318,7 +318,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'classStandard',
+        'cloudflare.r2.key': 'classStandard',
         closed: true,
       },
       {
@@ -350,7 +350,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'classInfrequentAccess',
+        'cloudflare.r2.key': 'classInfrequentAccess',
         closed: true,
       },
       {
@@ -376,7 +376,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'ssec',
+        'cloudflare.r2.key': 'ssec',
         closed: true,
       },
       {
@@ -415,7 +415,7 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'ssec',
+        'cloudflare.r2.key': 'ssec',
         closed: true,
       },
       {
@@ -448,28 +448,28 @@ export const test = {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'onlyIfWildcard',
+        'cloudflare.r2.key': 'onlyIfWildcard',
         closed: true,
       },
       {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'onlyIfStrongEtag',
+        'cloudflare.r2.key': 'onlyIfStrongEtag',
         closed: true,
       },
       {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'rangeSuff',
+        'cloudflare.r2.key': 'rangeSuff',
         closed: true,
       },
       {
         name: 'r2_get',
         'rpc.service': 'r2',
         'rpc.method': 'GetObject',
-        'cloudflare.r2.bucket': 'rangeOffLen',
+        'cloudflare.r2.key': 'rangeOffLen',
         closed: true,
       },
     ];
