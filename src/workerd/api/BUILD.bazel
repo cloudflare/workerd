@@ -444,7 +444,10 @@ wd_test(
 wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
-    data = ["r2-test.js"],
+    data = [
+        "r2-instrumentation-test.js",
+        "r2-test.js",
+    ],
 )
 
 wd_test(
