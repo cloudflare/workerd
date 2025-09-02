@@ -596,6 +596,9 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
     auto result = co_await request->finishScheduled();
+    KJ_IF_SOME(t, context.getWorkerTracer()) {
+      t.setReturn(kj::none, context.now());
+    }
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     co_return WorkerInterface::ScheduledResult{.retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
@@ -603,7 +606,8 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
   auto promise = waitForFinished(context, kj::mv(incomingRequest));
 
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  co_return result;
 }
 
 kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
@@ -716,7 +720,11 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setReturn(kj::none, context.now());
+  }
+  co_return result;
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -761,6 +769,10 @@ kj::Promise<bool> WorkerEntrypoint::test() {
       }
     }
 
+    // Not adding a return event here – we only provide rudimentary tracing support for test events
+    // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
+    // practice.
+
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;
     co_return outcome == EventOutcome::OK;
@@ -780,8 +792,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 
-  // TODO: Trying to use this as a replacement for setting return in server customEvent results in
-  // tail-worker-test missing out on some return events – is exception handling responsible?
   /*KJ_DEFER({
     KJ_IF_SOME(t, context.getWorkerTracer()) {
       t.setReturn(kj::none, context.now());
@@ -793,6 +803,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   //   for now. Otherwise we will need to `atomicAddRef()` the `Worker` at some point earlier on
   //   but I'd like to avoid that in the non-test case.
   auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setReturn(kj::none, context.now());
+  }
   co_return result;
 }
 
