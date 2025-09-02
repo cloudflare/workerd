@@ -381,7 +381,7 @@ R2Bucket::get(jsg::Lock& js,
 
     auto client = r2GetClient(context, clientIndex,
         {"r2_get"_kjc, {"rpc.method"_kjc, "GetObject"_kjc}, this->adminBucketName(),
-          {{"cloudflare.r2.bucket"_kjc, name.asPtr()}}});
+          {{"cloudflare.r2.key"_kjc, name.asPtr()}}});
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
