@@ -342,8 +342,16 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_get"_kjc, {"rpc.method"_kjc, "GetObject"_kjc}, this->adminBucketName()});
+    auto traceSpan = context.makeTraceSpan("r2_get"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_get"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("GetObject"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -361,9 +369,12 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) {
+    auto awaitIoResult =
+        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) {
       return parseObjectMetadata<HeadResult>(js, "head", r2Result, errorType);
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -379,9 +390,17 @@ R2Bucket::get(jsg::Lock& js,
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_get"_kjc, {"rpc.method"_kjc, "GetObject"_kjc}, this->adminBucketName(),
-          {{"cloudflare.r2.key"_kjc, name.asPtr()}}});
+    auto traceSpan = context.makeTraceSpan("r2_get"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_get"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("GetObject"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.key"_kjc, kj::str(name));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -402,7 +421,7 @@ R2Bucket::get(jsg::Lock& js,
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise),
+    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
         [&context, &errorType](jsg::Lock& js,
             R2Result r2Result) -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
@@ -420,6 +439,8 @@ R2Bucket::get(jsg::Lock& js,
       }
       return result;
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -443,8 +464,17 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     });
 
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_put"_kjc, {"rpc.method"_kjc, "PutObject"_kjc}, this->adminBucketName(), kj::none});
+
+    auto traceSpan = context.makeTraceSpan("r2_put"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_put"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("PutObject"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -611,7 +641,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
-    return context.awaitIo(js, kj::mv(promise),
+    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
             sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType](
             jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
@@ -626,6 +656,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         return result;
       }
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -635,9 +667,17 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_createMultipartUpload"_kjc, {"rpc.method"_kjc, "CreateMultipartUpload"_kjc},
-          this->adminBucketName()});
+
+    auto traceSpan = context.makeTraceSpan("r2_createMultipartUpload"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_createMultipartUpload"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("CreateMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -707,7 +747,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
-    return context.awaitIo(js, kj::mv(promise),
+    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
         [&errorType, key = kj::mv(key), this](jsg::Lock& js, R2Result r2Result) mutable {
       r2Result.throwIfError("createMultipartUpload", errorType);
 
@@ -720,6 +760,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       kj::String uploadId = kj::str(responseBuilder.getUploadId());
       return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -746,9 +788,18 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
       }
       KJ_UNREACHABLE;
     }();
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_delete"_kjc, {"rpc.method"_kjc, "DeleteObject"_kjc}, this->adminBucketName(),
-          {{"cloudflare.r2.delete"_kjc, deleteKey.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_delete"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_delete"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("DeleteObject"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.delete"_kjc, kj::str(deleteKey));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -777,13 +828,16 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
-    return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
+    auto awaitIoResult =
+        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {
         return;
       }
 
       r.throwIfError("delete", errorType);
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -793,8 +847,17 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, clientIndex,
-        {"r2_list"_kjc, {"rpc.method"_kjc, "ListObjects"_kjc}, this->adminBucketName()});
+
+    auto traceSpan = context.makeTraceSpan("r2_list"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_list"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("ListObjects"_kjc));
+    KJ_IF_SOME(b, this->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -879,7 +942,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise),
+    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
         [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType](
             jsg::Lock& js, R2Result r2Result) {
       r2Result.throwIfError("list", errorType);
@@ -906,6 +969,8 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 
       return kj::mv(result);
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
