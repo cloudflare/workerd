@@ -203,6 +203,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
+      durableObjectId(trace.durableObjectId.map([](auto& id) { return kj::str(id); })),
       executionModel(enumToStr(trace.executionModel)),
       spans(getTraceSpans(js, trace)),
       outcome(enumToStr(trace.outcome)),
@@ -280,6 +281,10 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
+  return durableObjectId.map([](auto& id) -> kj::StringPtr { return id; });
 }
 
 kj::StringPtr TraceItem::getExecutionModel() {
