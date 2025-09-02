@@ -7553,6 +7553,7 @@ type ImageOutputOptions = {
     | "rgba";
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 interface ImagesBinding {
   /**
