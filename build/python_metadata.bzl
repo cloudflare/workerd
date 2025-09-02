@@ -147,12 +147,12 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
         "python_version": "3.13.2",
-        "baseline_snapshot": "baseline-642052406.bin",
-        "baseline_snapshot_hash": "6420524066bd8b40857bedc63d51725fe908051d1707c3515f8699c2f5e1978d",
-        "numpy_snapshot": "package_snapshot_numpy-7e7fe731d.bin",
-        "numpy_snapshot_hash": "7e7fe731d6e92ebff2535eb3b0960abb8e384a909e642f3f77b4e5c7ec7e86c7",
-        "fastapi_snapshot": "package_snapshot_fastapi-2596aa5fd.bin",
-        "fastapi_snapshot_hash": "2596aa5fd64c1df9430ffabb96a9a68060086cec8853e1d9f94ad88ab5980ee4",
+        "baseline_snapshot": "baseline-32a2de5f7.bin",
+        "baseline_snapshot_hash": "32a2de5f759cd0e7b6aaa5a9292e0c54c3605b9f626ff6c88dc95f49cd98105d",
+        "numpy_snapshot": "package_snapshot_numpy-60c9cb28e.bin",
+        "numpy_snapshot_hash": "60c9cb28e6dc1ea6ab38b25471ddaa315b667637c9dd6f94aceb2acc6519c623",
+        "fastapi_snapshot": "package_snapshot_fastapi-a6ccb56fe.bin",
+        "fastapi_snapshot_hash": "a6ccb56fe9eac265d139727d0134e8d6432c5fe25c8c0b8ec95252b13493b297",
         "vendored_packages_for_tests": [
             {
                 # Downloaded from https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/beautifulsoup4-vendored-for-ew-testing.zip
