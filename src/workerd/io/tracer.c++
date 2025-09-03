@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -136,10 +137,6 @@ WorkerTracer::~WorkerTracer() noexcept(false) {
   // invocation to submit the onset event before any other tail events.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
-
-    KJ_IF_SOME(fetchResponseInfo, trace->fetchResponseInfo) {
-      writer->report(spanContext, tracing::Return({fetchResponseInfo.clone()}), completeTime);
-    }
 
     if (isPredictableModeForTest()) {
       writer->report(spanContext,
@@ -419,7 +416,23 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // fixed size.
 }
 
-void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
+kj::Date BaseTracer::setReturnTime() {
+  auto timestamp = kj::UNIX_EPOCH;
+  if (IoContext::hasCurrent()) {
+    timestamp = IoContext::current().now();
+  } else {
+    // TODO(felix): Remove if this looks stable after a few days.
+    if (isPredictableModeForTest()) {
+      KJ_FAIL_ASSERT("timestamp unavailable when reporting return");
+    } else {
+      LOG_PERIODICALLY(WARNING, "NOSENTRY timestamp unavailable when reporting return");
+    }
+  }
+  return timestamp;
+}
+
+void WorkerTracer::setReturn(
+    kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo, kj::Date timestamp) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
   // in setEventInfo() that are related to this check while probably also affect
   // this function.
@@ -427,10 +440,20 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
     return;
   }
 
-  // Note: In the streaming model, fetchResponseInfo is dispatched when the tail worker returns.
-  KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
-  KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
-  trace->fetchResponseInfo = kj::mv(info);
+  KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
+
+    writer->report(spanContext,
+        tracing::Return({fetchResponseInfo.map([](auto& info) { return info.clone(); })}),
+        timestamp);
+  }
+
+  // Add fetch response info for legacy tail worker
+  KJ_IF_SOME(info, fetchResponseInfo) {
+    KJ_REQUIRE(KJ_REQUIRE_NONNULL(trace->eventInfo).is<tracing::FetchEventInfo>());
+    KJ_ASSERT(trace->fetchResponseInfo == kj::none, "setFetchResponseInfo can only be called once");
+    trace->fetchResponseInfo = kj::mv(info);
+  }
 }
 
 void WorkerTracer::setUserRequestSpan(SpanParent&& span) {
