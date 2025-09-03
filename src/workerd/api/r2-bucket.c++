@@ -447,7 +447,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
+    return context.awaitIo(js, kj::mv(promise),
         [&errorType, traceContext = kj::mv(traceContext)](
             jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
@@ -458,8 +458,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
       }
       return result;
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -509,7 +507,7 @@ R2Bucket::get(jsg::Lock& js,
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
+    return context.awaitIo(js, kj::mv(promise),
         [&context, &errorType, traceContext = kj::mv(traceContext)](
             jsg::Lock& js, R2Result r2Result) mutable
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
@@ -542,8 +540,6 @@ R2Bucket::get(jsg::Lock& js,
 
       return result;
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -748,7 +744,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, jwt);
 
-    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
+    return context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
             sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType,
             traceContext = kj::mv(traceContext)](
@@ -767,8 +763,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
         return result;
       }
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -867,6 +861,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
         [&errorType, key = kj::mv(key), this](jsg::Lock& js, R2Result r2Result) mutable {
       r2Result.throwIfError("createMultipartUpload", errorType);
 
+      // TODO(now): should this have response tags?
       capnp::MallocMessageBuilder responseMessage;
       capnp::JsonCodec json;
       json.handleByAnnotation<R2CreateMultipartUploadResponse>();
@@ -1089,6 +1084,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
           KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
+      // TODO(now): should this have response tags?
       return kj::mv(result);
     });
 
