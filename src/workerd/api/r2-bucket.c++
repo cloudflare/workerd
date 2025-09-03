@@ -986,7 +986,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       }
       if (responseBuilder.hasDelimitedPrefixes()) {
         result.delimitedPrefixes =
-            KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
+          KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
       return kj::mv(result);
