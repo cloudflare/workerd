@@ -1,4 +1,4 @@
-import { RpcTarget } from 'cloudflare:workers';
+import { RpcTarget, WorkflowEntrypoint } from 'cloudflare:workers';
 import * as assert from 'node:assert';
 
 class Context extends RpcTarget {
@@ -11,6 +11,16 @@ class Context extends RpcTarget {
       // let's rethrow here since the engine does the same
       throw e;
     }
+  }
+}
+
+export class WorkflowEntrypointTester extends WorkflowEntrypoint {
+  __workflow_entrypoint = true;
+  async run() {
+    const step = new Context();
+    return await step.do('foo', async () => {
+      return 'bar';
+    });
   }
 }
 

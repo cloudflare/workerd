@@ -2,7 +2,7 @@
 # Licensed under the Apache 2.0 license found in the LICENSE file or at:
 #     https://opensource.org/licenses/Apache-2.0
 
-from workers import WorkflowEntrypoint
+from workers import WorkflowEntrypoint, WorkerEntrypoint
 
 
 class WorkflowEntrypointExample(WorkflowEntrypoint):
@@ -63,5 +63,6 @@ class WorkflowEntrypointExample(WorkflowEntrypoint):
         return await await_step(step_5)
 
 
-async def test(ctrl, env, ctx):
-    pass
+class Default(WorkerEntrypoint):
+    async def test(self, ctrl, env, ctx):
+        await self.env.MY_WORKFLOW.run()
