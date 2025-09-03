@@ -131,6 +131,12 @@ class BaseTracer: public kj::Refcounted {
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
   virtual SpanParent getUserRequestSpan() = 0;
+
+  // TODO(felix): Used for debug logging, remove after a few days.
+  void setIsJsRpc();
+
+  // Indicates that we're reporting from a JsRpc customEvent.
+  bool isJsRpc = false;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
