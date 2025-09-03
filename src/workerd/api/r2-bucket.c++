@@ -281,6 +281,80 @@ kj::Maybe<kj::String> buildSsecKey(
   return kj::none;
 }
 
+static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
+  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
+    traceContext.userSpan.setTag("error.type"_kjc, kj::str(e));
+    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, kj::str(e));
+  }
+  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
+    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, kj::str(v4));
+  }
+}
+
+static void addHeadResultSpanTags(
+    jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& headResult) {
+  traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, headResult.getEtag());
+  traceContext.userSpan.setTag("cloudflare.r2.response.size"_kjc, headResult.getSize());
+  traceContext.userSpan.setTag("cloudflare.r2.response.uploaded"_kjc,
+      kj::str(toUTCString(js, headResult.getUploaded()).asPtr()));
+  auto checksums = headResult.getChecksums();
+  KJ_IF_SOME(md5, checksums.get()->md5) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(md5));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("md5"));
+  }
+  KJ_IF_SOME(sha1, checksums.get()->sha1) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha1));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha1"));
+  }
+  KJ_IF_SOME(sha256, checksums.get()->sha256) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha256));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha256"));
+  }
+  KJ_IF_SOME(sha384, checksums.get()->sha384) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha384));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha384"));
+  }
+  KJ_IF_SOME(sha512, checksums.get()->sha512) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha512));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha512"));
+  }
+
+  traceContext.userSpan.setTag(
+      "cloudflare.r2.response.storage_class"_kjc, kj::str(headResult.getStorageClass()));
+  KJ_IF_SOME(_, headResult.getSSECKeyMd5()) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.ssec_key"_kjc, true);
+  } else {
+    traceContext.userSpan.setTag("cloudflare.r2.response.ssec_key"_kjc, false);
+  }
+  KJ_IF_SOME(httpMetadata, headResult.getHttpMetadata()) {
+    KJ_IF_SOME(ct, httpMetadata.contentType) {
+      traceContext.userSpan.setTag("cloudflare.r2.response.content_type"_kjc, kj::str(ct));
+    }
+    KJ_IF_SOME(ce, httpMetadata.contentEncoding) {
+      traceContext.userSpan.setTag("cloudflare.r2.response.content_encoding"_kjc, kj::str(ce));
+    }
+    KJ_IF_SOME(cd, httpMetadata.contentDisposition) {
+      traceContext.userSpan.setTag("cloudflare.r2.response.content_disposition"_kjc, kj::str(cd));
+    }
+    KJ_IF_SOME(cl, httpMetadata.contentLanguage) {
+      traceContext.userSpan.setTag("cloudflare.r2.response.content_language"_kjc, kj::str(cl));
+    }
+    KJ_IF_SOME(cc, httpMetadata.cacheControl) {
+      traceContext.userSpan.setTag("cloudflare.r2.response.cache_control"_kjc, kj::str(cc));
+    }
+    KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.response.cache_expiry"_kjc, kj::str(toUTCString(js, ce).asPtr()));
+    }
+  }
+  KJ_IF_SOME(_, headResult.getCustomMetadata()) {
+    traceContext.userSpan.setTag("cloudflare.r2.response.custom_metadata"_kjc, true);
+  } else {
+    traceContext.userSpan.setTag("cloudflare.r2.response.custom_metadata"_kjc, false);
+  }
+}
+
 template <typename Builder, typename Options>
 void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   initOnlyIf(js, builder, o);
@@ -373,9 +447,16 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    auto awaitIoResult =
-        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) {
-      return parseObjectMetadata<HeadResult>(js, "head", r2Result, errorType);
+    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+
+      auto result = parseObjectMetadata<HeadResult>(js, "head", r2Result, errorType);
+      KJ_IF_SOME(r, result) {
+        addHeadResultSpanTags(js, traceContext, *r.get());
+      }
+      return result;
     });
 
     return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
@@ -429,12 +510,15 @@ R2Bucket::get(jsg::Lock& js,
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
-        [&context, &errorType](jsg::Lock& js,
-            R2Result r2Result) -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
+        [&context, &errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable
+        -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
+      addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
         result = KJ_ASSERT_NONNULL(parseObjectMetadata<HeadResult>(js, "get", r2Result, errorType));
+        traceContext.userSpan.setTag("error.type"_kjc, kj::str("precondition-failed"_kjc));
       } else {
         jsg::Ref<ReadableStream> body = nullptr;
 
@@ -444,6 +528,18 @@ R2Bucket::get(jsg::Lock& js,
         }
         result = parseObjectMetadata<GetResult>(js, "get", r2Result, errorType, kj::mv(body));
       }
+
+      KJ_SWITCH_ONEOF(result) {
+        KJ_CASE_ONEOF(o, jsg::Ref<HeadResult>) {
+          addHeadResultSpanTags(js, traceContext, *o.get());
+        }
+        KJ_CASE_ONEOF(maybeHeadResult, kj::Maybe<jsg::Ref<GetResult>>) {
+          KJ_IF_SOME(o, maybeHeadResult) {
+            addHeadResultSpanTags(js, traceContext, *o.get());
+          }
+        }
+      }
+
       return result;
     });
 
@@ -654,15 +750,19 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
     auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
-            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType](
+            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType,
+            traceContext = kj::mv(traceContext)](
             jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
+      addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
+        traceContext.userSpan.setTag("error.type"_kjc, kj::str("precondition-failed"_kjc));
         return kj::none;
       } else {
         auto result = parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
         KJ_IF_SOME(o, result) {
           o.get()->httpMetadata = kj::mv(sentHttpMetadata);
           o.get()->customMetadata = kj::mv(sentCustomMetadata);
+          addHeadResultSpanTags(js, traceContext, *o.get());
         }
         return result;
       }
@@ -997,7 +1097,6 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 }
 
 namespace {
-
 kj::Array<R2Bucket::Etag> parseConditionalEtagHeader(kj::StringPtr condHeader,
     kj::Vector<R2Bucket::Etag> etagAccumulator = kj::Vector<R2Bucket::Etag>(),
     bool leadingCommaRequired = false) {
