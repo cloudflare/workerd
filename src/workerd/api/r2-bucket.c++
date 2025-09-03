@@ -348,12 +348,12 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("cloudflare.r2.operation.name"_kjc, kj::str("HeadObject"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("HeadObject"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
@@ -400,12 +400,12 @@ R2Bucket::get(jsg::Lock& js,
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("cloudflare.r2.operation.name"_kjc, kj::str("GetObject"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("GetObject"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
@@ -478,12 +478,12 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("cloudflare.r2.operation.name"_kjc, kj::str("PutObject"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("PutObject"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
@@ -685,13 +685,13 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag(
-        "cloudflare.r2.operation.name"_kjc, kj::str("CreateMultipartUpload"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("CreateMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
@@ -811,12 +811,12 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("cloudflare.r2.operation.name"_kjc, kj::str("DeleteObject"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("DeleteObject"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.request.keys"_kjc, kj::str(deleteKey));
 
@@ -873,12 +873,12 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("cloudflare.r2.operation.name"_kjc, kj::str("ListObjects"_kjc));
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
-    }
     KJ_IF_SOME(b, this->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("ListObjects"_kjc));
+    KJ_IF_SOME(b, this->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
 
     capnp::JsonCodec json;
@@ -986,7 +986,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       }
       if (responseBuilder.hasDelimitedPrefixes()) {
         result.delimitedPrefixes =
-          KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
+            KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
       return kj::mv(result);
