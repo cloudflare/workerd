@@ -32,6 +32,7 @@
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
@@ -87,7 +88,8 @@
   F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
   F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \
   F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)                                             \
-  F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)
+  F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
+  F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)
 
 namespace workerd::api {
 

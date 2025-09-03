@@ -1076,6 +1076,24 @@ class AsyncIteratorBase: public Object {
   };                                                                                               \
   jsg::Ref<Name> Label(jsg::Lock&);
 
+// Like JSG_ITERATOR but don't declare the method name automatically.
+//
+// TODO(cleanup): Change all JSG_ITERATOR usages to this. It's confusing for the macro to declare
+//   the method.
+#define JSG_ITERATOR_TYPE(Name, Type, State, NextFunc)                                             \
+  class Name final: public jsg::IteratorBase<Name, Type, State> {                                  \
+   public:                                                                                         \
+    using jsg::IteratorBase<Name, Type, State>::IteratorBase;                                      \
+    inline Next next(jsg::Lock& js) {                                                              \
+      return nextImpl(js, NextFunc);                                                               \
+    }                                                                                              \
+    JSG_RESOURCE_TYPE(Name) {                                                                      \
+      JSG_INHERIT_INTRINSIC(v8::kIteratorPrototype);                                               \
+      JSG_METHOD(next);                                                                            \
+      JSG_ITERABLE(self);                                                                          \
+    }                                                                                              \
+  };
+
 #define JSG_ASYNC_ITERATOR_TYPE(Name, Type, State, NextFunc, ReturnFunc)                           \
   class Name final: public jsg::AsyncIteratorBase<Name, Type, State> {                             \
    public:                                                                                         \

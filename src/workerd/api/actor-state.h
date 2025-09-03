@@ -20,6 +20,7 @@
 
 namespace workerd::api {
 class SqlStorage;
+class SyncKvStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObject;
@@ -81,6 +82,22 @@ class DurableObjectStorageOperations {
     JSG_STRUCT(start, startAfter, end, prefix, reverse, limit, allowConcurrency, noCache);
     JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions);  // Rename from DurableObjectStorageOperationsListOptions
   };
+
+  // A more convenient form of `ListOptions` for actually implementing the operation -- but less
+  // convenient for specifying it.
+  struct CompiledListOptions {
+    kj::String start;
+    kj::Maybe<kj::String> end;
+    bool reverse;
+    kj::Maybe<uint> limit;
+  };
+
+  // Compile `ListOptions` into `CompiledListOptions`. Returns null if the list operation would
+  // provably return no results (e.g. the end key is before the start key). This may (or may not)
+  // move some of the strings from the input to the output.
+  //
+  // This is public so that SyncKvStorage can reuse it.
+  static kj::Maybe<CompiledListOptions> compileListOptions(kj::Maybe<ListOptions>& maybeOptions);
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
@@ -200,6 +217,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
   // Throws if not SQLite-backed.
   SqliteDatabase& getSqliteDb(jsg::Lock& js);
+  SqliteKv& getSqliteKv(jsg::Lock& js);
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -223,6 +241,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   jsg::Promise<void> sync(jsg::Lock& js);
 
   jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
+
+  jsg::Ref<SyncKvStorage> getKv(jsg::Lock& js);
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
@@ -279,6 +299,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     JSG_METHOD(sync);
 
     JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    JSG_LAZY_INSTANCE_PROPERTY(kv, getKv);
     JSG_METHOD(transactionSync);
 
     JSG_METHOD(getCurrentBookmark);

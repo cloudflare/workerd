@@ -23,6 +23,7 @@ using kj::byte;
 using kj::uint;
 class OutputGate;
 class SqliteDatabase;
+class SqliteKv;
 
 struct ActorCacheReadOptions {
   // If the entry is not already in cache and has to be read from disk, don't store the result in
@@ -168,6 +169,11 @@ class ActorCacheInterface: public ActorCacheOps {
   // If the actor's storage is backed by SQLite, return the underlying database.
   virtual kj::Maybe<SqliteDatabase&> getSqliteDatabase() = 0;
 
+  // If the actor's storage is backed by SQLite, return the SqliteKv object which provides a
+  // synchronous interface to KV storage. This is only available for SQLite-basked DOs because
+  // old-style DOs have asyncronous storage.
+  virtual kj::Maybe<SqliteKv&> getSqliteKv() = 0;
+
   class Transaction: public ActorCacheOps {
    public:
     // Write all changes to the underlying ActorCache.
@@ -311,6 +317,9 @@ class ActorCache final: public ActorCacheInterface {
   ~ActorCache() noexcept(false);
 
   kj::Maybe<SqliteDatabase&> getSqliteDatabase() override {
+    return kj::none;
+  }
+  kj::Maybe<SqliteKv&> getSqliteKv() override {
     return kj::none;
   }
   kj::OneOf<kj::Maybe<Value>, kj::Promise<kj::Maybe<Value>>> get(

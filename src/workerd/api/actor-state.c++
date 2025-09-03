@@ -7,6 +7,7 @@
 #include "actor.h"
 #include "export-loopback.h"
 #include "sql.h"
+#include "sync-kv.h"
 #include "util.h"
 
 #include <workerd/api/web-socket.h>
@@ -305,14 +306,12 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
-    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+kj::Maybe<DurableObjectStorageOperations::CompiledListOptions> DurableObjectStorageOperations::
+    compileListOptions(kj::Maybe<ListOptions>& maybeOptions) {
   kj::String start;
   kj::Maybe<kj::String> end;
   bool reverse = false;
   kj::Maybe<uint> limit;
-
-  auto makeEmptyResult = [&]() { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); };
 
   KJ_IF_SOME(o, maybeOptions) {
     KJ_IF_SOME(s, o.start) {
@@ -359,7 +358,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
           // `start` is within the prefix, so need not be modified.
         } else {
           // `start` comes after the last value with the prefix, so there's no overlap.
-          return makeEmptyResult();
+          return kj::none;
         }
 
         // Calculate the first key that sorts after all keys with the given prefix.
@@ -380,7 +379,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
           KJ_IF_SOME(e, end) {
             if (e <= prefix) {
               // No keys could possibly match both the end and the prefix.
-              return makeEmptyResult();
+              return kj::none;
             } else if (e.startsWith(prefix)) {
               // `end` is within the prefix, so need not be modified.
             } else {
@@ -400,9 +399,22 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
   KJ_IF_SOME(e, end) {
     if (e <= start) {
       // Key range is empty.
-      return makeEmptyResult();
+      return kj::none;
     }
   }
+
+  return CompiledListOptions{
+    .start = kj::mv(start),
+    .end = kj::mv(end),
+    .reverse = reverse,
+    .limit = limit,
+  };
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
+    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+  auto [start, end, reverse, limit] = KJ_UNWRAP_OR(compileListOptions(maybeOptions),
+      { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); });
 
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
   ActorCacheOps::ReadOptions readOptions = options;
@@ -754,8 +766,43 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
   }
 }
 
+SqliteKv& DurableObjectStorage::getSqliteKv(jsg::Lock& js) {
+  KJ_IF_SOME(kv, cache->getSqliteKv()) {
+    // Actor is SQLite-backed but let's make sure SQL is configured to be enabled.
+    if (enableSql) {
+      return kv;
+    } else {
+      // We're presumably running local workerd, which always uses SQLite for DO storage, but we're
+      // trying to simulate a non-SQLite DO namespace for testing purposes.
+      JSG_FAIL_REQUIRE(Error,
+          "The storage.kv (synchronous KV) API is only available for SQLite-backed Durable "
+          "Objects, but this object's namespace is not declared to use SQLite. You can use "
+          "the older, asyncronous interface via methods of `storage` itself (e.g. "
+          "`storage.get()`). Alternatively, to enable SQLite, change `new_classes` to "
+          "`new_sqlite_classes` within the 'migrations' field in your wrangler.jsonc or "
+          "wrangler.toml file. If using workerd directly, set `enableSql = true` in your workerd "
+          "config for the class. Note that this change cannot be made after the class is "
+          "already deployed to production.");
+    }
+  } else {
+    // We're in production (not local workerd) and this DO namespace is not backed by SQLite.
+    JSG_FAIL_REQUIRE(Error,
+        "The storage.kv (synchronous KV) API is only available for SQLite-backed Durable "
+        "Objects, but this object's namespace is not declared to use SQLite. You can use "
+        "the older, asyncronous interface via methods of `storage` itself (e.g. "
+        "`storage.get()`). SQLite can be enabled on a new Durable Object class by using the "
+        "`new_sqlite_classes` instead of `new_classes` under `migrations` in your "
+        "wrangler.jsonc or wrangler.toml, but an already-deployed class cannot be converted "
+        "to SQLite (except by deleting the existing data).");
+  }
+}
+
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
   return js.alloc<SqlStorage>(JSG_THIS);
+}
+
+jsg::Ref<SyncKvStorage> DurableObjectStorage::getKv(jsg::Lock& js) {
+  return js.alloc<SyncKvStorage>(JSG_THIS);
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
