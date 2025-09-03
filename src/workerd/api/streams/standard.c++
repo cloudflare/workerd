@@ -2769,14 +2769,10 @@ class AllReader {
   }
 
   void copyInto(kj::ArrayPtr<byte> out, PartList in) {
-    size_t pos = 0;
-    auto dest = out.begin();
     for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size() - pos);
-      auto ptr = part.begin();
-      std::copy(ptr, ptr + part.size(), dest);
-      pos += part.size();
-      dest += part.size();
+      KJ_ASSERT(part.size() <= out.size());
+      out.first(part.size()).copyFrom(part);
+      out = out.slice(part.size());
     }
   }
 };
