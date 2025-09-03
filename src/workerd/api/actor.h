@@ -11,6 +11,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd {
@@ -333,6 +334,12 @@ class DurableObjectClass: public jsg::Object {
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()
   }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<DurableObjectClass> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::ACTOR_CLASS);
 
  private:
   kj::OneOf<uint, IoOwn<IoChannelFactory::ActorClassChannel>> channel;

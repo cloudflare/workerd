@@ -77,6 +77,11 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
+  kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props) override {
+    KJ_FAIL_ASSERT("no subrequests");
+  }
+
   capnp::Capability::Client getCapability(uint channel) override {
     KJ_FAIL_ASSERT("no capabilities");
   }
@@ -377,8 +382,9 @@ TestFixture::TestFixture(SetupParams&& params)
     };
     actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
         /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, makeStorage, kj::refcounted<MockActorLoopback>(), *timerChannel,
-        kj::refcounted<ActorObserver>(), kj::none, kj::none);
+        /*classname=*/kj::none, /*props=*/Frankenvalue(), makeStorage,
+        kj::refcounted<MockActorLoopback>(), *timerChannel, kj::refcounted<ActorObserver>(),
+        kj::none, kj::none);
   }
 }
 

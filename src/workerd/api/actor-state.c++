@@ -5,6 +5,7 @@
 #include "actor-state.h"
 
 #include "actor.h"
+#include "export-loopback.h"
 #include "sql.h"
 #include "util.h"
 
@@ -896,10 +897,23 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
         id = ioCtx.getActorOrThrow().cloneId();
       }
 
-      auto actorClass = options.$class->getChannel(ioCtx);
+      DurableObjectClass& actorClass = [&]() -> DurableObjectClass& {
+        KJ_SWITCH_ONEOF(options.$class) {
+          KJ_CASE_ONEOF(bare, jsg::Ref<DurableObjectClass>) {
+            return *bare.get();
+          }
+          KJ_CASE_ONEOF(loopback, jsg::Ref<LoopbackDurableObjectNamespace>) {
+            return loopback->getClass();
+          }
+          KJ_CASE_ONEOF(loopback, jsg::Ref<LoopbackColoLocalActorNamespace>) {
+            return loopback->getClass();
+          }
+        }
+        KJ_UNREACHABLE;
+      }();
 
       return Worker::Actor::FacetManager::StartInfo{
-        .actorClass = kj::mv(actorClass),
+        .actorClass = actorClass.getChannel(ioCtx),
         .id = kj::mv(id),
       };
     });
@@ -946,13 +960,15 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId(jsg::Lock&
 
 DurableObjectState::DurableObjectState(jsg::Lock& js,
     Worker::Actor::Id actorId,
-    jsg::JsRef<jsg::JsValue> exports,
+    jsg::JsValue exports,
+    jsg::JsValue props,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
     kj::Maybe<Worker::Actor::FacetManager&> facetManager)
     : id(kj::mv(actorId)),
-      exports(kj::mv(exports)),
+      exports(js, exports),
+      props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
         return js.alloc<Container>(kj::mv(cap), containerRunning);
