@@ -5180,9 +5180,9 @@ KJ_TEST("Server: structured logging with console methods") {
     KJ_ASSERT(logline.contains(R"("message":"logged")"), logline);
   });
 
-  // process.stderr should be info
+  // process.stderr should be debug
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
     KJ_ASSERT(logline.contains(R"("message":"stderr")"), logline);
   });
 
@@ -5195,7 +5195,7 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"debug")"), logline);
     KJ_ASSERT(logline.contains(R"("message":"after await")"), logline);
   });
 }
