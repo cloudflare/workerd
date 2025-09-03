@@ -1949,7 +1949,7 @@ void Worker::handleLog(jsg::Lock& js,
 
     // Log warnings and errors to stderr
     // Always log to stdout when structuredLogging is enabled.
-    auto useStderr = level == LogLevel::DEBUG_ || level >= LogLevel::WARN && !structuredLogging;
+    auto useStderr = level == LogLevel::DEBUG_ || (level >= LogLevel::WARN && !structuredLogging);
     auto fd = useStderr ? stderr : stdout;
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
     auto colors =
