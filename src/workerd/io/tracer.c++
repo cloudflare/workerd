@@ -419,6 +419,12 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // fixed size.
 }
 
+void WorkerTracer::recordTimestamp(kj::Date timestamp) {
+  if (completeTime == kj::UNIX_EPOCH) {
+    completeTime = timestamp;
+  }
+}
+
 void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
   // in setEventInfo() that are related to this check while probably also affect
@@ -434,6 +440,7 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 }
 
 void WorkerTracer::setUserRequestSpan(SpanParent&& span) {
+  KJ_ASSERT(span.isObserved(), "span argument must be observed");
   KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
   userRequestSpan = kj::mv(span);
 }

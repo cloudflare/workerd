@@ -128,17 +128,9 @@ class BaseTracer: public kj::Refcounted {
 
   // Report time as seen from the incoming Request when the request is complete, since it will not
   // be available afterwards.
-  void recordTimestamp(kj::Date timestamp) {
-    if (completeTime == kj::UNIX_EPOCH) {
-      completeTime = timestamp;
-    }
-  }
+  virtual void recordTimestamp(kj::Date timestamp) = 0;
 
   virtual SpanParent getUserRequestSpan() = 0;
-
-  // Time to be reported for the outcome event time. This will be set before the outcome is
-  // dispatched.
-  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
@@ -172,6 +164,8 @@ class WorkerTracer: public BaseTracer {
       tracing::EventInfo&& info) override;
   void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
+  virtual void recordTimestamp(kj::Date timestamp) override;
+
   SpanParent getUserRequestSpan() override;
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
@@ -198,5 +192,9 @@ class WorkerTracer: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 }  // namespace workerd
