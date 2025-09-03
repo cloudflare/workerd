@@ -65,7 +65,7 @@ class R2Bucket: public jsg::Object {
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String bindingName)
       : featureFlags(featureFlags),
         clientIndex(clientIndex),
-        adminBucket(kj::mv(bucket)),
+        bucket(kj::mv(bucket)),
         bindingName(kj::mv(bindingName)) {}
 
   explicit R2Bucket(
@@ -555,10 +555,15 @@ class R2Bucket: public jsg::Object {
     return adminBucket;
   }
 
+  kj::Maybe<kj::StringPtr> bucketName() const {
+    return bucket;
+  }
+
  private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;
+  kj::Maybe<kj::String> bucket;
   kj::Maybe<kj::String> bindingName;
   kj::Maybe<kj::String> jwt;
 
