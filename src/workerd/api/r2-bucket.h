@@ -62,11 +62,11 @@ class R2Bucket: public jsg::Object {
         adminBucket(kj::mv(bucket)) {}
 
   explicit R2Bucket(
-      FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String bindingName)
+      FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String binding)
       : featureFlags(featureFlags),
         clientIndex(clientIndex),
         bucket(kj::mv(bucket)),
-        bindingName(kj::mv(bindingName)) {}
+        binding(kj::mv(binding)) {}
 
   explicit R2Bucket(
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
@@ -559,12 +559,16 @@ class R2Bucket: public jsg::Object {
     return bucket;
   }
 
+  kj::Maybe<kj::StringPtr> bindingName() const {
+    return binding;
+  }
+
  private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;
   kj::Maybe<kj::String> bucket;
-  kj::Maybe<kj::String> bindingName;
+  kj::Maybe<kj::String> binding;
   kj::Maybe<kj::String> jwt;
 
   friend class R2Admin;
