@@ -34,9 +34,11 @@ class KvNamespace: public jsg::Object {
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace. It is also used to construct fetcher for JSRPC methods.
   // `additionalHeaders` is what gets appended to every outbound request.
-  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
+  explicit KvNamespace(
+      kj::String bindingName, kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
       : additionalHeaders(kj::mv(additionalHeaders)),
-        subrequestChannel(subrequestChannel) {}
+        subrequestChannel(subrequestChannel),
+        bindingName(kj::mv(bindingName)) {}
 
   struct GetOptions {
     jsg::Optional<kj::String> type;
@@ -270,6 +272,7 @@ class KvNamespace: public jsg::Object {
  private:
   kj::Array<AdditionalHeader> additionalHeaders;
   uint subrequestChannel;
+  kj::String bindingName;
 };
 
 #define EW_KV_ISOLATE_TYPES                                                                        \
