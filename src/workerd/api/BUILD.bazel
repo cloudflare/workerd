@@ -406,7 +406,10 @@ wd_test(
 wd_test(
     src = "analytics-engine-test.wd-test",
     args = ["--experimental"],
-    data = ["analytics-engine-test.js"],
+    data = [
+        "analytics-engine-test.js",
+        "analytics-engine-test-tail.js",
+    ],
 )
 
 wd_test(
