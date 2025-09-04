@@ -52,13 +52,14 @@ jsg::Promise<void> WritableStreamDefaultWriter::abort(
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::attach(WritableStreamController& controller,
+void WritableStreamDefaultWriter::attach(jsg::Lock& js,
+    WritableStreamController& controller,
     jsg::Promise<void> closedPromise,
     jsg::Promise<void> readyPromise) {
   KJ_ASSERT(state.is<Initial>());
   state = controller.addRef();
   this->closedPromise = kj::mv(closedPromise);
-  replaceReadyPromise(kj::mv(readyPromise));
+  replaceReadyPromise(js, kj::mv(readyPromise));
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::close(jsg::Lock& js) {
@@ -133,6 +134,10 @@ jsg::MemoizedIdentity<jsg::Promise<void>>& WritableStreamDefaultWriter::getReady
   return KJ_ASSERT_NONNULL(readyPromise, "the writer was never attached to a stream");
 }
 
+kj::Maybe<jsg::Promise<void>> WritableStreamDefaultWriter::isReady(jsg::Lock& js) {
+  return readyPromisePending.map([&](jsg::Promise<void>& p) { return p.whenResolved(js); });
+}
+
 void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& stream) {
   KJ_ASSERT(!stream.isLocked());
   KJ_ASSERT(stream.getController().lockWriter(js, *this));
@@ -166,8 +171,10 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
   KJ_UNREACHABLE;
 }
 
-void WritableStreamDefaultWriter::replaceReadyPromise(jsg::Promise<void> readyPromise) {
-  this->readyPromise = kj::mv(readyPromise);
+void WritableStreamDefaultWriter::replaceReadyPromise(
+    jsg::Lock& js, jsg::Promise<void> readyPromise) {
+  this->readyPromisePending = kj::mv(readyPromise);
+  this->readyPromise = KJ_ASSERT_NONNULL(this->readyPromisePending).whenResolved(js);
 }
 
 jsg::Promise<void> WritableStreamDefaultWriter::write(jsg::Lock& js, v8::Local<v8::Value> chunk) {
