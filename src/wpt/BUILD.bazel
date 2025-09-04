@@ -119,3 +119,9 @@ wpt_test(
     config = "fs-test.ts",
     wpt_directory = "@wpt//:fs@module",
 )
+
+wpt_test(
+    name = "performance-timeline",
+    config = "performance-timeline-test.ts",
+    wpt_directory = "@wpt//:performance-timeline@module",
+)
