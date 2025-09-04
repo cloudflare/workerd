@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 
 export class MyService extends WorkerEntrypoint {
   // Define a property to test behavior of property accessors.
@@ -21,6 +21,19 @@ export class MyService extends WorkerEntrypoint {
   }
 }
 
+export class MyActor extends DurableObject {
+  async functionProperty() {}
+
+  constructor(ctx, env) {
+    // As a regression test for EW-9282, check that logging in the constructor does not result in
+    // missing onset errors – for DOs, we need to report the onset even earlier.
+    super(ctx, env);
+    this.ctx.blockConcurrencyWhile(async () => {
+      console.log('baz');
+    });
+  }
+}
+
 export default {
   async test(controller, env, ctx) {
     let getByName = (name) => {
@@ -34,5 +47,9 @@ export default {
       name: 'TypeError',
       message: '"nonFunctionProperty" is not a function.',
     });
+
+    let id = env.MyActor.idFromName('foo');
+    let stub = env.MyActor.get(id);
+    await stub.functionProperty();
   },
 };
