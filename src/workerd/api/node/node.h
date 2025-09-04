@@ -67,6 +67,10 @@ constexpr bool isNodeHttp2Module(kj::StringPtr name) {
   return name == "node:http2"_kj;
 }
 
+constexpr bool isNodeConsoleModule(kj::StringPtr name) {
+  return name == "node:console"_kj;
+}
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -111,6 +115,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 
     if (isNodeHttp2Module(module.getName())) {
       return featureFlags.getEnableNodeJsHttp2Module();
+    }
+
+    if (isNodeConsoleModule(module.getName())) {
+      return featureFlags.getEnableNodeJsConsoleModule();
     }
 
     return true;
