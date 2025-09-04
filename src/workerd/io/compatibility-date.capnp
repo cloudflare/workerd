@@ -1061,4 +1061,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
   # Enables the Node.js non-functional stub vm module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsPerfHooksModule @122 :Bool
+     $compatEnableFlag("enable_nodejs_perf_hooks_module")
+     $compatDisableFlag("disable_nodejs_perf_hooks_module")
+     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
+   # Enables the Node.js perf_hooks module. It is required to use this flag with
+   # nodejs_compat (or nodejs_compat_v2).
+
+  enableGlobalPerformanceClasses @123 :Bool
+     $compatEnableFlag("enable_global_performance_classes")
+     $compatDisableFlag("disable_global_performance_classes")
+     $compatEnableDate("2025-09-21");
+   # Enables PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
+   # PerformanceObserver and PerformanceObserverEntryList global classes.
 }
