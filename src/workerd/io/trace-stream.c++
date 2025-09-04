@@ -871,8 +871,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
             [&](jsg::Lock& js, jsg::Value&& value) {
-          kj::Exception exception = KJ_EXCEPTION(FAILED, "Streaming tail session exception");
-          jsg::addExceptionDetail(js, exception, value.getHandle(js));
+          // Convert the JS exception to a KJ exception, preserving all details
+          kj::Exception exception = js.exceptionToKj(kj::mv(value));
+          // Mark this as a tail stream failure for proper classification
           exception.setDetail(TAIL_STREAM_JS_FAILURE, kj::heapArray<kj::byte>(0));
           doneFulfiller->reject(kj::mv(exception));
         });
