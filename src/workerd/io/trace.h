@@ -716,6 +716,7 @@ struct Onset final {
     kj::Maybe<kj::String> scriptId;
     kj::Maybe<kj::Array<kj::String>> scriptTags;
     kj::Maybe<kj::String> entrypoint;
+    kj::Maybe<kj::String> durableObjectId;
 
     WorkerInfo clone() const;
   };
