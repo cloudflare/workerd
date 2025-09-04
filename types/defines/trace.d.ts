@@ -100,6 +100,7 @@ interface Onset {
   readonly scriptName?: string;
   readonly scriptTags?: string[];
   readonly scriptVersion?: ScriptVersion;
+  readonly durableObjectId?: string;
   readonly trigger?: Trigger;
   readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
                  AlarmEventInfo | QueueEventInfo | EmailEventInfo |
