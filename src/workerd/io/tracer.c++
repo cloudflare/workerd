@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/tracer.h>
+#include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <capnp/message.h>  // for capnp::clone()
@@ -167,6 +168,10 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
+    // TODO(felix): Used for debug logging, remove after a few days.
+    if (topLevelInvocationSpanContext == kj::none) {
+      LOG_NOSENTRY(WARNING, "tried to send log before onset event", trace->entrypoint, isJsRpc);
+    }
     // If message is too big on its own, truncate it.
     writer->report(context,
         {(tracing::Log(timestamp, logLevel,
@@ -220,7 +225,8 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     // TODO(o11y): Provide correct nested spans
     // TODO(o11y): Propagate span context when context entropy is not available for RPC-based worker
     // invocations as indicated by isTrigger
-    auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span);
+    auto& topLevelContext =
+        KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span, trace->entrypoint, isJsRpc);
     tracing::InvocationSpanContext context = [&]() {
       if (topLevelContext.isTrigger()) {
         return topLevelContext.clone();
@@ -419,6 +425,12 @@ void WorkerTracer::setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Du
   // fixed size.
 }
 
+void WorkerTracer::recordTimestamp(kj::Date timestamp) {
+  if (completeTime == kj::UNIX_EPOCH) {
+    completeTime = timestamp;
+  }
+}
+
 void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
   // in setEventInfo() that are related to this check while probably also affect
@@ -434,6 +446,7 @@ void WorkerTracer::setFetchResponseInfo(tracing::FetchResponseInfo&& info) {
 }
 
 void WorkerTracer::setUserRequestSpan(SpanParent&& span) {
+  KJ_ASSERT(span.isObserved(), "span argument must be observed");
   KJ_ASSERT(!userRequestSpan.isObserved(), "setUserRequestSpan can only be called once");
   userRequestSpan = kj::mv(span);
 }
@@ -444,6 +457,10 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
 
 SpanParent WorkerTracer::getUserRequestSpan() {
   return userRequestSpan.addRef();
+}
+
+void BaseTracer::setIsJsRpc() {
+  isJsRpc = true;
 }
 
 }  // namespace workerd
