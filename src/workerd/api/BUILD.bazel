@@ -363,6 +363,24 @@ kj_test(
     deps = ["//src/workerd/tests:test-fixture"],
 )
 
+kj_test(
+    src = "streams/writable-sink-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
 wd_test(
     src = "actor-alarms-delete-test.wd-test",
     args = ["--experimental"],
