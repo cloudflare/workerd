@@ -857,11 +857,12 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
-    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
-        [&errorType, key = kj::mv(key), this](jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, key = kj::mv(key), this, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("createMultipartUpload", errorType);
 
-      // TODO(now): should this have response tags?
       capnp::MallocMessageBuilder responseMessage;
       capnp::JsonCodec json;
       json.handleByAnnotation<R2CreateMultipartUploadResponse>();
@@ -869,10 +870,9 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
 
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::String uploadId = kj::str(responseBuilder.getUploadId());
+      traceContext.userSpan.setTag("cloudflare.r2.response.upload_id"_kjc, kj::str(uploadId));
       return js.alloc<R2MultipartUpload>(kj::mv(key), kj::mv(uploadId), JSG_THIS);
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -942,16 +942,16 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
-    auto awaitIoResult =
-        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
-      if (r.objectNotFound()) {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      if (r2Result.objectNotFound()) {
         return;
       }
 
-      r.throwIfError("delete", errorType);
+      r2Result.throwIfError("delete", errorType);
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -1059,9 +1059,10 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     auto path = fillR2Path(components, adminBucket);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    auto awaitIoResult = context.awaitIo(js, kj::mv(promise),
-        [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType](
-            jsg::Lock& js, R2Result r2Result) {
+    return context.awaitIo(js, kj::mv(promise),
+        [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType,
+            traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("list", errorType);
 
       R2Bucket::ListResult result;
@@ -1084,11 +1085,19 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
           KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
-      // TODO(now): should this have response tags?
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.response.returned_objects"_kjc, int64_t(result.objects.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
+          int64_t(result.delimitedPrefixes.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      KJ_IF_SOME(_, result.cursor) {
+        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, true);
+      } else {
+        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, false);
+      }
+
       return kj::mv(result);
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 

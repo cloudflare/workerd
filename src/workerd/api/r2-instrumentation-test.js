@@ -135,6 +135,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'basicKey',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -144,6 +146,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -153,6 +156,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -162,6 +166,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -170,6 +175,11 @@ export const test = {
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'ListObjects',
         'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.returned_objects': 1n,
+        'cloudflare.r2.response.delimited_prefixes': 0n,
+        'cloudflare.r2.response.truncated': true,
+        'cloudflare.r2.response.cursor': true,
         closed: true,
       },
       {
@@ -179,6 +189,7 @@ export const test = {
         'cloudflare.r2.operation': 'DeleteObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.keys': 'basicKey',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -188,6 +199,7 @@ export const test = {
         'cloudflare.r2.operation': 'DeleteObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.keys': 'basicKey, basicKey2',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -379,6 +391,11 @@ export const test = {
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'ListObjects',
         'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.returned_objects': 1n,
+        'cloudflare.r2.response.delimited_prefixes': 0n,
+        'cloudflare.r2.response.truncated': false,
+        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {
@@ -388,6 +405,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'httpMetadata',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -397,6 +416,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -474,6 +494,11 @@ export const test = {
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'ListObjects',
         'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.returned_objects': 1n,
+        'cloudflare.r2.response.delimited_prefixes': 0n,
+        'cloudflare.r2.response.truncated': false,
+        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {
@@ -483,6 +508,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'httpMetadata',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -492,6 +519,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -548,6 +576,11 @@ export const test = {
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'ListObjects',
         'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.returned_objects': 1n,
+        'cloudflare.r2.response.delimited_prefixes': 0n,
+        'cloudflare.r2.response.truncated': false,
+        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {
@@ -557,6 +590,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'customMetadata',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -566,6 +601,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -623,6 +659,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'classDefault',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -632,6 +670,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -689,6 +728,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'classStandard',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -698,6 +739,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -755,6 +797,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'classInfrequentAccess',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -764,6 +808,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -821,6 +866,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'ssecMultipart',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -830,6 +877,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -839,6 +887,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -896,6 +945,8 @@ export const test = {
         'cloudflare.r2.operation': 'CreateMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'ssecMultipart',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.upload_id': 'multipartId',
         closed: true,
       },
       {
@@ -905,6 +956,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
       {
@@ -914,6 +966,7 @@ export const test = {
         'cloudflare.r2.operation': 'CompleteMultipartUpload',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.upload_id': 'multipartId',
+        'cloudflare.r2.response.success': true,
         closed: true,
       },
     ];
