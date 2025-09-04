@@ -16,6 +16,12 @@ wd_test(
 )
 
 wd_test(
+    src = "console-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["console-nodejs-test.js"],
+)
+
+wd_test(
     size = "enormous",
     src = "crypto_dh-test.wd-test",
     args = ["--experimental"],
