@@ -1180,6 +1180,14 @@ kj::Maybe<kj::String> getEntrypointFromReader(const rpc::Trace::Onset::Reader& r
   }
   return kj::none;
 }
+
+kj::Maybe<kj::String> getDurableObjectIdFromReader(const rpc::Trace::Onset::Reader& reader) {
+  if (reader.hasDurableObjectId()) {
+    return kj::str(reader.getDurableObjectId());
+  }
+  return kj::none;
+}
+
 tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Reader& reader) {
   return tracing::Onset::WorkerInfo{
     .executionModel = reader.getExecutionModel(),
@@ -1189,6 +1197,7 @@ tracing::Onset::WorkerInfo getWorkerInfoFromReader(const rpc::Trace::Onset::Read
     .scriptId = getScriptIdFromReader(reader),
     .scriptTags = getScriptTagsFromReader(reader),
     .entrypoint = getEntrypointFromReader(reader),
+    .durableObjectId = getDurableObjectIdFromReader(reader),
   };
 }
 }  // namespace
@@ -1232,6 +1241,9 @@ void tracing::Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
   KJ_IF_SOME(e, workerInfo.entrypoint) {
     builder.setEntryPoint(e);
   }
+  KJ_IF_SOME(doId, workerInfo.durableObjectId) {
+    builder.setDurableObjectId(doId);
+  }
   auto infoBuilder = builder.initInfo();
   writeOnsetInfo(info, infoBuilder);
 
@@ -1251,6 +1263,7 @@ tracing::Onset::WorkerInfo tracing::Onset::WorkerInfo::clone() const {
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
     .entrypoint = mapCopyString(entrypoint),
+    .durableObjectId = mapCopyString(durableObjectId),
   };
 }
 

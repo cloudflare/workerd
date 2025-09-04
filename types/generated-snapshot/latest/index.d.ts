@@ -9145,6 +9145,7 @@ declare namespace TailStream {
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
+    readonly durableObjectId?: string;
     readonly info:
       | FetchEventInfo
       | JsRpcEventInfo
