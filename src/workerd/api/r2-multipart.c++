@@ -36,9 +36,13 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
     auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
-    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("UploadPart"_kjc));
-    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
@@ -113,9 +117,13 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
     auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
-    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("CompleteMultipartUpload"_kjc));
-    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
@@ -176,9 +184,13 @@ jsg::Promise<void> R2MultipartUpload::abort(
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
     auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
 
-    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("AbortMultipartUpload"_kjc));
-    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));

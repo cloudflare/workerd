@@ -868,8 +868,9 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     }
 
     KJ_CASE_ONEOF(r2, Global::R2Bucket) {
-      value = lock.wrap(
-          context, lock.alloc<api::public_beta::R2Bucket>(featureFlags, r2.subrequestChannel));
+      value = lock.wrap(context,
+          lock.alloc<api::public_beta::R2Bucket>(
+              featureFlags, r2.subrequestChannel, kj::str(r2.bucket), kj::str(r2.bindingName)));
     }
 
     KJ_CASE_ONEOF(r2a, Global::R2Admin) {

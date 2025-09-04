@@ -3596,7 +3596,9 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     case config::Worker::Binding::R2_BUCKET: {
       uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Bucket(), kj::mv(errorContext)});
-      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel});
+      return makeGlobal(Global::R2Bucket{.subrequestChannel = channel,
+        .bucket = kj::str(binding.getR2Bucket().getName()),
+        .bindingName = kj::str(binding.getName())});
     }
 
     case config::Worker::Binding::R2_ADMIN: {
