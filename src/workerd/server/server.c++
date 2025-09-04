@@ -1949,7 +1949,7 @@ class Server::WorkerService final: public Service,
         //         "entrypoint will fail at runtime, but historically this was not a startup-time "
         //         "error. Future versions of workerd may make this a startup-time error."));
 
-        const kj::HashSet<kj::String> EMPTY_HANDLERS;
+        static const kj::HashSet<kj::String> EMPTY_HANDLERS;
         name = className;  // replace with more-permanent string
         handlers = &EMPTY_HANDLERS;
       } else {
