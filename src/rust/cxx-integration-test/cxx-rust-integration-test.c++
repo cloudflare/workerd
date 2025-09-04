@@ -33,7 +33,7 @@ KJ_TEST("err Result") {
   try {
     rust::test::result_error();
     KJ_FAIL_REQUIRE("exception is expected");
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     // this is expected
     KJ_EXPECT(e.getDescription() == "test error"_kj);
   }
@@ -167,7 +167,7 @@ KJ_TEST("opaque rust type") {
   KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
 
   s->set_name("another_name");
-  KJ_EXPECT("another_name"_kj == kj::StringPtr((std::string)s->get_name()));
+  KJ_EXPECT("another_name"_kjc == kj::arrayPtr(s->get_name().data(), s->get_name().size()));
 }
 
 KJ_TEST("rust::String test") {

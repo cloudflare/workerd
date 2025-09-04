@@ -11,6 +11,14 @@ export class MyService extends WorkerEntrypoint {
     console.log('foo');
     return { foo: 123 };
   }
+
+  constructor(ctx, env) {
+    // As a regression test for EW-9282, check that logging in the constructor does not result in
+    // missing onset errors. This requires setting the onset event early on, before getting a
+    // handler to the entrypoint.
+    console.log('bar');
+    super(ctx, env);
+  }
 }
 
 export default {

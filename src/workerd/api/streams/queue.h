@@ -7,9 +7,8 @@
 #include "common.h"
 
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/checked-queue.h>
-#include <workerd/util/weak-refs.h>
 
+#include <list>
 #include <set>
 
 namespace workerd::api {
@@ -356,7 +355,9 @@ class ConsumerImpl final {
       KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
-        ready.readRequests.drainTo([&](auto&& request) { request->resolveAsDone(js); });
+        for (auto& request: ready.readRequests) {
+          request.resolveAsDone(js);
+        }
         state.template init<Closed>();
       }
     }
@@ -367,7 +368,7 @@ class ConsumerImpl final {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // If we are not already closing, enqueue a Close sentinel.
       if (!isClosing()) {
-        ready.buffer.push(Close{});
+        ready.buffer.push_back(Close{});
       }
 
       // Then check to see if we need to drain pending reads and
@@ -402,13 +403,13 @@ class ConsumerImpl final {
     Self::handlePush(js, ready, queue, kj::mv(entry));
   }
 
-  void read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+  void read(jsg::Lock& js, ReadRequest request) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(c, Closed) {
-        return request->resolveAsDone(js);
+        return request.resolveAsDone(js);
       }
       KJ_CASE_ONEOF(e, Errored) {
-        return request->reject(js, e);
+        return request.reject(js, e);
       }
       KJ_CASE_ONEOF(ready, Ready) {
         Self::handleRead(js, ready, *this, queue, kj::mv(request));
@@ -445,17 +446,17 @@ class ConsumerImpl final {
   void resolveRead(jsg::Lock& js, ReadRequest& req) {
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
     KJ_REQUIRE(!ready.readRequests.empty());
-    KJ_REQUIRE(&req == KJ_ASSERT_NONNULL(ready.readRequests.peek()).get());
+    KJ_REQUIRE(&req == &ready.readRequests.front());
     req.resolve(js);
-    auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(ready.readRequests.pop());
+    ready.readRequests.pop_front();
   }
 
   void resolveReadAsDone(jsg::Lock& js, ReadRequest& req) {
     auto& ready = KJ_REQUIRE_NONNULL(state.template tryGet<Ready>());
     KJ_REQUIRE(!ready.readRequests.empty());
-    KJ_REQUIRE(&req == KJ_ASSERT_NONNULL(ready.readRequests.peek()).get());
+    KJ_REQUIRE(&req == &ready.readRequests.front());
     req.resolveAsDone(js);
-    auto dropped KJ_UNUSED = KJ_ASSERT_NONNULL(ready.readRequests.pop());
+    ready.readRequests.pop_front();
   }
 
   void cloneTo(jsg::Lock& js, ConsumerImpl& other) {
@@ -471,18 +472,16 @@ class ConsumerImpl final {
         auto& otherReady = KJ_REQUIRE_NONNULL(other.state.template tryGet<Ready>(),
             "The new consumer should not be closed or errored.");
         otherReady.queueTotalSize = ready.queueTotalSize;
-        ready.buffer.forEach([&](auto& item) {
+        for (auto& item: ready.buffer) {
           KJ_SWITCH_ONEOF(item) {
             KJ_CASE_ONEOF(c, Close) {
-              otherReady.buffer.push(Close{});
+              otherReady.buffer.push_back(Close{});
             }
             KJ_CASE_ONEOF(entry, QueueEntry) {
-              // Evil const_cast required for clone(...) below.
-              auto& q = const_cast<QueueEntry&>(entry);
-              otherReady.buffer.push(q.clone(js));
+              otherReady.buffer.push_back(entry.clone(js));
             }
           }
-        });
+        }
       }
     }
   }
@@ -507,7 +506,10 @@ class ConsumerImpl final {
       KJ_CASE_ONEOF(closed, Closed) {}
       KJ_CASE_ONEOF(errored, Errored) {}
       KJ_CASE_ONEOF(ready, Ready) {
-        ready.readRequests.drainTo([&](auto&& request) { request->resolver.reject(js, reason); });
+        for (auto& request: ready.readRequests) {
+          request.resolver.reject(js, reason);
+        }
+        ready.readRequests.clear();
       }
     }
   }
@@ -542,8 +544,10 @@ class ConsumerImpl final {
   struct Closed {};
   using Errored = jsg::Value;
   struct Ready {
-    workerd::util::Queue<kj::OneOf<QueueEntry, Close>> buffer;
-    workerd::util::Queue<kj::Own<ReadRequest>> readRequests;
+    // We use std::list to keep memory overhead low when there are many streams with no or few
+    // pending entries/reads.
+    std::list<kj::OneOf<QueueEntry, Close>> buffer;
+    std::list<ReadRequest> readRequests;
     size_t queueTotalSize = 0;
 
     inline kj::StringPtr jsgGetMemoryName() const;
@@ -569,7 +573,7 @@ class ConsumerImpl final {
         if (r.buffer.empty()) {
           return false;
         }
-        return KJ_ASSERT_NONNULL(r.buffer.peekBack()).template is<Close>();
+        return r.buffer.back().template is<Close>();
       }
     }
     KJ_UNREACHABLE;
@@ -583,7 +587,9 @@ class ConsumerImpl final {
         // If maybeReason != nullptr, then we are draining because of an error.
         // In that case, we want to reset/clear the buffer and reject any remaining
         // pending read requests using the given reason.
-        ready.readRequests.drainTo([&](auto&& request) { request->reject(js, reason); });
+        for (auto& request: ready.readRequests) {
+          request.reject(js, reason);
+        }
         state = reason.addRef(js);
         KJ_IF_SOME(listener, stateListener) {
           listener.onConsumerError(js, kj::mv(reason));
@@ -605,7 +611,9 @@ class ConsumerImpl final {
 
           KJ_ASSERT(empty());
           KJ_REQUIRE(ready.buffer.size() == 1);  // The close should be the only item remaining.
-          ready.readRequests.drainTo([&](auto&& request) { request->resolveAsDone(js); });
+          for (auto& request: ready.readRequests) {
+            request.resolveAsDone(js);
+          }
           state.template init<Closed>();
           KJ_IF_SOME(listener, stateListener) {
             listener.onConsumerClose(js);
@@ -696,7 +704,7 @@ class ValueQueue final {
 
     void error(jsg::Lock& js, jsg::Value reason);
 
-    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
+    void read(jsg::Lock& js, ReadRequest request);
 
     void push(jsg::Lock& js, kj::Own<Entry> entry);
 
@@ -757,7 +765,7 @@ class ValueQueue final {
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
       QueueImpl& queue,
-      kj::Own<ReadRequest> request);
+      ReadRequest request);
   static bool handleMaybeClose(
       jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, QueueImpl& queue);
 
@@ -776,8 +784,11 @@ class ByteQueue final {
 
   struct ReadRequest final {
     enum class Type { DEFAULT, BYOB };
-    kj::Own<WeakRef<ReadRequest>> selfRef;
     jsg::Promise<ReadResult>::Resolver resolver;
+    // The reference here should be cleared when the ByobRequest is invalidated,
+    // which happens either when respond(), respondWithNewView(), or invalidate()
+    // is called, or when the ByobRequest is destroyed, whichever comes first.
+    kj::Maybe<ByobRequest&> byobReadRequest;
 
     struct PullInto {
       jsg::BufferSource store;
@@ -791,7 +802,8 @@ class ByteQueue final {
     } pullInto;
 
     ReadRequest(jsg::Promise<ReadResult>::Resolver resolver, PullInto pullInto);
-    KJ_DISALLOW_COPY_AND_MOVE(ReadRequest);
+    ReadRequest(ReadRequest&&) = default;
+    ReadRequest& operator=(ReadRequest&&) = default;
     ~ReadRequest() noexcept(false);
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
@@ -809,23 +821,33 @@ class ByteQueue final {
   // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
   //
   // When isInvalidated() is false, respond() or respondWithNewView() can be called to fulfill
-  // the BYOB read request. Once either of those are called the ByobRequest is no longer usable
-  // and should be discarded.
+  // the BYOB read request. Once either of those are called, or once invalidate() is called,
+  // the ByobRequest is no longer usable and should be discarded.
   class ByobRequest final {
    public:
-    ByobRequest(kj::Own<WeakRef<ReadRequest>> request, ConsumerImpl& consumer, QueueImpl& queue)
-        : request(kj::mv(request)),
+    ByobRequest(ReadRequest& request, ConsumerImpl& consumer, QueueImpl& queue)
+        : request(request),
           consumer(consumer),
           queue(queue) {}
 
     KJ_DISALLOW_COPY_AND_MOVE(ByobRequest);
 
+    ~ByobRequest() noexcept(false);
+
+    inline ReadRequest& getRequest() {
+      return KJ_ASSERT_NONNULL(request);
+    }
+
     bool respond(jsg::Lock& js, size_t amount);
 
     bool respondWithNewView(jsg::Lock& js, jsg::BufferSource view);
 
+    // Disconnects this ByobRequest instance from the associated ByteQueue::ReadRequest.
+    // The term "invalidate" is adopted from the streams spec for handling BYOB requests.
+    void invalidate();
+
     inline bool isInvalidated() const {
-      return !request->isValid();
+      return request == kj::none;
     }
 
     bool isPartiallyFulfilled();
@@ -836,22 +858,21 @@ class ByteQueue final {
 
     JSG_MEMORY_INFO(ByteQueue::ByobRequest) {}
 
-    inline ReadRequest& getRequest() {
-      return KJ_ASSERT_NONNULL(request->tryGet(), "The ByobRequest has been invalidated.");
-    }
-
    private:
-    kj::Own<WeakRef<ReadRequest>> request;
+    kj::Maybe<ReadRequest&> request;
     ConsumerImpl& consumer;
     QueueImpl& queue;
   };
 
   struct State {
-    workerd::util::Queue<kj::Own<ByobRequest>> pendingByobReadRequests;
+    // We use std::list to keep memory overhead low when there are many streams with no or few
+    // pending reads.
+    std::list<kj::Own<ByobRequest>> pendingByobReadRequests;
 
     JSG_MEMORY_INFO(ByteQueue::State) {
-      pendingByobReadRequests.forEach(
-          [&](auto& request) { tracker.trackField("pendingByobReadRequest", request); });
+      for (auto& request: pendingByobReadRequests) {
+        tracker.trackField("pendingByobReadRequest", request);
+      }
     }
   };
 
@@ -905,7 +926,7 @@ class ByteQueue final {
 
     void error(jsg::Lock& js, jsg::Value reason);
 
-    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
+    void read(jsg::Lock& js, ReadRequest request);
 
     void push(jsg::Lock& js, kj::Own<Entry> entry);
 
@@ -973,7 +994,7 @@ class ByteQueue final {
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
       QueueImpl& queue,
-      kj::Own<ReadRequest> request);
+      ReadRequest request);
   static bool handleMaybeClose(
       jsg::Lock& js, ConsumerImpl::Ready& state, ConsumerImpl& consumer, QueueImpl& queue);
 
@@ -1037,7 +1058,7 @@ size_t ConsumerImpl<Self>::Ready::jsgGetMemorySelfSize() const {
 
 template <typename Self>
 void ConsumerImpl<Self>::Ready::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  buffer.forEach([&](auto& entry) {
+  for (auto& entry: buffer) {
     KJ_SWITCH_ONEOF(entry) {
       KJ_CASE_ONEOF(c, Close) {
         tracker.trackFieldWithSize("pendingClose", sizeof(Close));
@@ -1046,9 +1067,11 @@ void ConsumerImpl<Self>::Ready::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) co
         tracker.trackField("entry", e);
       }
     }
-  });
+  }
 
-  readRequests.forEach([&](auto& request) { tracker.trackField("pendingRead", request); });
+  for (auto& request: readRequests) {
+    tracker.trackField("pendingRead", request);
+  }
 }
 
 kj::StringPtr ValueQueue::Consumer::jsgGetMemoryName() const {

@@ -137,7 +137,7 @@ jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
       "FixedLengthStream requires an integer expected length less than 2^53.");
 
   auto& ioContext = IoContext::current();
-  auto pipe = newIdentityPipe(uint64_t(expectedLength));
+  auto pipe = newIdentityPipe(expectedLength);
 
   kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
   // For a FixedLengthStream we do not want a highWaterMark higher than the expectedLength.

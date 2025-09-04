@@ -142,6 +142,7 @@ struct Trace @0x8e8d911203762d34 {
   scriptTags @14 :List(Text);
 
   entrypoint @22 :Text;
+  durableObjectId @27 :Text;
 
   diagnosticChannelEvents @17 :List(DiagnosticChannelEvent);
   struct DiagnosticChannelEvent {
@@ -376,6 +377,23 @@ enum SerializationTag {
   # A JavaScript native error, such as Error, TypeError, etc. These are typically
   # not handled as host objects in V8 but we handle them as such in workers in
   # order to preserve additional information that we may attach to them.
+
+  serviceStub @11;
+  # A ServiceStub aka Fetcher aka Service Binding.
+  #
+  # Such stubs are different from jsRpcStub in that they don't point to a single live object, but
+  # instead represent a service that can be instantiated anywhere. This means that they can be
+  # passed around the world and instantiated in a different location, as well as persisted in
+  # long-term storage.
+  #
+  # Also because of all this, service stubs can be embedded in the `env` and `ctx.props` of other
+  # Workers. Regular RPC stubs cannot.
+
+  actorClass @12;
+  # An actor class reference, aka DurableObjectClass. Can be used to instantiate a facet.
+  #
+  # Similar to serviceStub, this refers to the entrypoint of a Worker that can be instantiated
+  # anywhere and any time, and thus can be persisted and used in `env` and `ctx.props`, etc.
 }
 
 enum StreamEncoding {

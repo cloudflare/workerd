@@ -20,12 +20,15 @@
 
 namespace workerd::api {
 class SqlStorage;
+class SyncKvStorage;
 
 // Forward-declared to avoid dependency cycle (actor.h -> http.h -> basics.h -> actor-state.h)
 class DurableObject;
 class DurableObjectId;
 class WebSocket;
 class DurableObjectClass;
+class LoopbackDurableObjectNamespace;
+class LoopbackColoLocalActorNamespace;
 
 kj::Array<kj::byte> serializeV8Value(jsg::Lock& js, const jsg::JsValue& value);
 
@@ -79,6 +82,22 @@ class DurableObjectStorageOperations {
     JSG_STRUCT(start, startAfter, end, prefix, reverse, limit, allowConcurrency, noCache);
     JSG_STRUCT_TS_OVERRIDE(DurableObjectListOptions);  // Rename from DurableObjectStorageOperationsListOptions
   };
+
+  // A more convenient form of `ListOptions` for actually implementing the operation -- but less
+  // convenient for specifying it.
+  struct CompiledListOptions {
+    kj::String start;
+    kj::Maybe<kj::String> end;
+    bool reverse;
+    kj::Maybe<uint> limit;
+  };
+
+  // Compile `ListOptions` into `CompiledListOptions`. Returns null if the list operation would
+  // provably return no results (e.g. the end key is before the start key). This may (or may not)
+  // move some of the strings from the input to the output.
+  //
+  // This is public so that SyncKvStorage can reuse it.
+  static kj::Maybe<CompiledListOptions> compileListOptions(kj::Maybe<ListOptions>& maybeOptions);
 
   jsg::Promise<jsg::JsRef<jsg::JsValue>> list(jsg::Lock& js, jsg::Optional<ListOptions> options);
 
@@ -198,6 +217,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
   // Throws if not SQLite-backed.
   SqliteDatabase& getSqliteDb(jsg::Lock& js);
+  SqliteKv& getSqliteKv(jsg::Lock& js);
 
   struct TransactionOptions {
     jsg::Optional<kj::Date> asOfTime;
@@ -221,6 +241,8 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   jsg::Promise<void> sync(jsg::Lock& js);
 
   jsg::Ref<SqlStorage> getSql(jsg::Lock& js);
+
+  jsg::Ref<SyncKvStorage> getKv(jsg::Lock& js);
 
   // Get a bookmark for the current state of the database. Note that since this is async, the
   // bookmark will include any writes in the current atomic batch, including writes that are
@@ -277,6 +299,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
     JSG_METHOD(sync);
 
     JSG_LAZY_INSTANCE_PROPERTY(sql, getSql);
+    JSG_LAZY_INSTANCE_PROPERTY(kv, getKv);
     JSG_METHOD(transactionSync);
 
     JSG_METHOD(getCurrentBookmark);
@@ -392,8 +415,20 @@ class DurableObjectFacets: public jsg::Object {
   DurableObjectFacets(kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager)
       : facetManager(kj::mv(facetManager)) {}
 
+  // Describes how to run a facet. The app provides this when first accessing a facet that isn't
+  // already running.
   struct StartupOptions {
-    jsg::Ref<DurableObjectClass> $class;
+    // The actor class to use to implement the facet.
+    //
+    // Note that the $ is needed only because `class` is a keyword in C++. JSG removes the $ from
+    // the name in the JS API. C++ does not officially recognize the existence of a $ symbol but
+    // all major compilers support using it as if it were a letter.
+    kj::OneOf<jsg::Ref<DurableObjectClass>,
+        jsg::Ref<LoopbackDurableObjectNamespace>,
+        jsg::Ref<LoopbackColoLocalActorNamespace>>
+        $class;
+
+    // Value to expose as `ctx.id` in the facet.
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
@@ -513,7 +548,8 @@ class DurableObjectState: public jsg::Object {
  public:
   DurableObjectState(jsg::Lock& js,
       Worker::Actor::Id actorId,
-      jsg::JsRef<jsg::JsValue> exports,
+      jsg::JsValue exports,
+      jsg::JsValue props,
       kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
       kj::Maybe<rpc::Container::Client> container,
       bool containerRunning,
@@ -523,6 +559,10 @@ class DurableObjectState: public jsg::Object {
 
   jsg::JsValue getExports(jsg::Lock& js) {
     return exports.getHandle(js);
+  }
+
+  jsg::JsValue getProps(jsg::Lock& js) {
+    return props.getHandle(js);
   }
 
   kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> getId(jsg::Lock& js);
@@ -606,6 +646,7 @@ class DurableObjectState: public jsg::Object {
       // this works in production.
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
+    JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
@@ -651,6 +692,7 @@ class DurableObjectState: public jsg::Object {
  private:
   Worker::Actor::Id id;
   jsg::JsRef<jsg::JsValue> exports;
+  jsg::JsRef<jsg::JsValue> props;
   kj::Maybe<jsg::Ref<DurableObjectStorage>> storage;
   kj::Maybe<jsg::Ref<Container>> container;
   kj::Maybe<IoPtr<Worker::Actor::FacetManager>> facetManager;

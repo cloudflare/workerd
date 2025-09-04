@@ -45,7 +45,7 @@ rust_library(
     ],
     version = "2.0.0",
     deps = [
-        "@crates_vendor__potential_utf-0.1.2//:potential_utf",
+        "@crates_vendor__potential_utf-0.1.3//:potential_utf",
         "@crates_vendor__yoke-0.8.0//:yoke",
         "@crates_vendor__zerofrom-0.1.6//:zerofrom",
         "@crates_vendor__zerovec-0.11.4//:zerovec",

@@ -235,7 +235,6 @@ void addExceptionToTrace(jsg::Lock& js,
     }
   }
 
-  // TODO(someday): Limit size of exception content?
   tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(name),
       kj::mv(message), kj::mv(stack));
 }
@@ -3307,6 +3306,7 @@ void Worker::Isolate::logMessage(jsg::Lock& js, uint16_t type, kj::StringPtr des
 
 struct Worker::Actor::Impl {
   Actor::Id actorId;
+  Frankenvalue props;
   MakeStorageFunc makeStorage;
 
   kj::Own<ActorObserver> metrics;
@@ -3474,6 +3474,7 @@ struct Worker::Actor::Impl {
       Actor::Id actorId,
       bool hasTransient,
       MakeActorCacheFunc makeActorCache,
+      Frankenvalue props,
       MakeStorageFunc makeStorage,
       kj::Own<Loopback> loopback,
       TimerChannel& timerChannel,
@@ -3484,6 +3485,7 @@ struct Worker::Actor::Impl {
       kj::Maybe<FacetManager&> facetManager,
       kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>())
       : actorId(kj::mv(actorId)),
+        props(kj::mv(props)),
         makeStorage(kj::mv(makeStorage)),
         metrics(kj::mv(metricsParam)),
         transient(hasTransient),
@@ -3533,6 +3535,7 @@ Worker::Actor::Actor(const Worker& worker,
     bool hasTransient,
     MakeActorCacheFunc makeActorCache,
     kj::Maybe<kj::StringPtr> className,
+    Frankenvalue props,
     MakeStorageFunc makeStorage,
     kj::Own<Loopback> loopback,
     TimerChannel& timerChannel,
@@ -3543,7 +3546,7 @@ Worker::Actor::Actor(const Worker& worker,
     kj::Maybe<FacetManager&> facetManager)
     : worker(kj::atomicAddRef(worker)),
       tracker(tracker.map([](RequestTracker& tracker) { return tracker.addRef(); })) {
-  impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache),
+  impl = kj::heap<Impl>(*this, kj::mv(actorId), hasTransient, kj::mv(makeActorCache), kj::mv(props),
       kj::mv(makeStorage), kj::mv(loopback), timerChannel, kj::mv(metrics), kj::mv(manager),
       hibernationEventType, kj::mv(container), facetManager);
 
@@ -3603,9 +3606,9 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       }
 
       auto ctx = js.alloc<api::DurableObjectState>(js, cloneId(),
-          jsg::JsRef<jsg::JsValue>(
-              js, KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).addRef(js)),
-          kj::mv(storage), kj::mv(impl->container), containerRunning, impl->facetManager);
+          jsg::JsValue(KJ_ASSERT_NONNULL(lock.getWorker().impl->ctxExports).getHandle(js)),
+          impl->props.toJs(js), kj::mv(storage), kj::mv(impl->container), containerRunning,
+          impl->facetManager);
 
       auto handler =
           info.cls(lock, ctx.addRef(), KJ_ASSERT_NONNULL(lock.getWorker().impl->env).addRef(js));

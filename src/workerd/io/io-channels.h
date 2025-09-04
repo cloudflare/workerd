@@ -145,14 +145,32 @@ class IoChannelFactory {
   // Object representing somehere where generic workers subrequests can be sent. Multiple requests
   // may be sent. This is an I/O type so it is only valid within the `IoContext` where it was
   // created.
-  class SubrequestChannel: public kj::Refcounted {
+  class SubrequestChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
     // Start a new request to this target.
     //
     // Note that not all `metadata` properties make sense here, but it didn't seem worth defining
     // a new struct type. `cfBlobJson` and `parentSpan` make sense, but `featureFlagsForFl` and
     // `dynamicDispatchTarget` do not.
+    //
+    // Note that the caller is expected to keep the SubrequestChannel alive until it is done with
+    // the returned WorkerInterface.
     virtual kj::Own<WorkerInterface> startRequest(SubrequestMetadata metadata) = 0;
+
+    kj::Own<CapTableEntry> clone() override final {
+      return kj::addRef(*this);
+    }
+
+    // Throws a JSG error if a Fetcher backed by this channel should not be serialized and passed
+    // to other workers. The default implementation throws a generic error, but subclasses may
+    // specialize with better errror messages -- or override to just return in order to permit the
+    // serialization.
+    //
+    // This check is necessary especially in workerd in order to block serialization of types that,
+    // in production, would be difficult or impossible to serialize. In particular,
+    // dynamically-loaded workers cannot be serialized because the system does not know how to
+    // reconstruct a dynamically-loaded worker from scratch.
+    virtual void requireAllowsTransfer() = 0;
   };
 
   // Obtain an object representing a particular subrequest channel.
@@ -161,11 +179,12 @@ class IoChannelFactory {
   // The reason to use this instead is when the channel is not necessarily going to be used to
   // start a subrequest immediately, but instead is going to be passed around as a capability.
   //
+  // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw.
+  //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannel(uint channel) {
-    // TODO(cleanup): Remove this once the production runtime has implemented this.
-    KJ_UNIMPLEMENTED("This runtime doesn't support getSubrequestChannel().");
-  }
+  virtual kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props = kj::none) = 0;
 
   // Stub for a remote actor. Allows sending requests to the actor.
   class ActorChannel: public SubrequestChannel {
@@ -173,6 +192,9 @@ class IoChannelFactory {
     // At present there are no methods beyond what `SubrequestChannel` defines. However, it's
     // easy to imagine that actor stubs may have more functionality than just sending requests
     // someday, so we keep this as a separate type.
+
+    // For now, actor stubs are not transferrable -- but we do intend to change that at some point.
+    void requireAllowsTransfer() override final;
   };
 
   // Get an actor stub from the given namespace for the actor with the given ID.
@@ -195,13 +217,25 @@ class IoChannelFactory {
   // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
   // token which can be passed into other interfaces that might use the actor class, particularly
   // Worker::Actor::FacetManager.
-  class ActorClassChannel: public kj::Refcounted {
+  class ActorClassChannel: public kj::Refcounted, public Frankenvalue::CapTableEntry {
    public:
-    // This class has no actual methods!
+    kj::Own<CapTableEntry> clone() override final {
+      return kj::addRef(*this);
+    }
+
+    // Same as SubrequestChannel::requireAllowsTransfer().
+    virtual void requireAllowsTransfer() = 0;
+
+    // This class has no functional methods, since it serves as a token to be passed to other
+    // interfaces (namely the facets API).
   };
 
   // Get an actor class binding corresponding to the given channel number.
-  virtual kj::Own<ActorClassChannel> getActorClass(uint channel) {
+  //
+  // `props` can only be specified if this is a loopback channel (i.e. from ctx.exports). For any
+  // other channel, it will throw.
+  virtual kj::Own<ActorClassChannel> getActorClass(
+      uint channel, kj::Maybe<Frankenvalue> props = kj::none) {
     // TODO(cleanup): Remove this once the production runtime has implemented this.
     KJ_UNIMPLEMENTED("This runtime doesn't support actor class channels.");
   }
@@ -258,6 +292,31 @@ struct DynamicWorkerSource {
   //  this is false, then it is perfectly safe to transfer ownership of ownContent between threads
   //  and keep it alive indefinitely long.
   bool ownContentIsRpcResponse = true;
+};
+
+// A Frankenvalue::CapTableEntry which directly references a numbered I/O channel. This is ONLY
+// valid to use when the `Frankenvalue` is being deserialized as the `env` object of an isolate.
+// The caller should use frankenvalue.rewriteCaps() to rewrite the cap table entries into
+// IoChannelCapTableEntry, building the I/O channel table as it goes.
+class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
+ public:
+  enum Type {
+    SUBREQUEST,
+    ACTOR_CLASS,
+    // TODO(someday): Other channel types, maybe.
+  };
+
+  IoChannelCapTableEntry(Type type, uint channel): type(type), channel(channel) {}
+
+  // Throws if type doesn't match.
+  uint getChannelNumber(Type expectedType);
+
+  kj::Own<CapTableEntry> clone() override;
+  kj::Own<CapTableEntry> threadSafeClone() const override;
+
+ private:
+  Type type;
+  uint channel;
 };
 
 }  // namespace workerd

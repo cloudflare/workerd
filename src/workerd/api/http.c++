@@ -2475,6 +2475,41 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
   return result;
 }
 
+void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "ServiceStub cannot be serialized in this context.");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "ServiceStub cannot be serialized in this context.");
+
+  auto channel = getSubrequestChannel(IoContext::current());
+  channel->requireAllowsTransfer();
+  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+}
+
+jsg::Ref<Fetcher> Fetcher::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got ServiceStub in unexpected context?");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
+  KJ_REQUIRE(externalHandler != nullptr, "got ServiceStub in unexpected context?");
+
+  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
+      "serialized ServiceStub had invalid cap table index");
+
+  if (auto channel = dynamic_cast<IoChannelFactory::SubrequestChannel*>(&cap)) {
+    return js.alloc<Fetcher>(
+        IoContext::current().addObject(kj::addRef(*channel)),
+        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
+    return js.alloc<Fetcher>(
+        channel->getChannelNumber(IoChannelCapTableEntry::Type::SUBREQUEST),
+        RequiresHostAndProtocol::YES, /*isInHouse=*/false);
+  } else {
+    KJ_FAIL_REQUIRE("ServiceStub capability in Frankenvalue is not a SubrequestChannel?");
+  }
+}
+
 static jsg::Promise<void> throwOnError(
     jsg::Lock& js, kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
   return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {
@@ -2677,6 +2712,20 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      auto userSpan = ioContext.makeUserTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto traceSpan = ioContext.makeTraceSpan(kj::ConstString(kj::str(operationName)));
+      auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
+      auto client = ioContext.getSubrequest(
+          [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+      }, {
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .operationName = kj::mv(operationName),
+      });
+      return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
+    }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       // For outgoing factories, no trace context needed
       auto client = outgoingFactory->newSingleUseClient(kj::mv(cfStr));
@@ -2695,6 +2744,9 @@ kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoCon
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       return ioContext.getIoChannelFactory().getSubrequestChannel(channel);
+    }
+    KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+      return kj::addRef(*channel);
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       return outgoingFactory->getSubrequestChannel();

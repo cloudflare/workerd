@@ -122,7 +122,7 @@ jobs:
         uses: ./.github/actions/setup-runner
       - name: build types
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types
+          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
       - name: Check snapshot diff
         run: |
           diff -r types/generated-snapshot/latest bazel-bin/types/definitions/latest > types.diff

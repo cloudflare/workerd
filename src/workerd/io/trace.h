@@ -823,7 +823,8 @@ class Trace final: public kj::Refcounted {
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel);
+      ExecutionModel executionModel,
+      kj::Maybe<kj::String> durableObjectId = kj::none);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -845,6 +846,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::String> entrypoint;
+  kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
   kj::Vector<CompleteSpan> spans;
@@ -1109,8 +1111,8 @@ inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date
 
 // Interface to track trace context including both Jaeger and User spans.
 // TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking user spans will not needed in all places where we have the
-// existing spans, so synergies will likely be limited.
+// to both,... We expect that tracking user spans will not be needed in all places where we have the
+// existing spans, so synergies will be limited.
 struct TraceContext {
   TraceContext(SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),

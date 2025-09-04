@@ -16,6 +16,12 @@ wd_test(
 )
 
 wd_test(
+    src = "console-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["console-nodejs-test.js"],
+)
+
+wd_test(
     size = "enormous",
     src = "crypto_dh-test.wd-test",
     args = ["--experimental"],
@@ -206,7 +212,6 @@ wd_test(
 
 wd_test(
     src = "process-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-nodejs-test.js"],
 )
 
@@ -218,8 +223,12 @@ wd_test(
 
 wd_test(
     src = "process-stdio-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-stdio-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-fs-nodejs-test.wd-test",
+    data = ["process-stdio-fs-nodejs-test.js"],
 )
 
 sh_test(
@@ -236,6 +245,24 @@ sh_test(
         "process-stdio-nodejs-test.expected_stdout",
         "process-stdio-nodejs-test.js",
         "process-stdio-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
+sh_test(
+    name = "process-stdio-fs-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-fs-nodejs-test.wd-test)",
+        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
+        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-fs-nodejs-test.expected_stderr",
+        "process-stdio-fs-nodejs-test.expected_stdout",
+        "process-stdio-fs-nodejs-test.js",
+        "process-stdio-fs-nodejs-test.wd-test",
         "//src/workerd/server:workerd_cross",
     ],
 )

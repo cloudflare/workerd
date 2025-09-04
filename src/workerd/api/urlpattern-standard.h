@@ -71,8 +71,8 @@ class URLPattern final: public jsg::Object {
   // URLPatternComponentResult API is defined as part of the URLPattern
   // specification.
   struct URLPatternComponentResult final {
-    jsg::JsString input;
-    jsg::JsObject groups;
+    jsg::JsRef<jsg::JsString> input;
+    jsg::JsRef<jsg::JsObject> groups;
 
     JSG_STRUCT(input, groups);
     JSG_STRUCT_TS_OVERRIDE(URLPatternComponentResult {
@@ -85,7 +85,7 @@ class URLPattern final: public jsg::Object {
   // components of a URL. The URLPatternResult API is defined as
   // part of the URLPattern specification.
   struct URLPatternResult final {
-    kj::Array<kj::OneOf<jsg::JsString, URLPatternInit>> inputs;
+    kj::Array<kj::OneOf<jsg::JsRef<jsg::JsString>, URLPatternInit>> inputs;
 #define V(_, name) URLPatternComponentResult name;
     URL_PATTERN_COMPONENTS(V)
 #undef V

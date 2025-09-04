@@ -56,14 +56,14 @@ alias(
 )
 
 alias(
-    name = "capnpc-0.21.2",
-    actual = "@crates_vendor__capnpc-0.21.2//:capnpc",
+    name = "capnpc-0.21.3",
+    actual = "@crates_vendor__capnpc-0.21.3//:capnpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.21.2//:capnpc",
+    actual = "@crates_vendor__capnpc-0.21.3//:capnpc",
     tags = ["manual"],
 )
 
@@ -80,26 +80,26 @@ alias(
 )
 
 alias(
-    name = "clang-ast-0.1.31",
-    actual = "@crates_vendor__clang-ast-0.1.31//:clang_ast",
+    name = "clang-ast-0.1.32",
+    actual = "@crates_vendor__clang-ast-0.1.32//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
     name = "clang-ast",
-    actual = "@crates_vendor__clang-ast-0.1.31//:clang_ast",
+    actual = "@crates_vendor__clang-ast-0.1.32//:clang_ast",
     tags = ["manual"],
 )
 
 alias(
-    name = "clap-4.5.45",
-    actual = "@crates_vendor__clap-4.5.45//:clap",
+    name = "clap-4.5.46",
+    actual = "@crates_vendor__clap-4.5.46//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.45//:clap",
+    actual = "@crates_vendor__clap-4.5.46//:clap",
     tags = ["manual"],
 )
 
@@ -388,19 +388,19 @@ alias(
 
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.21.2//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.21.3//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.21.2//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.21.3//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.45//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.46//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

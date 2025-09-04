@@ -497,6 +497,9 @@ interface AlarmInvocationInfo {
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
+declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
+}
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
@@ -527,7 +530,7 @@ interface DurableObjectId {
   readonly name?: string;
   readonly jurisdiction?: string;
 }
-interface DurableObjectNamespace<
+declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -568,10 +571,11 @@ type DurableObjectLocationHint =
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-interface DurableObjectClass {}
+declare abstract class DurableObjectClass {}
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   exports: any;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -653,6 +657,7 @@ interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -704,7 +709,10 @@ interface DurableObjectFacets {
   delete(name: string): void;
 }
 interface DurableObjectFacetsStartupOptions {
-  $class: DurableObjectClass;
+  $class:
+    | DurableObjectClass
+    | LoopbackDurableObjectNamespace
+    | LoopbackColoLocalActorNamespace;
   id?: DurableObjectId | string;
 }
 interface AnalyticsEngineDataset {
@@ -2660,6 +2668,7 @@ interface TraceItem {
   readonly scriptVersion?: ScriptVersion;
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
+  readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
@@ -3337,6 +3346,22 @@ declare class MessageChannel {
 }
 interface MessagePortPostMessageOptions {
   transfer?: any[];
+}
+interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
+interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
+interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
+  put<T>(key: string, value: T): void;
+  delete(key: string): boolean;
+}
+interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
 }
 type AiImageClassificationInput = {
   image: number[];

@@ -30,9 +30,18 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_uploadPart"_kjc, {"rpc.method"_kjc, "UploadPart"_kjc}, this->bucket->adminBucketName(),
-          {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_uploadPart"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_uploadPart"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("UploadPart"_kjc));
+    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -74,7 +83,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     auto promise = doR2HTTPPutRequest(
         kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(
+    auto awaitIoResult = context.awaitIo(
         js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
       r2Result.throwIfError("uploadPart", errorType);
 
@@ -88,6 +97,8 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
       return uploadedPart;
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -96,9 +107,18 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_completeMultipartUpload"_kjc, {"rpc.method"_kjc, "CompleteMultipartUpload"_kjc},
-          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_completeMultipartUpload"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -130,7 +150,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(
+    auto awaitIoResult = context.awaitIo(
         js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) mutable {
       auto parsedObject =
           parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
@@ -141,6 +161,8 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
             "Shouldn't happen, multipart completion should either error or return an object");
       }
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -148,9 +170,18 @@ jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_abortMultipartUpload"_kjc, {"rpc.method"_kjc, "AbortMultipartUpload"_kjc},
-          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_abortMultipartUpload"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+    traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("AbortMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->adminBucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -170,13 +201,16 @@ jsg::Promise<void> R2MultipartUpload::abort(
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
+    auto awaitIoResult =
+        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
       if (r.objectNotFound()) {
         return;
       }
 
       r.throwIfError("abortMultipartUpload", errorType);
     });
+
+    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 }  // namespace workerd::api::public_beta

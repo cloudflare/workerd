@@ -45,7 +45,6 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         "//src/workerd/util",
-        "//src/workerd/util:checked-queue",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
@@ -348,7 +347,7 @@ kj_test(
 kj_test(
     src = "multiple-typewrappers-test.c++",
     deps = [
+        ":jsg",
         "//src/workerd/io:compatibility-date_capnp",
-        "//src/workerd/jsg",
     ],
 )

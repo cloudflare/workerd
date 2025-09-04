@@ -65,7 +65,7 @@ wd_cc_library(
     srcs = glob(["r2*.c++"]),
     hdrs = glob(["r2*.h"]),
     implementation_deps = [
-        "//src/workerd/api:r2-api_capnp",
+        ":r2-api_capnp",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -444,7 +444,10 @@ wd_test(
 wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
-    data = ["r2-test.js"],
+    data = [
+        "r2-instrumentation-test.js",
+        "r2-test.js",
+    ],
 )
 
 wd_test(
@@ -458,6 +461,12 @@ wd_test(
     src = "sql-test.wd-test",
     args = ["--experimental"],
     data = ["sql-test.js"],
+)
+
+wd_test(
+    src = "sync-kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["sync-kv-test.js"],
 )
 
 wd_test(
