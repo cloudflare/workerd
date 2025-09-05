@@ -13,7 +13,7 @@ namespace workerd::tracing {
 namespace {
 
 // Uniquely identifies js tail session failures
-constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xfa110000bad0e0e0;
+constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xcde53d65a46183f7;
 
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
