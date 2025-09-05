@@ -386,6 +386,7 @@ void WorkerTracer::setEventInfo(
       .scriptId = mapCopyString(trace->scriptId),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
       .entrypoint = mapCopyString(trace->entrypoint),
+      .durableObjectId = mapCopyString(trace->durableObjectId),
     };
 
     writer->report(context,
