@@ -920,13 +920,44 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   struct MayOutliveIncomingRequest {};
   struct CantOutliveIncomingRequest {};
 
+  // Determine method name, and report trace event info if needed.
+  kj::ConstString establishTrace(IoContext& ctx, CallContext& callContext) {
+    // Method name suitable for use in trace and error messages. May be a pointer into the RPC
+    // params reader.
+    kj::ConstString methodNameForTrace;
+
+    auto params = callContext.getParams();
+    // Retrieve the method name and report onset event info if tracing is enabled.
+    switch (params.which()) {
+      case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
+        methodNameForTrace = params.getMethodName().attach();
+        break;
+      }
+      case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
+        auto path = params.getMethodPath();
+        auto n = path.size();
+
+        if (n == 0) {
+          // Call the target itself as a function.
+          methodNameForTrace = "(this)"_kjc;
+        } else {
+          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
+        }
+        break;
+      }
+    }
+    addTrace(ctx, methodNameForTrace);
+    return methodNameForTrace;
+  }
+
   // Constructor used by TransientJsRpcTarget, which does not own the context. It needs to use
   // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
   // or during a call.
   JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
       : enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](Worker::Lock& lock, CallContext callContext) {
-              return callImpl(lock, ctx, callContext);
+              kj::ConstString methodNameForTrace = establishTrace(ctx, callContext);
+              return callImpl(lock, ctx, callContext, kj::mv(methodNameForTrace));
             })) {}
 
   // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
@@ -935,8 +966,14 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       : enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
-          return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
-            return callImpl(lock, ctx, callContext);
+
+          // tracing needs to be set up before running callImpl to rule out that DO constructors run
+          // and potentially produce trace events before we have sent the outcome event.
+          kj::ConstString methodNameForTrace = establishTrace(ctx, callContext);
+
+          return ctx.run([this, &ctx, callContext, methodNameForTrace = kj::mv(methodNameForTrace)](
+                             Worker::Lock& lock) mutable {
+            return callImpl(lock, ctx, callContext, kj::mv(methodNameForTrace));
           });
         }) {}
 
@@ -990,34 +1027,12 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Hook for recording trace information.
   virtual void addTrace(IoContext& ioctx, kj::StringPtr methodName) = 0;
 
-  kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
+  kj::Promise<void> callImpl(Worker::Lock& lock,
+      IoContext& ctx,
+      CallContext callContext,
+      kj::ConstString methodNameForTrace) {
     jsg::Lock& js = lock;
     auto params = callContext.getParams();
-    // Method name suitable for use in trace and error messages. May be a pointer into the RPC
-    // params reader.
-    kj::ConstString methodNameForTrace;
-
-    // Retrieve the method name and report onset event info if tracing is enabled.
-    switch (params.which()) {
-      case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
-        methodNameForTrace = params.getMethodName().attach();
-        break;
-      }
-      case rpc::JsRpcTarget::CallParams::METHOD_PATH: {
-        auto path = params.getMethodPath();
-        auto n = path.size();
-
-        if (n == 0) {
-          // Call the target itself as a function.
-          methodNameForTrace = "(this)"_kjc;
-        } else {
-          methodNameForTrace = kj::ConstString(kj::strArray(path, "."));
-        }
-        break;
-      }
-    }
-    addTrace(ctx, methodNameForTrace);
-
     auto targetInfo = getTargetInfo(lock, ctx);
 
     // We will try to get the function, if we can't we'll throw an error to the client.
