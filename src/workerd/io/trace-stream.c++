@@ -932,8 +932,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     KJ_UNREACHABLE;
   });
 
-  co_return WorkerInterface::CustomEvent::Result{
-    .outcome = eventOutcome };
+  co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
