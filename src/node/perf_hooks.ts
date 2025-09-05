@@ -7,7 +7,7 @@ import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 import {
   createPerformance,
   Performance,
-} from 'node:internal/internal_performance';
+} from 'node-internal:internal_performance';
 import { PerformanceEntry } from 'node-internal:internal_performance_entry';
 import {
   PerformanceMeasure,

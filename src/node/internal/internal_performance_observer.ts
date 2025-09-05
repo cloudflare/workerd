@@ -16,7 +16,7 @@ import {
   validateObject,
 } from 'node-internal:validators';
 import { inspect } from 'node-internal:internal_inspect';
-import { kEnumerableProperty } from 'node:internal/internal_utils';
+import { kEnumerableProperty } from 'node-internal:internal_utils';
 import type {
   PerformanceObserverEntryList as _PerformanceObserverEntryList,
   PerformanceObserver as _PerformanceObserver,

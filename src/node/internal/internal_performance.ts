@@ -7,12 +7,12 @@ import {
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_ILLEGAL_CONSTRUCTOR,
   ERR_MISSING_ARGS,
-} from 'node:internal/internal_errors';
-import { PerformanceEntry } from 'node:internal/internal_performance_entry';
+} from 'node-internal:internal_errors';
+import { PerformanceEntry } from 'node-internal:internal_performance_entry';
 import { validateThisInternalField } from 'node-internal:validators';
-import { kEnumerableProperty } from 'node:internal/internal_utils';
+import { kEnumerableProperty } from 'node-internal:internal_utils';
 import { inspect } from 'node-internal:internal_inspect';
-import type { InspectOptions } from 'node:internal/internal_inspect';
+import type { InspectOptions } from 'node-internal:internal_inspect';
 import type {
   Performance as _Performance,
   PerformanceMark as _PerformanceMark,
@@ -26,7 +26,9 @@ const kPerformanceBrand = Symbol('performance');
 const kInitialize = Symbol('initialize');
 
 export class Performance extends EventTarget implements _Performance {
+  // @ts-expect-error TS2564 We don't implement performance node timing.
   nodeTiming: PerformanceNodeTiming;
+  [kPerformanceBrand] = true;
 
   constructor(arg: symbol | undefined = undefined) {
     super();
