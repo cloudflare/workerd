@@ -344,12 +344,13 @@ SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& read
 
     auto& newEntry = data->inProgress.insert(kj::heap<InProgress>(kj::str(key)));
     auto inProgress = newEntry.get();
-    return kj::Promise<GetWithFallbackOutcome>(prepareFallback(*inProgress, true));
+    //fprintf(stderr,"Preparing fallback\n");
+    return kj::Promise<GetWithFallbackOutcome>(prepareFallback(*inProgress));
   }
 }
 
 SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFallback(
-    InProgress& inProgress, bool handleFailureOnDestruction) const {
+    InProgress& inProgress) const {
   // We need to detect if the Promise that we are about to create ever settles,
   // as opposed to being destroyed without either being resolved or rejecting.
   struct FallbackStatus {
@@ -358,13 +359,18 @@ SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFall
   auto status = kj::heap<FallbackStatus>();
   auto& statusRef = *status;
 
-  auto deferredCancel =
-      kj::defer([this, status = kj::mv(status), &inProgress, handleFailureOnDestruction]() {
+  auto deferredCancel = kj::defer([this, status = kj::mv(status), &inProgress]() {
     // If the callback was destroyed without having run (for example, because
     // it was added to an I/O context that has since been canceled), we treat
     // it as if the promise had failed - but only if handleFailureOnDestruction is true.
-    if (!status->hasSettled && handleFailureOnDestruction) {
-      handleFallbackFailure(inProgress);
+    if (!status->hasSettled) {
+      // Use kj::evalLater to break recursion when many waiters are destroyed simultaneously
+      auto promise = kj::evalLater([this, &inProgress]() { handleFallbackQueue(inProgress); });
+      // Detach the promise since we don't need to wait for it
+      promise.detach([](kj::Exception&& e) {
+        // Log any errors but don't propagate them
+        KJ_LOG(ERROR, "Error in handleFallbackQueue", e);
+      });
     }
   });
 
@@ -389,72 +395,39 @@ SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFall
       fallbackSpan.setTag("waiters_notified"_kjc, static_cast<double>(waiterCount));
     } else {
       // The fallback failed for some reason. We do not care much about why it
-      // failed. If there are other queued fallbacks, handelFallbackFailure will
-      // schedule the next one.
+      // failed. If there are other queued fallbacks, handleFallbackQueue will
+      // schedule the next one. Use IoContext::current().evalLater() to break recursion.
       status.hasSettled = true;
-      handleFallbackFailure(inProgress);
+
+      // Schedule the next fallback processing to run later, breaking the recursive call chain
+      auto promise = kj::evalLater([this, &inProgress]() { handleFallbackQueue(inProgress); });
+      // Detach the promise since we don't need to wait for it
+      promise.detach([](kj::Exception&& e) {
+        // Log any errors but don't propagate them
+        KJ_LOG(ERROR, "Error in handleFallbackQueue", e);
+      });
     }
   };
 }
 
-void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const {
-  // To avoid stack overflow when many waiters are canceled simultaneously,
-  // we process them iteratively. The key insight: we collect all waiters first,
-  // clear the queue, then process them. Dead waiters will trigger a recursive
-  // call but find an empty queue. We handle this by continuing to process.
+void SharedMemoryCache::Use::handleFallbackQueue(InProgress& inProgress) const {
+  // Get the next waiter in FIFO order and fulfill it with prepareFallback
+  kj::Own<kj::CrossThreadPromiseFulfiller<GetWithFallbackOutcome>> nextFulfiller;
 
-  // Collect all waiters
-  kj::Vector<kj::Own<kj::CrossThreadPromiseFulfiller<GetWithFallbackOutcome>>> waiters;
   {
     auto data = cache->data.lockExclusive();
-    inProgress.waiting.drainTo(
-        [&](InProgress::Waiter&& waiter) { waiters.add(kj::mv(waiter.fulfiller)); });
-
-    if (waiters.size() == 0) {
+    KJ_IF_SOME(next, inProgress.waiting.pop()) {
+      nextFulfiller = kj::mv(next.fulfiller);
+    } else {
+      // No more waiters, cleanup and exit
       data->inProgress.eraseMatch(inProgress.key);
       return;
     }
   }
 
-  // Process each waiter. We give each one a callback that doesn't handle failure
-  // on destruction (to avoid recursion), except for the last one.
-  bool foundLive = false;
-  for (size_t i = 0; i < waiters.size(); ++i) {
-    if (waiters[i].get() != nullptr) {
-      // Check if this is the last non-null waiter
-      bool isLast = true;
-      for (size_t j = i + 1; j < waiters.size(); ++j) {
-        if (waiters[j].get() != nullptr) {
-          isLast = false;
-          break;
-        }
-      }
-
-      // If not the last, put remaining waiters back before fulfilling
-      if (!isLast) {
-        auto data = cache->data.lockExclusive();
-        for (size_t j = i + 1; j < waiters.size(); ++j) {
-          if (waiters[j].get() != nullptr) {
-            inProgress.waiting.push(InProgress::Waiter{kj::mv(waiters[j])});
-          }
-        }
-      }
-
-      // Fulfill with appropriate handleFailureOnDestruction setting
-      waiters[i]->fulfill(prepareFallback(inProgress, isLast));
-      foundLive = true;
-
-      // If this wasn't the last waiter, the recursive call (if dead) will
-      // continue processing. If it was the last, we're done either way.
-      return;
-    }
-  }
-
-  // All waiters were null
-  if (!foundLive) {
-    auto data = cache->data.lockExclusive();
-    data->inProgress.eraseMatch(inProgress.key);
-  }
+  // Use prepareFallback since we now use evalLater
+  // to break recursion in both the callback and deferred destructor
+  nextFulfiller->fulfill(prepareFallback(inProgress));
 }
 
 void SharedMemoryCache::Use::delete_(const kj::String& key) const {

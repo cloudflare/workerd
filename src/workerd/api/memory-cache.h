@@ -209,16 +209,15 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     // invoke a fallback but it does not call the fallback directly. The caller
     // is responsible for passing the returned task and fulfiller to the
     // respective I/O context in which the fallback will run.
-    FallbackDoneCallback prepareFallback(
-        InProgress& inProgress, bool handleFailureOnDestruction) const;
+    FallbackDoneCallback prepareFallback(InProgress& inProgress) const;
 
     // Called whenever a fallback has failed. The fallback might have thrown an
     // error or it might have returned a Promise that rejected, or the I/O
     // context in which the fallback should have been invoked has already been
     // destroyed. If other concurrent read operations have queued fallbacks,
-    // this schedules the next fallback. Otherwise, the InProgress struct is
-    // erased.
-    void handleFallbackFailure(InProgress& inProgress) const;
+    // this schedules the next fallback iteratively to avoid recursion and stack overflow.
+    // Otherwise, the InProgress struct is erased.
+    void handleFallbackQueue(InProgress& inProgress) const;
 
     kj::Own<const SharedMemoryCache> cache;
     static constexpr auto memoryCachekLockWaitTimeTag = "memory_cache_lock_wait_time_ns"_kjc;
