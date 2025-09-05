@@ -17,14 +17,37 @@ using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
 
+# A 128-bit trace ID used to identify traces.
+struct TraceId {
+  high @0 :UInt64;
+  low @1 :UInt64;
+}
+
+# InvocationSpanContext used to identify the current tracing context. Only used internally so far.
 struct InvocationSpanContext {
-  struct TraceId {
-    high @0 :UInt64;
-    low @1 :UInt64;
-  }
+  # The 128-bit ID uniquely identifying a trace.
   traceId @0 :TraceId;
+  # The 128-bit ID identifying a worker stage invocation within a trace.
   invocationId @1 :TraceId;
+  # The 64-bit span ID identifying an individual span within a worker stage invocation.
   spanId @2 :UInt64;
+}
+
+# Span context for a tail event – this is provided for each tail event.
+struct SpanContext {
+  # The 128-bit ID uniquely identifying a trace.
+  traceId @0 :TraceId;
+  # spanId in which this event is handled
+  # for Onset and SpanOpen events this would be the parent span id
+  # for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+  # For Hibernate and Mark this would be the span under which they were emitted.
+  # This is only empty if:
+  #  1. This is an Onset event
+  #  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+  info :union {
+    empty @1 :Void;
+    spanId @2 :UInt64;
+  }
 }
 
 struct Trace @0x8e8d911203762d34 {
@@ -191,13 +214,14 @@ struct Trace @0x8e8d911203762d34 {
   struct SpanOpen {
     # Marks the opening of a child span within the streaming tail session.
     operationName @0 :Text;
+    spanId @1 :UInt64;
+    # id for the span being opened by this SpanOpen event.
     info :union {
-      empty @1 :Void;
-      custom @2 :List(Attribute);
-      fetch @3 :FetchEventInfo;
-      jsRpc @4 :JsRpcEventInfo;
+      empty @2 :Void;
+      custom @3 :List(Attribute);
+      fetch @4 :FetchEventInfo;
+      jsRpc @5 :JsRpcEventInfo;
     }
-    parentSpanId @5 :UInt64;
   }
 
   struct SpanClose {
@@ -220,12 +244,6 @@ struct Trace @0x8e8d911203762d34 {
     scriptTags @5 :List(Text);
     entryPoint @6 :Text;
 
-    trigger @7 :InvocationSpanContext;
-    # If this invocation was triggered by a different invocation that
-    # is being traced, the trigger will identify the triggering span.
-    # Propagation of the trigger context is not required, and in some
-    # cases is not desirable.
-
     struct Info { union {
       fetch @0 :FetchEventInfo;
       jsRpc @1 :JsRpcEventInfo;
@@ -238,7 +256,9 @@ struct Trace @0x8e8d911203762d34 {
       custom @8 :CustomEventInfo;
     }
     }
-    info @8: Info;
+    info @7: Info;
+    spanId @8: UInt64;
+    # id for the span being opened by this Onset event.
     attributes @9 :List(Attribute);
   }
 
@@ -254,19 +274,25 @@ struct Trace @0x8e8d911203762d34 {
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
     # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
     # unless the stream was abruptly terminated.
-    context @0 :InvocationSpanContext;
-    timestampNs @1 :Int64;
-    sequence @2 :UInt32;
+    # Inherited spanContext for this event.
+    spanContext @0: SpanContext;
+    # invocation id of the currently invoked worker stage.
+    # invocation id will always be unique to every Onset event and will be the same until the Outcome event.
+    invocationId @1: TraceId;
+    # time for the tail event. This will be provided as I/O time from the perspective of the tail worker.
+    timestampNs @2 :Int64;
+    # unique sequence identifier for this tail event, starting at zero.
+    sequence @3 :UInt32;
     event :union {
-      onset @3 :Onset;
-      outcome @4 :Outcome;
-      spanOpen @5 :SpanOpen;
-      spanClose @6 :SpanClose;
-      attribute @7 :List(Attribute);
-      return @8 :Return;
-      diagnosticChannelEvent @9 :DiagnosticChannelEvent;
-      exception @10 :Exception;
-      log @11 :Log;
+      onset @4 :Onset;
+      outcome @5 :Outcome;
+      spanOpen @6 :SpanOpen;
+      spanClose @7 :SpanClose;
+      attribute @8 :List(Attribute);
+      return @9 :Return;
+      diagnosticChannelEvent @10 :DiagnosticChannelEvent;
+      exception @11 :Exception;
+      log @12 :Log;
     }
   }
 }
