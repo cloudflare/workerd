@@ -12,6 +12,9 @@
 namespace workerd::tracing {
 namespace {
 
+// Uniquely identifies js tail session failures
+constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xcde53d65a46183f7;
+
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
@@ -861,7 +864,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // prematurely. This applies even if promises were rejected.
       if (doFulfill) {
         p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) { doneFulfiller->fulfill(); });
+            [&](jsg::Lock& js, jsg::Value&& value) {
+          // Convert the JS exception to a KJ exception, preserving all details
+          kj::Exception exception = js.exceptionToKj(kj::mv(value));
+          // Mark this as a tail stream failure for proper classification
+          exception.setDetail(TAIL_STREAM_JS_FAILURE, kj::heapArray<kj::byte>(0));
+          doneFulfiller->reject(kj::mv(exception));
+        });
       }
       return ioContext.awaitJs(js, kj::mv(p));
     }
@@ -907,11 +916,17 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     waitUntilTasks.add(incomingRequest->drain().attach(kj::mv(incomingRequest)));
   });
 
-  co_await donePromise.exclusiveJoin(ioContext.onAbort());
+  auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
+    return ioContext.waitUntilStatus();
+  }, [](kj::Exception&& e) {
+    if (e.getDetail(TAIL_STREAM_JS_FAILURE) != kj::none) {
+      return EventOutcome::EXCEPTION;
+    }
+    kj::throwRecoverableException(kj::mv(e));
+    KJ_UNREACHABLE;
+  });
 
-  co_return WorkerInterface::CustomEvent::Result{
-    .outcome = ioContext.waitUntilStatus(),
-  };
+  co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
