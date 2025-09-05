@@ -342,8 +342,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
   return js.evalNow([&] {
     auto& context = IoContext::current();
 
-    auto traceSpan = context.makeTraceSpan("r2_get"_kjc);
-    auto userSpan = context.makeUserTraceSpan("r2_get"_kjc);
+    auto traceSpan = context.makeTraceSpan("r2_head"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_head"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
     auto client = context.getHttpClient(clientIndex, true, kj::none, traceContext);
 
