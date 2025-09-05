@@ -115,7 +115,7 @@ export const test_images_transform = {
     const result = await env.images
       .input(inputStream(['png']))
       .transform({ rotate: 90 })
-      .output({ format: 'image/avif' });
+      .output({ format: 'image/avif', anim: true });
 
     // Would be image/avif in real life, but mock always returns JSON
     assert.strictEqual(result.contentType(), 'application/json');
@@ -125,6 +125,7 @@ export const test_images_transform = {
       image: 'png',
       output_format: 'image/avif',
       transforms: [{ imageIndex: 0, rotate: 90 }],
+      anim: 'true',
     });
   },
 };

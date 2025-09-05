@@ -137,6 +137,10 @@ class ImageTransformerImpl implements ImageTransformer {
       formData.append('background', options.background);
     }
 
+    if (options.anim !== undefined) {
+      formData.append('anim', options.anim.toString());
+    }
+
     const response = await this.#fetcher.fetch(
       'https://js.images.cloudflare.com/transform',
       {
