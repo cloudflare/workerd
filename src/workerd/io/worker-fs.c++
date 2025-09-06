@@ -1758,7 +1758,7 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
   if (chars[endPos - 1] == '\n') endPos--;
 
   KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
-    auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "error"_kj);
+    auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "debug"_kj);
     if (method.isFunction()) {
       v8::Local<v8::Value> methodVal(method);
       auto methodFunc = methodVal.As<v8::Function>();
