@@ -460,3 +460,6 @@ export function parseEnv(content: string): Record<string, string> {
   }
   return result;
 }
+
+export const kEnumerableProperty = { __proto__: null, enumerable: true };
+Object.freeze(kEnumerableProperty);

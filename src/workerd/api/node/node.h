@@ -71,6 +71,10 @@ constexpr bool isNodeConsoleModule(kj::StringPtr name) {
   return name == "node:console"_kj;
 }
 
+constexpr bool isNodePerfHooksModule(kj::StringPtr name) {
+  return name == "node:perf_hooks"_kj;
+}
+
 template <class Registry>
 void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 #define V(T, N)                                                                                    \
@@ -119,6 +123,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 
     if (isNodeConsoleModule(module.getName())) {
       return featureFlags.getEnableNodeJsConsoleModule();
+    }
+
+    if (isNodePerfHooksModule(module.getName())) {
+      return featureFlags.getEnableNodeJsPerfHooksModule();
     }
 
     return true;
