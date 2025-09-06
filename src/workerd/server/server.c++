@@ -1750,6 +1750,11 @@ class WorkerTracerSpanObserver: public SpanObserver,
     spanSubmitter->submitSpan(spanId, parentSpanId, span);
   }
 
+  // Provide user time to the tracing system.
+  kj::Date getTime() override {
+    return IoContext::current().now();
+  }
+
  private:
   kj::Own<SpanSubmitter> spanSubmitter;
   tracing::SpanId spanId;
