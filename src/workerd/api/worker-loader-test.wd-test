@@ -17,6 +17,7 @@ const unitTests :Workerd.Config = (
         ],
         durableObjectNamespaces = [
           (className = "FacetTestActor", uniqueKey = "FacetTestActor"),
+          (className = "RendezvousActor", uniqueKey = "RendezvousActor"),
         ],
         durableObjectStorage = (inMemory = void),
         globalOutbound = (name = "worker-loader-test", entrypoint = "defaultOutbound"),
