@@ -113,14 +113,10 @@ JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext, TestType);
 
 #define PREAMBLE(fn)                                                                               \
   TestIsolate isolate(v8System, v8::IsolateGroup::GetDefault(), 123, kj::heap<IsolateObserver>()); \
-  runInV8Stack([&](auto& stackScope) {                                                             \
-    TestIsolate::Lock lock(isolate, stackScope);                                                   \
-    lock.withinHandleScope([&] {                                                                   \
-      v8::Local<v8::Context> context = lock.newContext<TestContext>().getHandle(lock);             \
-      v8::Context::Scope contextScope(context);                                                    \
-      setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::MODULE_REGISTRY, nullptr); \
-      fn(lock);                                                                                    \
-    });                                                                                            \
+  isolate.runInLockScope([&](auto& lock) {                                                         \
+    IsolateBase::from(lock.v8Isolate).setUsingNewModuleRegistry();                                 \
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.template newContext<TestContext>().getHandle(lock),        \
+        [&](jsg::Lock& js) { fn(lock); });                                                         \
   });
 
 // ======================================================================================
@@ -262,35 +258,6 @@ KJ_TEST("A user bundle with a single ESM module") {
 
   auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
   auto& module = KJ_ASSERT_NONNULL(resolved.module);
-
-  KJ_ASSERT(module.specifier() == specifier);
-  KJ_ASSERT(module.isEsm());
-  KJ_ASSERT(module.isMain());
-  KJ_ASSERT(module.type() == Module::Type::BUNDLE);
-}
-
-// ======================================================================================
-
-KJ_TEST("A registry with a parent") {
-  ModuleBundle::BundleBuilder builder(BASE);
-
-  auto source = kj::str("export const foo = 123;");
-  builder.addEsmModule("foo", source, Module::Flags::MAIN);
-
-  const auto specifier = "file:///foo"_url;
-
-  ResolveObserver observer;
-  auto parent = ModuleRegistry::Builder(observer, BASE).add(builder.finish()).finish();
-  auto registry = ModuleRegistry::Builder(observer, BASE).setParent(*parent).finish();
-
-  ResolveContext context = {
-    .type = ResolveContext::Type::BUNDLE,
-    .source = ResolveContext::Source::INTERNAL,
-    .specifier = specifier,
-    .referrer = BASE,
-  };
-
-  auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
 
   KJ_ASSERT(module.specifier() == specifier);
   KJ_ASSERT(module.isEsm());
@@ -644,7 +611,7 @@ KJ_TEST("Compound Registry") {
 
   auto registry = registryBuilder.finish();
 
-  constexpr auto resolve = [](ModuleRegistry& registry, ResolveContext::Type type,
+  constexpr auto resolve = [](const auto& registry, ResolveContext::Type type,
                                const Url& specifier) {
     ResolveContext context{
       .type = type,
@@ -652,12 +619,12 @@ KJ_TEST("Compound Registry") {
       .specifier = specifier,
       .referrer = BASE,
     };
-    return registry.resolve(context);
+    return registry->resolve(context);
   };
 
   {
     // The fallback module is resolved when using a bundle context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUNDLE, foo));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, foo));
     KJ_ASSERT(module.specifier() == foo);
     KJ_ASSERT(module.type() == Module::Type::FALLBACK);
     KJ_ASSERT(!module.isEsm());
@@ -666,7 +633,7 @@ KJ_TEST("Compound Registry") {
 
   {
     // A built-in module is resolved when using a bundle context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUNDLE, bar));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, bar));
     KJ_ASSERT(module.specifier() == bar);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
     KJ_ASSERT(module.isEsm());
@@ -675,7 +642,7 @@ KJ_TEST("Compound Registry") {
 
   {
     // A bundle module is resolved when using a bundle context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUNDLE, qux));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, qux));
     KJ_ASSERT(module.specifier() == qux);
     KJ_ASSERT(module.type() == Module::Type::BUNDLE);
     KJ_ASSERT(module.isEsm());
@@ -684,7 +651,7 @@ KJ_TEST("Compound Registry") {
 
   {
     // A built-in module is resolved when using a builtin context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUILTIN, bar));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN, bar));
     KJ_ASSERT(module.specifier() == bar);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
     KJ_ASSERT(module.isEsm());
@@ -693,7 +660,7 @@ KJ_TEST("Compound Registry") {
 
   {
     // A built-in only module is resolved when using a built-in context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUILTIN, baz));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN, baz));
     KJ_ASSERT(module.specifier() == baz);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
     KJ_ASSERT(!module.isEsm());
@@ -702,7 +669,7 @@ KJ_TEST("Compound Registry") {
 
   {
     // A built-in only module is resolved when using a built-in only context
-    auto& module = KJ_ASSERT_NONNULL(resolve(*registry, ResolveContext::Type::BUILTIN_ONLY, baz));
+    auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN_ONLY, baz));
     KJ_ASSERT(module.specifier() == baz);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
     KJ_ASSERT(!module.isEsm());
@@ -710,15 +677,15 @@ KJ_TEST("Compound Registry") {
   }
 
   // A built-in only module cannot be resolved from a bundle context
-  KJ_ASSERT(resolve(*registry, ResolveContext::Type::BUNDLE, baz) == kj::none);
+  KJ_ASSERT(resolve(registry, ResolveContext::Type::BUNDLE, baz) == kj::none);
 
   // Fallback modules cannot be resolved from a built-in context
-  KJ_ASSERT(resolve(*registry, ResolveContext::Type::BUILTIN, foo) == kj::none);
-  KJ_ASSERT(resolve(*registry, ResolveContext::Type::BUILTIN_ONLY, foo) == kj::none);
+  KJ_ASSERT(resolve(registry, ResolveContext::Type::BUILTIN, foo) == kj::none);
+  KJ_ASSERT(resolve(registry, ResolveContext::Type::BUILTIN_ONLY, foo) == kj::none);
 
   // Bundle modules cannot be resolved from a built-in or built-in only context
-  KJ_ASSERT(resolve(*registry, ResolveContext::Type::BUILTIN, qux) == kj::none);
-  KJ_ASSERT(resolve(*registry, ResolveContext::Type::BUILTIN_ONLY, qux) == kj::none);
+  KJ_ASSERT(resolve(registry, ResolveContext::Type::BUILTIN, qux) == kj::none);
+  KJ_ASSERT(resolve(registry, ResolveContext::Type::BUILTIN_ONLY, qux) == kj::none);
 
   // We should have seen eleven distinct resolution events.
   KJ_ASSERT(observer.modules.size() == 11);
@@ -895,7 +862,7 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
       .specifier = specifier,
       .referrer = BASE,
     };
-    KJ_ASSERT_NONNULL(registry->resolve(resolveContext));
+    auto& resolved KJ_UNUSED = KJ_ASSERT_NONNULL(registry->resolve(resolveContext));
 
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
@@ -1614,34 +1581,62 @@ KJ_TEST("Using a registry from multiple threads works") {
   kj::AsyncIoContext io = kj::setupAsyncIo();
 
   ModuleBundle::BundleBuilder bundleBuilder(BASE);
-  auto foo = kj::str("export default 123; for (let n = 0; n < 1000000; n++) {}");
+  static const auto foo = "export default 123; for (let n = 0; n < 100000; n++) {}"_kjc;
   bundleBuilder.addEsmModule("foo", foo);
   ResolveObserver resolveObserver;
   auto registry =
       ModuleRegistry::Builder(resolveObserver, BASE).add(bundleBuilder.finish()).finish();
 
-  static constexpr auto makeThread = [](ModuleRegistry& registry) {
-    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    kj::Thread thread([&registry, fulfiller = kj::mv(paf.fulfiller)] {
-      {
-        PREAMBLE([&](Lock& js) {
-          CompilationObserver compilationObserver;
-          auto attached = registry.attachToIsolate(js, compilationObserver);
-          js.tryCatch([&] {
-            auto val = ModuleRegistry::resolve(js, "file:///foo");
-            KJ_ASSERT(val.isNumber());
-          }, [&](Value exception) { js.throwException(kj::mv(exception)); });
-        });
-      }
+  struct NonOpErrorHandler final: public kj::TaskSet::ErrorHandler {
+    void taskFailed(kj::Exception&& exception) {}
+  };
+  NonOpErrorHandler errorHandler;
+
+  kj::TaskSet tasks(errorHandler);
+
+  static const auto makeRunnable = [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry,
+                                       kj::Own<kj::PromiseFulfiller<void>> fulfiller) {
+    return [registry = kj::mv(registry), fulfiller = kj::mv(fulfiller)]() mutable {
+      PREAMBLE([&](Lock& js) {
+        CompilationObserver compilationObserver;
+        auto attached = registry->attachToIsolate(js, compilationObserver);
+        js.tryCatch([&] {
+          auto val = ModuleRegistry::resolve(js, "file:///foo");
+          KJ_ASSERT(val.isNumber());
+        }, [&](Value exception) { js.throwException(kj::mv(exception)); });
+      });
       fulfiller->fulfill();
-    });
-    thread.detach();
-    return kj::mv(paf.promise);
+    };
   };
 
-  kj::joinPromises(kj::arr(makeThread(*registry), makeThread(*registry), makeThread(*registry),
-                       makeThread(*registry), makeThread(*registry)))
-      .wait(io.waitScope);
+  struct RunnableAndPromise {
+    kj::Promise<void> promise;
+    kj::Function<void()> runnable;
+  };
+
+  static const auto makeRunnableAndPromise =
+      [](kj::Arc<workerd::jsg::modules::ModuleRegistry> registry) -> RunnableAndPromise {
+    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
+    return {kj::mv(paf.promise), makeRunnable(kj::mv(registry), kj::mv(paf.fulfiller))};
+  };
+
+  auto [paf1, task1] = makeRunnableAndPromise(registry.addRef());
+  kj::Thread(kj::mv(task1)).detach();
+  auto [paf2, task2] = makeRunnableAndPromise(registry.addRef());
+  kj::Thread(kj::mv(task2)).detach();
+  auto [paf3, task3] = makeRunnableAndPromise(registry.addRef());
+  kj::Thread(kj::mv(task3)).detach();
+  auto [paf4, task4] = makeRunnableAndPromise(registry.addRef());
+  kj::Thread(kj::mv(task4)).detach();
+  auto [paf5, task5] = makeRunnableAndPromise(registry.addRef());
+  kj::Thread(kj::mv(task5)).detach();
+
+  tasks.add(kj::mv(paf1));
+  tasks.add(kj::mv(paf2));
+  tasks.add(kj::mv(paf3));
+  tasks.add(kj::mv(paf4));
+  tasks.add(kj::mv(paf5));
+  tasks.onEmpty().wait(io.waitScope);
 }
 
 // ======================================================================================

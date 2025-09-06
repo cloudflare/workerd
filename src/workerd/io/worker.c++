@@ -809,6 +809,7 @@ static void stopProfiling(jsg::Lock& js, v8::CpuProfiler& profiler, cdp::Command
 
 struct Worker::Script::Impl {
   kj::Own<workerd::VirtualFileSystem> vfs;
+  kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry;
 
   kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
 
@@ -819,7 +820,10 @@ struct Worker::Script::Impl {
   // If set, then any attempt to use this script shall throw this exception.
   kj::Maybe<kj::Exception> permanentException;
 
-  Impl(kj::Own<workerd::VirtualFileSystem> vfs): vfs(kj::mv(vfs)) {}
+  Impl(kj::Own<workerd::VirtualFileSystem> vfs,
+      kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry)
+      : vfs(kj::mv(vfs)),
+        maybeNewModuleRegistry(kj::mv(maybeNewModuleRegistry)) {}
 
   struct DynamicImportResult {
     jsg::Value value;
@@ -905,6 +909,11 @@ struct Worker::Script::Impl {
       // already be covered by the startup resource limiter.
       return js.resolvedPromise(handler());
     });
+  }
+
+  kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> getNewModuleRegistry() const {
+    return maybeNewModuleRegistry.map(
+        [](auto& r) -> const workerd::jsg::modules::ModuleRegistry& { return *r.get(); });
   }
 };
 
@@ -1262,12 +1271,13 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     SpanParent parentSpan,
-    kj::Own<workerd::VirtualFileSystem> vfs)
+    kj::Own<workerd::VirtualFileSystem> vfs,
+    kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry)
     : isolate(kj::mv(isolateParam)),
       id(kj::str(id)),
       modular(source.variant.is<ModulesSource>()),
       python(modular && source.variant.get<ModulesSource>().isPython),
-      impl(kj::heap<Impl>(kj::mv(vfs))),
+      impl(kj::heap<Impl>(kj::mv(vfs), kj::mv(maybeNewModuleRegistry))),
       dynamicEnvBuilder(source.dynamicEnvBuilder.map(
           [](const auto& inst) -> kj::Arc<DynamicEnvBuilder> { return inst.addRef(); })) {
   auto parseMetrics = isolate->metrics->parse(startType);
@@ -1299,7 +1309,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       v8::Local<v8::Context> context;
       if (modular) {
         // Modules can't be compiled for multiple contexts. We need to create the real context now.
-        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock));
+        auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
+            {
+              .newModuleRegistry = impl->getNewModuleRegistry(),
+            }));
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
         recordedLock.setupContext(context);
@@ -1609,7 +1622,10 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         currentSpan.setTag("module_context"_kjc, true);
       } else {
         // Create a new context.
-        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock));
+        jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
+            {
+              .newModuleRegistry = script->impl->getNewModuleRegistry(),
+            }));
       }
 
       v8::Local<v8::Context> context = KJ_REQUIRE_NONNULL(jsContext).getHandle(lock);
@@ -4012,10 +4028,12 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
     kj::Own<workerd::VirtualFileSystem> vfs,
     bool logNewScript,
     kj::Maybe<ValidationErrorReporter&> errorReporter,
-    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts) const {
+    kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
+    kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry) const {
   // Script doesn't already exist, so compile it.
   return kj::atomicRefcounted<Script>(kj::atomicAddRef(*this), scriptId, source, startType,
-      logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan), kj::mv(vfs));
+      logNewScript, errorReporter, kj::mv(artifacts), kj::mv(parentSpan), kj::mv(vfs),
+      kj::mv(maybeNewModuleRegistry));
 }
 
 void Worker::Isolate::completedRequest() const {
