@@ -609,6 +609,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         ioContext
             .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
                      Worker::Lock& lock) mutable -> kj::Promise<void> {
+      // TODO: This method is generally called several times in a single customEvent. Can/should a
+      // trace scope be created several times?
+      // jsg::AsyncContextFrame::StorageScope traceScope = ioContext.makeAsyncTraceScope(lock);
+
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();

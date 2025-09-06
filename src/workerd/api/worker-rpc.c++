@@ -936,6 +936,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
           return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+            // TODO: Is this trace scope sufficient or are additional scopes needed to get this
+            // right for non-toplevel calls? See STOR-4395 for background.
+            // TODO: Is it safe that we call this for non-toplevel events?
+            jsg::AsyncContextFrame::StorageScope traceScope = ctx.makeAsyncTraceScope(lock);
             return callImpl(lock, ctx, callContext);
           });
         }) {}
