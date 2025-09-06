@@ -5,6 +5,7 @@
 #include "server.h"
 #include "workerd-api.h"
 
+#include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.embed.h>
@@ -17,9 +18,14 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
+
+#ifdef __linux__
+#include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -69,6 +75,32 @@
 #endif
 
 #include <workerd/util/use-perfetto-categories.h>
+
+// needed for fuzzing FUZZILLI
+#ifdef WORKERD_FUZZILLI
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  //since kj installs their global signal handlers
+  //and exits with 1 Fuzzilli doesn't realize that an application crashed.
+  //therefore we install a handler before and just raise the signo
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+#endif
 
 namespace workerd::server {
 namespace {
@@ -713,6 +745,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe), "run the server")
           .addSubCommand(
               "compile", KJ_BIND_METHOD(*this, getCompile), "create a self-contained binary")
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz), "run reprl for fuzzing")
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
@@ -900,6 +933,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
+  kj::MainFunc getFuzz() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+        "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
+
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .callAfterParsing(CLI_METHOD(test))
         .build();
   }
@@ -1425,6 +1467,17 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     });
   }
 
+  struct TestContext: public jsg::Object {
+    // Inherit from jsg::Object to ensure proper GC and memory tracking
+
+    JSG_RESOURCE_TYPE(TestContext) {
+      // Declare any methods or properties of TestContext, if necessary
+    }
+  };
+
+  // Define the isolate type with the TestContext
+  JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
+
 #if _WIN32
   void reloadFromConfigChange() {
     KJ_UNREACHABLE("Watching is not yet implemented on Windows");
@@ -1657,13 +1710,100 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 }  // namespace
 }  // namespace workerd::server
 
+//
+// BEGIN FUZZING CODE
+//
+#if defined(__linux__) && defined(WORKERD_FUZZILLI)
+#define SHM_SIZE 0x200000
+#define MAX_EDGES ((SHM_SIZE - 4) * 8)
+
+struct shmem_data {
+  uint32_t num_edges;
+  unsigned char edges[];
+};
+
+// NOLINTBEGIN(edgeworker-mutable-globals)
+struct shmem_data* __shmem;
+uint32_t* __edges_start;
+uint32_t* __edges_stop;
+// NOLINTEND(edgeworker-mutable-globals)
+
+void __sanitizer_cov_reset_edgeguards() {
+  uint64_t N = 0;
+  for (uint32_t* x = __edges_start; x < __edges_stop && N < MAX_EDGES; x++) *x = ++N;
+}
+
+extern "C" void __sanitizer_cov_trace_pc_guard_init(uint32_t* start, uint32_t* stop) {
+  // Avoid duplicate initialization
+  if (start == stop || *start) return;
+
+  if (__edges_start != NULL || __edges_stop != NULL) {
+    fprintf(stderr, "Coverage instrumentation is only supported for a single module\n");
+    _exit(-1);
+  }
+
+  __edges_start = start;
+  __edges_stop = stop;
+
+  // Map the shared memory region
+  const char* shm_key = getenv("SHM_ID");
+  if (!shm_key) {
+    puts("[COV] no shared memory bitmap available, skipping");
+    __shmem = (struct shmem_data*)malloc(SHM_SIZE);
+  } else {
+    int fd = shm_open(shm_key, O_RDWR, S_IREAD | S_IWRITE);
+    if (fd <= -1) {
+      fprintf(stderr, "Failed to open shared memory region: %s\n", strerror(errno));
+      _exit(-1);
+    }
+
+    __shmem = (struct shmem_data*)mmap(0, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (__shmem == MAP_FAILED) {
+      fprintf(stderr, "Failed to mmap shared memory region\n");
+      _exit(-1);
+    }
+  }
+
+  __sanitizer_cov_reset_edgeguards();
+  __shmem->num_edges = stop - start;
+}
+
+extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t* guard) {
+  // There's a small race condition here: if this function executes in two threads for the same
+  // edge at the same time, the first thread might disable the edge (by setting the guard to zero)
+  // before the second thread fetches the guard value (and thus the index). However, our
+  // instrumentation ignores the first edge (see libcoverage.c) and so the race is unproblematic.
+  uint32_t index = *guard;
+  // If this function is called before coverage instrumentation is properly initialized we want to return early.
+  if (!index) return;
+  __shmem->edges[index / 8] |= 1 << (index % 8);
+  *guard = 0;
+}
+
+#define CHECK(condition)                                                                           \
+  do {                                                                                             \
+    if (!(condition)) {                                                                            \
+      fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition);     \
+      exit(EXIT_FAILURE);                                                                          \
+    }                                                                                              \
+  } while (0)
+#endif
+//
+// END FUZZING CODE
+//
+
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
+#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

@@ -4,6 +4,7 @@ def wd_cc_binary(
         name,
         linkopts = [],
         visibility = None,
+        target_compatible_with = [],
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
     """
@@ -27,7 +28,7 @@ def wd_cc_binary(
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         visibility = visibility,
         **kwargs
     )

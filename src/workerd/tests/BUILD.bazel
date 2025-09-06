@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -112,6 +113,27 @@ filegroup(
         ":bench-mimetype",
         ":bench-regex",
         ":bench-util",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_binary(
+    name = "test-reprl",
+    srcs = [
+        "libreprl/libreprl.c",
+        "libreprl/libreprl.h",
+        "test-reprl.c++",
+    ],
+    copts = [
+        "-Ilibreprl",
+    ],
+    includes = [
+        "libreprl",
+    ],
+    #tags = ["no-arm64"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        #    "@platforms//cpu:x86_64",
     ],
     visibility = ["//visibility:public"],
 )
