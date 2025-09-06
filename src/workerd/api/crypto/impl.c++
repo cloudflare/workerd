@@ -4,6 +4,8 @@
 
 #include "impl.h"
 
+#include "simdutf.h"
+
 #include <workerd/api/util.h>
 #include <workerd/jsg/memory.h>
 

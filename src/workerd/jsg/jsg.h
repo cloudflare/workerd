@@ -15,6 +15,7 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/util/strong-bool.h>
 
+#include <rust/cxx.h>
 #include <v8-external-memory-accounter.h>
 #include <v8-forward.h>
 #include <v8-locker.h>
@@ -212,6 +213,14 @@ namespace workerd::jsg {
   do {                                                                                             \
     static const char NAME[] = #name;                                                              \
     registry.template registerMethod<NAME, decltype(&Self::method), &Self::method>();              \
+  } while (false)
+
+// This method never has access to *this* of the parent class. It is available as a convenience
+// method for existing Rust methods (which are C methods) to interact and register to JSG.
+#define JSG_RUST_METHOD_NAMED(name, method)                                                        \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerMethod<NAME, decltype(&method), &method>();                          \
   } while (false)
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given method should be callable from
@@ -1986,7 +1995,8 @@ class PropertyReflection {
 
 template <typename T>
 concept CoercibleType = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
-    kj::isSameType<DOMString, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>();
+    kj::isSameType<DOMString, T>() || kj::isSameType<bool, T>() || kj::isSameType<double, T>() ||
+    kj::isSameType<::rust::String, T>();
 // When updating this list, be sure to keep the corresponding checks in the NonCoercibleWrapper
 // class in value.h updated as well.
 
