@@ -3980,6 +3980,19 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
         .subrequestChannels = kj::mv(subrequestChannels),
         .actorClassChannels = kj::mv(actorClassChannels),
 
+        .tails = KJ_MAP(tail, source.tails) -> FutureSubrequestChannel {
+          return {
+            .designator = kj::mv(tail),
+            .errorContext = kj::str("Worker's tail"),
+          };
+        },
+        .streamingTails = KJ_MAP(tail, source.streamingTails) -> FutureSubrequestChannel {
+          return {
+            .designator = kj::mv(tail),
+            .errorContext = kj::str("Worker's streaming tail"),
+          };
+        },
+
         .compileBindings = [env = kj::mv(source.env)](
             jsg::Lock& js, const Worker::Api& api, v8::Local<v8::Object> target) mutable {
           env.populateJsObject(js, jsg::JsObject(target));
@@ -4193,24 +4206,24 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
     .actorClassChannels = kj::mv(actorClassChannels),
     .workerLoaderChannels = kj::mv(workerLoaderChannels),
 
+    // clang-format off
     .tails = KJ_MAP(tail, conf.getTails()) -> FutureSubrequestChannel {
-    return {
-      .designator = tail,
-      .errorContext = kj::str("Worker \"", name, "\"'s tails"),
-    };
-  },
+      return {
+        .designator = tail,
+        .errorContext = kj::str("Worker \"", name, "\"'s tails"),
+      };
+    },
 
     .streamingTails = KJ_MAP(streamingTail, conf.getStreamingTails()) -> FutureSubrequestChannel {
-    return {
-      .designator = streamingTail,
-      .errorContext = kj::str("Worker \"", name, "\"'s streaming tails"),
-    };
-  },
+      return {
+        .designator = streamingTail,
+        .errorContext = kj::str("Worker \"", name, "\"'s streaming tails"),
+      };
+    },
 
     .actorStorageConf = conf.getDurableObjectStorage(),
     .containerEngineConf = conf.getContainerEngine(),
 
-    // clang-format off
     .compileBindings = [globals = kj::mv(globals)](
         jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target) {
       return WorkerdApi::from(api).compileGlobals(lock, globals, target, 1);

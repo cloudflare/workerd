@@ -282,6 +282,10 @@ struct DynamicWorkerSource {
   // Where should global fetch() (and connect()) be sent?
   kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
 
+  // Tail workers that should receive tail events for invocations of the dynamic worker.
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
+  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
+
   // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
   // `StringPtr`s; `ownContent` owns the backing buffer for them.)
   kj::Own<void> ownContent;

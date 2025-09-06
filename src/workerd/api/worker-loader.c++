@@ -95,10 +95,34 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
             ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
       }
 
+      kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tailChannels;
+      KJ_IF_SOME(tails, code.tails) {
+        tailChannels = KJ_MAP(tail, tails) {
+          auto channel = tail->getSubrequestChannel(ioctx);
+          channel->requireAllowsTransfer();
+          return kj::mv(channel);
+        };
+      }
+
+      kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
+      KJ_IF_SOME(streamingTails, code.streamingTails) {
+        JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
+            "Streaming tail workers are experimental. You must pass the option "
+            "'allowExperimental: true' to the worker loader to use them");
+
+        streamingTailChannels = KJ_MAP(tail, streamingTails) {
+          auto channel = tail->getSubrequestChannel(ioctx);
+          channel->requireAllowsTransfer();
+          return kj::mv(channel);
+        };
+      }
+
       return {.source = kj::mv(extractedSource),
         .compatibilityFlags = compatFlags,
         .env = kj::mv(env),
         .globalOutbound = kj::mv(globalOutbound),
+        .tails = kj::mv(tailChannels),
+        .streamingTails = kj::mv(streamingTailChannels),
         .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
         .ownContentIsRpcResponse = false};
     });
