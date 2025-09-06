@@ -934,6 +934,9 @@ class _FetcherWrapper:
         if not callable(attr):
             return attr
 
+        if hasattr(attr, "__workflow_entrypoint"):
+            return attr
+
         # Not using `@functools.wraps(attr)` here because `attr` is a JS proxy.
         async def wrapper(*args, **kwargs):
             js_args = [python_to_rpc(arg) for arg in args]

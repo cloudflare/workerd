@@ -18,6 +18,7 @@ const pyWorker :Workerd.Worker = (
 
   bindings = [
     (name = "PythonWorkflow", service = (name = "py", entrypoint = "WorkflowEntrypointExample")),
+    (name = "MY_WORKFLOW", service = (name = "js", entrypoint = "WorkflowEntrypointTester")),
   ],
 );
 
