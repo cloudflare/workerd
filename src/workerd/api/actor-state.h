@@ -641,11 +641,7 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
-      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
-    }
+    JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);

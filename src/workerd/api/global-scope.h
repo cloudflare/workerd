@@ -255,11 +255,7 @@ class ExecutionContext: public jsg::Object {
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
-    if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
-      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
-    }
+    JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
 
     if (flags.getWorkerdExperimental()) {

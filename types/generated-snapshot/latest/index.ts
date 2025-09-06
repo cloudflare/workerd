@@ -394,6 +394,7 @@ export interface TestController {}
 export interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  exports: any;
   props: any;
 }
 export type ExportedHandlerFetchHandler<
@@ -562,6 +563,7 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  exports: any;
   props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;

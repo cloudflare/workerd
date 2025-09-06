@@ -392,6 +392,7 @@ interface TestController {}
 interface ExecutionContext {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  exports: any;
   props: any;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -557,6 +558,7 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  exports: any;
   props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
