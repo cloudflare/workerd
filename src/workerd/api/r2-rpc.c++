@@ -36,6 +36,13 @@ kj::Maybe<uint> R2Result::v4ErrorCode() {
   return kj::none;
 }
 
+kj::Maybe<kj::String> R2Result::getR2ErrorMessage() {
+  KJ_IF_SOME(e, toThrow) {
+    return kj::str(e->getMessage());
+  }
+  return kj::none;
+}
+
 void R2Result::throwIfError(
     kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   KJ_IF_SOME(e, toThrow) {

@@ -20,6 +20,17 @@
 
 namespace workerd::api::public_beta {
 
+static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
+  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
+    traceContext.userSpan.setTag("error.type"_kjc, kj::str(e));
+    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, kj::str(e));
+  }
+  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
+    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, kj::str(v4));
+  }
+}
+
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg::Lock& js,
     int partNumber,
     R2PutValue value,
@@ -87,8 +98,10 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     auto promise = doR2HTTPPutRequest(
         kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
-    auto awaitIoResult = context.awaitIo(
-        js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, partNumber, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("uploadPart", errorType);
 
       capnp::MallocMessageBuilder responseMessage;
@@ -101,8 +114,6 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
       return uploadedPart;
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -158,8 +169,10 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    auto awaitIoResult = context.awaitIo(
-        js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       auto parsedObject =
           parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
       KJ_IF_SOME(obj, parsedObject) {
@@ -169,8 +182,6 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
             "Shouldn't happen, multipart completion should either error or return an object");
       }
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 
@@ -213,16 +224,16 @@ jsg::Promise<void> R2MultipartUpload::abort(
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    auto awaitIoResult =
-        context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
-      if (r.objectNotFound()) {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      if (r2Result.objectNotFound()) {
         return;
       }
 
-      r.throwIfError("abortMultipartUpload", errorType);
+      r2Result.throwIfError("abortMultipartUpload", errorType);
     });
-
-    return context.attachSpans(js, kj::mv(awaitIoResult), kj::mv(traceContext));
   });
 }
 }  // namespace workerd::api::public_beta
