@@ -158,6 +158,7 @@ declare namespace Rpc {
 
 declare namespace Cloudflare {
   interface Env {}
+  interface Exports {}
 }
 
 declare module 'cloudflare:node' {
@@ -188,12 +189,15 @@ declare module 'cloudflare:workers' {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<Env = unknown>
-    implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<
+    Env = Cloudflare.Env,
+    Props = {},
+    Exports = Cloudflare.Exports
+  > implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext;
+    protected ctx: ExecutionContext<Props, Exports>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
@@ -205,12 +209,15 @@ declare module 'cloudflare:workers' {
     test?(controller: TestController): void | Promise<void>;
   }
 
-  export abstract class DurableObject<Env = unknown>
-    implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<
+    Env = Cloudflare.Env,
+    Props = {},
+    Exports = Cloudflare.Exports
+  > implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
-    protected ctx: DurableObjectState;
+    protected ctx: DurableObjectState<Props, Exports>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 

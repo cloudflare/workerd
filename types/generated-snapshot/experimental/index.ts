@@ -396,11 +396,14 @@ export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
 export declare const navigator: Navigator;
 export interface TestController {}
-export interface ExecutionContext {
+export interface ExecutionContext<
+  Props = unknown,
+  Exports = Cloudflare.Exports,
+> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  exports: any;
-  props: any;
+  readonly exports: Exports;
+  readonly props: Props;
   abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<
@@ -577,10 +580,13 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
 export declare abstract class DurableObjectClass {}
-export interface DurableObjectState {
+export interface DurableObjectState<
+  Props = unknown,
+  Exports = Cloudflare.Exports,
+> {
   waitUntil(promise: Promise<any>): void;
-  exports: any;
-  props: any;
+  readonly exports: Exports;
+  readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -8258,6 +8264,7 @@ export declare namespace Rpc {
 }
 export declare namespace Cloudflare {
   interface Env {}
+  interface Exports {}
 }
 export interface SecretsStoreSecret {
   /**

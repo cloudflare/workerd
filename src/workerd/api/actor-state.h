@@ -663,12 +663,19 @@ class DurableObjectState: public jsg::Object {
     JSG_METHOD(abort);
 
     JSG_TS_ROOT();
-    JSG_TS_OVERRIDE({
+
+    // Type overrides:
+    // * Define Props/Exports type parameters.
+    // * Make `storage` non-optional
+    // * Make `id` strictly `DurableObjectId` (it's only a string for colo-local actors which are
+    //   not available publicly).
+    JSG_TS_OVERRIDE(<Props = unknown, Exports = Cloudflare.Exports> {
+      readonly props: Props;
+      readonly exports: Exports;
       readonly id: DurableObjectId;
       readonly storage: DurableObjectStorage;
       blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
     });
-    // Make `storage` non-optional
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

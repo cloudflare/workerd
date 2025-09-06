@@ -271,6 +271,11 @@ class ExecutionContext: public jsg::Object {
       //   consistent with each other.
       JSG_METHOD(abort);
     }
+
+    JSG_TS_OVERRIDE(<Props = unknown, Exports = Cloudflare.Exports> {
+      readonly props: Props;
+      readonly exports: Exports;
+    });
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
