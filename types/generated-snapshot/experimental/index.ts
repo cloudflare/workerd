@@ -712,21 +712,20 @@ export declare class WebSocketRequestResponsePair {
   get response(): string;
 }
 export interface DurableObjectFacets {
-  get(
+  get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
     name: string,
     getStartupOptions: () =>
-      | DurableObjectFacetsStartupOptions
-      | Promise<DurableObjectFacetsStartupOptions>,
-  ): Fetcher;
+      | FacetStartupOptions<T>
+      | Promise<FacetStartupOptions<T>>,
+  ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
 }
-export interface DurableObjectFacetsStartupOptions {
-  $class:
-    | DurableObjectClass
-    | LoopbackDurableObjectNamespace
-    | LoopbackColoLocalActorNamespace;
+export interface FacetStartupOptions<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {
   id?: DurableObjectId | string;
+  class: DurableObjectClass<T>;
 }
 export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
@@ -8307,6 +8306,10 @@ export declare namespace Cloudflare {
   //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
   //       // of `ctx.exports`.
   //       mainModule: typeof import("my-main-module");
+  //
+  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // thus should behave as Durable Object namsepace bindings.
+  //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
   //     }
   //
   // You can use `wrangler types` to generate `GlobalProps` automatically.
@@ -8321,7 +8324,16 @@ export declare namespace Cloudflare {
   type MainModule = GlobalProp<"mainModule", {}>;
   // The type of ctx.exports, which contains loopback bindings for all top-level exports.
   type Exports = {
-    [K in keyof MainModule]: LoopbackForExport<MainModule[K]>;
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<"durableNamespaces", never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
   };
 }
 export declare namespace CloudflareWorkersModule {

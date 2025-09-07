@@ -432,6 +432,14 @@ class DurableObjectFacets: public jsg::Object {
     jsg::Optional<kj::OneOf<jsg::Ref<DurableObjectId>, kj::String>> id;
 
     JSG_STRUCT($class, id);
+
+    JSG_STRUCT_TS_OVERRIDE(FacetStartupOptions<
+        T extends Rpc.DurableObjectBranded | undefined = undefined> {
+      class: DurableObjectClass<T>;
+      id?: DurableObjectId | string;
+
+      $class: never;  // work around generate-types bug
+    });
   };
 
   // Get a facet by name, starting it if it isn't already running. `getStartupOptions` is invoked
@@ -450,6 +458,13 @@ class DurableObjectFacets: public jsg::Object {
     JSG_METHOD(get);
     JSG_METHOD(abort);
     JSG_METHOD_NAMED(delete, delete_);
+
+    JSG_TS_OVERRIDE({
+      get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
+          name: string,
+          getStartupOptions: () => FacetStartupOptions<T> | Promise<FacetStartupOptions<T>>)
+          : Fetcher<T>;
+    });
   }
 
  private:
