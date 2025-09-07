@@ -74,8 +74,10 @@ class TestCounter extends RpcTarget {
 
 const symbolMethod = Symbol('symbolMethod');
 
-class TestEntrypoint extends WorkerEntrypoint<Env> {
-  constructor(ctx: ExecutionContext, env: Env) {
+type Props = {myProp: number};
+
+class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
+  constructor(ctx: ExecutionContext<Props>, env: Env) {
     super(ctx, env);
   }
 
@@ -90,7 +92,7 @@ class TestEntrypoint extends WorkerEntrypoint<Env> {
 
   private privateInstanceProperty = 0;
   private get privateProperty() {
-    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext>();
+    expectTypeOf(this.ctx).toEqualTypeOf<ExecutionContext<Props>>();
     expectTypeOf(this.env).toEqualTypeOf<Env>();
 
     return 1;
