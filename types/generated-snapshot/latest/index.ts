@@ -564,6 +564,9 @@ export type DurableObjectLocationHint =
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
+export interface DurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
 export interface DurableObjectState<
   Props = unknown,
   Exports = Cloudflare.Exports,
@@ -3139,6 +3142,30 @@ export declare class MessageChannel {
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+export type LoopbackForExport<
+  T extends
+    | (new (...args: any[]) => Rpc.EntrypointBranded)
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? LoopbackServiceStub<InstanceType<T>>
+  : T extends new (...args: any[]) => Rpc.DurableObjectBranded
+    ? LoopbackDurableObjectClass<InstanceType<T>>
+    : T extends ExportedHandler<any, any, any>
+      ? LoopbackServiceStub<undefined>
+      : undefined;
+export type LoopbackServiceStub<
+  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
+> = Fetcher<T> &
+  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props, any>
+    ? (opts: { props?: Props }) => Fetcher<T>
+    : (opts: { props?: any }) => Fetcher<T>);
+export type LoopbackDurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> = DurableObjectClass<T> &
+  (T extends CloudflareWorkersModule.DurableObject<any, infer Props, any>
+    ? (opts: { props?: Props }) => DurableObjectClass<T>
+    : (opts: { props?: any }) => DurableObjectClass<T>);
 export interface SyncKvStorage {
   get<T = unknown>(key: string): T | undefined;
   list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
@@ -8034,8 +8061,160 @@ export declare namespace Rpc {
   };
 }
 export declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
-  interface Exports {}
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]>;
+  };
+}
+export declare namespace CloudflareWorkersModule {
+  export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
+  export const RpcStub: {
+    new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
+  };
+  export abstract class RpcTarget implements Rpc.RpcTargetBranded {
+    [Rpc.__RPC_TARGET_BRAND]: never;
+  }
+  // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
+  export abstract class WorkerEntrypoint<
+    Env = Cloudflare.Env,
+    Props = {},
+    Exports = Cloudflare.Exports,
+  > implements Rpc.WorkerEntrypointBranded
+  {
+    [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext<Props, Exports>;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    test?(controller: TestController): void | Promise<void>;
+  }
+  export abstract class DurableObject<
+    Env = Cloudflare.Env,
+    Props = {},
+    Exports = Cloudflare.Exports,
+  > implements Rpc.DurableObjectBranded
+  {
+    [Rpc.__DURABLE_OBJECT_BRAND]: never;
+    protected ctx: DurableObjectState<Props, Exports>;
+    protected env: Env;
+    constructor(ctx: DurableObjectState, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    webSocketMessage?(
+      ws: WebSocket,
+      message: string | ArrayBuffer,
+    ): void | Promise<void>;
+    webSocketClose?(
+      ws: WebSocket,
+      code: number,
+      reason: string,
+      wasClean: boolean,
+    ): void | Promise<void>;
+    webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+  }
+  export type WorkflowDurationLabel =
+    | "second"
+    | "minute"
+    | "hour"
+    | "day"
+    | "week"
+    | "month"
+    | "year";
+  export type WorkflowSleepDuration =
+    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+    | number;
+  export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+  export type WorkflowRetentionDuration = WorkflowSleepDuration;
+  export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepConfig = {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+    timeout?: WorkflowTimeoutDuration | number;
+  };
+  export type WorkflowEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    instanceId: string;
+  };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
+  export abstract class WorkflowStep {
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
+    sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
+  }
+  export abstract class WorkflowEntrypoint<
+    Env = unknown,
+    T extends Rpc.Serializable<T> | unknown = unknown,
+  > implements Rpc.WorkflowEntrypointBranded
+  {
+    [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    run(
+      event: Readonly<WorkflowEvent<T>>,
+      step: WorkflowStep,
+    ): Promise<unknown>;
+  }
+  export function waitUntil(promise: Promise<unknown>): void;
+  export const env: Cloudflare.Env;
 }
 export interface SecretsStoreSecret {
   /**

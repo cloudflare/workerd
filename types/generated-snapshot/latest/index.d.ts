@@ -556,6 +556,9 @@ type DurableObjectLocationHint =
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
+interface DurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
 interface DurableObjectState<Props = unknown, Exports = Cloudflare.Exports> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Exports;
@@ -3122,6 +3125,30 @@ declare class MessageChannel {
 interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+type LoopbackForExport<
+  T extends
+    | (new (...args: any[]) => Rpc.EntrypointBranded)
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? LoopbackServiceStub<InstanceType<T>>
+  : T extends new (...args: any[]) => Rpc.DurableObjectBranded
+    ? LoopbackDurableObjectClass<InstanceType<T>>
+    : T extends ExportedHandler<any, any, any>
+      ? LoopbackServiceStub<undefined>
+      : undefined;
+type LoopbackServiceStub<
+  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
+> = Fetcher<T> &
+  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props, any>
+    ? (opts: { props?: Props }) => Fetcher<T>
+    : (opts: { props?: any }) => Fetcher<T>);
+type LoopbackDurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> = DurableObjectClass<T> &
+  (T extends CloudflareWorkersModule.DurableObject<any, infer Props, any>
+    ? (opts: { props?: Props }) => DurableObjectClass<T>
+    : (opts: { props?: any }) => DurableObjectClass<T>);
 interface SyncKvStorage {
   get<T = unknown>(key: string): T | undefined;
   list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
@@ -8046,8 +8073,40 @@ declare namespace Rpc {
   };
 }
 declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
-  interface Exports {}
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]>;
+  };
 }
 declare module "cloudflare:node" {
   export interface DefaultHandler {
@@ -8065,7 +8124,7 @@ declare module "cloudflare:node" {
     handlers?: Omit<DefaultHandler, "fetch">,
   ): DefaultHandler;
 }
-declare module "cloudflare:workers" {
+declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -8184,6 +8243,9 @@ declare module "cloudflare:workers" {
   }
   export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
+}
+declare module "cloudflare:workers" {
+  export = CloudflareWorkersModule;
 }
 interface SecretsStoreSecret {
   /**

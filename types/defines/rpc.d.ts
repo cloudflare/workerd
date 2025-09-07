@@ -157,8 +157,43 @@ declare namespace Rpc {
 }
 
 declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
-  interface Exports {}
+
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> =
+      K extends keyof GlobalProps ? GlobalProps[K] : Default;
+
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]>
+  };
 }
 
 declare module 'cloudflare:node' {
@@ -177,7 +212,7 @@ declare module 'cloudflare:node' {
   ): DefaultHandler;
 }
 
-declare module 'cloudflare:workers' {
+declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
     new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
@@ -320,4 +355,8 @@ declare module 'cloudflare:workers' {
   export function waitUntil(promise: Promise<unknown>): void;
 
   export const env: Cloudflare.Env;
+}
+
+declare module 'cloudflare:workers' {
+  export = CloudflareWorkersModule;
 }
