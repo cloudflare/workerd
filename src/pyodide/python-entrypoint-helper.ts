@@ -179,16 +179,37 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     // shouldn't be part of the snapshot and should filtered out in filterPythonScriptImports.
     if (pyodide.version === '0.26.0a2') {
       // Inject at cloudflare.workers for backwards compatibility
-      pyodide.FS.mkdir(`${sitePackages}/cloudflare`);
-      await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+      pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`);
+      await injectSitePackagesModule(
+        pyodide,
+        'workers-api/src/workers/__init__',
+        'cloudflare/workers/__init__'
+      );
+      await injectSitePackagesModule(
+        pyodide,
+        'workers-api/src/workers/_workers',
+        'cloudflare/workers/_workers'
+      );
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
-    await injectSitePackagesModule(pyodide, '_workers', '_workers');
-
     // Create workers package structure with workflows submodule
     pyodide.FS.mkdir(`${sitePackages}/workers`);
-    await injectSitePackagesModule(pyodide, 'workers', 'workers/__init__');
-    await injectSitePackagesModule(pyodide, 'workflows', 'workers/workflows');
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/__init__',
+      'workers/__init__'
+    );
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/_workers',
+      'workers/_workers'
+    );
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/workflows',
+      'workers/workflows'
+    );
+    await injectSitePackagesModule(pyodide, 'workers-api/src/asgi', 'asgi');
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
@@ -201,7 +222,6 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     ) {
       await applyPatch(pyodide, 'httpx');
     }
-    await injectSitePackagesModule(pyodide, 'asgi', 'asgi');
   });
 }
 
