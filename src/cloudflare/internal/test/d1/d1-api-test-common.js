@@ -43,7 +43,8 @@ export const itShould = async (description, ...assertions) => {
   }
 };
 
-// Make it easy to specify only a the meta properties we're interested in
+// Make it easy to specify only a the meta properties we're interested in.
+// Anything specified here as `anything` won't be checked.
 const meta = (values) => ({
   duration: anything,
   served_by: anything,
@@ -56,6 +57,7 @@ const meta = (values) => ({
   size_after: anything,
   rows_read: anything,
   rows_written: anything,
+  total_attempts: anything,
   ...values,
 });
 
