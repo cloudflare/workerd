@@ -90,10 +90,11 @@ class WorkerLoader: public jsg::Object {
     // If `null`, block the global outbound (all requests throw errors).
     jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> globalOutbound;
 
-    // TODO(someday): cache API outbound?
+    // Specify tail workers.
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> tails;
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> streamingTails;
 
-    // TODO(someday): Support specifying a list of tail workers. These should work similarly to
-    //   globalOutbound.
+    // TODO(someday): cache API outbound?
 
     JSG_STRUCT(compatibilityDate,
         compatibilityFlags,
@@ -101,7 +102,9 @@ class WorkerLoader: public jsg::Object {
         mainModule,
         modules,
         env,
-        globalOutbound);
+        globalOutbound,
+        tails,
+        streamingTails);
   };
 
   jsg::Ref<WorkerStub> get(

@@ -294,6 +294,64 @@ export let nullGlobalOutbound = {
   },
 };
 
+// We need to bounce the tail event through an actor to receive it back in the execution context
+// that set up the dynamic tail. `RendezvousActor` helps with that.
+export class RendezvousActor extends DurableObject {
+  promiseAndResolvers = Promise.withResolvers();
+
+  resolve(value) {
+    this.promiseAndResolvers.resolve(value);
+  }
+
+  wait() {
+    return this.promiseAndResolvers.promise;
+  }
+}
+
+export class TestTail extends WorkerEntrypoint {
+  async tail(event) {
+    // HACK: Currently, tail events are not serializable over RPC. :(
+    event = JSON.parse(JSON.stringify(event));
+
+    await this.ctx.exports.RendezvousActor.getByName('tails').resolve({
+      props: this.ctx.props,
+      event,
+    });
+  }
+}
+
+// Test tail worker on dynamically-loaded worker.
+export let tails = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('tails', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                console.log("hello, tail");
+                return new Response("OK");
+              },
+            }
+          `,
+        },
+
+        tails: [ctx.exports.TestTail({ props: { foo: 123 } })],
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'OK');
+
+    let { props, event } =
+      await ctx.exports.RendezvousActor.getByName('tails').wait();
+    assert.deepEqual(props, { foo: 123 });
+    assert.strictEqual(event[0].logs[0].message[0], 'hello, tail');
+  },
+};
+
 export class GreeterFacet extends DurableObject {
   async greet(name) {
     return `${this.ctx.props.greeting}, ${name}?`;
