@@ -182,11 +182,12 @@ class LazyWorkerInterface final: public WorkerInterface {
     throwIfInvalidHeaderValue(headers);
     ensureResolve();
     KJ_IF_SOME(w, worker) {
-      co_await w->request(method, url, headers, requestBody, response);
+      co_await w->request(method, url, kj::mv(headers), requestBody, response);
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
       throwIfInvalidHeaderValue(headers);
-      co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
+      co_await KJ_ASSERT_NONNULL(worker)->request(
+          method, url, kj::mv(headers), requestBody, response);
     }
   }
 
@@ -197,11 +198,11 @@ class LazyWorkerInterface final: public WorkerInterface {
       kj::HttpConnectSettings settings) override {
     ensureResolve();
     KJ_IF_SOME(w, worker) {
-      co_await w->connect(host, headers, connection, response, kj::mv(settings));
+      co_await w->connect(host, kj::mv(headers), connection, response, kj::mv(settings));
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
       co_await KJ_ASSERT_NONNULL(worker)->connect(
-          host, headers, connection, response, kj::mv(settings));
+          host, kj::mv(headers), connection, response, kj::mv(settings));
     }
   }
 

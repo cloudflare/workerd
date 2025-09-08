@@ -4442,9 +4442,9 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   throwIfInvalidHeaderValue(headers);
   KJ_IF_SOME(rid, maybeRequestId) {
     ResponseWrapper wrapper(response, kj::mv(rid), kj::mv(signalResponse));
-    co_await inner->request(method, url, headers, requestBody, wrapper);
+    co_await inner->request(method, url, kj::mv(headers), requestBody, wrapper);
   } else {
-    co_await inner->request(method, url, headers, requestBody, response);
+    co_await inner->request(method, url, kj::mv(headers), requestBody, response);
   }
 }
 
@@ -4454,7 +4454,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::connect(kj::StringPtr host,
     kj::HttpService::ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {
   // TODO(someday): EW-7116 Figure out how to represent TCP connections in the devtools network tab.
-  return inner->connect(host, headers, connection, tunnel, kj::mv(settings));
+  return inner->connect(host, kj::mv(headers), connection, tunnel, kj::mv(settings));
 }
 
 // TODO(someday): Log other kinds of subrequests?

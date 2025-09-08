@@ -795,10 +795,10 @@ class Server::ExternalHttpService final: public Service {
       wrappedResponse = response;
       if (parent->rewriter->needsRewriteRequest()) {
         auto rewrite = parent->rewriter->rewriteOutgoingRequest(url, headers, metadata.cfBlobJson);
-        return parent->serviceAdapter->request(method, url, *rewrite.headers, requestBody, *this)
-            .attach(kj::mv(rewrite));
+        return parent->serviceAdapter->request(
+            method, url, kj::mv(*rewrite.headers), requestBody, *this);
       } else {
-        return parent->serviceAdapter->request(method, url, headers, requestBody, *this);
+        return parent->serviceAdapter->request(method, url, kj::mv(headers), requestBody, *this);
       }
     }
 
@@ -808,7 +808,8 @@ class Server::ExternalHttpService final: public Service {
         ConnectResponse& tunnel,
         kj::HttpConnectSettings settings) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::connect()");
-      return parent->serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
+      return parent->serviceAdapter->connect(
+          host, kj::mv(headers), connection, tunnel, kj::mv(settings));
     }
 
     kj::Promise<void> prewarm(kj::StringPtr url) override {
@@ -974,7 +975,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     TRACE_EVENT("workerd", "NetworkService::request()");
-    return serviceAdapter->request(method, url, headers, requestBody, response);
+    return serviceAdapter->request(method, url, kj::mv(headers), requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -987,7 +988,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
     // It represents a proxy-less TCP connection, which means we can simply defer the handling of
     // the connection to the service adapter (likely NetworkHttpClient). Its behavior will be to
     // connect directly to the host over TCP.
-    return serviceAdapter->connect(host, headers, connection, tunnel, kj::mv(settings));
+    return serviceAdapter->connect(host, kj::mv(headers), connection, tunnel, kj::mv(settings));
   }
 
   kj::Promise<void> prewarm(kj::StringPtr url) override {
@@ -1619,7 +1620,8 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       kj::HttpService::Response& response) override {
     try {
       SimpleResponseObserver responseWrapper(&fetchStatus, response);
-      co_await KJ_ASSERT_NONNULL(inner).request(method, url, headers, requestBody, responseWrapper);
+      co_await KJ_ASSERT_NONNULL(inner).request(
+          method, url, kj::mv(headers), requestBody, responseWrapper);
     } catch (...) {
       fetchStatus = 500;
       auto exception = kj::getCaughtExceptionAsKj();
@@ -1635,7 +1637,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
       kj::HttpConnectSettings settings) override {
     try {
       co_return co_await KJ_ASSERT_NONNULL(inner).connect(
-          host, headers, connection, response, settings);
+          host, kj::mv(headers), connection, response, settings);
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
@@ -5034,10 +5036,11 @@ class Server::HttpListener final: public kj::Refcounted {
             { co_return co_await response.sendError(400, "Bad Request", parent.headerTable); });
         auto worker = parent.service->startRequest(kj::mv(metadata));
         co_return co_await worker->request(
-            method, url, *rewrite.headers, requestBody, *wrappedResponse);
+            method, url, kj::mv(*rewrite.headers), requestBody, *wrappedResponse);
       } else {
         auto worker = parent.service->startRequest(kj::mv(metadata));
-        co_return co_await worker->request(method, url, headers, requestBody, *wrappedResponse);
+        co_return co_await worker->request(
+            method, url, kj::mv(headers), requestBody, *wrappedResponse);
       }
     }
 
@@ -5056,7 +5059,8 @@ class Server::HttpListener final: public kj::Refcounted {
 
       // TODO(someday): Deliver connect() event to to worker? For now we call the default
       //   implementation which throws an exception.
-      return kj::HttpService::connect(host, headers, connection, response, kj::mv(settings));
+      return kj::HttpService::connect(
+          host, kj::mv(headers), connection, response, kj::mv(settings));
     }
 
     // ---------------------------------------------------------------------------
