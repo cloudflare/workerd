@@ -1557,13 +1557,13 @@ class ModuleRegistryBase {
  public:
   virtual ~ModuleRegistryBase() noexcept(false) {}
   virtual kj::Own<void> attachToIsolate(
-      Lock& js, const CompilationObserver& observer) KJ_WARN_UNUSED_RESULT = 0;
+      Lock& js, const CompilationObserver& observer) const KJ_WARN_UNUSED_RESULT = 0;
 
   virtual const capnp::SchemaLoader& getSchemaLoader() const = 0;
 };
 
 struct NewContextOptions {
-  kj::Maybe<ModuleRegistryBase&> newModuleRegistry = kj::none;
+  kj::Maybe<const ModuleRegistryBase&> newModuleRegistry = kj::none;
   bool enableWeakRef = false;
 };
 
