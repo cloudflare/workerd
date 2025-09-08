@@ -46,6 +46,11 @@ void HeapTracer::clearWrappers() {
   clearFreelistedShims();
 }
 
+using JSGWrappable = workerd::jsg::Wrappable;
+#if (V8_MAJOR_VERSION >= 14 && V8_MINOR_VERSION >= 1) || (V8_MAJOR_VERSION > 14)
+#define HAS_V8_WRAPPABLE
+#endif
+
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
 // integrate with the GC in order to receive GC visitation callbacks, so that the GC is able to
 // trace through our C++ objects to find what is reachable through them. The only way for us to
@@ -72,9 +77,13 @@ void HeapTracer::clearWrappers() {
 // reused for a future allocation, if that allocation occurs before the next major GC. When a
 // major GC occurs, the freelist is cleared, since any unreachable CppgcShim objects are likely
 // condemned after that point and will be deleted shortly thereafter.
+#ifdef HAS_V8_WRAPPABLE
+class Wrappable::CppgcShim final: public v8::Object::Wrappable {
+#else
 class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
+#endif
  public:
-  CppgcShim(Wrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
+  CppgcShim(JSGWrappable& wrappable): state(Active{kj::addRef(wrappable)}) {
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = *this;
   }
@@ -105,7 +114,11 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
+#ifdef HAS_V8_WRAPPABLE
+  void Trace(cppgc::Visitor* visitor) const override {
+#else
   void Trace(cppgc::Visitor* visitor) const {
+#endif
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(active, Active) {
         active.wrappable->traceFromV8(*visitor);
@@ -119,15 +132,21 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
     }
   }
 
+#ifdef HAS_V8_WRAPPABLE
+  const char* GetHumanReadableName() const override {
+    return "CppgcShim";
+  }
+#endif
+
   struct Active {
-    kj::Own<Wrappable> wrappable;
+    kj::Own<JSGWrappable> wrappable;
   };
 
   // The JavaScript wrapper using this shim was collected in a minor GC. cppgc objects can only
   // be collected in full GC, so we freelist the shim object in the meantime.
   struct Freelisted {
-    kj::Maybe<Wrappable::CppgcShim&> next;
-    kj::Maybe<Wrappable::CppgcShim&>* prev;
+    kj::Maybe<JSGWrappable::CppgcShim&> next;
+    kj::Maybe<JSGWrappable::CppgcShim&>* prev;
     // kj::List doesn't quite work here because the list link is inside a OneOf. Also we want a
     // LIFO list anyway so we don't need a tail pointer, which makes things easier. So we do it
     // manually.
@@ -154,37 +173,37 @@ class Wrappable::CppgcShim final: public cppgc::GarbageCollected<CppgcShim> {
   // the main thread so concurrency is not a concern.
 };
 
-void HeapTracer::addToFreelist(Wrappable::CppgcShim& shim) {
-  auto& freelisted = shim.state.init<Wrappable::CppgcShim::Freelisted>();
+void HeapTracer::addToFreelist(JSGWrappable::CppgcShim& shim) {
+  auto& freelisted = shim.state.init<JSGWrappable::CppgcShim::Freelisted>();
   freelisted.next = freelistedShims;
   KJ_IF_SOME(next, freelisted.next) {
-    next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
+    next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelisted.next;
   }
   freelisted.prev = &freelistedShims;
   freelistedShims = shim;
 }
 
-Wrappable::CppgcShim* HeapTracer::allocateShim(Wrappable& wrappable) {
+JSGWrappable::CppgcShim* HeapTracer::allocateShim(JSGWrappable& wrappable) {
   KJ_IF_SOME(shim, freelistedShims) {
-    freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
+    freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
     KJ_IF_SOME(next, freelistedShims) {
-      next.state.get<Wrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
+      next.state.get<JSGWrappable::CppgcShim::Freelisted>().prev = &freelistedShims;
     }
-    shim.state = Wrappable::CppgcShim::Active{kj::addRef(wrappable)};
+    shim.state = JSGWrappable::CppgcShim::Active{kj::addRef(wrappable)};
     KJ_DASSERT(wrappable.cppgcShim == kj::none);
     wrappable.cppgcShim = shim;
     return &shim;
   } else {
     auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
-    return cppgc::MakeGarbageCollected<Wrappable::CppgcShim>(cppgcAllocHandle, wrappable);
+    return cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, wrappable);
   }
 }
 
 void HeapTracer::clearFreelistedShims() {
   for (;;) {
     KJ_IF_SOME(shim, freelistedShims) {
-      freelistedShims = shim.state.get<Wrappable::CppgcShim::Freelisted>().next;
-      shim.state = Wrappable::CppgcShim::Dead{};
+      freelistedShims = shim.state.get<JSGWrappable::CppgcShim::Freelisted>().next;
+      shim.state = JSGWrappable::CppgcShim::Dead{};
     } else {
       break;
     }
@@ -198,7 +217,7 @@ void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
   // TODO(soon): Track the other fields here?
 }
 
-kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
+kj::Own<JSGWrappable> JSGWrappable::detachWrapper(bool shouldFreelistShim) {
   KJ_IF_SOME(shim, cppgcShim) {
 #if __has_feature(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
     // There's a possibility that the CppgcShim has already been found to be unreachable by a GC
@@ -221,11 +240,12 @@ kj::Own<Wrappable> Wrappable::detachWrapper(bool shouldFreelistShim) {
 #endif
 
     auto& tracer = HeapTracer::getTracer(isolate);
-    auto result = kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<CppgcShim::Active>()).wrappable);
+    auto result =
+        kj::mv(KJ_ASSERT_NONNULL(shim.state.tryGet<JSGWrappable::CppgcShim::Active>()).wrappable);
     if (shouldFreelistShim) {
       tracer.addToFreelist(shim);
     } else {
-      shim.state = CppgcShim::Dead{};
+      shim.state = JSGWrappable::CppgcShim::Dead{};
     }
     wrapper = kj::none;
     cppgcShim = kj::none;
