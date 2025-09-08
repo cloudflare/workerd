@@ -2202,11 +2202,9 @@ class Server::WorkerService final: public Service,
     }
 
     KJ_IF_SOME(w, workerTracer) {
-      if (worker->getIsolate().getApi().getFeatureFlags().getTailWorkerUserSpans()) {
-        auto tracerSpanObserver =
-            kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
-        w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
-      }
+      auto tracerSpanObserver =
+          kj::refcounted<WorkerTracerSpanObserver>(kj::refcounted<SpanSubmitter>(kj::addRef(*w)));
+      w->setUserRequestSpan({kj::mv(tracerSpanObserver)});
     }
     kj::Own<RequestObserver> observer =
         kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
