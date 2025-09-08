@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "python-workers-runtime-types"
+name = "python-workers-runtime-types1"
 version = "0.1.0"
 description = "Python runtime types for Cloudflare Workers"
 requires-python = ">=3.12"
