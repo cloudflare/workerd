@@ -17,7 +17,6 @@ from typing import Any, Never, Protocol, TypedDict, Unpack
 import _pyodide_entrypoint_helper
 import js
 from js import Object
-from workers.workflows import NonRetryableError
 
 import pyodide.http
 from pyodide import __version__ as pyodide_version
@@ -30,6 +29,7 @@ from pyodide.ffi import (
     to_js,
 )
 from pyodide.http import pyfetch
+from workers.workflows import NonRetryableError
 
 
 class Context(Protocol):

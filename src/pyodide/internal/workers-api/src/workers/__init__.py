@@ -1,4 +1,4 @@
-from _workers import (
+from ._workers import (
     Blob,
     BlobEnding,
     BlobValue,
