@@ -180,7 +180,9 @@ def make_fastapi_snapshot(
     ]
 
 
-def make_snapshots(cache: Path, outdir: Path, update_released: bool):
+def make_snapshots(
+    cache: Path, outdir: Path, update_released: bool
+) -> tuple[str, tuple[str, str]]:
     res = []
     for ver, info in bundle_version_info().items():
         if ver.startswith("dev"):
@@ -201,7 +203,7 @@ def make_snapshots(cache: Path, outdir: Path, update_released: bool):
     return res
 
 
-def update_python_metadata_bzl(res):
+def update_python_metadata_bzl(res: tuple[str, tuple[str, str]]):
     """Update python_metadata.bzl file with new snapshot values."""
     metadata_path = (
         Path(__file__).parent.parent.parent / "build" / "python_metadata.bzl"
@@ -232,24 +234,18 @@ def upload_snapshots(outdir: Path):
 
     s3 = client(
         "s3",
-        endpoint_url=f"https://{environ['PROD_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
-        aws_access_key_id=environ["PROD_R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=environ["PROD_R2_SECRET_ACCESS_KEY"],
+        endpoint_url=f"https://{environ['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
+        aws_access_key_id=environ["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=environ["R2_SECRET_ACCESS_KEY"],
         region_name="auto",
     )
 
-    for file in outdir.glob("baseline-*.bin"):
-        s3.upload_file(str(file), "pyodide-capnp-bin", file.name)
-
-    s3 = client(
-        "s3",
-        endpoint_url=f"https://{environ['TEST_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
-        aws_access_key_id=environ["TEST_R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=environ["TEST_R2_SECRET_ACCESS_KEY"],
-        region_name="auto",
-    )
     for file in outdir.glob("*.bin"):
-        s3.upload_file(str(file), "ew-snapshot-tests", file.name)
+        if file.name.startswith("baseline-"):
+            key = "baseline-snapshot/" + hexdigest(file)
+        else:
+            key = "test-snapshot/" + file.name
+        s3.upload_file(str(file), "pyodide-capnp-bin", key)
 
 
 def main() -> int:

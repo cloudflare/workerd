@@ -48,12 +48,9 @@ jobs:
 
       - name: Build and upload Python memory snapshots
         env:
-          PROD_R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
-          PROD_R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
-          PROD_R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
-          TEST_R2_ACCOUNT_ID: ${{ secrets.R2_EW_SNAPSHOT_TESTS_ACCOUNT_ID }}
-          TEST_R2_ACCESS_KEY_ID: ${{ secrets.R2_EW_SNAPSHOT_TESTS_ACCESS_KEY_ID }}
-          TEST_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_EW_SNAPSHOT_TESTS_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.PYODIDE_CAPNP_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.PYODIDE_CAPNP_R2_SECRET_ACCESS_KEY }}
           WORKERD_BINARY: "/tmp/workerd"
         run: |
           bazel build @workerd//src/pyodide:bundle_version_info
