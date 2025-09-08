@@ -550,7 +550,7 @@ class StreamWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     // Parse the URL to extract the path
@@ -572,7 +572,7 @@ class StreamWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {

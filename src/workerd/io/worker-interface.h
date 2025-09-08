@@ -28,7 +28,7 @@ class WorkerInterface: public kj::HttpService {
   // visibility.)
   virtual kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) = 0;
   // TODO(perf): Consider changing this to return Promise<DeferredProxy>. This would allow
@@ -39,7 +39,7 @@ class WorkerInterface: public kj::HttpService {
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
   // than get the default implementation which throws an unimplemented exception.
   virtual kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) = 0;
@@ -176,7 +176,7 @@ class LazyWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     throwIfInvalidHeaderValue(headers);
@@ -191,7 +191,7 @@ class LazyWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
@@ -281,12 +281,12 @@ class RpcWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;

@@ -646,14 +646,14 @@ class Server::ExternalTcpService final: public Service, private WorkerInterface 
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     throwUnsupported();
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override {
@@ -787,7 +787,7 @@ class Server::ExternalHttpService final: public Service {
 
     kj::Promise<void> request(kj::HttpMethod method,
         kj::StringPtr url,
-        const kj::HttpHeaders& headers,
+        kj::HttpHeaders headers,
         kj::AsyncInputStream& requestBody,
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "ExternalHttpServer::request()");
@@ -803,7 +803,7 @@ class Server::ExternalHttpService final: public Service {
     }
 
     kj::Promise<void> connect(kj::StringPtr host,
-        const kj::HttpHeaders& headers,
+        kj::HttpHeaders headers,
         kj::AsyncIoStream& connection,
         ConnectResponse& tunnel,
         kj::HttpConnectSettings settings) override {
@@ -970,7 +970,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     TRACE_EVENT("workerd", "NetworkService::request()");
@@ -978,7 +978,7 @@ class Server::NetworkService final: public Service, private WorkerInterface {
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override {
@@ -1066,7 +1066,7 @@ class Server::DiskDirectoryService final: public Service, private WorkerInterfac
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr urlStr,
-      const kj::HttpHeaders& requestHeaders,
+      kj::HttpHeaders requestHeaders,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     TRACE_EVENT("workerd", "DiskDirectoryService::request()", "url", urlStr.cStr());
@@ -1262,7 +1262,7 @@ class Server::DiskDirectoryService final: public Service, private WorkerInterfac
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
@@ -1400,7 +1400,7 @@ class Server::InspectorService final: public kj::HttpService, public kj::HttpSer
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     // The inspector protocol starts with the debug client sending ordinary HTTP GET requests
@@ -1614,7 +1614,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   // WorkerInterface
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     try {
@@ -1629,7 +1629,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
@@ -5015,7 +5015,7 @@ class Server::HttpListener final: public kj::Refcounted {
 
     kj::Promise<void> request(kj::HttpMethod method,
         kj::StringPtr url,
-        const kj::HttpHeaders& headers,
+        kj::HttpHeaders headers,
         kj::AsyncInputStream& requestBody,
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
@@ -5042,7 +5042,7 @@ class Server::HttpListener final: public kj::Refcounted {
     }
 
     kj::Promise<void> connect(kj::StringPtr host,
-        const kj::HttpHeaders& headers,
+        kj::HttpHeaders headers,
         kj::AsyncIoStream& connection,
         ConnectResponse& response,
         kj::HttpConnectSettings settings) override {

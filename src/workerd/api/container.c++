@@ -118,7 +118,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   // (as opposed to, say, speaking http-over-capnp to the container service).
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     // URLs should have been validated earlier in the stack, so parsing the URL should succeed.
@@ -158,7 +158,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
   // Implements connect(), i.e., forms a raw socket.
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {

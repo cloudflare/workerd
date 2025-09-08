@@ -62,11 +62,11 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override;
@@ -240,7 +240,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
 
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
   throwIfInvalidHeaderValue(headers);
@@ -494,7 +494,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
 }
 
 kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {

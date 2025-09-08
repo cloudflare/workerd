@@ -4225,11 +4225,11 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface {
   KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
@@ -4247,7 +4247,7 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface {
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
   throwIfInvalidHeaderValue(headers);
@@ -4449,7 +4449,7 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
 }
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {

@@ -479,7 +479,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // listeners.
   kj::Promise<DeferredProxy<void>> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response,
       kj::Maybe<kj::StringPtr> cfBlobJson,
