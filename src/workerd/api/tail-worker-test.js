@@ -94,7 +94,7 @@ export const test = {
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"fetch","method":"GET","url":"","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":404}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
       // queue-test.js: queue events
-      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"queue_send","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"queue_send","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"queue_send","spanId":"0000000000000003"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"queue_send","spanId":"0000000000000004"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"queue_send","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"queue","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-delay-secs","value":"2"},{"name":"x-msg-fmt","value":"text"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-fmt","value":"bytes"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"https://fake-host/message","headers":[{"name":"content-type","value":"application/octet-stream"},{"name":"x-msg-fmt","value":"json"}]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
@@ -121,7 +121,7 @@ export const test = {
 
       // tail-worker-test-jsrpc: Regression test for EW-9282 (missing onset event with
       // JsRpcSessionCustomEventImpl). This is derived from tests/js-rpc-test.js.
-      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc","methodName":"nonFunctionProperty"}}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
