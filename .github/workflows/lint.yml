@@ -25,5 +25,5 @@ jobs:
         run: git config core.hooksPath githooks
       - name: Lint
         run: |
-          bazel info output_base # Ensure bazel is initialized before procedding
+          bazel info output_base # Ensure bazel is initialized before proceeding
           python3 ./tools/cross/format.py --check
