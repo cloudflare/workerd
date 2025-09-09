@@ -419,6 +419,11 @@ jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   return jsg::ByteString(str.toString(js));
 }
 
+jsg::ByteString JsDate::toISOString(jsg::Lock& js) const {
+  JsString str(inner->ToISOString());
+  return jsg::ByteString(str.toString(js));
+}
+
 JsDate::operator kj::Date() const {
   return kj::UNIX_EPOCH + (int64_t(inner->ValueOf()) * kj::MILLISECONDS);
 }

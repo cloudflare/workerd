@@ -55,6 +55,10 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toUTCString(js);
 }
 
+static jsg::ByteString toISOString(jsg::Lock& js, kj::Date date) {
+  return js.date(date).toISOString(js);
+}
+
 enum class OptionalMetadata : uint16_t {
   Http = static_cast<uint8_t>(R2ListRequest::IncludeField::HTTP),
   Custom = static_cast<uint8_t>(R2ListRequest::IncludeField::CUSTOM),
@@ -274,7 +278,7 @@ void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Opt
         onlyIfBuilder.setSecondsGranularity(true);
       }
       traceContext.userSpan.setTag(
-          "cloudflare.r2.request.only_if.uploaded_before"_kjc, kj::str(toUTCString(js, d).asPtr()));
+          "cloudflare.r2.request.only_if.uploaded_before"_kjc, kj::str(toISOString(js, d).asPtr()));
     }
     KJ_IF_SOME(d, c.uploadedAfter) {
       onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
@@ -282,7 +286,7 @@ void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Opt
         onlyIfBuilder.setSecondsGranularity(true);
       }
       traceContext.userSpan.setTag(
-          "cloudflare.r2.request.only_if.uploaded_after"_kjc, kj::str(toUTCString(js, d).asPtr()));
+          "cloudflare.r2.request.only_if.uploaded_after"_kjc, kj::str(toISOString(js, d).asPtr()));
     }
   }
 }
@@ -322,7 +326,7 @@ static void addHeadResultSpanTags(
   traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, headResult.getEtag());
   traceContext.userSpan.setTag("cloudflare.r2.response.size"_kjc, headResult.getSize());
   traceContext.userSpan.setTag("cloudflare.r2.response.uploaded"_kjc,
-      kj::str(toUTCString(js, headResult.getUploaded()).asPtr()));
+      kj::str(toISOString(js, headResult.getUploaded()).asPtr()));
   auto checksums = headResult.getChecksums();
   KJ_IF_SOME(md5, checksums.get()->md5) {
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(md5));
@@ -368,7 +372,7 @@ static void addHeadResultSpanTags(
     }
     KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
       traceContext.userSpan.setTag(
-          "cloudflare.r2.response.cache_expiry"_kjc, kj::str(toUTCString(js, ce).asPtr()));
+          "cloudflare.r2.response.cache_expiry"_kjc, kj::str(toISOString(js, ce).asPtr()));
     }
   }
   KJ_IF_SOME(_, headResult.getCustomMetadata()) {
