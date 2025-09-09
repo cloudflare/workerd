@@ -38,7 +38,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::Timer& timer,
       kj::Network& network,
       kj::EntropySource& entropySource,
-      Worker::ConsoleMode consoleMode,
+      Worker::LoggingOptions loggingOptions,
       kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept;
 
@@ -130,8 +130,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
 
   bool experimental = false;
 
-  Worker::ConsoleMode consoleMode;
-  StructuredLogging structuredLogging{StructuredLogging::NO};
+  Worker::LoggingOptions loggingOptions;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
