@@ -10,6 +10,9 @@
 #include "http.h"
 #include "messagechannel.h"
 #include "performance.h"
+#ifdef WORKERD_FUZZILLI
+#include "fuzzilli.h"
+#endif
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -645,8 +648,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_METHOD(fetch);
 
-    //TODO: only enable w/ define
+#ifdef WORKERD_FUZZILLI
     JSG_METHOD(fuzzilli);
+#endif
 
     // Unlike regular interface attributes, which Web IDL requires us to
     // implement as prototype properties, the global scope is special --
