@@ -168,6 +168,20 @@ export function validateString(
   }
 }
 
+export function validateStringArray(
+  value: unknown,
+  name: string
+): asserts value is string[] {
+  validateArray(value, name);
+  for (let i = 0; i < value.length; ++i) {
+    // Don't use validateString here for performance reasons, as
+    // we would generate intermediate strings for the name.
+    if (typeof value[i] !== 'string') {
+      throw new ERR_INVALID_ARG_TYPE(`${name}[${i}]`, 'string', value[i]);
+    }
+  }
+}
+
 export function validateNumber(
   value: unknown,
   name: string,

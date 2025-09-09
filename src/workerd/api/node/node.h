@@ -121,6 +121,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsConsoleModule();
     }
 
+    if (module.getName() == "node:vm"_kj) {
+      return featureFlags.getEnableNodeJsVmModule();
+    }
+
     return true;
   });
 
