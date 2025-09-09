@@ -44,7 +44,7 @@ const replServer :Workerd.Worker = (
   ],
 
   # Latest compatibility date
-  compatibilityDate = "2025-08-08",
+  compatibilityDate = "2024-12-01",
 
   # Enable all compatibility flags for maximum API coverage
   compatibilityFlags = [
@@ -64,40 +64,40 @@ const consumerWorker :Workerd.Worker = (
 	modules = [
 		( name = "consumer", esModule = embed "worker-consume-request.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );
 
 const kvMockWorker :Workerd.Worker = (
 	modules = [
-		( name = "kv", esModule = "export default { fetch() { return new Response('KV mock service'); } }" )
+		( name = "kv", esModule = embed "kv-mock.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );
 
 const d1MockWorker :Workerd.Worker = (
 	modules = [
-		( name = "d1", esModule = "export default { fetch() { return new Response('D1 mock service'); } }" )
+		( name = "d1", esModule = embed "d1-mock.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );
 
 const r2MockWorker :Workerd.Worker = (
 	modules = [
-		( name = "r2", esModule = "export default { fetch() { return new Response('R2 mock service'); } }" )
+		( name = "r2", esModule = embed "r2-mock.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );
 
 const analyticsMockWorker :Workerd.Worker = (
 	modules = [
-		( name = "analytics", esModule = "export default { fetch() { return new Response('Analytics mock service'); } }" )
+		( name = "analytics", esModule = embed "analytics-mock.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );
 
 const queueMockWorker :Workerd.Worker = (
 	modules = [
-		( name = "queue", esModule = "export default { fetch() { return new Response('Queue mock service'); } }" )
+		( name = "queue", esModule = embed "queue-mock.js" )
 	],
-	compatibilityDate = "2025-08-08"
+	compatibilityDate = "2024-12-01"
 );

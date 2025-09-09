@@ -231,7 +231,6 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
     input: RequestInfo | URL,
     init?: RequestInit<RequestInitCfProperties>,
   ): Promise<Response>;
-  fuzzilli(...args: any[]): void;
   self: ServiceWorkerGlobalScope;
   crypto: Crypto;
   caches: CacheStorage;
@@ -362,7 +361,6 @@ declare function fetch(
   input: RequestInfo | URL,
   init?: RequestInit<RequestInitCfProperties>,
 ): Promise<Response>;
-declare function fuzzilli(...args: any[]): void;
 declare const self: ServiceWorkerGlobalScope;
 /**
  * The Web Crypto API provides a set of low-level functions for common cryptographic tasks.
