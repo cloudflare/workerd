@@ -111,9 +111,11 @@ class WorkerdApi final: public Worker::Api {
     };
     struct KvNamespace {
       uint subrequestChannel;
+      kj::String bindingName;
 
       KvNamespace clone() const {
-        return *this;
+        return KvNamespace{
+          .subrequestChannel = subrequestChannel, .bindingName = kj::str(bindingName)};
       }
     };
     struct R2Bucket {
