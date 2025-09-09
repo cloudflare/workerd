@@ -60,6 +60,8 @@ export const test = {
     // Recorded streaming tail worker events, in insertion order,
     let received = Array.from(spans.values());
 
+    console.log(received);
+
     // spans emitted by r2-test.js in execution order
     let expected = [
       {
@@ -209,8 +211,8 @@ export const test = {
         'cloudflare.r2.operation': 'GetObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'rangeOffLen',
-        'cloudflare.r2.response.range.offset': 1n,
-        'cloudflare.r2.response.range.length': 3n,
+        'cloudflare.r2.request.range.offset': 1n,
+        'cloudflare.r2.request.range.length': 3n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
         'cloudflare.r2.response.size': 123,
@@ -244,7 +246,7 @@ export const test = {
         'cloudflare.r2.operation': 'GetObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'rangeSuff',
-        'cloudflare.r2.response.range.suffix': 2n,
+        'cloudflare.r2.request.range.suffix': 2n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
         'cloudflare.r2.response.size': 123,
@@ -867,12 +869,13 @@ export const test = {
         'cloudflare.r2.operation': 'GetObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'ssec',
-        'cloudflare.r2.response.ssec_key': true,
+        'cloudflare.r2.request.ssec_key': true,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
         'cloudflare.r2.response.size': 123,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
+        'cloudflare.r2.response.ssec_key': true,
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },
@@ -948,12 +951,13 @@ export const test = {
         'cloudflare.r2.operation': 'GetObject',
         'cloudflare.r2.bucket': 'r2-test',
         'cloudflare.r2.request.key': 'ssec',
-        'cloudflare.r2.response.ssec_key': true,
+        'cloudflare.r2.request.ssec_key': true,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
         'cloudflare.r2.response.size': 123,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
+        'cloudflare.r2.response.ssec_key': true,
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
       },

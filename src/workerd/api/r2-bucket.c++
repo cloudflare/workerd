@@ -394,7 +394,7 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
               ") must be an integer, not floating point.");
           rangeBuilder.setOffset(static_cast<uint64_t>(offset));
           traceContext.userSpan.setTag(
-              "cloudflare.r2.response.range.offset"_kjc, static_cast<int64_t>(offset));
+              "cloudflare.r2.request.range.offset"_kjc, static_cast<int64_t>(offset));
         }
 
         KJ_IF_SOME(length, r.length) {
@@ -405,7 +405,7 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
 
           rangeBuilder.setLength(static_cast<uint64_t>(length));
           traceContext.userSpan.setTag(
-              "cloudflare.r2.response.range.length"_kjc, static_cast<int64_t>(length));
+              "cloudflare.r2.request.range.length"_kjc, static_cast<int64_t>(length));
         }
         KJ_IF_SOME(suffix, r.suffix) {
           JSG_REQUIRE(r.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
@@ -418,13 +418,14 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
 
           rangeBuilder.setSuffix(static_cast<uint64_t>(suffix));
           traceContext.userSpan.setTag(
-              "cloudflare.r2.response.range.suffix"_kjc, static_cast<int64_t>(suffix));
+              "cloudflare.r2.request.range.suffix"_kjc, static_cast<int64_t>(suffix));
         }
       }
 
       KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
         KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
           builder.setRangeHeader(kj::str(e));
+          traceContext.userSpan.setTag("cloudflare.r2.request.range"_kjc, kj::str(e));
         }
       }
     }
@@ -433,7 +434,7 @@ void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder,
   KJ_IF_SOME(ssecKey, maybeSsecKey) {
     auto ssecBuilder = builder.initSsec();
     ssecBuilder.setKey(ssecKey);
-    traceContext.userSpan.setTag("cloudflare.r2.response.ssec_key"_kjc, true);
+    traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
   }
 }
 
