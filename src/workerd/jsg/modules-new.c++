@@ -67,8 +67,8 @@ constexpr ModuleBundle::Type toModuleBuilderType(ModuleBundle::BuiltinBuilder::T
 // The implementation of Module for ESM.
 class EsModule final: public Module {
  public:
-  explicit EsModule(Url specifier, Type type, Flags flags, kj::ArrayPtr<const char> source)
-      : Module(kj::mv(specifier), type, flags | Flags::ESM | Flags::EVAL),
+  explicit EsModule(Url id, Type type, Flags flags, kj::ArrayPtr<const char> source)
+      : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(source),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
@@ -77,7 +77,7 @@ class EsModule final: public Module {
 
   v8::MaybeLocal<v8::Module> getDescriptor(
       Lock& js, const CompilationObserver& observer) const override {
-    auto metrics = observer.onEsmCompilationStart(js.v8Isolate, kj::str(specifier().getHref()),
+    auto metrics = observer.onEsmCompilationStart(js.v8Isolate, kj::str(id().getHref()),
         type() == Type::BUNDLE ? CompilationObserver::Option::BUNDLE
                                : CompilationObserver::Option::BUILTIN);
 
@@ -87,7 +87,7 @@ class EsModule final: public Module {
     static constexpr int scriptId = -1;
     static constexpr bool resourceIsOpaque = false;
     static constexpr bool isWasm = false;
-    v8::ScriptOrigin origin(js.str(specifier().getHref()), resourceLineOffset, resourceColumnOffset,
+    v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
     auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
@@ -205,12 +205,12 @@ class SyntheticModule final: public Module {
   // The name of the default export.
   static constexpr auto DEFAULT = "default"_kjc;
 
-  SyntheticModule(Url specifier,
+  SyntheticModule(Url id,
       Type type,
       ModuleBundle::BundleBuilder::EvaluateCallback callback,
       kj::Array<kj::String> namedExports,
       Flags flags = Flags::NONE)
-      : Module(kj::mv(specifier), type, flags),
+      : Module(kj::mv(id), type, flags),
         callback(kj::mv(callback)),
         namedExports(kj::mv(namedExports)) {
     // Synthetic modules can never be ESM or Main
@@ -225,7 +225,7 @@ class SyntheticModule final: public Module {
     for (const auto& exp: namedExports) {
       exports[n++] = js.strIntern(exp);
     }
-    return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(specifier().getHref()),
+    return v8::Module::CreateSyntheticModule(js.v8Isolate, js.str(id().getHref()),
         v8::MemorySpan<const v8::Local<v8::String>>(exports.data(), exports.size()),
         evaluationSteps);
   }
@@ -244,7 +244,7 @@ class SyntheticModule final: public Module {
     }
 
     ModuleNamespace ns(module, namedExports);
-    if (!const_cast<SyntheticModule*>(this)->callback(js, specifier(), ns, observer)) {
+    if (!const_cast<SyntheticModule*>(this)->callback(js, id(), ns, observer)) {
       // An exception should already be scheduled with the isolate
       return v8::MaybeLocal<v8::Value>();
     }
@@ -289,21 +289,21 @@ class IsolateModuleRegistry final {
 
   struct SpecifierContext final {
     ResolveContext::Type type;
-    Url specifier;
+    Url id;
     SpecifierContext(const ResolveContext& resolveContext)
         : type(resolveContext.type),
-          specifier(resolveContext.specifier.clone()) {}
+          id(resolveContext.normalizedSpecifier.clone()) {}
     bool operator==(const SpecifierContext& other) const {
-      return type == other.type && specifier == other.specifier;
+      return type == other.type && id == other.id;
     }
     uint hashCode() const {
-      return kj::hashCode(type, specifier);
+      return kj::hashCode(type, id);
     }
   };
 
   struct Entry final {
     HashableV8Ref<v8::Module> key;
-    SpecifierContext specifier;
+    SpecifierContext context;
     const Module& module;
   };
 
@@ -325,14 +325,14 @@ class IsolateModuleRegistry final {
     }
 
     // Nothing found? Aw... fail!
-    JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
+    JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
   }
 
   // Used to implement the async dynamic import of modules (using `await import(...)`)
   // Returns a promise that is resolved once the module is resolved. If any empty
   // v8::MaybeLocal is returned, then an exception has been scheduled with the isolate.
   v8::MaybeLocal<v8::Promise> dynamicResolve(
-      Lock& js, Url specifier, Url referrer, kj::StringPtr rawSpecifier) {
+      Lock& js, Url normalizedSpecifier, Url referrer, kj::StringPtr rawSpecifier) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const CompilationObserver& observer,
                                          const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
@@ -356,8 +356,8 @@ class IsolateModuleRegistry final {
       ResolveContext context = {
         .type = moduleTypeToResolveContextType(referring.module.type()),
         .source = ResolveContext::Source::DYNAMIC_IMPORT,
-        .specifier = specifier,
-        .referrer = referrer,
+        .normalizedSpecifier = normalizedSpecifier,
+        .referrerNormalizedSpecifier = referrer,
         .rawSpecifier = rawSpecifier,
       };
 
@@ -372,7 +372,7 @@ class IsolateModuleRegistry final {
       }
 
       // Nothing found? Aw... fail!
-      JSG_FAIL_REQUIRE(TypeError, kj::str("Module not found: ", specifier.getHref()));
+      JSG_FAIL_REQUIRE(TypeError, kj::str("Module not found: ", normalizedSpecifier.getHref()));
     }, [&](Value exception) -> Promise<Value> {
       return js.rejectedPromise<Value>(kj::mv(exception));
     }));
@@ -391,7 +391,7 @@ class IsolateModuleRegistry final {
   // function will actually return the default export from the module namespace object.
   v8::MaybeLocal<v8::Object> require(
       Lock& js, const ResolveContext& context, RequireOption option = RequireOption::DEFAULT) {
-    static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& specifier,
+    static constexpr auto evaluate = [](Lock& js, Entry& entry, const Url& id,
                                          const CompilationObserver& observer,
                                          const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
@@ -409,7 +409,7 @@ class IsolateModuleRegistry final {
       // is still evaluating.
 
       if (entry.module.isEsm() && status == v8::Module::kEvaluating) {
-        JSG_FAIL_REQUIRE(Error, "Circular dependency when resolving module: ", specifier);
+        JSG_FAIL_REQUIRE(Error, "Circular dependency when resolving module: ", id);
       }
 
       // If the module has already been evaluated, or is in the process of being
@@ -452,7 +452,7 @@ class IsolateModuleRegistry final {
           // microtask queue. This means we've got a pending promise somwwhere
           // that is being awaited preventing the module from being ready to
           // go. We can't have that! Throw! Throw!
-          JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", specifier, "\".");
+          JSG_FAIL_REQUIRE(Error, kTopLevelAwaitError, " Specifier: \"", id, "\".");
         }
       }
       KJ_UNREACHABLE;
@@ -461,17 +461,19 @@ class IsolateModuleRegistry final {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
-        return evaluate(js, found, context.specifier, getObserver(), inner.getEvaluator());
+        return evaluate(
+            js, found, context.normalizedSpecifier, getObserver(), inner.getEvaluator());
       }
 
       KJ_IF_SOME(found, resolveWithCaching(js, context)) {
-        return evaluate(js, found, context.specifier, getObserver(), inner.getEvaluator());
+        return evaluate(
+            js, found, context.normalizedSpecifier, getObserver(), inner.getEvaluator());
       }
 
       if (option == RequireOption::RETURN_EMPTY) {
         return v8::MaybeLocal<v8::Object>();
       }
-      JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.specifier.getHref()));
+      JSG_FAIL_REQUIRE(Error, kj::str("Module not found: ", context.normalizedSpecifier.getHref()));
     }, [&](Value exception) {
       // Use the isolate to rethrow the exception here instead of using the lock.
       js.v8Isolate->ThrowException(exception.getHandle(js));
@@ -512,25 +514,25 @@ class IsolateModuleRegistry final {
 
   struct ContextCallbacks final {
     const SpecifierContext& keyForRow(const Entry& entry) const {
-      return entry.specifier;
+      return entry.context;
     }
-    bool matches(const Entry& entry, const SpecifierContext& specifier) const {
-      return entry.specifier == specifier;
+    bool matches(const Entry& entry, const SpecifierContext& context) const {
+      return entry.context == context;
     }
-    uint hashCode(const SpecifierContext& specifier) const {
-      return specifier.hashCode();
+    uint hashCode(const SpecifierContext& context) const {
+      return context.hashCode();
     }
   };
 
   struct UrlCallbacks final {
     const Url& keyForRow(const Entry& entry) const {
-      return entry.specifier.specifier;
+      return entry.context.id;
     }
-    bool matches(const Entry& entry, const Url& specifier) const {
-      return entry.specifier.specifier == specifier;
+    bool matches(const Entry& entry, const Url& id) const {
+      return entry.context.id == id;
     }
-    uint hashCode(const Url& specifier) const {
-      return specifier.hashCode();
+    uint hashCode(const Url& id) const {
+      return id.hashCode();
     }
   };
 
@@ -544,12 +546,12 @@ class IsolateModuleRegistry final {
       // This is passed along for informational purposes only.
       .source = context.source,
       // The inner registry should ignore all URL query parameters and fragments
-      .specifier = context.specifier.clone(
+      .normalizedSpecifier = context.normalizedSpecifier.clone(
           Url::EquivalenceOption::IGNORE_FRAGMENTS | Url::EquivalenceOption::IGNORE_SEARCH),
       // The referrer is passed along for informational purposes only.
-      .referrer = context.referrer,
+      .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
     };
-    KJ_IF_SOME(found, inner.resolve(innerContext)) {
+    KJ_IF_SOME(found, inner.lookup(innerContext)) {
       return kj::Maybe<Entry&>(lookupCache.upsert(
           Entry{
             .key = HashableV8Ref<v8::Module>(
@@ -558,7 +560,7 @@ class IsolateModuleRegistry final {
             // innerContext that was created. This is because we want to use the original
             // specifier URL (with query parameters and fragments) as part of the key for
             // the lookup cache.
-            .specifier = context,
+            .context = context,
             .module = found,
           },
           [](auto&, auto&&) {}));
@@ -603,7 +605,7 @@ void importMeta(
   try {
     js.tryCatch([&] {
       KJ_IF_SOME(found, registry.lookup(js, module)) {
-        auto href = found.specifier.specifier.getHref();
+        auto href = found.context.id.getHref();
 
         // V8's documentation says that the host should set the properties
         // using CreateDataProperty.
@@ -722,8 +724,8 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
           ResolveContext context = {
             .type = ResolveContext::Type::BUILTIN_ONLY,
             .source = ResolveContext::Source::DYNAMIC_IMPORT,
-            .specifier = normalized,
-            .referrer = referrer,
+            .normalizedSpecifier = normalized,
+            .referrerNormalizedSpecifier = referrer,
             .rawSpecifier = processSpec,
           };
           return registry.dynamicResolve(js, kj::mv(normalized), kj::mv(referrer), processSpec);
@@ -790,7 +792,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     auto& referrerUrl = registry.lookup(js, referrer)
                             .map([&](IsolateModuleRegistry::Entry& entry) -> const Url& {
       type = moduleTypeToResolveContextType(entry.module.type());
-      return entry.specifier.specifier;
+      return entry.context.id;
     }).orDefault(registry.getBundleBase());
 
     // If Node.js Compat v2 mode is enable, we have to check to see if the specifier
@@ -810,8 +812,8 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
         ResolveContext resolveContext = {
           .type = ResolveContext::Type::BUILTIN_ONLY,
           .source = ResolveContext::Source::STATIC_IMPORT,
-          .specifier = normalized,
-          .referrer = referrerUrl,
+          .normalizedSpecifier = normalized,
+          .referrerNormalizedSpecifier = referrerUrl,
           .rawSpecifier = processSpec,
         };
         return registry.resolve(js, resolveContext);
@@ -824,8 +826,8 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
       ResolveContext resolveContext = {
         .type = type,
         .source = ResolveContext::Source::STATIC_IMPORT,
-        .specifier = normalized,
-        .referrer = referrerUrl,
+        .normalizedSpecifier = normalized,
+        .referrerNormalizedSpecifier = referrerUrl,
         .rawSpecifier = spec.asPtr(),
       };
       // TODO(soon): Add import attributes to the context.
@@ -852,19 +854,19 @@ class FallbackModuleBundle final: public ModuleBundle {
       : ModuleBundle(Type::FALLBACK),
         callback(kj::mv(callback)) {}
 
-  kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
+  kj::Maybe<Resolved> lookup(const ResolveContext& context) override {
     // Maybe it's an alias? If so, we just return the aliased specifier.
     // We don't resolve again because the alias might be to a specifier
     // in another bundle. We should start the resolution process over
     // from the start.
-    KJ_IF_SOME(found, aliases.find(context.specifier)) {
+    KJ_IF_SOME(found, aliases.find(context.normalizedSpecifier)) {
       return Resolved{
         .specifier = kj::str(found),
       };
     }
 
     // Maybe it's already cached? If so, we just return the cached module.
-    KJ_IF_SOME(found, storage.find(context.specifier)) {
+    KJ_IF_SOME(found, storage.find(context.normalizedSpecifier)) {
       return Resolved{
         .module = *found,
       };
@@ -877,10 +879,10 @@ class FallbackModuleBundle final: public ModuleBundle {
           // We got an alias back. Store it and return it, unless it's an alias
           // to itself, in which case return kj::none. It's possible that a buggy
           // fallback resolver could end up in an infinite loop of aliasing.
-          if (str == context.specifier.getHref()) {
+          if (str == context.normalizedSpecifier.getHref()) {
             return kj::none;
           }
-          aliases.insert(context.specifier.clone(), kj::str(str));
+          aliases.insert(context.normalizedSpecifier.clone(), kj::str(str));
           return Resolved{
             .specifier = kj::mv(str),
           };
@@ -890,15 +892,15 @@ class FallbackModuleBundle final: public ModuleBundle {
           // If the fallback service returned a module with a specifier that
           // already exists in storage, ignore it and return kj::none. We can't
           // have two different modules with the same specifier in the bundle.
-          if (storage.find(module.specifier()) != kj::none) {
+          if (storage.find(module.id()) != kj::none) {
             return kj::none;
           }
-          storage.insert(module.specifier().clone(), kj::mv(resolved));
-          if (context.specifier != module.specifier()) {
+          storage.insert(module.id().clone(), kj::mv(resolved));
+          if (context.normalizedSpecifier != module.id()) {
             // We checked for the existence of the specifier alias above so this
             // insert should always succeed. In debug mode, let's check.
-            KJ_DASSERT(aliases.find(context.specifier) == kj::none);
-            aliases.insert(context.specifier.clone(), kj::str(module.specifier().getHref()));
+            KJ_DASSERT(aliases.find(context.normalizedSpecifier) == kj::none);
+            aliases.insert(context.normalizedSpecifier.clone(), kj::str(module.id().getHref()));
           }
           return Resolved{
             .module = module,
@@ -930,23 +932,23 @@ class StaticModuleBundle final: public ModuleBundle {
         aliases(kj::mv(aliases)) {}
   KJ_DISALLOW_COPY_AND_MOVE(StaticModuleBundle);
 
-  kj::Maybe<Resolved> resolve(const ResolveContext& context) override {
+  kj::Maybe<Resolved> lookup(const ResolveContext& context) override {
     // Is it an alias? If so, we just return the aliased specifier.
-    KJ_IF_SOME(aliased, aliases.find(context.specifier)) {
+    KJ_IF_SOME(aliased, aliases.find(context.normalizedSpecifier)) {
       return Resolved{
         .specifier = kj::str(aliased.getHref()),
       };
     }
 
     // It's not an alias, maybe it's already cached?
-    KJ_IF_SOME(cached, cache.find(context.specifier)) {
+    KJ_IF_SOME(cached, cache.find(context.normalizedSpecifier)) {
       return Resolved{
         .module = checkModule(context, *cached),
       };
     }
 
     // Not aliased or cached, we need to look it up.
-    KJ_IF_SOME(found, modules.find(context.specifier)) {
+    KJ_IF_SOME(found, modules.find(context.normalizedSpecifier)) {
       KJ_IF_SOME(resolved, found(context)) {
         KJ_SWITCH_ONEOF(resolved) {
           KJ_CASE_ONEOF(str, kj::String) {
@@ -956,7 +958,7 @@ class StaticModuleBundle final: public ModuleBundle {
           }
           KJ_CASE_ONEOF(resolved, kj::Own<Module>) {
             const Module& module = *resolved;
-            cache.insert(context.specifier.clone(), kj::mv(resolved));
+            cache.insert(context.normalizedSpecifier.clone(), kj::mv(resolved));
             return Resolved{
               .module = checkModule(context, module),
             };
@@ -1008,22 +1010,22 @@ void ModuleBundle::getBuiltInBundleFromCapnp(
 
   for (auto module: bundle.getModules()) {
     if (module.getType() == filter) {
-      auto specifier = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
+      auto id = KJ_ASSERT_NONNULL(Url::tryParse(module.getName()));
       switch (module.which()) {
         case workerd::jsg::Module::SRC: {
-          builder.addEsm(specifier, module.getSrc().asChars());
+          builder.addEsm(id, module.getSrc().asChars());
           continue;
         }
         case workerd::jsg::Module::WASM: {
-          builder.addSynthetic(specifier, Module::newWasmModuleHandler(module.getWasm().asBytes()));
+          builder.addSynthetic(id, Module::newWasmModuleHandler(module.getWasm().asBytes()));
           continue;
         }
         case workerd::jsg::Module::DATA: {
-          builder.addSynthetic(specifier, Module::newDataModuleHandler(module.getData().asBytes()));
+          builder.addSynthetic(id, Module::newDataModuleHandler(module.getData().asBytes()));
           continue;
         }
         case workerd::jsg::Module::JSON: {
-          builder.addSynthetic(specifier, Module::newJsonModuleHandler(module.getJson().asArray()));
+          builder.addSynthetic(id, Module::newJsonModuleHandler(module.getJson().asArray()));
           continue;
         }
       }
@@ -1036,21 +1038,21 @@ ModuleBundle::ModuleBundle(Type type): type_(type) {}
 
 ModuleBundle::Builder::Builder(Type type): type_(type) {}
 
-ModuleBundle::Builder& ModuleBundle::Builder::alias(const Url& alias, const Url& specifier) {
+ModuleBundle::Builder& ModuleBundle::Builder::alias(const Url& alias, const Url& id) {
   auto aliasNormed = alias.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   if (modules_.find(aliasNormed) != kj::none || aliases_.find(aliasNormed) != kj::none) {
     KJ_FAIL_REQUIRE(kj::str("Module \"", aliasNormed.getHref(), "\" already added to bundle"));
   }
-  aliases_.insert(kj::mv(aliasNormed), specifier.clone(Url::EquivalenceOption::NORMALIZE_PATH));
+  aliases_.insert(kj::mv(aliasNormed), id.clone(Url::EquivalenceOption::NORMALIZE_PATH));
   return *this;
 }
 
 ModuleBundle::Builder& ModuleBundle::Builder::add(
-    const Url& specifier, Builder::ResolveCallback callback) {
-  if (modules_.find(specifier) != kj::none || aliases_.find(specifier) != kj::none) {
-    KJ_FAIL_REQUIRE(kj::str("Module \"", specifier.getHref(), "\" already added to bundle"));
+    const Url& id, Builder::ResolveCallback callback) {
+  if (modules_.find(id) != kj::none || aliases_.find(id) != kj::none) {
+    KJ_FAIL_REQUIRE(kj::str("Module \"", id.getHref(), "\" already added to bundle"));
   }
-  modules_.insert(specifier.clone(), kj::mv(callback));
+  modules_.insert(id.clone(), kj::mv(callback));
   return *this;
 }
 
@@ -1058,10 +1060,10 @@ kj::Own<ModuleBundle> ModuleBundle::Builder::finish() {
   return kj::heap<StaticModuleBundle>(type_, kj::mv(modules_), kj::mv(aliases_));
 }
 
-void ModuleBundle::Builder::ensureIsNotBundleSpecifier(const Url& specifier) {
+void ModuleBundle::Builder::ensureIsNotBundleSpecifier(const Url& id) {
   // The file: protocol is reserved for bundle type modules.
-  KJ_REQUIRE(specifier.getProtocol() != "file:"_kjc,
-      "The file: protocol is reserved for bundle type modules");
+  KJ_REQUIRE(
+      id.getProtocol() != "file:"_kjc, "The file: protocol is reserved for bundle type modules");
 }
 
 // ======================================================================================
@@ -1071,8 +1073,8 @@ ModuleBundle::BundleBuilder::BundleBuilder(const jsg::Url& bundleBase)
       bundleBase(bundleBase) {}
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
-    kj::StringPtr specifier, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
+    kj::StringPtr name, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
+  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
@@ -1087,8 +1089,8 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 }
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr specifier, kj::ArrayPtr<const char> source, Module::Flags flags) {
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
+    kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
+  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
   url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
   add(url,
@@ -1101,10 +1103,10 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 }
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::alias(
-    kj::StringPtr alias, kj::StringPtr specifier) {
+    kj::StringPtr alias, kj::StringPtr name) {
   auto aliasUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(alias));
-  auto specifierUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(specifier));
-  Builder::alias(aliasUrl, specifierUrl);
+  auto id = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
+  Builder::alias(aliasUrl, id);
   return *this;
 }
 
@@ -1114,10 +1116,10 @@ ModuleBundle::BuiltinBuilder::BuiltinBuilder(Type type)
     : ModuleBundle::Builder(toModuleBuilderType(type)) {}
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
-    const Url& specifier, ModuleBundle::BundleBuilder::EvaluateCallback callback) {
-  ensureIsNotBundleSpecifier(specifier);
-  Builder::add(specifier,
-      [url = specifier.clone(), callback = kj::mv(callback), type = type()](
+    const Url& id, ModuleBundle::BundleBuilder::EvaluateCallback callback) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     kj::Own<Module> mod = Module::newSynthetic(kj::mv(url), type, kj::mv(callback));
@@ -1127,10 +1129,10 @@ ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addSynthetic(
 }
 
 ModuleBundle::BuiltinBuilder& ModuleBundle::BuiltinBuilder::addEsm(
-    const Url& specifier, kj::ArrayPtr<const char> source) {
-  ensureIsNotBundleSpecifier(specifier);
-  Builder::add(specifier,
-      [url = specifier.clone(), source, type = type()](const ResolveContext& context) mutable
+    const Url& id, kj::ArrayPtr<const char> source) {
+  ensureIsNotBundleSpecifier(id);
+  Builder::add(id,
+      [url = id.clone(), source, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
     kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, source);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
@@ -1203,13 +1205,13 @@ kj::Own<void> ModuleRegistry::attachToIsolate(Lock& js, const CompilationObserve
 
 kj::Maybe<ModuleRegistry::ModuleOrRedirect> ModuleRegistry::tryFindInBundle(
     const ResolveContext& context, ModuleBundle& bundle, const Url& bundleBase) {
-  KJ_IF_SOME(found, bundle.resolve(context)) {
+  KJ_IF_SOME(found, bundle.lookup(context)) {
     KJ_IF_SOME(str, found.specifier) {
       // We received a redirect to another module specifier. Let's
       // start resolution over again with the new specifier... but only
       // if we can successfully parse the specifier as a URL.
-      KJ_IF_SOME(specifier, jsg::Url::tryParse(str.asPtr(), bundleBase.getHref())) {
-        return kj::Maybe(kj::mv(specifier));
+      KJ_IF_SOME(id, jsg::Url::tryParse(str.asPtr(), bundleBase.getHref())) {
+        return kj::Maybe(kj::mv(id));
       }
     }
     KJ_IF_SOME(module, found.module) {
@@ -1247,9 +1249,10 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
         ResolveContext ctx{                                                                        \
           .type = context.type,                                                                    \
           .source = context.source,                                                                \
-          .specifier = url,                                                                        \
-          .referrer = context.referrer.clone(),                                                    \
-          .rawSpecifier = context.rawSpecifier.map([](auto& str) { return kj::str(str); }),        \
+          .normalizedSpecifier = url,                                                              \
+          .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,                      \
+          .rawSpecifier =                                                                          \
+              context.rawSpecifier.map([](auto& str) -> kj::StringPtr { return str; }),            \
           .attributes = kj::mv(clonedAttrs),                                                       \
         };                                                                                         \
         return lookupImpl(impl, ctx, true);                                                        \
@@ -1286,9 +1289,10 @@ kj::Maybe<const Module&> ModuleRegistry::lookupImpl(
   return kj::none;
 }
 
-kj::Maybe<const Module&> ModuleRegistry::resolve(const ResolveContext& context) const {
+kj::Maybe<const Module&> ModuleRegistry::lookup(const ResolveContext& context) const {
   // If the embedder supports it, collect metrics on what modules were resolved.
-  auto metrics = observer.onResolveModule(context.specifier, context.type, context.source);
+  auto metrics =
+      observer.onResolveModule(context.normalizedSpecifier, context.type, context.source);
 
   // While multiple threads may be holing references to the registry, only one thread
   // at a time may resolve a module. Resolving a module may involve mutating internal
@@ -1320,8 +1324,8 @@ kj::Maybe<JsObject> ModuleRegistry::tryResolveModuleNamespace(Lock& js,
   ResolveContext context{
     .type = type,
     .source = source,
-    .specifier = normalized,
-    .referrer = maybeReferrer.orDefault(bound.getBundleBase()),
+    .normalizedSpecifier = normalized,
+    .referrerNormalizedSpecifier = maybeReferrer.orDefault(bound.getBundleBase()),
     .rawSpecifier = specifier,
   };
   v8::TryCatch tryCatch(js.v8Isolate);
@@ -1348,10 +1352,7 @@ JsValue ModuleRegistry::resolve(Lock& js,
 
 // ======================================================================================
 
-Module::Module(Url specifier, Type type, Flags flags)
-    : specifier_(kj::mv(specifier)),
-      type_(type),
-      flags_(flags) {}
+Module::Module(Url id, Type type, Flags flags): id_(kj::mv(id)), type_(type), flags_(flags) {}
 
 kj::Maybe<jsg::Promise<Value>> Module::Evaluator::operator()(jsg::Lock& js,
     const Module& module,
@@ -1385,26 +1386,22 @@ bool Module::isMain() const {
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {
-  if (context.specifier != specifier()) return false;
+  if (context.normalizedSpecifier != id()) return false;
   // TODO(soon): Check the import attributes in the context.
   return true;
 }
 
-kj::Own<Module> Module::newSynthetic(Url specifier,
-    Type type,
-    EvaluateCallback callback,
-    kj::Array<kj::String> namedExports,
-    Flags flags) {
-  return kj::heap<SyntheticModule>(
-      kj::mv(specifier), type, kj::mv(callback), kj::mv(namedExports), flags);
+kj::Own<Module> Module::newSynthetic(
+    Url id, Type type, EvaluateCallback callback, kj::Array<kj::String> namedExports, Flags flags) {
+  return kj::heap<SyntheticModule>(kj::mv(id), type, kj::mv(callback), kj::mv(namedExports), flags);
 }
 
-kj::Own<Module> Module::newEsm(Url specifier, Type type, kj::Array<const char> code, Flags flags) {
-  return kj::heap<EsModule>(kj::mv(specifier), type, flags, code).attach(kj::mv(code));
+kj::Own<Module> Module::newEsm(Url id, Type type, kj::Array<const char> code, Flags flags) {
+  return kj::heap<EsModule>(kj::mv(id), type, flags, code).attach(kj::mv(code));
 }
 
-kj::Own<Module> Module::newEsm(Url specifier, Type type, kj::ArrayPtr<const char> code) {
-  return kj::heap<EsModule>(kj::mv(specifier), type, Flags::ESM, code);
+kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {
+  return kj::heap<EsModule>(kj::mv(id), type, Flags::ESM, code);
 }
 
 Module::ModuleNamespace::ModuleNamespace(
@@ -1441,7 +1438,7 @@ kj::ArrayPtr<const kj::StringPtr> Module::ModuleNamespace::getNamedExports() con
 // from multiple threads. The callbacks must be thread-safe and idempotent.
 
 Module::EvaluateCallback Module::newTextModuleHandler(kj::ArrayPtr<const char> data) {
-  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+  return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
     return js.tryCatch([&] { return ns.setDefault(js, js.str(data)); }, [&](Value exception) {
       js.v8Isolate->ThrowException(exception.getHandle(js));
@@ -1451,7 +1448,7 @@ Module::EvaluateCallback Module::newTextModuleHandler(kj::ArrayPtr<const char> d
 }
 
 Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byte> data) {
-  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+  return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver&) -> bool {
     return js.tryCatch([&] {
       auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, data.size());
@@ -1466,7 +1463,7 @@ Module::EvaluateCallback Module::newDataModuleHandler(kj::ArrayPtr<const kj::byt
 }
 
 Module::EvaluateCallback Module::newJsonModuleHandler(kj::ArrayPtr<const char> data) {
-  return [data](Lock& js, const Url& specifier, const ModuleNamespace& ns,
+  return [data](Lock& js, const Url& id, const ModuleNamespace& ns,
              const CompilationObserver& observer) -> bool {
     return js.tryCatch([&] {
       auto metrics = observer.onJsonCompilationStart(js.v8Isolate, data.size());
@@ -1482,8 +1479,8 @@ Module::EvaluateCallback Module::newWasmModuleHandler(kj::ArrayPtr<const kj::byt
   struct Cache final {
     kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> mutex{};
   };
-  return [data, cache = kj::heap<Cache>()](Lock& js, const Url& specifier,
-             const ModuleNamespace& ns, const CompilationObserver& observer) mutable -> bool {
+  return [data, cache = kj::heap<Cache>()](Lock& js, const Url& id, const ModuleNamespace& ns,
+             const CompilationObserver& observer) mutable -> bool {
     return js.tryCatch([&]() -> bool {
       js.setAllowEval(true);
       KJ_DEFER(js.setAllowEval(false));
