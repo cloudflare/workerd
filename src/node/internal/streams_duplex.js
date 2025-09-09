@@ -26,24 +26,33 @@
 /* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { Readable } from 'node-internal:streams_readable';
-import { ok as assert } from 'node-internal:internal_assert';
-import { Writable } from 'node-internal:streams_writable';
-import { Stream } from 'node-internal:streams_legacy';
+import { Buffer } from 'node-internal:internal_buffer';
 import {
-  newStreamDuplexFromReadableWritablePair,
-  newReadableWritablePairFromDuplex,
-} from 'node-internal:streams_adapters';
+  Readable,
+  newReadableStreamFromStreamReadable,
+} from 'node-internal:streams_readable';
+import {
+  Writable,
+  newWritableStreamFromStreamWritable,
+} from 'node-internal:streams_writable';
+import { ok as assert } from 'node-internal:internal_assert';
+import { Stream } from 'node-internal:streams_legacy';
 import { nextTick } from 'node-internal:internal_process';
+
+import { validateBoolean, validateObject } from 'node-internal:validators';
+
+import { normalizeEncoding } from 'node-internal:internal_utils';
 
 import {
   addAbortSignal,
   destroyer,
   eos,
+  isDestroyed,
   isReadable,
   isWritable,
   isIterable,
   isNodeStream,
+  isWritableEnded,
   isReadableNodeStream,
   isWritableNodeStream,
   isDuplexNodeStream,
@@ -54,8 +63,17 @@ import {
 import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
   ERR_INVALID_RETURN_VALUE,
+  ERR_STREAM_PREMATURE_CLOSE,
 } from 'node-internal:internal_errors';
+
+/**
+ * @typedef {import('./readablestream').ReadableWritablePair
+ * } ReadableWritablePair
+ * @typedef {import('../../stream').Duplex} Duplex
+ */
+const encoder = new TextEncoder();
 
 Object.setPrototypeOf(Duplex.prototype, Readable.prototype);
 Object.setPrototypeOf(Duplex, Readable);
@@ -651,4 +669,255 @@ export function duplexPair(options) {
   side0[kInitOtherSide](side1);
   side1[kInitOtherSide](side0);
   return [side0, side1];
+}
+
+/**
+ * @param {Duplex} duplex
+ * @returns {ReadableWritablePair}
+ */
+export function newReadableWritablePairFromDuplex(
+  duplex,
+  createTypeBytes = false
+) {
+  // Not using the internal/streams/utils isWritableNodeStream and
+  // isReadableNodeStream utilities here because they will return false
+  // if the duplex was created with writable or readable options set to
+  // false. Instead, we'll check the readable and writable state after
+  // and return closed WritableStream or closed ReadableStream as
+  // necessary.
+  if (
+    typeof duplex?._writableState !== 'object' ||
+    typeof duplex?._readableState !== 'object'
+  ) {
+    throw new ERR_INVALID_ARG_TYPE('duplex', 'stream.Duplex', duplex);
+  }
+
+  if (isDestroyed(duplex)) {
+    const writable = new WritableStream();
+    const readable = new ReadableStream();
+    writable.close();
+    readable.cancel();
+    return { readable, writable };
+  }
+
+  const writable = isWritable(duplex)
+    ? newWritableStreamFromStreamWritable(duplex)
+    : new WritableStream();
+
+  if (!isWritable(duplex)) writable.close();
+
+  const readableOptions = createTypeBytes ? { type: 'bytes' } : {};
+  const readable = isReadable(duplex)
+    ? newReadableStreamFromStreamReadable(duplex, {}, createTypeBytes)
+    : new ReadableStream(readableOptions);
+
+  if (!isReadable(duplex)) readable.cancel();
+
+  return { writable, readable };
+}
+
+/**
+ * @param {ReadableWritablePair} pair
+ * @param {{
+ *   allowHalfOpen? : boolean,
+ *   decodeStrings? : boolean,
+ *   encoding? : string,
+ *   highWaterMark? : number,
+ *   objectMode? : boolean,
+ *   signal? : AbortSignal,
+ * }} [options]
+ * @returns {Duplex}
+ */
+export function newStreamDuplexFromReadableWritablePair(
+  pair = {},
+  options = {}
+) {
+  validateObject(pair, 'pair');
+  const { readable: readableStream, writable: writableStream } = pair;
+
+  if (!(readableStream instanceof ReadableStream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'pair.readable',
+      'ReadableStream',
+      readableStream
+    );
+  }
+  if (!(writableStream instanceof WritableStream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'pair.writable',
+      'WritableStream',
+      writableStream
+    );
+  }
+
+  validateObject(options, 'options');
+  const {
+    allowHalfOpen = false,
+    objectMode = false,
+    encoding,
+    decodeStrings = true,
+    highWaterMark,
+    signal,
+  } = options;
+
+  validateBoolean(objectMode, 'options.objectMode');
+  if (encoding !== undefined && !Buffer.isEncoding(encoding))
+    throw new ERR_INVALID_ARG_VALUE(encoding, 'options.encoding');
+
+  const writer = writableStream.getWriter();
+  const reader = readableStream.getReader();
+  let writableClosed = false;
+  let readableClosed = false;
+
+  const duplex = new Duplex({
+    allowHalfOpen,
+    highWaterMark,
+    objectMode,
+    encoding,
+    decodeStrings,
+    signal,
+
+    writev(chunks, callback) {
+      function done(error) {
+        error = error.filter((e) => e);
+        try {
+          callback(error.length === 0 ? undefined : error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => destroy.call(duplex, error));
+        }
+      }
+
+      writer.ready.then(() => {
+        return Promise.all(
+          chunks.map((data) => {
+            return writer.write(data);
+          })
+        ).then(done, done);
+      }, done);
+    },
+
+    write(chunk, encoding, callback) {
+      if (typeof chunk === 'string' && decodeStrings && !objectMode) {
+        const enc = normalizeEncoding(encoding);
+
+        if (enc === 'utf8') {
+          chunk = encoder.encode(chunk);
+        } else {
+          chunk = Buffer.from(chunk, encoding);
+          chunk = new Uint8Array(
+            chunk.buffer,
+            chunk.byteOffset,
+            chunk.byteLength
+          );
+        }
+      }
+
+      function done(error) {
+        try {
+          callback(error);
+        } catch (error) {
+          destroy.call(duplex, error);
+        }
+      }
+
+      writer.ready.then(() => {
+        return writer.write(chunk).then(done, done);
+      }, done);
+    },
+
+    final(callback) {
+      function done(error) {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => destroy.call(duplex, error));
+        }
+      }
+
+      if (!writableClosed) {
+        writer.close().then(done, done);
+      }
+    },
+
+    read() {
+      reader.read().then(
+        (chunk) => {
+          if (chunk.done) {
+            duplex.push(null);
+          } else {
+            duplex.push(chunk.value);
+          }
+        },
+        (error) => destroy.call(duplex, error)
+      );
+    },
+
+    destroy(error, callback) {
+      function done() {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => {
+            throw error;
+          });
+        }
+      }
+
+      async function closeWriter() {
+        if (!writableClosed) await writer.abort(error);
+      }
+
+      async function closeReader() {
+        if (!readableClosed) await reader.cancel(error);
+      }
+
+      if (!writableClosed || !readableClosed) {
+        Promise.all([closeWriter(), closeReader()]).then(done, done);
+        return;
+      }
+
+      done();
+    },
+  });
+
+  writer.closed.then(
+    () => {
+      writableClosed = true;
+      if (!isWritableEnded(duplex))
+        destroy.call(duplex, new ERR_STREAM_PREMATURE_CLOSE());
+    },
+    (error) => {
+      writableClosed = true;
+      readableClosed = true;
+      destroy.call(duplex, error);
+    }
+  );
+
+  reader.closed.then(
+    () => {
+      readableClosed = true;
+    },
+    (error) => {
+      writableClosed = true;
+      readableClosed = true;
+      destroy.call(duplex, error);
+    }
+  );
+
+  return duplex;
 }
