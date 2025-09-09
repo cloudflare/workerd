@@ -28,7 +28,7 @@ const jsg::Url BASE = "file:///"_url;
 
 struct ResolveObserverImpl: public ResolveObserver {
   struct Request {
-    Url specifier;
+    Url id;
     ResolveObserver::Context context;
     ResolveObserver::Source source;
     bool found = false;
@@ -47,9 +47,9 @@ struct ResolveObserverImpl: public ResolveObserver {
   };
 
   kj::Own<ResolveObserver::ResolveStatus> onResolveModule(
-      const Url& specifier, Context context, Source source) const override {
+      const Url& id, Context context, Source source) const override {
     modules.add(Request{
-      .specifier = specifier.clone(),
+      .id = id.clone(),
       .context = context,
       .source = source,
     });
@@ -133,11 +133,11 @@ KJ_TEST("An empty registry") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  KJ_ASSERT(registry->resolve(context) == kj::none);
+  KJ_ASSERT(registry->lookup(context) == kj::none);
 
   KJ_ASSERT(observer.modules.size() == 1);
   KJ_ASSERT(observer.modules[0].found == false);
@@ -158,11 +158,11 @@ KJ_TEST("A empty fallback bundle") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  KJ_ASSERT(fallback->resolve(context) == kj::none);
+  KJ_ASSERT(fallback->lookup(context) == kj::none);
   KJ_ASSERT(called);
 }
 
@@ -178,11 +178,11 @@ KJ_TEST("An empty user bundle") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  KJ_ASSERT(bundle->resolve(context) == kj::none);
+  KJ_ASSERT(bundle->lookup(context) == kj::none);
 }
 
 // ======================================================================================
@@ -197,11 +197,11 @@ KJ_TEST("An empty built-in bundle") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  KJ_ASSERT(bundle->resolve(context) == kj::none);
+  KJ_ASSERT(bundle->lookup(context) == kj::none);
 }
 
 // ======================================================================================
@@ -228,11 +228,11 @@ KJ_TEST("A registry with empty bundles") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  KJ_ASSERT(registry->resolve(context) == kj::none);
+  KJ_ASSERT(registry->lookup(context) == kj::none);
   KJ_ASSERT(observer.modules.size() == 1);
   KJ_ASSERT(observer.modules[0].found == false);
 }
@@ -247,19 +247,19 @@ KJ_TEST("A user bundle with a single ESM module") {
 
   auto bundle = builder.finish();
 
-  const auto specifier = "file:///foo"_url;
+  const auto id = "file:///foo"_url;
 
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = specifier,
-    .referrer = BASE,
+    .normalizedSpecifier = id,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+  auto resolved = KJ_ASSERT_NONNULL(bundle->lookup(context));
   auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
-  KJ_ASSERT(module.specifier() == specifier);
+  KJ_ASSERT(module.id() == id);
   KJ_ASSERT(module.isEsm());
   KJ_ASSERT(module.isMain());
   KJ_ASSERT(module.type() == Module::Type::BUNDLE);
@@ -286,14 +286,14 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = foo,
-      .referrer = BASE,
+      .normalizedSpecifier = foo,
+      .referrerNormalizedSpecifier = BASE,
     };
 
-    auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(bundle->lookup(context));
     auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
-    KJ_ASSERT(module.specifier() == foo);
+    KJ_ASSERT(module.id() == foo);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUNDLE);
@@ -303,14 +303,14 @@ KJ_TEST("A user bundle with an ESM module and a Synthetic module") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = BASE,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = BASE,
     };
 
-    auto resolved = KJ_ASSERT_NONNULL(bundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(bundle->lookup(context));
     auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUNDLE);
@@ -350,13 +350,13 @@ KJ_TEST("A built-in bundle with two modules") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = foo,
-      .referrer = foo,
+      .normalizedSpecifier = foo,
+      .referrerNormalizedSpecifier = foo,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
 
-    KJ_ASSERT(module.specifier() == foo);
+    KJ_ASSERT(module.id() == foo);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
@@ -366,21 +366,21 @@ KJ_TEST("A built-in bundle with two modules") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = bar,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = bar,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
 
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
   }
 
   KJ_ASSERT(observer.modules.size() == 2);
-  KJ_ASSERT(observer.modules[0].specifier == foo);
-  KJ_ASSERT(observer.modules[1].specifier == bar);
+  KJ_ASSERT(observer.modules[0].id == foo);
+  KJ_ASSERT(observer.modules[1].id == bar);
 }
 
 // ======================================================================================
@@ -406,13 +406,13 @@ KJ_TEST("Built-in and Built-in only bundles") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = foo,
-      .referrer = foo,
+      .normalizedSpecifier = foo,
+      .referrerNormalizedSpecifier = foo,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
 
-    KJ_ASSERT(module.specifier() == foo);
+    KJ_ASSERT(module.id() == foo);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
@@ -422,25 +422,25 @@ KJ_TEST("Built-in and Built-in only bundles") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = bar,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = bar,
     };
 
     // Built-in only modules cannot be resolved from a bundle context.
-    KJ_ASSERT(registry->resolve(context) == kj::none);
+    KJ_ASSERT(registry->lookup(context) == kj::none);
   }
 
   {
     ResolveContext context = {
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = bar,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = bar,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
 
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
@@ -450,13 +450,13 @@ KJ_TEST("Built-in and Built-in only bundles") {
     ResolveContext context = {
       .type = ResolveContext::Type::BUILTIN_ONLY,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = bar,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = bar,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
 
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
@@ -495,18 +495,18 @@ KJ_TEST("Fallback bundle that returns something") {
       observer, BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
   auto registry = registryBuilder.add(kj::mv(fallback)).finish();
 
-  const auto specifier = "file:///foo"_url;
+  const auto id = "file:///foo"_url;
 
   {
     ResolveContext context{
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
 
-    auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
-    KJ_ASSERT(module.specifier() == specifier);
+    auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
+    KJ_ASSERT(module.id() == id);
     KJ_ASSERT(module.type() == Module::Type::FALLBACK);
     KJ_ASSERT(!module.isEsm());
   }
@@ -516,22 +516,22 @@ KJ_TEST("Fallback bundle that returns something") {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
 
-    KJ_ASSERT(registry->resolve(context) == kj::none);
+    KJ_ASSERT(registry->lookup(context) == kj::none);
   }
 
   {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN_ONLY,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
 
-    KJ_ASSERT(registry->resolve(context) == kj::none);
+    KJ_ASSERT(registry->lookup(context) == kj::none);
   }
 }
 
@@ -561,9 +561,10 @@ KJ_TEST("Fallback bundles are not permitted in production") {
   ModuleRegistry::Builder registryBuilder(observer, BASE);
   try {
     registryBuilder.add(ModuleBundle::newFallbackBundle([](const ResolveContext& context) {
-      kj::Own<Module> mod = Module::newSynthetic(context.specifier.clone(), Module::Type::FALLBACK,
-          [](Lock&, const Url&, const Module::ModuleNamespace&,
-              const CompilationObserver&) -> bool { KJ_FAIL_ASSERT("Should not be called"); });
+      kj::Own<Module> mod =
+          Module::newSynthetic(context.normalizedSpecifier.clone(), Module::Type::FALLBACK,
+              [](Lock&, const Url&, const Module::ModuleNamespace&,
+                  const CompilationObserver&) -> bool { KJ_FAIL_ASSERT("Should not be called"); });
       return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
     }));
     KJ_FAIL_ASSERT("Expected an exception");
@@ -587,7 +588,7 @@ KJ_TEST("Compound Registry") {
 
   registryBuilder.add(ModuleBundle::newFallbackBundle(
       [&](const ResolveContext& context) -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    if (context.specifier != foo) return kj::none;
+    if (context.normalizedSpecifier != foo) return kj::none;
     kj::Own<Module> mod = Module::newSynthetic(foo.clone(), Module::Type::FALLBACK,
         [](Lock&, const Url&, const Module::ModuleNamespace&, const CompilationObserver&) -> bool {
       KJ_FAIL_ASSERT("should not have been called");
@@ -611,21 +612,20 @@ KJ_TEST("Compound Registry") {
 
   auto registry = registryBuilder.finish();
 
-  constexpr auto resolve = [](const auto& registry, ResolveContext::Type type,
-                               const Url& specifier) {
+  constexpr auto resolve = [](const auto& registry, ResolveContext::Type type, const Url& id) {
     ResolveContext context{
       .type = type,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
-    return registry->resolve(context);
+    return registry->lookup(context);
   };
 
   {
     // The fallback module is resolved when using a bundle context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, foo));
-    KJ_ASSERT(module.specifier() == foo);
+    KJ_ASSERT(module.id() == foo);
     KJ_ASSERT(module.type() == Module::Type::FALLBACK);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
@@ -634,7 +634,7 @@ KJ_TEST("Compound Registry") {
   {
     // A built-in module is resolved when using a bundle context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, bar));
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(!module.isMain());
@@ -643,7 +643,7 @@ KJ_TEST("Compound Registry") {
   {
     // A bundle module is resolved when using a bundle context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUNDLE, qux));
-    KJ_ASSERT(module.specifier() == qux);
+    KJ_ASSERT(module.id() == qux);
     KJ_ASSERT(module.type() == Module::Type::BUNDLE);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(module.isMain());
@@ -652,7 +652,7 @@ KJ_TEST("Compound Registry") {
   {
     // A built-in module is resolved when using a builtin context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN, bar));
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN);
     KJ_ASSERT(module.isEsm());
     KJ_ASSERT(!module.isMain());
@@ -661,7 +661,7 @@ KJ_TEST("Compound Registry") {
   {
     // A built-in only module is resolved when using a built-in context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN, baz));
-    KJ_ASSERT(module.specifier() == baz);
+    KJ_ASSERT(module.id() == baz);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
@@ -670,7 +670,7 @@ KJ_TEST("Compound Registry") {
   {
     // A built-in only module is resolved when using a built-in only context
     auto& module = KJ_ASSERT_NONNULL(resolve(registry, ResolveContext::Type::BUILTIN_ONLY, baz));
-    KJ_ASSERT(module.specifier() == baz);
+    KJ_ASSERT(module.id() == baz);
     KJ_ASSERT(module.type() == Module::Type::BUILTIN_ONLY);
     KJ_ASSERT(!module.isEsm());
     KJ_ASSERT(!module.isMain());
@@ -715,12 +715,12 @@ KJ_TEST("Bundle shadows built-in") {
   ResolveContext context{
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = foo,
-    .referrer = BASE,
+    .normalizedSpecifier = foo,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  auto& module = KJ_ASSERT_NONNULL(registry->resolve(context));
-  KJ_ASSERT(module.specifier() == foo);
+  auto& module = KJ_ASSERT_NONNULL(registry->lookup(context));
+  KJ_ASSERT(module.id() == foo);
   KJ_ASSERT(module.type() == Module::Type::BUNDLE);
   KJ_ASSERT(module.isEsm());
   KJ_ASSERT(module.isMain());
@@ -746,15 +746,15 @@ KJ_TEST("Attaching a module registry works") {
 
     auto registry = registryBuilder.finish();
 
-    const auto specifier = "file:///main"_url;
+    const auto id = "file:///main"_url;
 
     ResolveContext resolveContext{
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
-    KJ_ASSERT(registry->resolve(resolveContext) != kj::none);
+    KJ_ASSERT(registry->lookup(resolveContext) != kj::none);
 
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
@@ -854,15 +854,15 @@ KJ_TEST("Basic types of modules work (text, data, json, wasm)") {
 
     auto registry = registryBuilder.finish();
 
-    const auto specifier = "file:///worker"_url;
+    const auto id = "file:///worker"_url;
 
     ResolveContext resolveContext{
       .type = ResolveContext::Type::BUNDLE,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = specifier,
-      .referrer = BASE,
+      .normalizedSpecifier = id,
+      .referrerNormalizedSpecifier = BASE,
     };
-    auto& resolved KJ_UNUSED = KJ_ASSERT_NONNULL(registry->resolve(resolveContext));
+    auto& resolved KJ_UNUSED = KJ_ASSERT_NONNULL(registry->lookup(resolveContext));
 
     auto attached = registry->attachToIsolate(js, compilationObserver);
 
@@ -908,12 +908,12 @@ KJ_TEST("compileEvalFunction in synthetic module works") {
     ResolveObserver resolveObserver;
     ModuleBundle::BundleBuilder bundleBuilder(BASE);
     bundleBuilder.addSyntheticModule("abc",
-        [](Lock& js, const Url& specifier, const Module::ModuleNamespace& ns,
+        [](Lock& js, const Url& id, const Module::ModuleNamespace& ns,
             const CompilationObserver& observer) mutable -> bool {
       // The compileEvalFunction is used in CommonJs/Node.js compat modules to
       // evaluate the module as a function rather than as an ESM. This test just
       // verifies that compileEvalFunction works as expected.
-      auto ext = js.alloc<TestType>(js, specifier);
+      auto ext = js.alloc<TestType>(js, id);
       auto& wrapper = TestIsolate_TypeWrapper::from(js.v8Isolate);
       auto fn = Module::compileEvalFunction(js, "bar(123);"_kj, "foo"_kj,
           JsObject(wrapper.wrap(js, js.v8Context(), kj::none, ext.addRef())), observer);
@@ -1523,13 +1523,13 @@ KJ_TEST("Building a bundle from a capnp description works") {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = foo,
-      .referrer = BASE,
+      .normalizedSpecifier = foo,
+      .referrerNormalizedSpecifier = BASE,
     };
-    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->lookup(context));
     auto& module = KJ_ASSERT_NONNULL(resolved.module);
 
-    KJ_ASSERT(module.specifier() == foo);
+    KJ_ASSERT(module.id() == foo);
   }
 
   {
@@ -1537,12 +1537,12 @@ KJ_TEST("Building a bundle from a capnp description works") {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = bar,
-      .referrer = BASE,
+      .normalizedSpecifier = bar,
+      .referrerNormalizedSpecifier = BASE,
     };
-    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->lookup(context));
     auto& module = KJ_ASSERT_NONNULL(resolved.module);
-    KJ_ASSERT(module.specifier() == bar);
+    KJ_ASSERT(module.id() == bar);
   }
 
   {
@@ -1550,12 +1550,12 @@ KJ_TEST("Building a bundle from a capnp description works") {
     ResolveContext context{
       .type = ResolveContext::Type::BUILTIN,
       .source = ResolveContext::Source::INTERNAL,
-      .specifier = qux,
-      .referrer = BASE,
+      .normalizedSpecifier = qux,
+      .referrerNormalizedSpecifier = BASE,
     };
-    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->resolve(context));
+    auto resolved = KJ_ASSERT_NONNULL(moduleBundle->lookup(context));
     auto& module = KJ_ASSERT_NONNULL(resolved.module);
-    KJ_ASSERT(module.specifier() == qux);
+    KJ_ASSERT(module.id() == qux);
   }
 
   PREAMBLE([&](Lock& js) {
@@ -1648,14 +1648,14 @@ KJ_TEST("Fallback service can see original raw specifier if provided") {
   ModuleRegistry::Builder builder(
       resolveObserver, BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
   auto rawSpecifier = "nothing"_kjc;
-  const auto specifier = "file:///nothing"_url;
+  const auto id = "file:///nothing"_url;
 
   bool called = false;
 
   builder.add(ModuleBundle::newFallbackBundle([&](const ResolveContext& context) {
     KJ_ASSERT(context.rawSpecifier == rawSpecifier);
-    KJ_ASSERT(context.specifier == specifier);
-    KJ_ASSERT(context.referrer == BASE);
+    KJ_ASSERT(context.normalizedSpecifier == id);
+    KJ_ASSERT(context.referrerNormalizedSpecifier == BASE);
     called = true;
     return kj::none;
   }));
@@ -1665,12 +1665,12 @@ KJ_TEST("Fallback service can see original raw specifier if provided") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = specifier,
-    .referrer = BASE,
+    .normalizedSpecifier = id,
+    .referrerNormalizedSpecifier = BASE,
     .rawSpecifier = rawSpecifier,
   };
 
-  KJ_ASSERT(registry->resolve(context) == kj::none);
+  KJ_ASSERT(registry->lookup(context) == kj::none);
   KJ_ASSERT(called);
 }
 
@@ -1683,7 +1683,7 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
   ModuleRegistry::Builder builder(
       resolveObserver, BASE, ModuleRegistry::Builder::Options::ALLOW_FALLBACK);
   auto rawSpecifier = "nothing"_kjc;
-  const auto specifier = "file:///nothing"_url;
+  const auto id = "file:///nothing"_url;
   const auto url = "file:///different"_url;
 
   int called = 0;
@@ -1700,28 +1700,28 @@ KJ_TEST("Fallback service can return a module with a different specifier") {
   ResolveContext context = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = specifier,
-    .referrer = BASE,
+    .normalizedSpecifier = id,
+    .referrerNormalizedSpecifier = BASE,
     .rawSpecifier = rawSpecifier,
   };
 
-  auto& module1 = KJ_ASSERT_NONNULL(registry->resolve(context));
+  auto& module1 = KJ_ASSERT_NONNULL(registry->lookup(context));
 
   ResolveContext context2 = {
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = url,
-    .referrer = BASE,
+    .normalizedSpecifier = url,
+    .referrerNormalizedSpecifier = BASE,
     .rawSpecifier = rawSpecifier,
   };
 
-  auto& module2 = KJ_ASSERT_NONNULL(registry->resolve(context2));
+  auto& module2 = KJ_ASSERT_NONNULL(registry->lookup(context2));
 
-  auto& module3 = KJ_ASSERT_NONNULL(registry->resolve(context));
+  auto& module3 = KJ_ASSERT_NONNULL(registry->lookup(context));
 
   // Both specifiers should resolve to the same module so the called count should be 1.
   KJ_ASSERT(called == 1);
-  KJ_ASSERT(module1.specifier() == url);
+  KJ_ASSERT(module1.id() == url);
   KJ_ASSERT(&module1 == &module2);
   KJ_ASSERT(&module2 == &module3);
 }
@@ -1803,19 +1803,19 @@ KJ_TEST("Aliased modules (import maps) work") {
   ResolveContext contextBar{
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "file:///bar"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "file:///bar"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
   ResolveContext contextFoo{
     .type = ResolveContext::Type::BUNDLE,
     .source = ResolveContext::Source::INTERNAL,
-    .specifier = "http://example/foo"_url,
-    .referrer = BASE,
+    .normalizedSpecifier = "http://example/foo"_url,
+    .referrerNormalizedSpecifier = BASE,
   };
 
-  auto& bar = KJ_ASSERT_NONNULL(registry->resolve(contextBar));
-  auto& foo = KJ_ASSERT_NONNULL(registry->resolve(contextFoo));
+  auto& bar = KJ_ASSERT_NONNULL(registry->lookup(contextBar));
+  auto& foo = KJ_ASSERT_NONNULL(registry->lookup(contextFoo));
 
   // The aliases resolve to the same underlying module...
   KJ_ASSERT(&bar == &foo);

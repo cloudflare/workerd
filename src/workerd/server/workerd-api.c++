@@ -1258,11 +1258,11 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
           [fallbackService = kj::str(fallbackService), featureFlags](
               const jsg::modules::ResolveContext& context)
               -> kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>> {
-        auto specifier = kj::str(context.specifier.getHref());
-        auto referrer = kj::str(context.referrer.getHref());
+        auto normalizedSpecifier = kj::str(context.normalizedSpecifier.getHref());
+        auto referrer = kj::str(context.referrerNormalizedSpecifier.getHref());
         KJ_IF_SOME(resolved,
             workerd::fallback::tryResolve(workerd::fallback::Version::V2,
-                workerd::fallback::ImportType::IMPORT, fallbackService, specifier,
+                workerd::fallback::ImportType::IMPORT, fallbackService, normalizedSpecifier,
                 context.rawSpecifier.orDefault(nullptr), referrer, context.attributes)) {
           KJ_SWITCH_ONEOF(resolved) {
             KJ_CASE_ONEOF(str, kj::String) {
@@ -1274,7 +1274,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
               // The fallback service returned a module definition.
               // We need to convert that into a Module instance.
               auto mod = readModuleConf(*def, featureFlags, kj::none);
-              KJ_IF_SOME(specifier, jsg::Url::tryParse(mod.name)) {
+              KJ_IF_SOME(id, jsg::Url::tryParse(mod.name)) {
                 // Note that unlike the regular case, the module content returned
                 // by the fallback service is not guaranteed to be memory-resident.
                 // We need to copy the content into a heap-allocated arrays and
@@ -1282,7 +1282,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                 KJ_SWITCH_ONEOF(mod.content) {
                   KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newEsm(kj::mv(specifier),
+                        jsg::modules::Module::newEsm(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             kj::heapArray<const char>(content.body)));
                   }
@@ -1290,7 +1290,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     auto ownedData = kj::str(content.body);
                     auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                        jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newTextModuleHandler(ptr))
                             .attach(kj::mv(ownedData)));
@@ -1299,7 +1299,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     auto ownedData = kj::heapArray<uint8_t>(content.body);
                     auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                        jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newDataModuleHandler(ptr))
                             .attach(kj::mv(ownedData)));
@@ -1308,7 +1308,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     auto ownedData = kj::heapArray<uint8_t>(content.body);
                     auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                        jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newWasmModuleHandler(ptr))
                             .attach(kj::mv(ownedData)));
@@ -1317,7 +1317,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                     auto ownedData = kj::heapArray<const char>(content.body);
                     auto ptr = ownedData.asPtr();
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                        jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newJsonModuleHandler(ptr))
                             .attach(kj::mv(ownedData)));
@@ -1330,7 +1330,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                       named = n;
                     }
                     return kj::Maybe<kj::OneOf<kj::String, kj::Own<jsg::modules::Module>>>(
-                        jsg::modules::Module::newSynthetic(kj::mv(specifier),
+                        jsg::modules::Module::newSynthetic(kj::mv(id),
                             jsg::modules::Module::Type::FALLBACK,
                             jsg::modules::Module::newCjsStyleModuleHandler<
                                 api::CommonJsModuleContext, JsgWorkerdIsolate_TypeWrapper>(
@@ -1357,7 +1357,7 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
                 }
                 KJ_UNREACHABLE;
               }
-              KJ_LOG(WARNING, "Fallback service returned an invalid specifier");
+              KJ_LOG(WARNING, "Fallback service returned an invalid id");
               return kj::none;
             }
           }
