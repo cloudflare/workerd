@@ -181,7 +181,7 @@ export const test = {
         'cloudflare.r2.response.returned_objects': 1n,
         'cloudflare.r2.response.delimited_prefixes': 0n,
         'cloudflare.r2.response.truncated': true,
-        'cloudflare.r2.response.cursor': true,
+        'cloudflare.r2.response.cursor': 'ai',
         closed: true,
       },
       {
@@ -416,7 +416,6 @@ export const test = {
         'cloudflare.r2.response.returned_objects': 1n,
         'cloudflare.r2.response.delimited_prefixes': 0n,
         'cloudflare.r2.response.truncated': false,
-        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {
@@ -532,7 +531,6 @@ export const test = {
         'cloudflare.r2.response.returned_objects': 1n,
         'cloudflare.r2.response.delimited_prefixes': 0n,
         'cloudflare.r2.response.truncated': false,
-        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {
@@ -621,7 +619,6 @@ export const test = {
         'cloudflare.r2.response.returned_objects': 1n,
         'cloudflare.r2.response.delimited_prefixes': 0n,
         'cloudflare.r2.response.truncated': false,
-        'cloudflare.r2.response.cursor': false,
         closed: true,
       },
       {

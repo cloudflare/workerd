@@ -1201,12 +1201,9 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
           int64_t(result.delimitedPrefixes.size()));
       traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
-      KJ_IF_SOME(_, result.cursor) {
-        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, true);
-      } else {
-        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, false);
+      KJ_IF_SOME(cursor, result.cursor) {
+        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, kj::str(cursor));
       }
-
       return kj::mv(result);
     });
   });
