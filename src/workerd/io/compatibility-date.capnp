@@ -1048,10 +1048,17 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Removes APIs that reached end-of-life in Node.js 24.x. When using the
 	# removeNodejsCompatEOL flag, this will default enable on/after 2028-04-30.
 
-	enableNodeJsConsoleModule @120 :Bool
+  enableNodeJsConsoleModule @120 :Bool
     $compatEnableFlag("enable_nodejs_console_module")
     $compatDisableFlag("disable_nodejs_console_module")
     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
   # Enables the Node.js console module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsVmModule @121 :Bool
+    $compatEnableFlag("enable_nodejs_vm_module")
+    $compatDisableFlag("disable_nodejs_vm_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
+  # Enables the Node.js non-functional stub vm module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
 }
