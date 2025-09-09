@@ -6,17 +6,6 @@
 
 namespace workerd::api {
 
-// NOLINTBEGIN(edgeworker-mutable-globals)
-struct shmem_data* __shmem = nullptr;
-uint32_t* __edges_start = nullptr;
-uint32_t* __edges_stop = nullptr;
-// NOLINTEND(edgeworker-mutable-globals)
-
-void __sanitizer_cov_reset_edgeguards() {
-  uint64_t N = 0;
-  for (uint32_t* x = __edges_start; x < __edges_stop && N < MAX_EDGES; x++) *x = ++N;
-}
-
 namespace {
 static constexpr auto EVAL_STR = "eval"_kjc;
 static constexpr auto ANON_STR = "anonymous"_kjc;

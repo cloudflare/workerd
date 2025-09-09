@@ -4,14 +4,15 @@
 
 #include "global-scope.h"
 
+#include "fuzzilli.h"
 #include "simdutf.h"
 
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/fuzzilli.h>
 #include <workerd/api/hibernatable-web-socket.h>
-#include <workerd/api/immediate-crash.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/trace.h>
@@ -729,37 +730,14 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
   return js.str(result.first(written));
 }
 
-//Fuzzilli required macros
-#define REPRL_CRFD 100
-#define REPRL_CWFD 101
-#define REPRL_DRFD 102
-#define REPRL_DWFD 103
-#define USE(...)                                                                                   \
-  do {                                                                                             \
-    (void)(__VA_ARGS__);                                                                           \
-  } while (false)
-
-void perform_wild_write() {
-  // Access an invalid address.
-  // We want to use an "interesting" address for the access (instead of
-  // e.g. nullptr). In the (unlikely) case that the address is actually
-  // mapped, simply increment the pointer until it crashes.
-  // The cast ensures that this works correctly on both 32-bit and 64-bit.
-  uintptr_t addr = static_cast<uintptr_t>(0x414141414141ull);
-  char* ptr = reinterpret_cast<char*>(addr);
-  for (int i = 0; i < 1024; i++) {
-    *ptr = 'A';
-    ptr += 1 * 1024 * 1024;
-  }
-}
-
+#ifdef WORKERD_FUZZILLI
 void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Value> value = v8::Local<v8::Value>::Cast(args[0].getHandle(isolate));
   v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
   v8::String::Utf8Value operation(js.v8Isolate, str);
   if (*operation == nullptr) {
-    printf("Operation was null...\n");
+    KJ_LOG(ERROR, "Fuzzilli operation was null...\n");
     fflush(stdout);
     return;
   }
@@ -768,7 +746,7 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
     auto maybeArg =
         v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
     if (!maybeArg.IsJust()) {
-      printf("Maybe arg is empty...\n");
+      KJ_LOG(ERROR, "Maybe arg is empty...\n");
       fflush(stdout);
       return;
     }
@@ -815,27 +793,6 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
         memset(vec.data(), 42, 0x100);
         break;
       }
-      case 7: {
-        // if (i::v8_flags.hole_fuzzing) {
-        //   // This should crash with a segmentation fault only
-        //   // when --hole-fuzzing is used.
-        //   char* ptr = reinterpret_cast<char*>(0x414141414141ull);
-        //   for (int i = 0; i < 1024; i++) {
-        //     *ptr = 'A';
-        //     ptr += 1 * GB;
-        //   }
-        // }
-        break;
-      }
-      case 8: {
-        // This allows Fuzzilli to check that DEBUG is defined, which should be
-        // the case if dcheck_always_on is set. This is useful for fuzzing as
-        // there are some integrity checks behind DEBUG.
-        // #ifdef DEBUG
-        //         IMMEDIATE_CRASH();
-        // #endif
-        break;
-      }
       default:
         assert(0);
         break;
@@ -857,6 +814,7 @@ void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value
     fflush(fzliout);
   }
 }
+#endif
 
 jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
   auto decoded = kj::decodeBase64(data.asArray());

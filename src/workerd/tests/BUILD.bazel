@@ -130,10 +130,9 @@ wd_cc_binary(
     includes = [
         "libreprl",
     ],
-    #tags = ["no-arm64"],
     target_compatible_with = [
         "@platforms//os:linux",
-        #    "@platforms//cpu:x86_64",
     ],
     visibility = ["//visibility:public"],
+    deps = [":test-fixture"],
 )

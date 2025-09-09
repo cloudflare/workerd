@@ -35,6 +35,9 @@
   },
   "files.associations": {
     "*.inc": "cpp",
-    "chrono": "cpp"
+    "chrono": "cpp",
+    "cstdint": "cpp",
+    "string": "cpp",
+    "stdexcept": "cpp"
   }
 }

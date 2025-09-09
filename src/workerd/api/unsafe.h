@@ -15,16 +15,9 @@
 #include <unistd.h>
 #endif
 
+#include "fuzzilli.h"
+
 namespace workerd::api {
-
-struct shmem_data {
-  uint32_t num_edges;
-  unsigned char edges[];
-};
-
-#define SHM_SIZE 0x200000
-#define MAX_EDGES ((SHM_SIZE - 4) * 8)
-void __sanitizer_cov_reset_edgeguards();
 
 // A special binding object that allows for dynamic evaluation.
 class UnsafeEval: public jsg::Object {
@@ -79,20 +72,6 @@ class UnsafeEval: public jsg::Object {
     JSG_METHOD(newWasmModule);
   }
 };
-
-// Define the REPRL file descriptors
-#define REPRL_CRFD 100
-#define REPRL_CWFD 101
-#define REPRL_DRFD 102
-#define REPRL_DWFD 103
-
-#define CHECK(condition)                                                                           \
-  do {                                                                                             \
-    if (!(condition)) {                                                                            \
-      fprintf(stderr, "Error: %s:%d: condition failed: %s\n", __FILE__, __LINE__, #condition);     \
-      exit(EXIT_FAILURE);                                                                          \
-    }                                                                                              \
-  } while (0)
 
 // A special binding that allows access to stdin. Used for REPL.
 class Stdin: public jsg::Object {
@@ -192,7 +171,9 @@ class Stdin: public jsg::Object {
 
   JSG_RESOURCE_TYPE(Stdin) {
     JSG_METHOD(getline);
+#ifdef WORKERD_FUZZILLI
     JSG_METHOD(reprl);
+#endif
   }
 };
 
