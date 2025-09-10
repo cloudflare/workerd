@@ -1,7 +1,9 @@
 declare namespace ArtifactBundler {
+  type SnapshotType = 'baseline' | 'dedicated' | 'package';
   type MemorySnapshotResult = {
     snapshot: Uint8Array;
     importedModulesList: string[];
+    snapshotType: SnapshotType;
   };
 
   const hasMemorySnapshot: () => boolean;
