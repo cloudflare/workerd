@@ -149,6 +149,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsClusterModule();
     }
 
+    if (module.getName() == "node:worker_threads"_kj) {
+      return featureFlags.getEnableNodeJsWorkerThreadsModule();
+    }
+
     return true;
   });
 
