@@ -42,7 +42,7 @@ class LoopbackServiceStub: public Fetcher {
       type LoopbackServiceStub<
         T extends Rpc.WorkerEntrypointBranded | undefined = undefined
       > = Fetcher<T> &
-        ( T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props, any>
+        ( T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
         ? (opts: {props?: Props}) => Fetcher<T>
         : (opts: {props?: any}) => Fetcher<T>);
     );
@@ -95,7 +95,7 @@ class LoopbackDurableObjectClass: public DurableObjectClass {
           | Rpc.DurableObjectBranded
           | undefined = undefined
       > = DurableObjectClass<T> &
-        ( T extends CloudflareWorkersModule.DurableObject<any, infer Props, any>
+        ( T extends CloudflareWorkersModule.DurableObject<any, infer Props>
         ? (opts: {props?: Props}) => DurableObjectClass<T>
         : (opts: {props?: any}) => DurableObjectClass<T>);
     );

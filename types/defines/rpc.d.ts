@@ -242,12 +242,11 @@ declare namespace CloudflareWorkersModule {
   export abstract class WorkerEntrypoint<
     Env = Cloudflare.Env,
     Props = {},
-    Exports = Cloudflare.Exports
   > implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
-    protected ctx: ExecutionContext<Props, Exports>;
+    protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
 
@@ -262,12 +261,11 @@ declare namespace CloudflareWorkersModule {
   export abstract class DurableObject<
     Env = Cloudflare.Env,
     Props = {},
-    Exports = Cloudflare.Exports
   > implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 
-    protected ctx: DurableObjectState<Props, Exports>;
+    protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
 

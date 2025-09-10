@@ -272,9 +272,9 @@ class ExecutionContext: public jsg::Object {
       JSG_METHOD(abort);
     }
 
-    JSG_TS_OVERRIDE(<Props = unknown, Exports = Cloudflare.Exports> {
+    JSG_TS_OVERRIDE(<Props = unknown> {
       readonly props: Props;
-      readonly exports: Exports;
+      readonly exports: Cloudflare.Exports;
     });
   }
 

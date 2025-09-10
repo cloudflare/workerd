@@ -394,10 +394,10 @@ declare const Cloudflare: Cloudflare;
 declare const origin: string;
 declare const navigator: Navigator;
 interface TestController {}
-interface ExecutionContext<Props = unknown, Exports = Cloudflare.Exports> {
+interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  readonly exports: Exports;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   abort(reason?: any): void;
 }
@@ -574,9 +574,9 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 interface DurableObjectClass<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
-interface DurableObjectState<Props = unknown, Exports = Cloudflare.Exports> {
+interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  readonly exports: Exports;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
@@ -3363,13 +3363,13 @@ type LoopbackForExport<
 type LoopbackServiceStub<
   T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
 > = Fetcher<T> &
-  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props, any>
+  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
     ? (opts: { props?: Props }) => Fetcher<T>
     : (opts: { props?: any }) => Fetcher<T>);
 type LoopbackDurableObjectClass<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > = DurableObjectClass<T> &
-  (T extends CloudflareWorkersModule.DurableObject<any, infer Props, any>
+  (T extends CloudflareWorkersModule.DurableObject<any, infer Props>
     ? (opts: { props?: Props }) => DurableObjectClass<T>
     : (opts: { props?: any }) => DurableObjectClass<T>);
 interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
@@ -8409,14 +8409,11 @@ declare namespace CloudflareWorkersModule {
     [Rpc.__RPC_TARGET_BRAND]: never;
   }
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
-  export abstract class WorkerEntrypoint<
-    Env = Cloudflare.Env,
-    Props = {},
-    Exports = Cloudflare.Exports,
-  > implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
-    protected ctx: ExecutionContext<Props, Exports>;
+    protected ctx: ExecutionContext<Props>;
     protected env: Env;
     constructor(ctx: ExecutionContext, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
@@ -8426,14 +8423,11 @@ declare namespace CloudflareWorkersModule {
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
   }
-  export abstract class DurableObject<
-    Env = Cloudflare.Env,
-    Props = {},
-    Exports = Cloudflare.Exports,
-  > implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
-    protected ctx: DurableObjectState<Props, Exports>;
+    protected ctx: DurableObjectState<Props>;
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
     fetch?(request: Request): Response | Promise<Response>;

@@ -684,9 +684,9 @@ class DurableObjectState: public jsg::Object {
     // * Make `storage` non-optional
     // * Make `id` strictly `DurableObjectId` (it's only a string for colo-local actors which are
     //   not available publicly).
-    JSG_TS_OVERRIDE(<Props = unknown, Exports = Cloudflare.Exports> {
+    JSG_TS_OVERRIDE(<Props = unknown> {
       readonly props: Props;
-      readonly exports: Exports;
+      readonly exports: Cloudflare.Exports;
       readonly id: DurableObjectId;
       readonly storage: DurableObjectStorage;
       blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
