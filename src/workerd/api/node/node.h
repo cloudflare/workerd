@@ -145,6 +145,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsPunycodeModule();
     }
 
+    if (module.getName() == "node:cluster"_kj) {
+      return featureFlags.getEnableNodeJsClusterModule();
+    }
+
     return true;
   });
 
