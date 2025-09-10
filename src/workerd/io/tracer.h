@@ -102,7 +102,7 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
+  // Add a span.
   virtual void addSpan(CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
