@@ -2,11 +2,11 @@
 
 #include "basics.h"
 
+#include <workerd/api/messagechannel.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>
 
 namespace workerd::api {
-class MessagePort;
 
 class MessageEvent final: public Event {
  public:
