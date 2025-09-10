@@ -136,6 +136,11 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     if (module.getName() == "node:v8"_kj) {
       return featureFlags.getEnableNodeJsV8Module();
     }
+
+    if (module.getName() == "node:tty"_kj) {
+      return featureFlags.getEnableNodeJsTtyModule();
+    }
+
     return true;
   });
 
