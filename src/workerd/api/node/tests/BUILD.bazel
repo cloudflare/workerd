@@ -608,6 +608,12 @@ wd_test(
     data = ["v8-nodejs-test.js"],
 )
 
+wd_test(
+    src = "tty-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tty-nodejs-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",

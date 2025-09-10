@@ -1091,4 +1091,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
   # Enables the Node.js non-functional stub v8 module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsTtyModule @126 :Bool
+    $compatEnableFlag("enable_nodejs_tty_module")
+    $compatDisableFlag("disable_nodejs_tty_module")
+    $experimental;
+    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+  # Enables the Node.js non-functional stub tty module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
 }
