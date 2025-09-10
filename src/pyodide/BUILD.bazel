@@ -1,5 +1,7 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
+load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load(":helpers.bzl", "pyodide_extra", "pyodide_static", "python_bundles")
 
 pyodide_extra()
@@ -13,6 +15,13 @@ DEV_VERSION = BUNDLE_VERSION_INFO["development"]["real_pyodide_version"]
 alias(
     name = "pyodide.capnp.bin",
     actual = "pyodide.capnp.bin@rule@" + DEV_VERSION,
+    visibility = ["//visibility:public"],
+)
+
+wd_cc_embed(
+    name = "python-entrypoint",
+    src = "python-entrypoint.js",
+    base_name = "python-entrypoint",
     visibility = ["//visibility:public"],
 )
 
@@ -45,4 +54,13 @@ write_file(
     name = "bundle_version_info",
     out = "bundle_version_info.json",
     content = [json.encode(BUNDLE_VERSION_INFO)],
+)
+
+py_test(
+    name = "unit-test-introspection",
+    srcs = [
+        "internal/introspection.py",
+        "internal/test_introspection.py",
+    ] + glob(["internal/workers-api/src/workers/*"]),
+    main = "internal/test_introspection.py",
 )

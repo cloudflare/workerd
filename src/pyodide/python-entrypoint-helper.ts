@@ -2,40 +2,102 @@
 // This file is a BUILTIN module that provides the actual implementation for the
 // python-entrypoint.js USER module.
 
-import { loadPyodide } from 'pyodide-internal:python';
+import { beforeRequest, loadPyodide } from 'pyodide-internal:python';
 import { enterJaegerSpan } from 'pyodide-internal:jaeger';
 import { patchLoadPackage } from 'pyodide-internal:setupPackages';
 import {
-  IS_TRACING,
   IS_WORKERD,
   LOCKFILE,
   TRANSITIVE_REQUIREMENTS,
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
-  DURABLE_OBJECT_CLASSES,
-  WORKER_ENTRYPOINT_CLASSES,
   SHOULD_SNAPSHOT_TO_DISK,
+  workflowsEnabled,
+  legacyGlobalHandlers,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
-import { entropyBeforeRequest } from 'pyodide-internal:topLevelEntropy/lib';
-import { reportError } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  reportError,
+} from 'pyodide-internal:util';
+
+type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
+
+const waitUntilPatched = new WeakSet();
+
+function patchWaitUntil(ctx: {
+  waitUntil: (p: Promise<void> | PyFuture<void>) => void;
+}): void {
+  let tag;
+  try {
+    tag = Object.prototype.toString.call(ctx);
+  } catch (_e) {}
+  if (tag !== '[object ExecutionContext]') {
+    return;
+  }
+  if (waitUntilPatched.has(ctx)) {
+    return;
+  }
+  const origWaitUntil: (p: Promise<void>) => void = ctx.waitUntil.bind(ctx);
+  function waitUntil(p: Promise<void> | PyFuture<void>): void {
+    origWaitUntil(
+      (async function (): Promise<void> {
+        if ('copy' in p) {
+          p = p.copy();
+        }
+        await p;
+        if ('destroy' in p) {
+          p.destroy();
+        }
+      })()
+    );
+  }
+  ctx.waitUntil = waitUntil;
+  waitUntilPatched.add(ctx);
+}
+
+export type PyodideEntrypointHelper = {
+  doAnImport: (mod: string) => Promise<any>;
+  cloudflareWorkersModule: any;
+  cloudflareSocketsModule: any;
+  workerEntrypoint: any;
+  patchWaitUntil: typeof patchWaitUntil;
+};
+import { maybeCollectDedicatedSnapshot } from 'pyodide-internal:snapshot';
 
 // Function to import JavaScript modules from Python
-const pyodide_entrypoint_helper: any = {};
+let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
+
+function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
+  if (!_pyodide_entrypoint_helper) {
+    throw new PythonRuntimeError(
+      'pyodide_entrypoint_helper is not initialized'
+    );
+  }
+  return _pyodide_entrypoint_helper;
+}
 
 export function setDoAnImport(
   func: (mod: string) => Promise<any>,
-  cloudflareWorkers: any,
-  cloudflareSockets: any
+  cloudflareWorkersModule: any,
+  cloudflareSocketsModule: any,
+  workerEntrypoint: any
 ): void {
-  pyodide_entrypoint_helper.doAnImport = func;
-  pyodide_entrypoint_helper.cloudflareWorkersModule = cloudflareWorkers;
-  pyodide_entrypoint_helper.cloudflareSocketsModule = cloudflareSockets;
+  _pyodide_entrypoint_helper = {
+    doAnImport: func,
+    cloudflareWorkersModule,
+    cloudflareSocketsModule,
+    workerEntrypoint,
+    patchWaitUntil,
+  };
 }
 
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
-    throw new Error('Main module needs to end with a .py file extension');
+    throw new PythonUserError(
+      'Main module needs to end with a .py file extension'
+    );
   }
   const mainModuleName = MAIN_MODULE_NAME.slice(0, -3);
   if (pyodide.version === '0.26.0a2') {
@@ -54,7 +116,12 @@ async function getPyodide(): Promise<Pyodide> {
       return pyodidePromise;
     }
     pyodidePromise = (async function (): Promise<Pyodide> {
-      const pyodide = loadPyodide(IS_WORKERD, LOCKFILE, WORKERD_INDEX_URL);
+      const pyodide = loadPyodide(
+        IS_WORKERD,
+        LOCKFILE,
+        WORKERD_INDEX_URL,
+        get_pyodide_entrypoint_helper()
+      );
       await setupPatches(pyodide);
       return pyodide;
     })();
@@ -100,11 +167,10 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
 
     // install any extra packages into the site-packages directory
     const sitePackages = pyodide.FS.sitePackages;
-
     // Expose the doAnImport function and global modules to Python globals
     pyodide.registerJsModule(
       '_pyodide_entrypoint_helper',
-      pyodide_entrypoint_helper
+      get_pyodide_entrypoint_helper()
     );
 
     // Inject modules that enable JS features to be used idiomatically from Python.
@@ -113,12 +179,37 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     // shouldn't be part of the snapshot and should filtered out in filterPythonScriptImports.
     if (pyodide.version === '0.26.0a2') {
       // Inject at cloudflare.workers for backwards compatibility
-      pyodide.FS.mkdir(`${sitePackages}/cloudflare`);
-      await injectSitePackagesModule(pyodide, 'workers', 'cloudflare/workers');
+      pyodide.FS.mkdirTree(`${sitePackages}/cloudflare/workers`);
+      await injectSitePackagesModule(
+        pyodide,
+        'workers-api/src/workers/__init__',
+        'cloudflare/workers/__init__'
+      );
+      await injectSitePackagesModule(
+        pyodide,
+        'workers-api/src/workers/_workers',
+        'cloudflare/workers/_workers'
+      );
     }
     // The SDK was moved from `cloudflare.workers` to just `workers`.
-    await injectSitePackagesModule(pyodide, '_workers', '_workers');
-    await injectSitePackagesModule(pyodide, 'workers', 'workers');
+    // Create workers package structure with workflows submodule
+    pyodide.FS.mkdir(`${sitePackages}/workers`);
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/__init__',
+      'workers/__init__'
+    );
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/_workers',
+      'workers/_workers'
+    );
+    await injectSitePackagesModule(
+      pyodide,
+      'workers-api/src/workers/workflows',
+      'workers/workflows'
+    );
+    await injectSitePackagesModule(pyodide, 'workers-api/src/asgi', 'asgi');
 
     // Install patches as needed
     if (TRANSITIVE_REQUIREMENTS.has('aiohttp')) {
@@ -131,7 +222,6 @@ async function setupPatches(pyodide: Pyodide): Promise<void> {
     ) {
       await applyPatch(pyodide, 'httpx');
     }
-    await injectSitePackagesModule(pyodide, 'asgi', 'asgi');
   });
 }
 
@@ -160,7 +250,7 @@ async function preparePython(): Promise<PyModule> {
   try {
     const pyodide = await getPyodide();
     const mainModule = await getMainModule();
-    entropyBeforeRequest(pyodide._module);
+    beforeRequest(pyodide._module);
     return mainModule;
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
@@ -192,7 +282,11 @@ function doRelaxedPyCall(pyfunc: PyCallable, args: any[]): any {
 }
 
 function makeHandler(pyHandlerName: string): Handler {
-  if (pyHandlerName === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+  if (
+    pyHandlerName === 'test' &&
+    SHOULD_SNAPSHOT_TO_DISK &&
+    legacyGlobalHandlers
+  ) {
     return async function () {
       await getPyodide();
       console.log('Stored snapshot to disk; quitting without running test');
@@ -205,7 +299,7 @@ function makeHandler(pyHandlerName: string): Handler {
     );
     const handler = mainModule[pyHandlerName];
     if (!handler) {
-      throw new Error(
+      throw new PythonUserError(
         `Python entrypoint "${MAIN_MODULE_NAME}" does not export a handler named "${pyHandlerName}"`
       );
     }
@@ -244,38 +338,63 @@ const SPECIAL_DO_HANDLER_NAMES = [
 
 function makeEntrypointProxyHandler(
   pyInstancePromise: Promise<PyModule>,
-  isDurableObject: boolean
+  className: string
 ): ProxyHandler<any> {
   return {
     get(target, prop, receiver): any {
       if (typeof prop !== 'string') {
         return Reflect.get(target, prop, receiver);
       }
+      const isDurableObject = className === 'DurableObject';
+      const isWorkflow = className === 'WorkflowEntrypoint';
 
       // Proxy calls to `fetch` to methods named `on_fetch` (and the same for other handlers.)
       const isKnownHandler = SPECIAL_HANDLER_NAMES.includes(prop);
       const isKnownDoHandler =
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
-      const isFetch = prop == 'fetch';
-      if (isKnownHandler || isKnownDoHandler) {
+      const isFetch = prop === 'fetch';
+      const isWorkflowHandler = isWorkflow && prop === 'run';
+      if ((isKnownHandler || isKnownDoHandler) && legacyGlobalHandlers) {
         prop = 'on_' + prop;
+      }
+
+      if (!legacyGlobalHandlers && prop === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+        return async function () {
+          await getPyodide();
+          console.log('Stored snapshot to disk; quitting without running test');
+        };
       }
 
       return async function (...args: any[]): Promise<any> {
         // Check if the requested method exists and if so, call it.
         const pyInstance = await pyInstancePromise;
+
         if (typeof pyInstance[prop] !== 'function') {
           throw new TypeError(`Method ${prop} does not exist`);
         }
 
         if ((isKnownHandler || isKnownDoHandler) && !isFetch) {
-          return await doPyCallHelper(true, pyInstance[prop], args);
+          return await doPyCallHelper(
+            true,
+            pyInstance[prop] as PyCallable,
+            args
+          );
+        }
+
+        if (workflowsEnabled && isWorkflowHandler) {
+          // we're hiding this behind a compat flag for now
+          return await doPyCallHelper(
+            true,
+            pyInstance[prop] as PyCallable,
+            args
+          );
         }
 
         const introspectionMod = await getIntrospectionMod();
 
+        const isRelaxed = isFetch || prop === 'test';
         return await doPyCall(introspectionMod.wrapper_func, [
-          isFetch,
+          isRelaxed,
           pyInstance,
           prop,
           ...args,
@@ -290,7 +409,6 @@ function makeEntrypointClass(
   classKind: AnyClass,
   methods: string[]
 ): any {
-  const isDurableObject = classKind.name === 'DurableObject';
   const result = class EntrypointWrapper extends classKind {
     constructor(...args: any[]) {
       super(...args);
@@ -300,7 +418,7 @@ function makeEntrypointClass(
       // support any possible method name.
       return new Proxy(
         this,
-        makeEntrypointProxyHandler(pyInstancePromise, isDurableObject)
+        makeEntrypointProxyHandler(pyInstancePromise, classKind.name)
       );
     }
   };
@@ -308,7 +426,10 @@ function makeEntrypointClass(
   // Add dummy functions to the class so that the validator can detect them. These will never get
   // accessed because of the proxy at runtime.
   for (let method of methods) {
-    if (SUPPORTED_HANDLER_NAMES.includes(method.slice(3))) {
+    if (
+      SUPPORTED_HANDLER_NAMES.includes(method.slice(3)) &&
+      legacyGlobalHandlers
+    ) {
       // Remove the "on_" prefix.
       method = method.slice(3);
     }
@@ -374,6 +495,32 @@ type PythonInitResult = {
   makeEntrypointClass: typeof makeEntrypointClass;
 };
 
+function handleDefaultClass(
+  handlers: PythonInitResult['handlers'],
+  workerEntrypoints: ExporterClassInfo[]
+): void {
+  const index = workerEntrypoints.findIndex(
+    (cls) => cls.className === 'Default'
+  );
+  if (index === -1) {
+    return;
+  }
+  const cls = workerEntrypoints[index]!;
+
+  // Disallow defining a `Default` WorkerEntrypoint and other "default" top-level handlers.
+  if (Object.keys(handlers).length > 0) {
+    throw new TypeError('Cannot define multiple default entrypoints');
+  }
+
+  handlers['default'] = makeEntrypointClass(
+    'Default',
+    get_pyodide_entrypoint_helper().workerEntrypoint,
+    cls.methodNames
+  );
+  // Remove the default entrypoint from the list of workerEntrypoints to avoid duplication.
+  workerEntrypoints.splice(index, 1);
+}
+
 export async function initPython(): Promise<PythonInitResult> {
   const handlers: {
     [handlerName: string]: Handler;
@@ -385,41 +532,25 @@ export async function initPython(): Promise<PythonInitResult> {
     workflowEntrypoints: [],
   };
 
-  // Do not setup anything to do with Python in the global scope when tracing. The Jaeger tracing
-  // needs to be called inside an IO context.
-  if (IS_TRACING) {
-    // Currently when tracing we cannot perform IO in the
-    // top-level. So we have some custom logic for handlers here in that case.
-    //
-    // Because of the above we have limited info, so we cannot get the method names of the classes
-    // that are exported. But this doesn't matter as it's only useful for the validator.
-    const toClassInfo = (x: string): ExporterClassInfo => {
-      return { className: x, methodNames: [] };
-    };
-    pythonEntrypointClasses.durableObjects = (DURABLE_OBJECT_CLASSES ?? []).map(
-      toClassInfo
-    );
-    // We currently have no way to discern between worker entrypoint classes and workflow entrypoint
-    // classes in workerd. But workflow entrypoints appear to be just a special case of worker
-    // entrypoints, so this should still work just fine.
-    pythonEntrypointClasses.workerEntrypoints = (
-      WORKER_ENTRYPOINT_CLASSES ?? []
-    ).map(toClassInfo);
+  const mainModule = await getMainModule();
 
+  // In order to get the entrypoint classes exported by the worker, we use a Python module
+  // to introspect the user's main module. So we are effectively using Python to analyse the
+  // classes exported by the user worker here. The class names are then exported from here and
+  // used to create the equivalent JS classes via makeEntrypointClass.
+  const introspectionMod = await getIntrospectionMod();
+  pythonEntrypointClasses =
+    introspectionMod.collect_entrypoint_classes(mainModule);
+  handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
+
+  if (legacyGlobalHandlers) {
+    // We add all handlers when running in workerd, so that we can handle the case where the
+    // handler is not defined in our own code and throw a more helpful error. See
+    // undefined-handler.wd-test.
+    const addAllHandlers = IS_WORKERD && !handlers['default'];
     for (const handlerName of SUPPORTED_HANDLER_NAMES) {
       const pyHandlerName = 'on_' + handlerName;
-      handlers[handlerName] = makeHandler(pyHandlerName);
-    }
-
-    handlers.test = makeHandler('test');
-  } else {
-    const mainModule = await getMainModule();
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
-      // We add all handlers when running in workerd, so that we can handle the case where the
-      // handler is not defined in our own code and throw a more helpful error. See
-      // undefined-handler.wd-test.
-      if (typeof mainModule[pyHandlerName] === 'function' || IS_WORKERD) {
+      if (addAllHandlers || typeof mainModule[pyHandlerName] === 'function') {
         handlers[handlerName] = makeHandler(pyHandlerName);
       }
     }
@@ -427,15 +558,14 @@ export async function initPython(): Promise<PythonInitResult> {
     if (typeof mainModule.test === 'function') {
       handlers.test = makeHandler('test');
     }
-
-    // In order to get the entrypoint classes exported by the worker, we use a Python module
-    // to introspect the user's main module. So we are effectively using Python to analyse the
-    // classes exported by the user worker here. The class names are then exported from here and
-    // used to create the equivalent JS classes via makeEntrypointClass.
-    const introspectionMod = await getIntrospectionMod();
-    pythonEntrypointClasses =
-      introspectionMod.collect_entrypoint_classes(mainModule);
   }
+
+  // Collect a dedicated snapshot at the very end.
+  const pyodide = await getPyodide();
+  maybeCollectDedicatedSnapshot(
+    pyodide._module,
+    get_pyodide_entrypoint_helper()
+  );
 
   return { handlers, pythonEntrypointClasses, makeEntrypointClass };
 }

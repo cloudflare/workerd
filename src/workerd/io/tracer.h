@@ -5,7 +5,8 @@
 #pragma once
 
 #include <workerd/io/trace.h>
-#include <workerd/util/weak-refs.h>
+
+#include <kj/refcount.h>
 
 namespace workerd {
 namespace tracing {
@@ -17,13 +18,10 @@ class TailStreamWriter final: public kj::Refcounted {
   // closed state.
   using Reporter = kj::Function<bool(TailEvent&&)>;
 
-  // A callback that provides the timestamps for tail stream events.
-  // Ideally this uses the same time context as IoContext:now().
-  using TimeSource = kj::Function<kj::Date()>;
-  TailStreamWriter(Reporter reporter, TimeSource timeSource);
+  TailStreamWriter(Reporter reporter);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
-  void report(const InvocationSpanContext& context, TailEvent::Event&& event);
+  void report(const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date time);
 
   inline bool isClosed() const {
     return state == kj::none;
@@ -32,11 +30,8 @@ class TailStreamWriter final: public kj::Refcounted {
  private:
   struct State {
     Reporter reporter;
-    TimeSource timeSource;
     uint32_t sequence = 0;
-    State(Reporter reporter, TimeSource timeSource)
-        : reporter(kj::mv(reporter)),
-          timeSource(kj::mv(timeSource)) {}
+    State(Reporter reporter): reporter(kj::mv(reporter)) {}
   };
   kj::Maybe<State> state;
   bool onsetSeen = false;
@@ -70,6 +65,7 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
       kj::Maybe<kj::String> dispatchNamespace,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
+      kj::Maybe<kj::String> durableObjectId,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
 
   // Adds a trace from the contents of `reader` this is used in sharded workers to send traces back
@@ -98,11 +94,6 @@ class PipelineTracer: public kj::Refcounted, public kj::EnableAddRefToThis<Pipel
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
-  BaseTracer(): self(kj::refcounted<WeakRef<BaseTracer>>(kj::Badge<BaseTracer>{}, *this)) {}
-  virtual ~BaseTracer() {
-    self->invalidate();
-  }
-
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -135,18 +126,17 @@ class BaseTracer: public kj::Refcounted {
   // final event, causing the stream to terminate.
   virtual void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) = 0;
 
-  kj::Own<WeakRef<BaseTracer>> addWeakRef() {
-    return self->addRef();
-  }
+  // Report time as seen from the incoming Request when the request is complete, since it will not
+  // be available afterwards.
+  virtual void recordTimestamp(kj::Date timestamp) = 0;
 
   virtual SpanParent getUserRequestSpan() = 0;
 
-  // A weak reference for the internal span submitter. We use this so that the span submitter can
-  // add spans while the tracer exists, but does not artificially prolong the lifetime of the tracer
-  // which would interfere with span submission (traces get submitted when the worker returns its
-  // response, but with e.g. waitUntil() the worker can still be performing tasks afterwards so the
-  // span submitter may exist for longer than the tracer).
-  kj::Own<WeakRef<BaseTracer>> self;
+  // TODO(felix): Used for debug logging, remove after a few days.
+  void setIsJsRpc();
+
+  // Indicates that we're reporting from a JsRpc customEvent.
+  bool isJsRpc = false;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
@@ -158,6 +148,7 @@ class WorkerTracer: public BaseTracer {
       PipelineLogLevel pipelineLogLevel,
       kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter);
   explicit WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel);
+  virtual ~WorkerTracer() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(WorkerTracer);
 
   void addLog(const tracing::InvocationSpanContext& context,
@@ -179,16 +170,23 @@ class WorkerTracer: public BaseTracer {
       tracing::EventInfo&& info) override;
   void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
+  virtual void recordTimestamp(kj::Date timestamp) override;
+
   SpanParent getUserRequestSpan() override;
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
-  void setUserRequestSpan(SpanBuilder&& span);
+  void setUserRequestSpan(SpanParent&& span);
+
+  // Set a worker-level tag/attribute to be provided in the onset event.
+  void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
   // The root span for the new tracing format.
-  SpanBuilder userRequestSpan;
+  SpanParent userRequestSpan;
+  // span attributes to be added to the onset event.
+  kj::Vector<tracing::Attribute> attributes;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
@@ -200,5 +198,9 @@ class WorkerTracer: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 }  // namespace workerd

@@ -183,11 +183,11 @@ kj::Promise<void> WorkerQueue::send(
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(type, opts.contentType) {
       auto validatedType = validateContentType(type);
-      headers.add(HDR_MSG_FORMAT, validatedType);
+      headers.addPtrPtr(HDR_MSG_FORMAT, validatedType);
       contentType = validatedType;
     }
     KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.add(HDR_MSG_DELAY, kj::str(secs));
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
     }
   }
 
@@ -195,7 +195,7 @@ kj::Promise<void> WorkerQueue::send(
   KJ_IF_SOME(type, contentType) {
     serialized = serialize(js, body, type, SerializeArrayBufferBehavior::DEEP_COPY);
   } else if (workerd::FeatureFlags::get(js).getQueuesJsonMessages()) {
-    headers.add("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
+    headers.addPtrPtr("X-Msg-Fmt", IncomingQueueMessage::ContentType::JSON);
     serialized = serialize(
         js, body, IncomingQueueMessage::ContentType::JSON, SerializeArrayBufferBehavior::DEEP_COPY);
   } else {
@@ -306,14 +306,14 @@ kj::Promise<void> WorkerQueue::sendBatch(jsg::Lock& js,
   // decide whether it's too large.
   // TODO(someday): Enforce the size limits here instead for very slightly better performance.
   auto headers = kj::HttpHeaders(context.getHeaderTable());
-  headers.add("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
-  headers.add("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
-  headers.add("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
+  headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));
+  headers.addPtr("CF-Queue-Batch-Bytes"_kj, kj::str(totalSize));
+  headers.addPtr("CF-Queue-Largest-Msg"_kj, kj::str(largestMessage));
   headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(secs, opts.delaySeconds) {
-      headers.add(HDR_MSG_DELAY, kj::str(secs));
+      headers.addPtr(HDR_MSG_DELAY, kj::str(secs));
     }
   }
 

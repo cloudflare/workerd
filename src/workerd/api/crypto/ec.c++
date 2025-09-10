@@ -232,7 +232,7 @@ class EllipticKey final: public AsymmetricKeyCryptoKeyImpl {
 
     kj::Vector<kj::byte> sharedSecret;
     sharedSecret.resize(
-        integerCeilDivision<std::make_unsigned<decltype(fieldSize)>::type>(fieldSize, 8u));
+        integerCeilDivision<std::make_unsigned_t<decltype(fieldSize)>>(fieldSize, 8u));
     auto written = ECDH_compute_key(sharedSecret.begin(), sharedSecret.capacity(),
         publicEcKey.getPublicKey(), privateEcKey.getKey(), nullptr);
     JSG_REQUIRE(written > 0, DOMOperationError, "Failed to generate shared ECDH secret",
@@ -649,8 +649,12 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
       internalDescribeOpensslErrors());
 
   auto point = OSSL_NEW(EC_POINT, group);
-  OSSLCALL(EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr));
-  OSSLCALL(EC_KEY_set_public_key(ecKey, point));
+  JSG_REQUIRE(1 == EC_POINT_set_affine_coordinates_GFp(group, point, bigX, bigY, nullptr),
+      DOMOperationError, "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      tryDescribeOpensslErrors());
+  JSG_REQUIRE(1 == EC_KEY_set_public_key(ecKey, point), DOMOperationError,
+      "Invalid EC key; public key coordinates \"x\" and \"y\" are invalid",
+      tryDescribeOpensslErrors());
 
   if (keyDataJwk.d != kj::none) {
     // This is a private key.
@@ -661,11 +665,15 @@ kj::Own<EVP_PKEY> ellipticJwkReader(
     auto bigD = JSG_REQUIRE_NONNULL(toBignum(d), InternalDOMOperationError,
         "Error importing EC key", internalDescribeOpensslErrors());
 
-    OSSLCALL(EC_KEY_set_private_key(ecKey, bigD));
+    JSG_REQUIRE(1 == EC_KEY_set_private_key(ecKey, bigD), DOMOperationError,
+        "Invalid EC key; "
+        "private key component \"d\" is invalid",
+        tryDescribeOpensslErrors());
   }
 
   auto evpPkey = OSSL_NEW(EVP_PKEY);
-  OSSLCALL(EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()));
+  JSG_REQUIRE(1 == EVP_PKEY_set1_EC_KEY(evpPkey.get(), ecKey.get()), DOMOperationError,
+      "Error importing EC key", tryDescribeOpensslErrors());
   return evpPkey;
 }
 }  // namespace
@@ -859,13 +867,12 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
 
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize Ed25519 signing digest",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to initialize Ed25519 signing digest",
+        tryDescribeOpensslErrors());
     JSG_REQUIRE(1 ==
             EVP_DigestSign(digestCtx.get(), signature.asArrayPtr().begin(), &signatureLength,
                 data.begin(), data.size()),
-        InternalDOMOperationError, "Failed to sign with Ed25119 key",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to sign with Ed25119 key", tryDescribeOpensslErrors());
 
     JSG_REQUIRE(signatureLength == signature.size(), InternalDOMOperationError,
         "Unexpected change in size signing Ed25519", signatureLength);
@@ -890,8 +897,8 @@ class EdDsaKey final: public AsymmetricKeyCryptoKeyImpl {
 
     auto digestCtx = OSSL_NEW(EVP_MD_CTX);
     JSG_REQUIRE(1 == EVP_DigestSignInit(digestCtx.get(), nullptr, nullptr, nullptr, getEvpPkey()),
-        InternalDOMOperationError, "Failed to initialize Ed25519 verification digest",
-        internalDescribeOpensslErrors());
+        DOMOperationError, "Failed to initialize Ed25519 verification digest",
+        tryDescribeOpensslErrors());
 
     auto result = EVP_DigestVerify(
         digestCtx.get(), signature.begin(), signature.size(), data.begin(), data.size());

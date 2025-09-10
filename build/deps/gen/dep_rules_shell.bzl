@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v0.5.0"
-URL = "https://github.com/bazelbuild/rules_shell/releases/download/v0.5.0/rules_shell-v0.5.0.tar.gz"
-STRIP_PREFIX = "rules_shell-0.5.0"
-SHA256 = "b15cc2e698a3c553d773ff4af35eb4b3ce2983c319163707dddd9e70faaa062d"
+TAG_NAME = "v0.6.0"
+URL = "https://github.com/bazelbuild/rules_shell/releases/download/v0.6.0/rules_shell-v0.6.0.tar.gz"
+STRIP_PREFIX = "rules_shell-0.6.0"
+SHA256 = "fce2a7a974aa70e9367068122e19c39a6a27a5aca30698bcf9030beb529612b6"
 TYPE = "tgz"
 
 def dep_rules_shell():

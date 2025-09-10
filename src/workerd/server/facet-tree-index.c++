@@ -22,7 +22,7 @@ FacetTreeIndex::FacetTreeIndex(kj::Own<const kj::File> fileParam)
   // nothing was ever written to the index, so we just rewrite it and start over.
   if (fileBytes.size() <= sizeof(MAGIC_NUMBER)) {
     // New file, initialize with magic number.
-    file->write(0, kj::arrayPtr(MAGIC_NUMBER).asBytes());
+    file->write(0, kj::asBytes(MAGIC_NUMBER));
     file->datasync();
     offset = sizeof(MAGIC_NUMBER);
     return;

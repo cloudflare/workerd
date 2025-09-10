@@ -1,4 +1,4 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 
 def wd_test(
         src,
@@ -34,13 +34,17 @@ def wd_test(
         # compilation, see https://github.com/aspect-build/rules_ts/blob/f1b7b83/docs/performance.md#isolated-typecheck.
         # This will require extensive refactoring and we may only want to enable it for some
         # targets, but might be useful if we end up transpiling more code later on.
+        ts_config(
+            name = name + "@ts_config",
+            src = "tsconfig.json",
+            deps = ["@workerd//tools:base-tsconfig"],
+        )
         ts_project(
             name = name + "@ts_project",
             srcs = ts_srcs,
-            tsconfig = "tsconfig.json",
+            tsconfig = ":" + name + "@ts_config",
             allow_js = True,
             source_map = True,
-            composite = True,
             declaration = True,
             deps = ["//src/node:node@tsproject"] + ts_deps,
         )
@@ -54,6 +58,7 @@ def wd_test(
     ] + args
 
     _wd_test(
+        src = src,
         name = name,
         data = data,
         args = args,
@@ -69,6 +74,7 @@ REM Run supervisor to start sidecar if specified
 if not "{sidecar}" == "" (
     REM These environment variables are processed by the supervisor executable
     set PORTS_TO_ASSIGN={port_bindings}
+    set RANDOMIZE_IP={randomize_ip}
     set SIDECAR_COMMAND="{sidecar}"
     powershell -Command \"{supervisor} {runtest}\"
 ) else (
@@ -85,7 +91,7 @@ set -e
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
     # These environment variables are processed by the supervisor executable
-    PORTS_TO_ASSIGN={port_bindings} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi
@@ -149,6 +155,7 @@ def _wd_test_impl(ctx):
         runtest = runtest,
         supervisor = ctx.file.sidecar_supervisor.short_path if ctx.file.sidecar_supervisor else "",
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
+        randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
     )
 
     ctx.actions.write(
@@ -173,17 +180,43 @@ def _wd_test_impl(ctx):
         if default_runfiles:
             runfiles = runfiles.merge(default_runfiles)
 
+    # IMPORTANT: The workerd binary must be listed in dependency_attributes
+    # to ensure its transitive dependencies (all the C++ source files) are
+    # included in the coverage instrumentation. Without this, coverage data
+    # won't be collected for the actual workerd implementation code.
+    instrumented_files_info = coverage_common.instrumented_files_info(
+        ctx,
+        source_attributes = ["src", "data"],
+        dependency_attributes = ["workerd", "sidecar", "sidecar_supervisor"],
+        # Include all file types that might contain testable code
+        extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
+    )
+
     return [
         DefaultInfo(
             executable = executable,
             runfiles = runfiles,
         ),
+        instrumented_files_info,
     ]
 
 _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
     attrs = {
+        # Implicit dependencies used by Bazel to generate coverage reports.
+        "_lcov_merger": attr.label(
+            default = configuration_field(fragment = "coverage", name = "output_generator"),
+            executable = True,
+            cfg = config.exec(exec_group = "test"),
+        ),
+        "_collect_cc_coverage": attr.label(
+            default = "@bazel_tools//tools/test:collect_cc_coverage",
+            executable = True,
+            cfg = config.exec(exec_group = "test"),
+        ),
+        # Source file
+        "src": attr.label(allow_single_file = True),
         # The workerd executable is used to run all tests
         "workerd": attr.label(
             allow_single_file = True,
@@ -201,6 +234,10 @@ _wd_test = rule(
             executable = True,
             cfg = "exec",
         ),
+        # Sidecars
+        # ---------
+        # For detailed documentation, see src/workerd/api/node/tests/sidecar-supervisor.mjs
+
         # A list of binding names which will be filled in with random port numbers that the sidecar
         # and test can use for communication. The test will only begin once the sidecar is
         # listening to these ports.
@@ -210,13 +247,16 @@ _wd_test = rule(
         #
         # Reminder: you'll also need to add a network = ( allow = ["private"] ) service as well.
         "sidecar_port_bindings": attr.string_list(),
+        # If true, a random IP address will be assigned to the sidecar process, and provided in the
+        # environment variable SIDECAR_HOSTNAME,
+        "sidecar_randomize_ip": attr.bool(default = True),
         # An executable that is used to manage port assignments and child process creation when a
         # sidecar is specified.
         "sidecar_supervisor": attr.label(
             allow_single_file = True,
             executable = True,
             cfg = "exec",
-            default = "//src/workerd/api/node:sidecar-supervisor",
+            default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
         # A reference to the Windows platform label, needed for the implementation of wd_test

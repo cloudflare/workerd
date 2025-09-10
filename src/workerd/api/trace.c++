@@ -183,10 +183,6 @@ kj::Maybe<TraceItem::EventInfo> getTraceEvent(jsg::Lock& js, const Trace& trace)
         }
         KJ_UNREACHABLE;
       }
-      KJ_CASE_ONEOF(resume, tracing::Resume) {
-        // Resume events are not used with legacy trace
-        KJ_UNREACHABLE;
-      }
       KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
         return kj::Maybe(js.alloc<TraceItem::CustomEventInfo>(trace, custom));
       }
@@ -207,6 +203,7 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       scriptVersion(getTraceScriptVersion(trace)),
       dispatchNamespace(trace.dispatchNamespace.map([](auto& ns) { return kj::str(ns); })),
       scriptTags(getTraceScriptTags(trace)),
+      durableObjectId(trace.durableObjectId.map([](auto& id) { return kj::str(id); })),
       executionModel(enumToStr(trace.executionModel)),
       spans(getTraceSpans(js, trace)),
       outcome(enumToStr(trace.outcome)),
@@ -284,6 +281,10 @@ jsg::Optional<kj::StringPtr> TraceItem::getDispatchNamespace() {
 jsg::Optional<kj::Array<kj::StringPtr>> TraceItem::getScriptTags() {
   return scriptTags.map(
       [](kj::Array<kj::String>& tags) { return KJ_MAP(t, tags) -> kj::StringPtr { return t; }; });
+}
+
+jsg::Optional<kj::StringPtr> TraceItem::getDurableObjectId() {
+  return durableObjectId.map([](auto& id) -> kj::StringPtr { return id; });
 }
 
 kj::StringPtr TraceItem::getExecutionModel() {
@@ -683,7 +684,7 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
       auto handler = lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor());
       return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
     });
-  } catch (kj::Exception e) {
+  } catch (kj::Exception& e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
     //   event handler throws an exception; we do not consider waitUntil(). But all async work done
     //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
@@ -710,6 +711,8 @@ auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingReque
   waitUntilTasks.add(sendTracesToExportedHandler(
       kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
 
+  // Reporting a proper return code here would be nice, but for that we'd need to await running the
+  // tail handler...
   return Result{
     .outcome = EventOutcome::OK,
   };

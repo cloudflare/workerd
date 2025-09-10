@@ -25,6 +25,11 @@ class ThreadContext {
     const kj::HttpHeaderId cfBlobRequest;       // used by R2 binding implementation
     const kj::HttpHeaderId authorization;       // used by R2 binding implementation
     const kj::HttpHeaderId secWebSocketProtocol;
+    const kj::HttpHeaderId userAgent;       // used in tracing instrumentation
+    const kj::HttpHeaderId contentType;     // used in tracing instrumentation
+    const kj::HttpHeaderId contentLength;   // used in tracing instrumentation
+    const kj::HttpHeaderId accept;          // used in tracing instrumentation
+    const kj::HttpHeaderId acceptEncoding;  // used in tracing instrumentation
   };
 
   ThreadContext(kj::Timer& timer,

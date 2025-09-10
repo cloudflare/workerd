@@ -7,6 +7,7 @@
 #include <openssl/rand.h>
 
 #include <kj/compat/http.h>
+#include <kj/debug.h>
 
 #include <cstdlib>
 

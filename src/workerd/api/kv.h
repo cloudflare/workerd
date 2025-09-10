@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/http.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/io/limit-enforcer.h>
@@ -35,9 +34,11 @@ class KvNamespace: public jsg::Object {
   // `subrequestChannel` is what to pass to IoContext::getHttpClient() to get an HttpClient
   // representing this namespace. It is also used to construct fetcher for JSRPC methods.
   // `additionalHeaders` is what gets appended to every outbound request.
-  explicit KvNamespace(kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
+  explicit KvNamespace(
+      kj::String bindingName, kj::Array<AdditionalHeader> additionalHeaders, uint subrequestChannel)
       : additionalHeaders(kj::mv(additionalHeaders)),
-        subrequestChannel(subrequestChannel) {}
+        subrequestChannel(subrequestChannel),
+        bindingName(kj::mv(bindingName)) {}
 
   struct GetOptions {
     jsg::Optional<kj::String> type;
@@ -52,10 +53,15 @@ class KvNamespace: public jsg::Object {
   using GetResult = kj::Maybe<
       kj::OneOf<jsg::Ref<ReadableStream>, kj::Array<byte>, kj::String, jsg::JsRef<jsg::JsValue>>>;
 
-  jsg::Promise<KvNamespace::GetResult> getSingle(
-      jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+  jsg::Promise<KvNamespace::GetResult> getSingle(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
+      kj::String name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   jsg::Promise<jsg::JsRef<jsg::JsMap>> getBulk(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
       kj::Array<kj::String> name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
       bool withMetadata);
@@ -84,12 +90,17 @@ class KvNamespace: public jsg::Object {
   };
 
   jsg::Promise<GetWithMetadataResult> getWithMetadataImpl(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
       kj::String name,
       jsg::Optional<kj::OneOf<kj::String, GetOptions>> options,
       LimitEnforcer::KvOpType op);
 
-  jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(
-      jsg::Lock& js, kj::String name, jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
+  jsg::Promise<KvNamespace::GetWithMetadataResult> getWithMetadataSingle(jsg::Lock& js,
+      IoContext& context,
+      TraceContext& traceContext,
+      kj::String name,
+      jsg::Optional<kj::OneOf<kj::String, GetOptions>> options);
 
   kj::OneOf<jsg::Promise<KvNamespace::GetWithMetadataResult>, jsg::Promise<jsg::JsRef<jsg::JsMap>>>
   getWithMetadata(jsg::Lock& js,
@@ -248,19 +259,20 @@ class KvNamespace: public jsg::Object {
 
  protected:
   // Do the boilerplate work of constructing an HTTP client to KV. Setting a KvOptType causes
-  // the limiter for that op type to be checked. If a string is used, that's used as the operation
-  // name for the HttpClient without any limiter enforcement.
+  // the limiter for that op type to be checked. If a string is used, there isn't any limiter
+  // enforcement.
   // NOTE: The urlStr is added to the headers as a non-owning reference and thus must outlive
   // the usage of the headers.
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
       kj::HttpHeaders& headers,
       kj::OneOf<LimitEnforcer::KvOpType, kj::LiteralStringConst> opTypeOrName,
       kj::StringPtr urlStr,
-      kj::Maybe<kj::OneOf<ListOptions, kj::OneOf<kj::String, GetOptions>, PutOptions>> options);
+      TraceContext& traceContext);
 
  private:
   kj::Array<AdditionalHeader> additionalHeaders;
   uint subrequestChannel;
+  kj::String bindingName;
 };
 
 #define EW_KV_ISOLATE_TYPES                                                                        \

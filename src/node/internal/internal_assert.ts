@@ -29,7 +29,7 @@
 
 import {
   AssertionError,
-  AssertionErrorConstructorOptions,
+  type AssertionErrorConstructorOptions,
 } from 'node-internal:internal_assertionerror';
 
 import { diffstr, diff, buildMessage } from 'node-internal:internal_diffs';

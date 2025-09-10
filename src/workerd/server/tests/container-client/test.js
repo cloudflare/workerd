@@ -3,6 +3,29 @@ import assert from 'node:assert';
 import { scheduler } from 'node:timers/promises';
 
 export class DurableObjectExample extends DurableObject {
+  async testExitCode() {
+    const container = this.ctx.container;
+    if (container.running) {
+      let monitor = container.monitor().catch((_err) => {});
+      await container.destroy();
+      await monitor;
+    }
+    assert.strictEqual(container.running, false);
+
+    // Start container with valid configuration
+    await container.start({
+      entrypoint: ['node', 'nonexistant.js'],
+    });
+
+    let exitCode = undefined;
+    await container.monitor().catch((err) => {
+      exitCode = err.exitCode;
+    });
+
+    assert.strictEqual(typeof exitCode, 'number');
+    assert.notEqual(0, exitCode);
+  }
+
   async testBasics() {
     const container = this.ctx.container;
     if (container.running) {
@@ -194,6 +217,15 @@ export const testBasics = {
       const stub = CONTAINER.get(id);
       await stub.testBasics();
     }
+  },
+};
+
+// Test exit code monitor functionality
+export const testExitCode = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName('testExitCode');
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testExitCode();
   },
 };
 

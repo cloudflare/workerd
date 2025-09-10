@@ -4,19 +4,24 @@
 #include "dns.h"
 
 #include <workerd/jsg/exception.h>
-#include <workerd/rust/cxx-integration/cxx-bridge.h>
 #include <workerd/rust/dns/lib.rs.h>
+
+#include <kj-rs/kj-rs.h>
+
+using namespace kj_rs;
 
 namespace workerd::api::node {
 
 DnsUtil::CaaRecord DnsUtil::parseCaaRecord(kj::String record) {
-  auto parsed = rust::dns::parse_caa_record(record.as<Rust>());
+  // value comes from js so it is always valid utf-8
+  auto parsed = rust::dns::parse_caa_record(record.as<RustUncheckedUtf8>());
   return CaaRecord{
     .critical = parsed.critical, .field = kj::str(parsed.field), .value = kj::str(parsed.value)};
 }
 
 DnsUtil::NaptrRecord DnsUtil::parseNaptrRecord(kj::String record) {
-  auto parsed = rust::dns::parse_naptr_record(record.as<Rust>());
+  // value comes from js so it is always valid utf-8
+  auto parsed = rust::dns::parse_naptr_record(record.as<RustUncheckedUtf8>());
   return NaptrRecord{
     .flags = kj::str(parsed.flags),
     .service = kj::str(parsed.service),

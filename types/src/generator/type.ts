@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// TODO(soon): Fallthrough have false positives here. Investigate this.
+/* eslint-disable no-fallthrough */
+
 import assert from 'node:assert';
 import {
   ArrayType,
@@ -39,11 +42,11 @@ export function maybeUnwrapOptional(
     typeNode.types.length === 2 &&
     ts.isTypeReferenceNode(typeNode.types[1]) &&
     ts.isIdentifier(typeNode.types[1].typeName) &&
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
-    typeNode.types[1].typeName.escapedText === 'undefined'
+    typeNode.types[1].typeName.escapedText === 'undefined' // eslint-disable-line @typescript-eslint/no-unsafe-enum-comparison
   ) {
     return typeNode.types[0];
   }
+  return undefined;
 }
 
 // Returns `true` iff this maybe type represents `T | null`, not `T | undefined`
@@ -347,7 +350,6 @@ export function createTypeNode(
         default:
           assert.fail(`Unknown builtin type: ${builtin satisfies never}`);
       }
-      break;
     }
     case Type_Which.INTRINSIC: {
       const intrinsic = type.intrinsic.name;
@@ -365,7 +367,6 @@ export function createTypeNode(
         default:
           assert.fail(`Unknown intrinsic type: ${intrinsic}`);
       }
-      break;
     }
     case Type_Which.FUNCTION: {
       const func = type.function;
@@ -406,12 +407,10 @@ export function createTypeNode(
             `Unknown JSG implementation type: ${impl satisfies never}`
           );
       }
-      break;
     }
     case Type_Which.JS_BUILTIN: {
       // TODO(soon): implement
       assert.fail('`JS_BUILTIN`s are not yet supported');
-      break;
     }
     default: {
       assert.fail(`Unknown type: ${which satisfies never}`);

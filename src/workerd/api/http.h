@@ -461,11 +461,30 @@ public:
   explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
       : channelOrClientFactory(channel), requiresHost(requiresHost), isInHouse(isInHouse) {}
 
+  // Create a Fetcher bound to an IoChannelFactory::SubrequestChannel object rather than a numeric
+  // channel. This Fetcher will inherently be bound to the current I/O context.
+  explicit Fetcher(IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel,
+      RequiresHostAndProtocol requiresHost = RequiresHostAndProtocol::YES,
+      bool isInHouse = false)
+      : channelOrClientFactory(kj::mv(subrequestChannel)),
+        requiresHost(requiresHost),
+        isInHouse(isInHouse) {}
+
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
+  //
+  // TODO(cleanup): Consider removing this in favor of `IoChannelFactory::SubrequestChannel`, which
+  //   is almost the same thing.
   class OutgoingFactory {
   public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
+
+    // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
+    // Fetcher is being passed to another isolate.
+    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
+      // TODO(soon): Update all implementations and remove this default implementation.
+      KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
+    }
   };
 
   // Used by Fetchers that obtain their HttpClient in a custom way, but which aren't tied
@@ -474,6 +493,11 @@ public:
   class CrossContextOutgoingFactory {
   public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(IoContext& context, kj::Maybe<kj::String> cfStr) = 0;
+
+    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
+      // TODO(soon): Update all implementations and remove this default implementation.
+      KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
+    }
   };
 
   // `outgoingFactory` is used for Fetchers that use ad-hoc WorkerInterface instances, such as ones
@@ -500,6 +524,21 @@ public:
       IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName);
+
+  // Result of getClient call that includes optional trace context
+  struct ClientWithTracing {
+    kj::Own<WorkerInterface> client;
+    kj::Maybe<TraceContext> traceContext;
+  };
+
+  // Get client and optionally create trace context, all in one call
+  ClientWithTracing getClientWithTracing(
+    IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName);
+
+  // Get a SubrequestChannel representing this Fetcher.
+  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
 
   // Wraps kj::Url::parse to take into account whether the Fetcher requires a host to be
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
@@ -630,7 +669,16 @@ public:
       });
     }
     JSG_TS_DEFINE(
-      type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> = Fetcher<T>;
+      type Service<
+        T extends
+          | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+          | Rpc.WorkerEntrypointBranded
+          | ExportedHandler<any, any, any>
+          | undefined = undefined,
+      > = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded ? Fetcher<InstanceType<T>>
+        : T extends Rpc.WorkerEntrypointBranded ? Fetcher<T>
+        : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded> ? never
+        : Fetcher<undefined>
     );
 
     if (!flags.getFetcherNoGetPutDelete()) {
@@ -652,8 +700,18 @@ public:
     }
   }
 
-private:
-  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>> channelOrClientFactory;
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Fetcher> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  kj::OneOf<uint,
+      IoOwn<IoChannelFactory::SubrequestChannel>,
+      kj::Own<CrossContextOutgoingFactory>,
+      IoOwn<OutgoingFactory>>
+      channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
 };

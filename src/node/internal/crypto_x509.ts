@@ -26,7 +26,7 @@
 /* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
-import { default as cryptoImpl, CheckOptions } from 'node-internal:crypto';
+import { default as cryptoImpl, type CheckOptions } from 'node-internal:crypto';
 
 import {
   validateString,

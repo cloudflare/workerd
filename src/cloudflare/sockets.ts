@@ -3,10 +3,19 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // TODO: c++ built-ins do not yet support named exports
+
 import sockets from 'cloudflare-internal:sockets';
+import { type ServiceStub } from 'cloudflare-internal:workers';
+
 export function connect(
   address: string | sockets.SocketAddress,
   options: sockets.SocketOptions
 ): sockets.Socket {
   return sockets.connect(address, options);
+}
+
+export function internalNewHttpClient(
+  socket: sockets.Socket
+): Promise<ServiceStub> {
+  return sockets.internalNewHttpClient(socket);
 }

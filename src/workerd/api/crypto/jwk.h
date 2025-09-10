@@ -1,6 +1,5 @@
 #pragma once
 
-#include "impl.h"
 #include "keys.h"
 
 namespace workerd::api {

@@ -18,11 +18,7 @@ deps_gen()
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-NODE_VERSION = "22.15.1"
-
-load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
-
-bazel_skylib_workspace()
+NODE_VERSION = "22.18.0"
 
 # ========================================================================================
 # Simple dependencies
@@ -189,6 +185,7 @@ python_register_toolchains(
     ignore_root_user_error = True,
     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
     python_version = "3.13",
+    register_coverage_tool = True,
 )
 
 load("@rules_python//python:pip.bzl", "pip_parse")
@@ -231,7 +228,26 @@ new_local_repository(
     name = "workerd-v8",
     build_file_content = """cc_library(
         name = "v8",
+        defines = ["WORKERD_ICU_DATA_EMBED"],
         deps = [ "@v8//:v8_icu", "@workerd//:icudata-embed" ],
+        visibility = ["//visibility:public"])""",
+    path = "empty",
+)
+
+# Tell workerd code where to find google-benchmark with CodSpeed.
+#
+# We indirect through `@workerd-google-benchmark` to allow dependents to override how and where
+# google-benchmark is built, similar to the v8 setup above.
+new_local_repository(
+    name = "workerd-google-benchmark",
+    build_file_content = """cc_library(
+        name = "benchmark",
+        deps = [ "@codspeed//google_benchmark:benchmark" ],
+        visibility = ["//visibility:public"])
+
+cc_library(
+        name = "benchmark_main",
+        deps = [ "@codspeed//google_benchmark:benchmark_main" ],
         visibility = ["//visibility:public"])""",
     path = "empty",
 )

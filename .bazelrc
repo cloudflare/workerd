@@ -31,7 +31,7 @@ build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
 
-import %workspace%/build/lint.bazelrc
+import %workspace%/build/rust_lint.bazelrc
 
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
@@ -43,8 +43,8 @@ build --per_file_copt='external@-Wno-error'
 build --per_file_copt='external/v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
-build --per_file_copt=external/protobuf@-Wno-deprecated-this-capture
-build --host_per_file_copt=external/protobuf@-Wno-deprecated-this-capture
+build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
+build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
 
 ## simdutf
 build --per_file_copt=external/simdutf@-Wno-unused-const-variable
@@ -379,6 +379,9 @@ build:release_windows --copt="/clang:-O3"
 # clang-cl does not enable strict aliasing by default to match MSVC's approach, unlike clang on
 # Unix which turns it on for opt builds.
 build:release_windows --copt="-fstrict-aliasing"
+# This file breaks our CI windows release builds when compiled using O2/O3
+# Ref: https://github.com/llvm/llvm-project/issues/136481
+build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
 
 build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
@@ -392,10 +395,25 @@ build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unuse
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
 build:windows --cxxopt='/Zc:__cplusplus' --host_cxxopt='/Zc:__cplusplus'
 
-# enable clang coverage: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
-build:clang-coverage --copt="-fprofile-instr-generate" --linkopt="-fprofile-instr-generate"
-build:clang-coverage --copt="-fcoverage-mapping" --linkopt="-fcoverage-mapping"
+build:coverage --action_env=GCOV=llvm-profdata-19
+build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
+build:coverage --copt=-DNDEBUG
+build:coverage --combined_report=lcov
+build:coverage --strategy=TestRunner=remote,sandboxed,local
+build:coverage --strategy=CoverageReport=sandboxed,local
+build:coverage --experimental_use_llvm_covmap
+build:coverage --experimental_generate_llvm_lcov
+build:coverage --experimental_fetch_all_coverage_outputs
+build:coverage --collect_code_coverage
+build:coverage --instrumentation_filter="^//,-//external"
+build:coverage --remote_download_minimal
+build:coverage --define=tcmalloc=gperftools
+build:coverage --test_timeout=120,120,120,120
+build:coverage --instrument_test_targets
 
 # This config is defined internally and enabled on many machines.
 # Defining it as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
+
+coverage --build_tests_only
+coverage --config=coverage

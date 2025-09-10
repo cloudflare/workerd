@@ -1,4 +1,4 @@
-export type { addAbortSignal } from 'node:stream';
+export { addAbortSignal } from 'node:stream';
 import type { FinishedOptions } from 'node:stream';
 
 // Exported symbols
@@ -228,7 +228,7 @@ export function destroy(
 export function undestroy(this: NodeStreamLike): void;
 export function errorOrDestroy(
   stream: NodeStreamLike,
-  err: Error,
+  err: unknown,
   sync?: boolean
 ): void;
 export function construct(

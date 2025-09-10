@@ -5,10 +5,12 @@
 #pragma once
 
 #include "basics.h"
+#include "events.h"
 
 #include <workerd/io/io-gate.h>
 #include <workerd/io/observer.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/checked-queue.h>
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
@@ -24,80 +26,6 @@ namespace workerd::api {
 
 template <typename T>
 struct DeferredProxy;
-
-class MessageEvent: public Event {
- public:
-  MessageEvent(jsg::Lock& js, const jsg::JsValue& data)
-      : Event("message"),
-        data(jsg::JsRef(js, data)) {}
-  MessageEvent(jsg::Lock& js, jsg::JsRef<jsg::JsValue> data)
-      : Event("message"),
-        data(kj::mv(data)) {}
-  MessageEvent(jsg::Lock& js, kj::String type, const jsg::JsValue& data)
-      : Event(kj::mv(type)),
-        data(jsg::JsRef(js, kj::mv(data))) {}
-  MessageEvent(jsg::Lock& js, kj::String type, jsg::JsRef<jsg::JsValue> data)
-      : Event(kj::mv(type)),
-        data(kj::mv(data)) {}
-
-  struct Initializer {
-    jsg::JsRef<jsg::JsValue> data;
-
-    JSG_STRUCT(data);
-    JSG_STRUCT_TS_OVERRIDE(MessageEventInit {
-      data: ArrayBuffer | string;
-    });
-  };
-  static jsg::Ref<MessageEvent> constructor(
-      jsg::Lock& js, kj::String type, Initializer initializer) {
-    return js.alloc<MessageEvent>(js, kj::mv(type), kj::mv(initializer.data));
-  }
-
-  jsg::JsValue getData(jsg::Lock& js) {
-    return data.getHandle(js);
-  }
-
-  jsg::Unimplemented getOrigin() {
-    return jsg::Unimplemented();
-  }
-  jsg::Unimplemented getLastEventId() {
-    return jsg::Unimplemented();
-  }
-  jsg::Unimplemented getSource() {
-    return jsg::Unimplemented();
-  }
-  jsg::Unimplemented getPorts() {
-    return jsg::Unimplemented();
-  }
-
-  JSG_RESOURCE_TYPE(MessageEvent) {
-    JSG_INHERIT(Event);
-
-    JSG_READONLY_INSTANCE_PROPERTY(data, getData);
-
-    JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
-    JSG_READONLY_INSTANCE_PROPERTY(lastEventId, getLastEventId);
-    JSG_READONLY_INSTANCE_PROPERTY(source, getSource);
-    JSG_READONLY_INSTANCE_PROPERTY(ports, getPorts);
-
-    JSG_TS_ROOT();
-    // MessageEvent will be referenced from the `WebSocketEventMap` define
-    JSG_TS_OVERRIDE({
-      readonly data: ArrayBuffer | string;
-    });
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("data", data);
-  }
-
- private:
-  jsg::JsRef<jsg::JsValue> data;
-
-  void visitForGc(jsg::GcVisitor& visitor) {
-    visitor.visit(data);
-  }
-};
 
 class CloseEvent: public Event {
  public:
@@ -630,16 +558,15 @@ class WebSocket: public EventTarget {
   // between regular websocket messages, and auto-responses.
   struct AutoResponse {
     kj::Promise<void> ongoingAutoResponse = kj::READY_NOW;
-    std::list<kj::String> pendingAutoResponseDeque;
+    workerd::util::Queue<kj::String> pendingAutoResponseDeque;
     size_t queuedAutoResponses = 0;
     bool isPumping = false;
     bool isClosed = false;
 
     JSG_MEMORY_INFO(AutoResponse) {
       tracker.trackFieldWithSize("ongoingAutoResponse", sizeof(kj::Promise<void>));
-      for (const auto& message: pendingAutoResponseDeque) {
-        tracker.trackField(nullptr, message);
-      }
+      pendingAutoResponseDeque.forEach(
+          [&](const kj::String& message) { tracker.trackField(nullptr, message); });
     }
   };
 
@@ -697,8 +624,7 @@ class WebSocket: public EventTarget {
 };
 
 #define EW_WEBSOCKET_ISOLATE_TYPES                                                                 \
-  api::CloseEvent, api::CloseEvent::Initializer, api::MessageEvent,                                \
-      api::MessageEvent::Initializer, api::WebSocket, api::WebSocketPair,                          \
+  api::CloseEvent, api::CloseEvent::Initializer, api::WebSocket, api::WebSocketPair,               \
       api::WebSocketPair::PairIterator,                                                            \
       api::WebSocketPair::PairIterator::                                                           \
           Next  // The list of websocket.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE

@@ -227,6 +227,10 @@ export const test = {
         assert.strictEqual(
           event.data,
           `MessageEvent {
+  ports: [ [length]: 0 ],
+  source: null,
+  lastEventId: '',
+  origin: null,
   data: 'data',
   type: 'message',
   eventPhase: 2,
@@ -254,6 +258,9 @@ export const test = {
     webSocket.send('data');
     webSocket.close();
     await messagePromise;
+
+    // Test sending to oversized URL (bigger than MAX_TRACE_BYTES), relevant primarily for tail worker test.
+    await env.SERVICE.fetch('http://placeholder/' + '0'.repeat(2 ** 18));
   },
 };
 

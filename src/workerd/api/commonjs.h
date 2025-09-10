@@ -12,7 +12,7 @@ class CommonJsModuleObject final: public jsg::Object {
   CommonJsModuleObject(jsg::Lock& js, kj::String path);
 
   jsg::JsValue getExports(jsg::Lock& js) const;
-  void setExports(jsg::Value value);
+  void setExports(jsg::Lock& js, jsg::JsValue value);
   kj::StringPtr getPath() const;
 
   JSG_RESOURCE_TYPE(CommonJsModuleObject) {
@@ -23,7 +23,7 @@ class CommonJsModuleObject final: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  jsg::Value exports;
+  jsg::JsRef<jsg::JsValue> exports;
   kj::String path;
 };
 
@@ -37,7 +37,7 @@ class CommonJsModuleContext final: public jsg::Object {
   jsg::Ref<CommonJsModuleObject> getModule(jsg::Lock& js);
 
   jsg::JsValue getExports(jsg::Lock& js) const;
-  void setExports(jsg::Value value);
+  void setExports(jsg::Lock& js, jsg::JsValue value);
 
   kj::String getFilename() const;
   kj::String getDirname() const;
@@ -63,7 +63,7 @@ class CommonJsModuleContext final: public jsg::Object {
   // implementation. If it is a jsg::Url, then we are using the new module
   // registry implementation.
   kj::OneOf<kj::Path, jsg::Url> pathOrSpecifier;
-  jsg::Value exports;
+  jsg::JsRef<jsg::JsValue> exports;
 };
 
 // Used with the original module registry implementation.

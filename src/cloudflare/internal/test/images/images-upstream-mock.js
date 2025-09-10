@@ -58,7 +58,12 @@ export default {
           // @ts-ignore
           transforms: JSON.parse(form.get('transforms') || '{}'),
         };
-        for (const x of ['output_format', 'output_quality', 'background']) {
+        for (const x of [
+          'output_format',
+          'output_quality',
+          'background',
+          'anim',
+        ]) {
           if (form.get(x)) {
             obj[x] = form.get(x);
           }

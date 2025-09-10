@@ -24,10 +24,10 @@ index a9f380e38abdde83b6a3f8b5804d81e46df421bc..7a3e5c26a549f4f42e20a8f28301dd61
  
  #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 99c21c30422397f9243a715bcd615c33cf6eada7..df8c9654e45dcd108397bef35c21bd2cbd1773dc 100644
+index 582a485ccccdc84bce392e8a8623e1e81769a026..4bc7192b05f036de18317b7df34aa8b9eb8a97e2 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1834,6 +1834,9 @@ class V8_EXPORT Isolate {
+@@ -1844,6 +1844,9 @@ class V8_EXPORT Isolate {
     */
    uint64_t GetHashSeed();
  
@@ -37,7 +37,7 @@ index 99c21c30422397f9243a715bcd615c33cf6eada7..df8c9654e45dcd108397bef35c21bd2c
    Isolate() = delete;
    ~Isolate() = delete;
    Isolate(const Isolate&) = delete;
-@@ -1881,6 +1884,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
+@@ -1891,6 +1894,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
    return {};
  }
  
@@ -58,10 +58,10 @@ index 99c21c30422397f9243a715bcd615c33cf6eada7..df8c9654e45dcd108397bef35c21bd2c
  
  #endif  // INCLUDE_V8_ISOLATE_H_
 diff --git a/src/api/api.cc b/src/api/api.cc
-index bcf9f8cb41fc12953e83c24b86b6afd5a177fff6..fc2c81a6b93331b0a9bcb0ba88b1af7889c382d9 100644
+index 0311748cb83e8fa098305ee33e043d9311e94370..ac3a516d93e0b9871796486251827467e802b7a2 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -12472,6 +12472,25 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
+@@ -12566,6 +12566,25 @@ TryToCopyAndConvertArrayToCppBuffer<CTypeInfoBuilder<double>::Build().GetId(),
                                                              max_length);
  }
  
@@ -187,10 +187,10 @@ index f3ece10afb659042fbb195a98cad8254cf1188c5..cd5261012bd9a2f16b2f3354b6c526ab
    return instance;
  }
 diff --git a/src/compiler/js-create-lowering.cc b/src/compiler/js-create-lowering.cc
-index c3725194083d4649021ca73b858f7086fefb34d0..0160120831f20db7dcb50d3b47a9c933faa9bb58 100644
+index 822012d74153df43bf1ddefdddde3d27ae80a954..4b275a2ab9384625bf7cc5df777ae663862c4250 100644
 --- a/src/compiler/js-create-lowering.cc
 +++ b/src/compiler/js-create-lowering.cc
-@@ -1123,10 +1123,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
+@@ -1126,10 +1126,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
            jsgraph()->EmptyFixedArrayConstant());
    a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kReactionsOrResultOffset),
            jsgraph()->ZeroConstant());
@@ -205,10 +205,10 @@ index c3725194083d4649021ca73b858f7086fefb34d0..0160120831f20db7dcb50d3b47a9c933
         offset < JSPromise::kSizeWithEmbedderFields; offset += kTaggedSize) {
      a.Store(AccessBuilder::ForJSObjectOffset(offset),
 diff --git a/src/diagnostics/objects-printer.cc b/src/diagnostics/objects-printer.cc
-index dd051ef2c4a1285f10fb252abce873241644bfb8..dc46a346595907460de20333798f981a1f020352 100644
+index 65e694850ecfd3afc8839d851c5dd024549b8187..4de528103be80124c75ed7806ba829526c8c9542 100644
 --- a/src/diagnostics/objects-printer.cc
 +++ b/src/diagnostics/objects-printer.cc
-@@ -939,6 +939,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
+@@ -962,6 +962,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
    }
    os << "\n - has_handler: " << has_handler();
    os << "\n - is_silent: " << is_silent();
@@ -217,7 +217,7 @@ index dd051ef2c4a1285f10fb252abce873241644bfb8..dc46a346595907460de20333798f981a
  }
  
 diff --git a/src/execution/isolate-inl.h b/src/execution/isolate-inl.h
-index 1f4e50e719332e0653694a8e0bae1e301be619dd..77b4342a03b5ae56584b9dc8bd7a15e14ebbc142 100644
+index 8579c79d99cf67cdbf4109d84169ba0e0e4458c5..3e5662b29265104741c7d98d79257a81e8b0fa46 100644
 --- a/src/execution/isolate-inl.h
 +++ b/src/execution/isolate-inl.h
 @@ -133,6 +133,25 @@ bool Isolate::is_execution_terminating() {
@@ -247,10 +247,10 @@ index 1f4e50e719332e0653694a8e0bae1e301be619dd..77b4342a03b5ae56584b9dc8bd7a15e1
  Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
    if (is_execution_terminating() && !v8_flags.strict_termination_checks) {
 diff --git a/src/execution/isolate.cc b/src/execution/isolate.cc
-index 8860542b650e5570ae52a8733cf214a0043686ab..3fbf91e9359deaaef4529b3687fe5f8fa5e34970 100644
+index b5c8ab68340aaec141ecef818d148937e2fbc641..c2f47f68450ee5ca800716d585d70284079faf0a 100644
 --- a/src/execution/isolate.cc
 +++ b/src/execution/isolate.cc
-@@ -610,6 +610,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
+@@ -622,6 +622,8 @@ void Isolate::Iterate(RootVisitor* v, ThreadLocalTop* thread) {
                        FullObjectSlot(&thread->pending_message_));
    v->VisitRootPointer(Root::kStackRoots, nullptr,
                        FullObjectSlot(&thread->context_));
@@ -259,7 +259,7 @@ index 8860542b650e5570ae52a8733cf214a0043686ab..3fbf91e9359deaaef4529b3687fe5f8f
  
    for (v8::TryCatch* block = thread->try_catch_handler_; block != nullptr;
         block = block->next_) {
-@@ -5799,6 +5801,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
+@@ -5854,6 +5856,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
      shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
    }
  
@@ -267,7 +267,7 @@ index 8860542b650e5570ae52a8733cf214a0043686ab..3fbf91e9359deaaef4529b3687fe5f8f
    InitializeThreadLocal();
  
    // Profiler has to be created after ThreadLocal is initialized
-@@ -7864,5 +7867,40 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
+@@ -7948,5 +7951,40 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
    PrintF("\n");
  }
  
@@ -309,10 +309,10 @@ index 8860542b650e5570ae52a8733cf214a0043686ab..3fbf91e9359deaaef4529b3687fe5f8f
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/execution/isolate.h b/src/execution/isolate.h
-index 4f985dfa1599db9801400a591feb969c00e5bc22..014ff251d199b33be295c17b5c73dcd7befe7095 100644
+index b4209daea87ac5df53182de5c0dc6a084b8dda7d..c7726eaf074dcf412b61b29061ef719970544d97 100644
 --- a/src/execution/isolate.h
 +++ b/src/execution/isolate.h
-@@ -2429,6 +2429,15 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2391,6 +2391,15 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                         v8::ExceptionContext callback_kind);
    void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
  
@@ -328,7 +328,7 @@ index 4f985dfa1599db9801400a591feb969c00e5bc22..014ff251d199b33be295c17b5c73dcd7
  #ifdef V8_ENABLE_WASM_SIMD256_REVEC
    void set_wasm_revec_verifier_for_test(
        compiler::turboshaft::WasmRevecVerifier* verifier) {
-@@ -2967,6 +2976,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2933,6 +2942,12 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
  
    bool is_frozen_ = false;
  
@@ -341,7 +341,7 @@ index 4f985dfa1599db9801400a591feb969c00e5bc22..014ff251d199b33be295c17b5c73dcd7
    friend class GlobalSafepoint;
    friend class heap::HeapTester;
    friend class IsolateForPointerCompression;
-@@ -2974,6 +2989,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
+@@ -2940,6 +2955,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
    friend class IsolateGroup;
    friend class TestSerializer;
    friend class SharedHeapNoClientsTest;
@@ -350,10 +350,10 @@ index 4f985dfa1599db9801400a591feb969c00e5bc22..014ff251d199b33be295c17b5c73dcd7
  
  // The current entered Isolate and its thread data. Do not access these
 diff --git a/src/heap/factory.cc b/src/heap/factory.cc
-index ede00c9893b11ca10122c7bc10c5433db5020f06..159e06767a175d7c9a7dc110a3d1cffd5b095660 100644
+index ba83a6a8bf40687fe4c46dd25fac883221b5cd56..259a62966f8120c594877381f4029987d606be42 100644
 --- a/src/heap/factory.cc
 +++ b/src/heap/factory.cc
-@@ -4545,6 +4545,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
+@@ -4564,6 +4564,12 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
    DisallowGarbageCollection no_gc;
    Tagged<JSPromise> raw = *promise;
    raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
@@ -379,10 +379,10 @@ index 93a4a34f9f1f7fad40611d4b9432aaf944c9fbae..188619ea64c9e307f014898e4023ce79
  }
  
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 1f5fa0425fce4093774f5100d5ac3c8c479e18bf..24860fe05aab39ac7ef2a8a629ad39a4212bde34 100644
+index c37d9edafd5f5b460a9aa39f5aa5a275a6d49015..0e3aa9cb10bafcf0528adf43500c426773b46ec5 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
-@@ -1104,8 +1104,8 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1113,8 +1113,8 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint32_t>(view->byte_length()));
    if (version_ >= 14) {
      uint32_t flags =
@@ -394,10 +394,10 @@ index 1f5fa0425fce4093774f5100d5ac3c8c479e18bf..24860fe05aab39ac7ef2a8a629ad39a4
    }
    return ThrowIfOutOfMemory();
 diff --git a/src/profiler/heap-snapshot-generator.cc b/src/profiler/heap-snapshot-generator.cc
-index d02edc36b550231514ca31766cb365ecb05092b9..47f96c023ec4d088407149b1dc55e6a1779720c2 100644
+index 40ee39d700916be0fa2c82d64de8fcf02138abaa..c75cd7a2de525fd3186f718451f4cee2640fee20 100644
 --- a/src/profiler/heap-snapshot-generator.cc
 +++ b/src/profiler/heap-snapshot-generator.cc
-@@ -2054,6 +2054,8 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
+@@ -2069,6 +2069,8 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
    SetInternalReference(entry, "reactions_or_result",
                         promise->reactions_or_result(),
                         JSPromise::kReactionsOrResultOffset);
@@ -453,10 +453,10 @@ index 262b9aa5aa6974a4628d0679ada91aff76567906..9730731cd42c0ea6ce0d96ec250a11fc
  }  // namespace internal
  }  // namespace v8
 diff --git a/src/runtime/runtime.h b/src/runtime/runtime.h
-index 3c3f6dda8896ed963e681d0d45d87ffa6bebebc1..aa7a769044ce0e10d81e379fc21a119db68901e3 100644
+index 0fcff20ce40c4c6e01f120e5bc9fefc96bba1a1e..ee80eeffdead1e45d70984a9fbdf9a570e85c545 100644
 --- a/src/runtime/runtime.h
 +++ b/src/runtime/runtime.h
-@@ -430,20 +430,22 @@ constexpr bool CanTriggerGC(T... properties) {
+@@ -431,20 +431,22 @@ constexpr bool CanTriggerGC(T... properties) {
    F(StrictNotEqual, 2, 1)                  \
    F(ReferenceEqual, 2, 1)
  

@@ -1,7 +1,19 @@
-load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
-load("//:build/wd_test.bzl", "wd_test")
+
+wd_cc_library(
+    name = "exceptions",
+    srcs = [
+        "exceptions.c++",
+    ],
+    hdrs = [
+        "exceptions.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+    ],
+)
 
 wd_cc_library(
     name = "node",
@@ -10,6 +22,7 @@ wd_cc_library(
         "crypto-keys.c++",
         "diagnostics-channel.c++",
         "module.c++",
+        "process.c++",
         "timers.c++",
         "util.c++",
         "zlib-util.c++",
@@ -19,6 +32,7 @@ wd_cc_library(
         "diagnostics-channel.h",
         "module.h",
         "node.h",
+        "process.h",
         "timers.h",
         "util.h",
         "zlib-util.h",
@@ -52,6 +66,7 @@ wd_cc_library(
         "buffer-string-search.h",
         "dns.h",
         "i18n.h",
+        "node-version.h",
         "url.h",
     ],
     implementation_deps = [
@@ -70,405 +85,11 @@ wd_cc_library(
         "//src/workerd/jsg",
         "//src/workerd/io",
         "//src/workerd/util:mimetype",
+        ":exceptions",
     ],
 )
 
 kj_test(
     src = "buffer-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
-)
-
-wd_test(
-    src = "tests/assert-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/assert-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/buffer-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/buffer-nodejs-test.js"],
-)
-
-wd_test(
-    size = "enormous",
-    src = "tests/crypto_dh-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_dh-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_hash-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_hash-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_hkdf-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_hkdf-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_hmac-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_hmac-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_keys-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/crypto_keys-test.js",
-        "tests/fixtures/agent1-cert.pem",
-        "tests/fixtures/dh_private.pem",
-        "tests/fixtures/dh_public.pem",
-        "tests/fixtures/dsa_private.pem",
-        "tests/fixtures/dsa_private_1025.pem",
-        "tests/fixtures/dsa_private_encrypted.pem",
-        "tests/fixtures/dsa_private_encrypted_1025.pem",
-        "tests/fixtures/dsa_private_pkcs8.pem",
-        "tests/fixtures/dsa_public.pem",
-        "tests/fixtures/dsa_public_1025.pem",
-        "tests/fixtures/ec_p256_private.pem",
-        "tests/fixtures/ec_p256_public.pem",
-        "tests/fixtures/ec_p384_private.pem",
-        "tests/fixtures/ec_p384_public.pem",
-        "tests/fixtures/ec_p521_private.pem",
-        "tests/fixtures/ec_p521_public.pem",
-        "tests/fixtures/ec_secp256k1_private.pem",
-        "tests/fixtures/ec_secp256k1_public.pem",
-        "tests/fixtures/ed25519_private.pem",
-        "tests/fixtures/ed25519_public.pem",
-        "tests/fixtures/ed448_private.pem",
-        "tests/fixtures/ed448_public.pem",
-        "tests/fixtures/rsa_private.pem",
-        "tests/fixtures/rsa_private_2048.pem",
-        "tests/fixtures/rsa_private_4096.pem",
-        "tests/fixtures/rsa_private_b.pem",
-        "tests/fixtures/rsa_private_encrypted.pem",
-        "tests/fixtures/rsa_private_pkcs8.pem",
-        "tests/fixtures/rsa_private_pkcs8_bad.pem",
-        "tests/fixtures/rsa_pss_private_2048.pem",
-        "tests/fixtures/rsa_pss_private_2048_sha1_sha1_20.pem",
-        "tests/fixtures/rsa_pss_private_2048_sha256_sha256_16.pem",
-        "tests/fixtures/rsa_pss_private_2048_sha512_sha256_20.pem",
-        "tests/fixtures/rsa_pss_public_2048.pem",
-        "tests/fixtures/rsa_pss_public_2048_sha1_sha1_20.pem",
-        "tests/fixtures/rsa_pss_public_2048_sha256_sha256_16.pem",
-        "tests/fixtures/rsa_pss_public_2048_sha512_sha256_20.pem",
-        "tests/fixtures/rsa_public.pem",
-        "tests/fixtures/rsa_public_2048.pem",
-        "tests/fixtures/rsa_public_4096.pem",
-        "tests/fixtures/rsa_public_b.pem",
-        "tests/fixtures/x25519_private.pem",
-        "tests/fixtures/x25519_public.pem",
-        "tests/fixtures/x448_private.pem",
-        "tests/fixtures/x448_public.pem",
-    ],
-)
-
-wd_test(
-    src = "tests/crypto_pbkdf2-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_pbkdf2-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_random-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_random-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/crypto_scrypt-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_scrypt-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_spkac-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_spkac-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_x509-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/crypto_x509-test.js"],
-)
-
-wd_test(
-    src = "tests/diagnostics-channel-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/diagnostics-channel-test.js"],
-)
-
-wd_test(
-    src = "tests/mimetype-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/mimetype-test.js"],
-)
-
-wd_test(
-    src = "tests/node-compat-v2-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/node-compat-v2-test.js"],
-)
-
-wd_test(
-    src = "tests/path-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/path-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/streams-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/streams-test.js"],
-)
-
-wd_test(
-    src = "tests/string-decoder-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/string-decoder-test.js"],
-)
-
-wd_test(
-    src = "tests/url-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/url-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/util-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/util-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/sys-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/sys-nodejs-test.js"],
-)
-
-wd_test(
-    size = "large",
-    src = "tests/zlib-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/zlib-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/module-create-require-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/module-create-require-test.js"],
-)
-
-wd_test(
-    src = "tests/process-exit-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/process-exit-test.js"],
-)
-
-wd_test(
-    src = "tests/process-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/process-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/querystring-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/querystring-nodejs-test.js"],
-)
-
-config_setting(
-    name = "debug_build",
-    values = {"compilation_mode": "dbg"},
-)
-
-wd_test(
-    size = "large",
-    src = "tests/legacy_url-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/legacy_url-nodejs-test.js"],
-    target_compatible_with = select({
-        ":debug_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
-)
-
-wd_test(
-    src = "tests/dns-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/dns-nodejs-test.js"],
-)
-
-js_binary(
-    name = "net-nodejs-tcp-server",
-    entry_point = "tests/net-nodejs-tcp-server.js",
-)
-
-wd_test(
-    size = "large",
-    src = "tests/net-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/net-nodejs-test.js"],
-    sidecar = "net-nodejs-tcp-server",
-    sidecar_port_bindings = [
-        "SERVER_PORT",
-        "ECHO_SERVER_PORT",
-        "TIMEOUT_SERVER_PORT",
-        "END_SERVER_PORT",
-        "SERVER_THAT_DIES_PORT",
-        "RECONNECT_SERVER_PORT",
-    ],
-)
-
-wd_test(
-    src = "tests/timers-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/timers-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/async_hooks-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/async_hooks-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/crypto_sign-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/crypto_sign-test.js",
-        "tests/fixtures/dsa_private.pem",
-        "tests/fixtures/dsa_public.pem",
-        "tests/fixtures/ed25519_private.pem",
-        "tests/fixtures/ed25519_public.pem",
-        "tests/fixtures/rsa_private.pem",
-        "tests/fixtures/rsa_public.pem",
-    ],
-)
-
-wd_test(
-    src = "tests/crypto_cipher-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/crypto_cipher-test.js",
-        "tests/fixtures/ed25519_private.pem",
-        "tests/fixtures/ed25519_public.pem",
-        "tests/fixtures/rsa_private.pem",
-        "tests/fixtures/rsa_public.pem",
-    ],
-)
-
-js_binary(
-    name = "tls-nodejs-tcp-server",
-    entry_point = "tests/tls-nodejs-tcp-server.js",
-)
-
-wd_test(
-    size = "large",
-    src = "tests/tls-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = [
-        "tests/fixtures/tls-nodejs-tcp-server.pem",
-        "tests/tls-nodejs-test.js",
-    ],
-    sidecar = "tls-nodejs-tcp-server",
-    sidecar_port_bindings = [
-        "ECHO_SERVER_PORT",
-        "HELLO_SERVER_PORT",
-        "JS_STREAM_SERVER_PORT",
-        "STREAM_WRAP_SERVER_PORT",
-    ],
-)
-
-js_binary(
-    name = "sidecar-supervisor",
-    entry_point = "tests/sidecar-supervisor.mjs",
-    visibility = ["//visibility:public"],
-)
-
-wd_test(
-    src = "tests/streams-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/streams-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/http-nodejs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/http-nodejs-test.js"],
-)
-
-wd_test(
-    src = "tests/bound-als-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/bound-als-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-access-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-access-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-chown-chmod-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-chown-chmod-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-utimes-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-utimes-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-stat-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-stat-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-misc-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-misc-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-link-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-link-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-dir-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-dir-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-filehandle-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-filehandle-test.js"],
-)
-
-wd_test(
-    src = "tests/fs-glob-test.wd-test",
-    args = ["--experimental"],
-    data = ["tests/fs-glob-test.js"],
 )

@@ -32,6 +32,7 @@ import {
   ERR_INVALID_ARG_VALUE,
   ERR_SOCKET_BAD_PORT,
   ERR_OUT_OF_RANGE,
+  ERR_INVALID_THIS,
 } from 'node-internal:internal_errors';
 import { default as bufferUtil } from 'node-internal:buffer';
 
@@ -164,6 +165,20 @@ export function validateString(
 ): asserts value is string {
   if (typeof value !== 'string') {
     throw new ERR_INVALID_ARG_TYPE(name, 'string', value);
+  }
+}
+
+export function validateStringArray(
+  value: unknown,
+  name: string
+): asserts value is string[] {
+  validateArray(value, name);
+  for (let i = 0; i < value.length; ++i) {
+    // Don't use validateString here for performance reasons, as
+    // we would generate intermediate strings for the name.
+    if (typeof value[i] !== 'string') {
+      throw new ERR_INVALID_ARG_TYPE(`${name}[${i}]`, 'string', value[i]);
+    }
   }
 }
 
@@ -368,6 +383,20 @@ export function parseFileMode(
   return value;
 }
 
+export function validateThisInternalField(
+  object: object | null,
+  fieldKey: string | symbol,
+  className: string
+): void {
+  if (
+    typeof object !== 'object' ||
+    object === null ||
+    !Object.prototype.hasOwnProperty.call(object, fieldKey)
+  ) {
+    throw new ERR_INVALID_THIS(className);
+  }
+}
+
 export const kValidateObjectNone = 0;
 export const kValidateObjectAllowNullable = 1 << 0;
 export const kValidateObjectAllowArray = 1 << 1;
@@ -395,6 +424,7 @@ export default {
   validateString,
   validateUint32,
   validatePort,
+  validateThisInternalField,
 
   // Zlib specific
   checkFiniteNumber,

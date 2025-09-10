@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { isIterable, isNodeStream, finished } from 'node-internal:streams_util';
 
 import { pipelineImpl as pl } from 'node-internal:streams_pipeline';

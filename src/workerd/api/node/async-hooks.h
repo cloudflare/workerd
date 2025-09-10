@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
-#include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/jsg.h>
 
@@ -173,18 +172,6 @@ class AsyncResource final: public jsg::Object {
   static jsg::Ref<AsyncResource> constructor(
       jsg::Lock& js, jsg::Optional<kj::String> type, jsg::Optional<Options> options = kj::none);
 
-  // The Node.js API uses numeric identifiers for all async resources. We do not
-  // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented asyncId() {
-    return {};
-  }
-
-  // The Node.js API uses numeric identifiers for all async resources. We do not
-  // implement that part of their API. To prevent subtle bugs, we'll throw explicitly.
-  inline jsg::Unimplemented triggerAsyncId() {
-    return {};
-  }
-
   static v8::Local<v8::Function> staticBind(jsg::Lock& js,
       v8::Local<v8::Function> fn,
       jsg::Optional<kj::String> type,
@@ -203,18 +190,37 @@ class AsyncResource final: public jsg::Object {
       jsg::Optional<v8::Local<v8::Value>> thisArg,
       jsg::Arguments<jsg::Value>);
 
+  // The Node.js API uses numeric identifiers for all async resources. We do not
+  // implement that part of their API. Always returns 0.
+  inline int asyncId() {
+    return 0;
+  }
+
+  // The Node.js API uses numeric identifiers for all async resources. We do not
+  // implement that part of their API. Always returns 0.
+  inline int triggerAsyncId() {
+    return 0;
+  }
+
+  // No-op. We do not track resource lifetimes. This is provided only for API compatibility.
+  void emitDestroy(jsg::Lock&) {};
+
   JSG_RESOURCE_TYPE(AsyncResource) {
     JSG_STATIC_METHOD_NAMED(bind, staticBind);
     JSG_METHOD(asyncId);
     JSG_METHOD(triggerAsyncId);
     JSG_METHOD(bind);
     JSG_METHOD(runInAsyncScope);
+    JSG_METHOD(emitDestroy);
 
     JSG_TS_OVERRIDE(AsyncResource {
       constructor(type: string, options?: AsyncResourceOptions);
       static bind<Func extends (this: ThisArg, ...args: any[]) => any, ThisArg>(fn: Func, type?: string, thisArg?: ThisArg): Func;
       bind<Func extends (...args: any[]) => any>(fn: Func): Func;
       runInAsyncScope<This, Result>(fn: (this: This, ...args: any[]) => Result, thisArg?: This, ...args: any[]): Result;
+      asyncId(): number;
+      triggerAsyncId(): number;
+      emitDestroy(): void;
     });
   }
 

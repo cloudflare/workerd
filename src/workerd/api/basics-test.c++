@@ -14,7 +14,6 @@
 #include <workerd/io/promise-wrapper.h>
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/autogate.h>
 
 namespace workerd::api {
 namespace {

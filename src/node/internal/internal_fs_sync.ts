@@ -38,6 +38,7 @@ import {
   type SymlinkType,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
   validatePosition,
   validateAccessArgs,
   validateChownArgs,
@@ -57,7 +58,7 @@ import {
   validateBoolean,
   validateObject,
   validateOneOf,
-  validateEncoding,
+  validateString,
   validateUint32,
 } from 'node-internal:validators';
 import {
@@ -135,10 +136,10 @@ export function accessSync(path: FilePath, mode: number = F_OK): void {
 export function appendFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): number {
   if (typeof options === 'string' || options == null) {
-    options = { encoding: options as BufferEncoding | null };
+    options = { encoding: options as BufferEncoding };
   }
   const {
     encoding = 'utf8',
@@ -214,6 +215,7 @@ export function cpSync(
     recursive = false,
     verbatimSymlinks = false,
   } = options;
+
   validateBoolean(dereference, 'options.dereference');
   validateBoolean(errorOnExist, 'options.errorOnExist');
   validateBoolean(force, 'options.force');
@@ -229,8 +231,18 @@ export function cpSync(
     );
   }
 
-  if (filter !== undefined && typeof filter !== 'function') {
-    throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  // We do not implement the filter option currently. There's a bug in the Node.js
+  // implementation of fs.cp and the option.filter in which non-UTF-8 encoded file
+  // names are not handled correctly and the option.filter fails when the src or
+  // dest is passed in as a Buffer. Fixing this bug in Node.js will require a breaking
+  // change to the API or a new API that appropriately handles Buffer inputs and non
+  // UTF-8 encoded names. We want to avoid implementing the filter option for now
+  // until Node.js settles on a better implementation and API.
+  if (filter !== undefined) {
+    if (typeof filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+    }
+    throw new ERR_UNSUPPORTED_OPERATION();
   }
 
   const exclusive = Boolean(mode & COPYFILE_EXCL);
@@ -238,9 +250,25 @@ export function cpSync(
   // it here just to use it so the compiler doesn't complain.
   validateBoolean(exclusive, '');
 
-  src = normalizePath(src);
-  dest = normalizePath(dest);
-  throw new Error('Not implemented');
+  // We're not currently implementing verbatimSymlinks in any meaningful way.
+  // Our symlinks are always fully qualfied. That is, they always point to
+  // an absolute path and never to a relative path, so there is no distinction
+  // between verbatimSymlinks and non-verbatimSymlinks. We validate the option
+  // value above but otherwise we ignore it.
+
+  // We're also not currently implementing the preserveTimestamps option.
+  // Timestamps in our virtual filesystem aren't super meaningful given
+  // that most files in the current implementation are either created
+  // at startup and use the EPOCH as their timestamp, or are temporary files
+  // that are deleted when the request completes.
+  // TODO(node-fs): Decide if we want to implement preserveTimestamps in the future.
+
+  cffs.cp(normalizePath(src), normalizePath(dest), {
+    deferenceSymlinks: dereference,
+    recursive,
+    force,
+    errorOnExist,
+  });
 }
 
 export function existsSync(path: FilePath): boolean {
@@ -415,19 +443,21 @@ export function mkdirSync(
 }
 
 export type MkdirTempSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: ValidEncoding | undefined;
 };
 
 export function mkdtempSync(
   prefix: FilePath,
-  options: BufferEncoding | null | MkdirTempSyncOptions = {}
+  options: ValidEncoding | MkdirTempSyncOptions = {}
 ): string {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   prefix = normalizePath(prefix, encoding);
   const ret = cffs.mkdir(normalizePath(prefix), {
     recursive: false,
@@ -481,7 +511,7 @@ export type ReadDirResult = string[] | Buffer[] | Dirent[];
 
 export function readdirSync(
   path: FilePath,
-  options: BufferEncoding | null | ReadDirOptions = {}
+  options: ValidEncoding | ReadDirOptions = {}
 ): ReadDirResult {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
@@ -517,25 +547,31 @@ export function readdirSync(
   }
 
   return handles.map((handle) => {
-    return Buffer.from(handle.name).toString(encoding);
+    return Buffer.from(handle.name).toString(encoding as string);
   });
 }
 
 export type ReadFileSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: ValidEncoding | undefined;
   flag?: string | number | undefined;
 };
 
 export function readFileSync(
   pathOrFd: number | FilePath,
-  options: BufferEncoding | null | ReadFileSyncOptions = {}
+  options: ValidEncoding | ReadFileSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
-  const { encoding = 'utf8', flag = 'r' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  const { encoding = null, flag = 'r' } = options;
+  if (
+    encoding !== null &&
+    encoding !== 'buffer' &&
+    !Buffer.isEncoding(encoding)
+  ) {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   stringToFlags(flag);
 
   // TODO(node:fs): We are currently ignoring flags on readFileSync.
@@ -555,19 +591,21 @@ export function readFileSync(
 }
 
 export type ReadLinkSyncOptions = {
-  encoding?: BufferEncoding | null | undefined;
+  encoding?: ValidEncoding | undefined;
 };
 
 export function readlinkSync(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   const dest = Buffer.from(
     cffs.readLink(normalizePath(path), { failIfNotSymlink: true })
   );
@@ -621,14 +659,16 @@ export function readvSync(
 
 export function realpathSync(
   p: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): string | Buffer {
   if (typeof options === 'string' || options == null) {
     options = { encoding: options };
   }
   validateObject(options, 'options');
   const { encoding = 'utf8' } = options;
-  validateEncoding(encoding, 'options.encoding');
+  if (!Buffer.isEncoding(encoding) && encoding !== 'buffer') {
+    throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
+  }
   const dest = Buffer.from(
     cffs.readLink(normalizePath(p), { failIfNotSymlink: false })
   );
@@ -748,7 +788,7 @@ export function utimesSync(
 export function writeFileSync(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): number {
   const {
     path: validatedPath,
@@ -764,7 +804,7 @@ export function writeSync(
   fd: number,
   buffer: NodeJS.ArrayBufferView | string,
   offsetOrOptions: WriteSyncOptions | Position = null,
-  length?: number | BufferEncoding | null,
+  length?: number | ValidEncoding,
   position?: Position
 ): number {
   const {
@@ -804,6 +844,23 @@ export function globSync(
   // which is not yet available in the workers runtime. This will be
   // explored for implementation separately in the future.
   throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+export interface OpenAsBlobOptions {
+  type?: string | undefined;
+}
+export function openAsBlob(
+  path: FilePath,
+  options: OpenAsBlobOptions = {}
+): Blob {
+  // TODO(node-fs): We do not yet implement the openAsBlob API. We will implement
+  // this soon.
+  normalizePath(path);
+  validateObject(options, 'options');
+  const { type = '' } = options;
+  validateString(type, 'options.type');
+
+  return cffs.openAsBlob(normalizePath(path), { type });
 }
 
 // An API is considered stubbed if it is not implemented by the function
@@ -866,6 +923,5 @@ export function globSync(
 // [x][x][2][x][x] fs.appendFileSync(path, data[, options])
 // [x][x][2][x][x] fs.copyFileSync(src, dest[, mode])
 // [x][x][2][x][x] fs.opendirSync(path[, options])
-//
-// [x][ ][ ][ ][ ] fs.cpSync(src, dest[, options])
+// [x][x][2][x][x] fs.cpSync(src, dest[, options])
 // [ ][ ][ ][ ][ ] fs.globSync(pattern[, options])

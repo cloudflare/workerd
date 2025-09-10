@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
+/* eslint-disable @typescript-eslint/no-deprecated */
 import {
   sendDnsRequest,
   validateAnswer,
@@ -37,6 +38,7 @@ import {
 } from 'node-internal:validators';
 import * as errorCodes from 'node-internal:internal_dns_constants';
 import { isIP } from 'node-internal:internal_net';
+import type dns from 'node:dns';
 
 type DnsOrder = 'verbatim' | 'ipv4first' | 'ipv6first';
 
@@ -49,18 +51,9 @@ export const validDnsOrders: DnsOrder[] = [
 
 let defaultDnsOrder: DnsOrder = 'verbatim';
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function getServers(): Promise<string[]> {
+export function getServers(): ReturnType<(typeof dns)['getServers']> {
   return ['1.1.1.1', '2606:4700:4700::1111', '1.0.0.1', '2606:4700:4700::1001'];
 }
-
-export type LookupOptions = {
-  family?: number | string;
-  hints?: number;
-  all?: boolean;
-  order?: string;
-  verbatim?: boolean;
-};
 
 export type LookupCallback = (
   err: Error | null,
@@ -70,7 +63,7 @@ export type LookupCallback = (
 
 export function lookup(
   hostname: string,
-  options?: LookupOptions | LookupCallback,
+  options?: dns.LookupOptions | LookupCallback,
   callback?: LookupCallback
 ): void {
   let family: 0 | 4 | 6 = 0;
@@ -442,8 +435,7 @@ export function getDefaultResultOrder(): DnsOrder {
   return defaultDnsOrder;
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function setServers(): Promise<void> {
+export function setServers(): void {
   // This function does not apply to workerd model.
   // Our implementation always use Cloudflare DNS and does not
   // allow users to change the underlying DNS server.

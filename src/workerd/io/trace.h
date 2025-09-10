@@ -10,7 +10,6 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/util/own-util.h>
 
-#include <kj/async.h>
 #include <kj/map.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
@@ -114,8 +113,8 @@ class TraceId final {
     return high;
   }
 
-  static TraceId fromCapnp(rpc::InvocationSpanContext::TraceId::Reader reader);
-  void toCapnp(rpc::InvocationSpanContext::TraceId::Builder writer) const;
+  static TraceId fromCapnp(rpc::TraceId::Reader reader);
+  void toCapnp(rpc::TraceId::Builder writer) const;
 
  private:
   uint64_t low = 0;
@@ -172,6 +171,8 @@ class SpanId final {
   uint64_t id;
 };
 constexpr SpanId SpanId::nullId = nullptr;
+// Fixed spanId value to be used for tests
+constexpr uint64_t staticSpanId = 0x2a2a2a2a2a2a2a2aULL;
 
 // The InvocationSpanContext is a tuple of a trace id, invocation id, and span id.
 // The trace id represents a top-level request and should be shared across all
@@ -267,9 +268,39 @@ class InvocationSpanContext final {
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 };
 
+// SpanContext as used for streaming tail worker tail events. spanId is always set except for Onset
+// events that don't inherit context from another invocation.
+struct SpanContext {
+  SpanContext(TraceId traceId, kj::Maybe<SpanId> spanId): traceId(traceId), spanId(spanId) {};
+  KJ_DISALLOW_COPY(SpanContext);
+  SpanContext(SpanContext&& other) = default;
+  SpanContext& operator=(SpanContext&& other) = default;
+
+  inline bool operator==(const SpanContext& other) const {
+    return traceId == other.traceId && spanId == other.spanId;
+  }
+
+  inline const TraceId& getTraceId() const {
+    return traceId;
+  }
+
+  inline kj::Maybe<SpanId> getSpanId() const {
+    return spanId;
+  }
+
+  static SpanContext fromCapnp(rpc::SpanContext::Reader reader);
+  void toCapnp(rpc::SpanContext::Builder writer) const;
+  SpanContext clone() const;
+
+ private:
+  TraceId traceId;
+  kj::Maybe<SpanId> spanId;
+};
+
 kj::String KJ_STRINGIFY(const SpanId& id);
 kj::String KJ_STRINGIFY(const TraceId& id);
 kj::String KJ_STRINGIFY(const InvocationSpanContext& context);
+kj::String KJ_STRINGIFY(const SpanContext& context);
 
 // The various structs defined below are used in both legacy tail workers
 // and streaming tail workers to report tail events.
@@ -297,6 +328,7 @@ struct FetchEventInfo final {
 
     void copyTo(rpc::Trace::FetchEventInfo::Header::Builder builder) const;
     Header clone() const;
+    kj::String toString() const;
 
     JSG_MEMORY_INFO(Header) {
       tracker.trackField("name", name);
@@ -312,6 +344,7 @@ struct FetchEventInfo final {
 
   void copyTo(rpc::Trace::FetchEventInfo::Builder builder) const;
   FetchEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a jsrpc request
@@ -326,6 +359,7 @@ struct JsRpcEventInfo final {
 
   void copyTo(rpc::Trace::JsRpcEventInfo::Builder builder) const;
   JsRpcEventInfo clone() const;
+  kj::String toString() const;
 };
 
 // Describes a scheduled request
@@ -518,32 +552,6 @@ struct Exception final {
   Exception clone() const;
 };
 
-// Used to indicate that a previously hibernated tail stream is being resumed.
-struct Resume final {
-  explicit Resume(kj::Maybe<kj::Array<kj::byte>> attachment);
-  Resume(rpc::Trace::Resume::Reader reader);
-  Resume(Resume&&) = default;
-  KJ_DISALLOW_COPY(Resume);
-  ~Resume() noexcept(false) = default;
-
-  kj::Maybe<kj::Array<kj::byte>> attachment;
-
-  void copyTo(rpc::Trace::Resume::Builder builder) const;
-  Resume clone() const;
-};
-
-// Used to indicate that a tail stream is being hibernated.
-struct Hibernate final {
-  explicit Hibernate();
-  Hibernate(rpc::Trace::Hibernate::Reader reader);
-  Hibernate(Hibernate&&) = default;
-  KJ_DISALLOW_COPY(Hibernate);
-  ~Hibernate() noexcept(false) = default;
-
-  void copyTo(rpc::Trace::Hibernate::Builder builder) const;
-  Hibernate clone() const;
-};
-
 // EventInfo types are used to describe the onset of an invocation. The FetchEventInfo
 // can also be used to describe the start of a fetch subrequest.
 // TODO(o11y): Write KJ_STRINGIFY() for EventInfo to beef up logging for events reported after
@@ -556,7 +564,6 @@ using EventInfo = kj::OneOf<FetchEventInfo,
     EmailEventInfo,
     TraceEventInfo,
     HibernatableWebSocketEventInfo,
-    Resume,
     CustomEventInfo>;
 
 EventInfo cloneEventInfo(const EventInfo& info);
@@ -597,14 +604,16 @@ struct Attribute final {
 
   void copyTo(rpc::Trace::Attribute::Builder builder) const;
   Attribute clone() const;
+  kj::String toString() const;
 };
 using CustomInfo = kj::Array<Attribute>;
+kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
 }  // namespace tracing
 
 struct CompleteSpan {
   // Represents a completed span within user tracing.
-  uint64_t spanId;
-  uint64_t parentSpanId;
+  tracing::SpanId spanId;
+  tracing::SpanId parentSpanId;
 
   kj::ConstString operationName;
   kj::Date startTime;
@@ -615,22 +624,20 @@ struct CompleteSpan {
   CompleteSpan(rpc::UserSpanData::Reader reader);
   void copyTo(rpc::UserSpanData::Builder builder) const;
   CompleteSpan clone() const;
-  explicit CompleteSpan(uint64_t spanId,
-      uint64_t parentSpanId,
+  explicit CompleteSpan(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
       kj::ConstString operationName,
       kj::Date startTime,
       kj::Date endTime,
-      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags)
+      kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags =
+          kj::HashMap<kj::ConstString, tracing::Attribute::Value>())
       : spanId(spanId),
         parentSpanId(parentSpanId),
         operationName(kj::mv(operationName)),
         startTime(startTime),
         endTime(endTime),
         tags(kj::mv(tags)) {}
-  explicit CompleteSpan(kj::ConstString operationName, kj::Date startTime)
-      : operationName(kj::mv(operationName)),
-        startTime(startTime),
-        endTime(startTime) {}
+  kj::String toString() const;
 };
 
 namespace tracing {
@@ -653,26 +660,7 @@ struct Return final {
   Return clone() const;
 };
 
-// A Link mark is used to establish a link from one span to another.
-// The optional label can be used to identify the link.
-struct Link final {
-  explicit Link(const InvocationSpanContext& other, kj::Maybe<kj::String> label = kj::none);
-  explicit Link(kj::Maybe<kj::String> label, TraceId traceId, TraceId invocationId, SpanId spanId);
-  Link(rpc::Trace::Link::Reader reader);
-  Link(Link&&) = default;
-  Link& operator=(Link&&) = default;
-  KJ_DISALLOW_COPY(Link);
-
-  kj::Maybe<kj::String> label;
-  TraceId traceId;
-  TraceId invocationId;
-  SpanId spanId;
-
-  void copyTo(rpc::Trace::Link::Builder builder) const;
-  Link clone() const;
-};
-
-// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, Link, and CustomInfo events.
+// Mark events no longer have a corresponding type, but the term generally refers to DiagnosticChannelEvent, Exception, Log, Return, and CustomInfo events.
 
 // Marks the opening of a child span within the streaming tail session.
 struct SpanOpen final {
@@ -680,8 +668,7 @@ struct SpanOpen final {
   // details of that subrequest.
   using Info = kj::OneOf<FetchEventInfo, JsRpcEventInfo, CustomInfo>;
 
-  explicit SpanOpen(
-      uint64_t parentSpanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
+  explicit SpanOpen(SpanId spanId, kj::String operationName, kj::Maybe<Info> info = kj::none);
   SpanOpen(rpc::Trace::SpanOpen::Reader reader);
   SpanOpen(SpanOpen&&) = default;
   SpanOpen& operator=(SpanOpen&&) = default;
@@ -689,10 +676,11 @@ struct SpanOpen final {
 
   kj::String operationName;
   kj::Maybe<Info> info = kj::none;
-  uint64_t parentSpanId;
+  SpanId spanId;
 
   void copyTo(rpc::Trace::SpanOpen::Builder builder) const;
   SpanOpen clone() const;
+  kj::String toString() const;
 };
 
 // Marks the closing of a child span within the streaming tail session.
@@ -709,6 +697,7 @@ struct SpanClose final {
 
   void copyTo(rpc::Trace::SpanClose::Builder builder) const;
   SpanClose clone() const;
+  kj::String toString() const;
 };
 
 // The Onset and Outcome event types are special forms of SpanOpen and
@@ -731,31 +720,18 @@ struct Onset final {
     WorkerInfo clone() const;
   };
 
-  struct TriggerContext final {
-    TraceId traceId;
-    TraceId invocationId;
-    SpanId spanId;
-
-    TriggerContext(TraceId traceId, TraceId invocationId, SpanId spanId)
-        : traceId(kj::mv(traceId)),
-          invocationId(kj::mv(invocationId)),
-          spanId(kj::mv(spanId)) {}
-
-    TriggerContext(const InvocationSpanContext& ctx)
-        : TriggerContext(ctx.getTraceId(), ctx.getInvocationId(), ctx.getSpanId()) {}
-  };
-
   explicit Onset(
-      Info&& info, WorkerInfo&& workerInfo, kj::Maybe<TriggerContext> maybeTrigger = kj::none);
+      tracing::SpanId spanId, Info&& info, WorkerInfo&& workerInfo, CustomInfo attributes);
 
   Onset(rpc::Trace::Onset::Reader reader);
   Onset(Onset&&) = default;
   Onset& operator=(Onset&&) = default;
   KJ_DISALLOW_COPY(Onset);
 
+  tracing::SpanId spanId;
   Info info;
   WorkerInfo workerInfo;
-  kj::Maybe<TriggerContext> trigger;
+  CustomInfo attributes;
 
   void copyTo(rpc::Trace::Onset::Builder builder) const;
   Onset clone() const;
@@ -778,6 +754,7 @@ struct Outcome final {
 
   void copyTo(rpc::Trace::Outcome::Builder builder) const;
   Outcome clone() const;
+  kj::String toString() const;
 };
 
 // A streaming tail worker receives a series of Tail Events. Tail events always
@@ -786,28 +763,26 @@ struct Outcome final {
 // always an Outcome. Between those can be any number of SpanOpen, SpanClose,
 // and Mark events. Every SpanOpen *must* be associated with a SpanClose unless
 // the stream was abruptly terminated.
+// A future version may add support for Link events again.
 struct TailEvent final {
   using Event = kj::OneOf<Onset,
       Outcome,
-      Hibernate,
       SpanOpen,
       SpanClose,
-      // TODO(o11y): We don't support proper span instrumentation at open/close time yet, provide
-      // completed spans internally for now and only synthesize spanopen/close events in the tail
-      // worker customEvent.
-      CompleteSpan,
       DiagnosticChannelEvent,
       Exception,
       Log,
       Return,
-      Link,
       CustomInfo>;
 
-  explicit TailEvent(
-      const InvocationSpanContext& context, kj::Date timestamp, kj::uint sequence, Event&& event);
+  explicit TailEvent(SpanContext context,
+      TraceId invocationId,
+      kj::Date timestamp,
+      kj::uint sequence,
+      Event&& event);
   TailEvent(TraceId traceId,
       TraceId invocationId,
-      SpanId spanId,
+      kj::Maybe<SpanId> spanId,
       kj::Date timestamp,
       kj::uint sequence,
       Event&& event);
@@ -816,10 +791,9 @@ struct TailEvent final {
   TailEvent& operator=(TailEvent&&) = default;
   KJ_DISALLOW_COPY(TailEvent);
 
-  // The invocation span context this event is associated with.
-  TraceId traceId;
+  // The span context this event is associated with.
+  SpanContext spanContext;
   TraceId invocationId;
-  SpanId spanId;
 
   kj::Date timestamp;  // Unix epoch, Spectre-mitigated resolution
   kj::uint sequence;
@@ -829,6 +803,9 @@ struct TailEvent final {
   void copyTo(rpc::Trace::TailEvent::Builder builder) const;
   TailEvent clone() const;
 };
+
+kj::String KJ_STRINGIFY(const tracing::TailEvent::Event& event);
+
 }  // namespace tracing
 
 enum class PipelineLogLevel {
@@ -861,7 +838,8 @@ class Trace final: public kj::Refcounted {
       kj::Maybe<kj::String> scriptId,
       kj::Array<kj::String> scriptTags,
       kj::Maybe<kj::String> entrypoint,
-      ExecutionModel executionModel);
+      ExecutionModel executionModel,
+      kj::Maybe<kj::String> durableObjectId = kj::none);
   Trace(rpc::Trace::Reader reader);
   ~Trace() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Trace);
@@ -883,6 +861,7 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> scriptId;
   kj::Array<kj::String> scriptTags;
   kj::Maybe<kj::String> entrypoint;
+  kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
   kj::Vector<CompleteSpan> spans;
@@ -1045,12 +1024,7 @@ class SpanBuilder {
   // attached to the observer observing this span.
   explicit SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
       kj::ConstString operationName,
-      kj::Date startTime = kj::systemPreciseCalendarClock().now()) {
-    if (observer != kj::none) {
-      this->observer = kj::mv(observer);
-      span.emplace(kj::mv(operationName), startTime);
-    }
-  }
+      kj::Date startTime = kj::systemPreciseCalendarClock().now());
 
   // Make a SpanBuilder that ignores all calls. (Useful if you want to assign it later.)
   SpanBuilder(decltype(nullptr)) {}
@@ -1152,8 +1126,8 @@ inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date
 
 // Interface to track trace context including both Jaeger and User spans.
 // TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking user spans will not needed in all places where we have the
-// existing spans, so synergies will likely be limited.
+// to both,... We expect that tracking user spans will not be needed in all places where we have the
+// existing spans, so synergies will be limited.
 struct TraceContext {
   TraceContext(SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),

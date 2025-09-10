@@ -69,6 +69,11 @@ void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
   set(js, js.strIntern(name), value);
 }
 
+void JsObject::defineProperty(Lock& js, kj::StringPtr name, const JsValue& value) {
+  v8::Local<v8::String> nameStr = js.strIntern(name);
+  check(inner->DefineOwnProperty(js.v8Context(), nameStr, value));
+}
+
 void JsObject::setReadOnly(Lock& js, kj::StringPtr name, const JsValue& value) {
   v8::Local<v8::String> nameStr = js.strIntern(name);
   check(inner->DefineOwnProperty(js.v8Context(), nameStr, value,
@@ -314,7 +319,7 @@ jsg::USVString JsString::toUSVString(Lock& js) const {
 }
 
 jsg::ByteString JsString::toByteString(Lock& js) const {
-  auto result = js.accountedByteString(toString(js));
+  auto result = jsg::ByteString(toString(js));
 
   if (!simdutf::validate_ascii(result.begin(), result.size())) {
     // If storage is one-byte or the string contains only one-byte
@@ -411,7 +416,7 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
-  return js.accountedByteString(str.toString(js));
+  return jsg::ByteString(str.toString(js));
 }
 
 JsDate::operator kj::Date() const {
@@ -619,8 +624,8 @@ JsPromise Lock::rejectedJsPromise(jsg::JsValue exception) {
   return JsPromise(handleScope.Escape(resolver->GetPromise()));
 }
 
-JsPromise Lock::rejectedJsPromise(kj::Exception&& exception) {
-  return rejectedJsPromise(exceptionToJsValue(kj::mv(exception)).getHandle(*this));
+JsPromise Lock::rejectedJsPromise(kj::Exception&& exception, ExceptionToJsOptions options) {
+  return rejectedJsPromise(exceptionToJsValue(kj::mv(exception), options).getHandle(*this));
 }
 
 PromiseState JsPromise::state() {
@@ -721,6 +726,38 @@ void JsMessage::addJsStackTrace(Lock& js, kj::Vector<kj::String>& lines) {
       lines.add(locationStr.flatten());
     }
   }
+}
+
+size_t JsFunction::length(Lock& js) const {
+  JsObject obj = *this;
+  auto lengthVal = obj.get(js, "length"_kj);
+  KJ_IF_SOME(num, lengthVal.tryCast<jsg::JsNumber>()) {
+    return static_cast<size_t>(num.value(js).orDefault(0));
+  }
+  return 0;
+}
+
+JsString JsFunction::name(Lock& js) const {
+  JsObject obj = *this;
+  auto nameVal = obj.get(js, "name"_kj);
+  // It really shouldn't ever be possible for the name property to be non-string,
+  // but just in case, we check and throw if that happens.
+  return JSG_REQUIRE_NONNULL(
+      nameVal.tryCast<jsg::JsString>(), TypeError, "Function name is not a string");
+}
+
+JsValue JsFunction::call(Lock& js, const JsValue& recv, v8::LocalVector<v8::Value>& args) const {
+  v8::Local<v8::Function> fn = *this;
+  return JsValue(check(fn->Call(js.v8Context(), recv, args.size(), args.data())));
+}
+
+JsValue JsFunction::callNoReceiver(Lock& js, v8::LocalVector<v8::Value>& args) const {
+  return call(js, js.null(), args);
+}
+
+uint JsFunction::hashCode() const {
+  v8::Local<v8::Function> obj = *this;
+  return kj::hashCode(obj->GetIdentityHash());
 }
 
 }  // namespace workerd::jsg

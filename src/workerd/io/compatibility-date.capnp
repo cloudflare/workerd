@@ -642,12 +642,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   cacheNoCache @70 :Bool
       $compatEnableFlag("cache_no_cache_enabled")
       $compatDisableFlag("cache_no_cache_disabled")
-      $experimental;
+      $impliedByAfterDate(name = "cacheOptionEnabled", date = "2025-08-07");
   # Enables the use of cache: no-cache in the fetch api.
 
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
-      $experimental
+      $compatDisableFlag("no_python_workers_20250116")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2025-09-29")
       $pythonSnapshotRelease;
 
   requestCfOverridesCacheRules @72 :Bool
@@ -832,4 +833,232 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # throw an error when unknown import attributes are encountered. In the new module registry
   # implementation the recommended behavior is what is implemented. With this compat flag
   # enabled, the original module registry implementation will follow the recommended behavior.
+
+  pythonWorkflows @95 :Bool
+    $compatEnableFlag("python_workflows")
+    $compatDisableFlag("disable_python_workflows")
+    $impliedByAfterDate(name = "pythonWorkers", date = "2025-09-20");
+  # Enables support for Python workflows.
+  # This is still in development and may change in the future.
+
+  unsupportedProcessActualPlatform @96 :Bool
+      $compatEnableFlag("unsupported_process_actual_platform")
+      $experimental;
+  # By default, Workerd will always expose "linux" as the process.platform.
+  # This flag enables support for process.platform to expose the actual system platform.
+  # This is unsupported, as this feature will never ever be supported as non-experimental and is a
+  # temporary WPT test path only.
+
+  enableNodeJsProcessV2 @97 :Bool
+      $compatEnableFlag("enable_nodejs_process_v2")
+      $compatDisableFlag("disable_nodejs_process_v2")
+      $impliedByAfterDate(name = "nodeJsCompat", date="2025-09-15");
+  # Switches from the partial process implementation with only "nextTick", "env", "exit",
+  # "getBuiltinModule", "platform" and "features" property implementations, to the full-featured
+  # Node.js-compatibile process implementation with all process properties either stubbed or
+  # implemented. It is required to use this flag with nodejs_compat (or nodejs_compat_v2).
+
+  setEventTargetThis @98 :Bool
+      $compatEnableFlag("set_event_target_this")
+      $compatDisableFlag("no_set_event_target_this")
+      $compatEnableDate("2025-08-01");
+  # The original implementation of EventTarget was not correctly setting the `this` value
+  # for event handlers. This flag enables the correct behavior, which is compliant with the spec.
+
+  enableForwardableEmailFullHeaders @99 :Bool
+      $compatEnableFlag("set_forwardable_email_full_headers")
+      $compatDisableFlag("set_forwardable_email_single_headers")
+      $compatEnableDate("2025-08-01");
+  # The original version of the headers sent to edgeworker were truncated to a single
+  # value for specific header names, such as To and Cc. With this compat flag we will send
+  # the full header values to the worker script.
+
+  enableNodejsHttpModules @100 :Bool
+      $compatEnableFlag("enable_nodejs_http_modules")
+      $compatDisableFlag("disable_nodejs_http_modules")
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2025-08-15");
+  # Enables Node.js http related modules such as node:http and node:https
+
+  pedanticWpt @101 :Bool
+      $compatEnableFlag("pedantic_wpt")
+      $compatDisableFlag("non_pedantic_wpt");
+  # Enables a "pedantic mode" for WPT compliance. Multiple changes are grouped under
+  # this flag that are known to be required to pass more web platform tests but which
+  # otherwise are likely not to be strictly necessary for most users.
+
+  exposeGlobalMessageChannel @102 :Bool
+      $compatEnableFlag("expose_global_message_channel")
+      $compatDisableFlag("no_expose_global_message_channel")
+      $compatEnableDate("2025-08-15");
+  # Enables exposure of the MessagePort and MessageChannel classes on the global scope.
+
+  enableNodejsHttpServerModules @103 :Bool
+      $compatEnableFlag("enable_nodejs_http_server_modules")
+      $compatDisableFlag("disable_nodejs_http_server_modules")
+      $impliedByAfterDate(name = "enableNodejsHttpModules", date = "2025-09-01");
+  # Enables Node.js http server related modules such as node:_http_server
+  # It is required to use this flag with `enable_nodejs_http_modules` since
+  # it enables the usage of http related node.js modules, and this flag enables
+  # the methods exposed by the node.js http modules.
+  # Regarding the recommendation for using import { env, waitUntil } from 'cloudflare:workers';
+  # `disallow_importable_env` compat flag should not be set if you are using this
+  # and need access to the env since that will prevent access.
+
+  pythonNoGlobalHandlers @104 :Bool
+      $compatEnableFlag("python_no_global_handlers")
+      $compatDisableFlag("disable_python_no_global_handlers")
+      $compatEnableDate("2025-08-14");
+  # Disables the global handlers for Python workers and enforces their use via default entrypoint
+  # classes.
+
+  enableNodeJsFsModule @105 :Bool
+    $compatEnableFlag("enable_nodejs_fs_module")
+    $compatDisableFlag("disable_nodejs_fs_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-15");
+  # Enables the Node.js fs module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsOsModule @106 :Bool
+    $compatEnableFlag("enable_nodejs_os_module")
+    $compatDisableFlag("disable_nodejs_os_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-15");
+  # Enables the Node.js os module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  pythonWorkersForceNewVendorPath @107 :Bool
+      $compatEnableFlag("python_workers_force_new_vendor_path")
+      $compatEnableDate("2025-08-11");
+  # Disables adding `/session/metadata/vendor` to the Python Worker's sys.path. So Workers using
+  # this flag will have to place their vendored modules in a `python_modules` directory.
+
+  removeNodejsCompatEOL @108 :Bool
+    $compatEnableFlag("remove_nodejs_compat_eol")
+    $compatDisableFlag("add_nodejs_compat_eol")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-01");
+  # Removes the Node.js compatibility layer for EOL versions of Node.js.
+  # When the flag is enabled, APIs that have reached End-of-Life in Node.js
+  # will be removed for workers. When disabled, the APIs are present (but
+  # might still be non-functional stubs)
+  # This flag is intended to be a roll-up flag. That is, as additional APIs
+  # reach EOL, new compat flags will be added for those that will have
+  # `impliedByAfterDate(name = "removeNodeJsCompatEOL", ...` annotations.
+
+  enableWorkflowScriptValidation @109 :Bool
+      $compatEnableFlag("enable_validate_workflow_entrypoint")
+      $compatDisableFlag("disable_validate_workflow_entrypoint")
+      $compatEnableDate("2025-09-20");
+  # This flag enables additional checks in the control plane to validate that workflows are
+  # defined and used correctly
+
+  pythonDedicatedSnapshot @110 :Bool
+      $compatEnableFlag("python_dedicated_snapshot")
+      $compatDisableFlag("disable_python_dedicated_snapshot")
+      $experimental;
+  # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
+  # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
+  # top-level execution of the Worker.
+
+  typescriptStripTypes @111 :Bool
+    $compatEnableFlag("typescript_strip_types")
+    $experimental;
+  # Strips all Typescript types from loaded files.
+  # If loaded files contain unsupported typescript construct beyond type annotations (e.g. enums),
+  # or is not a syntactically valid Typescript, the worker will fail to load.
+
+  enableNodeJsHttp2Module @112 :Bool
+    $compatEnableFlag("enable_nodejs_http2_module")
+    $compatDisableFlag("disable_nodejs_http2_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-01");
+  # Enables the Node.js http2 module stubs.
+
+  experimentalAllowEvalAlways @113 :Bool
+      $compatEnableFlag("allow_insecure_inefficient_logged_eval")
+      $experimental;
+  # Enables eval() and new Function() always, even during request handling.
+  # ***This flag should *never* be enabled by default.***
+  # The name of the enable flag is intentionally long and scary-sounding to
+  # discourage casual use.
+  #  * "insecure" because code-gen during request handling can lead to security issues.
+  #  * "inefficient" because repeated code-gen during request handling can be slow.
+  #  * "logged" because each use would likely be logged in production for security
+  #    auditing so users should avoid including PII and other sensitive data in dynamically
+  #    generated and evaluated code.
+  # This flag is experimental and may be removed in the future. It is added for
+  # testing purposes.
+
+  stripAuthorizationOnCrossOriginRedirect @114 :Bool
+      $compatEnableFlag("strip_authorization_on_cross_origin_redirect")
+      $compatDisableFlag("retain_authorization_on_cross_origin_redirect")
+      $compatEnableDate("2025-09-01");
+  # This flag specifies that when automatic redirects are enabled, and a redirect points to a URL
+  # at a different origin, if the original request contained an Authorization header, that header
+  # is removed before following the redirect. This behavior is required by the current version of
+  # the Fetch API specification.
+  #
+  # This requirement was added to the Fetch spec in 2022, well after Cloudflare Workers
+  # originally implemented it. Hence, Workers did not originally implement this requirement. This
+  # requirement is backwards-incompatible, and so the new behavior is guarded by a compatibility
+  # flag.
+  #
+  # Note that the old behavior was not inherently insecure, and indeed could be desirable in many
+  # circumstances. For example, if an API that requires authorization wishes to change its
+  # hostname, it might wish to redirect to the new hostname while having the client send along
+  # their credentials. Under the new fetch behavior, such a redirect will break clients, and this
+  # has legitimately broken real use cases. However, it's true that the old behavior could be a
+  # "gotcha" leading to security problems when combined with other mistakes. Hence, the spec was
+  # changed, and Workers must follow the spec.
+
+  enhancedErrorSerialization @115 :Bool
+      $compatEnableFlag("enhanced_error_serialization")
+      $compatDisableFlag("legacy_error_serialization")
+      $experimental;
+  # Enables enhanced error serialization for errors serialized using structuredClone /
+  # v8 serialization. More error types are supported, and own properties are included.
+  # Note that when enabled, deserialization of the errors will not preserve the original
+  # stack by default.
+
+  emailSendingQueuing @116 :Bool
+      $compatEnableFlag("enable_email_sending_queuing")
+      $compatDisableFlag("disable_email_sending_queuing")
+      $experimental;
+  # Enables Queuing on the `.send(message: EmailMessage)` function on send_email binding if there's
+  # a temporary error on email delivery.
+  # Note that by enabling this, user-provided Message-IDs are stripped and
+  # Email Workers will generate and use its own.
+
+  removeNodejsCompatEOLv22 @117 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v22")
+      $compatDisableFlag("add_nodejs_compat_eol_v22")
+      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2027-04-30");
+  # Removes APIs that reached end-of-life in Node.js 22.x. When using the
+  # removeNodejsCompatEOL flag, this will default enable on/after 2027-04-30.
+
+  removeNodejsCompatEOLv23 @118 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v23")
+      $compatDisableFlag("add_nodejs_compat_eol_v23")
+      $impliedByAfterDate(name = "removeNodejsCompatEOLv24", date = "2025-09-01");
+  # Removes APIs that reached end-of-life in Node.js 23.x. This will default
+  # enable when the removeNodejsCompatEOLv24 flag is enabled after 2025-09-01.
+  # Went EOL on 2025-06-01
+
+  removeNodejsCompatEOLv24 @119 :Bool
+      $compatEnableFlag("remove_nodejs_compat_eol_v24")
+      $compatDisableFlag("add_nodejs_compat_eol_v24")
+      $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2028-04-30");
+  # Removes APIs that reached end-of-life in Node.js 24.x. When using the
+	# removeNodejsCompatEOL flag, this will default enable on/after 2028-04-30.
+
+  enableNodeJsConsoleModule @120 :Bool
+    $compatEnableFlag("enable_nodejs_console_module")
+    $compatDisableFlag("disable_nodejs_console_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
+  # Enables the Node.js console module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsVmModule @121 :Bool
+    $compatEnableFlag("enable_nodejs_vm_module")
+    $compatDisableFlag("disable_nodejs_vm_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
+  # Enables the Node.js non-functional stub vm module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
 }

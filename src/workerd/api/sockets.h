@@ -117,6 +117,10 @@ class Socket: public jsg::Object {
     }
   }
 
+  // Takes ownership of the underlying connection stream, detaching the readable and writable streams.
+  // This is a destructive operation that renders the Socket unusable for further I/O operations.
+  kj::Own<kj::AsyncIoStream> takeConnectionStream(jsg::Lock& js);
+
   // Closes the socket connection.
   //
   // The closure is only performed after the socket connection is properly
@@ -264,8 +268,15 @@ class SocketsModule final: public jsg::Object {
   jsg::Ref<Socket> connect(
       jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 
-  JSG_RESOURCE_TYPE(SocketsModule) {
+  // Creates a Fetcher from a Socket that can perform HTTP requests over the socket connection
+  jsg::Promise<jsg::Ref<Fetcher>> internalNewHttpClient(jsg::Lock& js, jsg::Ref<Socket> socket);
+
+  JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(internalNewHttpClient);
+    }
   }
 };
 

@@ -41,18 +41,14 @@ import {
   errorOrDestroy,
   finished,
   kOnConstructed,
+  isDestroyed,
+  isReadable,
 } from 'node-internal:streams_util';
-
-import * as process from 'node-internal:process';
+import { nextTick } from 'node-internal:internal_process';
 
 import { EventEmitter } from 'node-internal:events';
 
 import { Stream } from 'node-internal:streams_legacy';
-
-import {
-  newStreamReadableFromReadableStream,
-  newReadableStreamFromStreamReadable,
-} from 'node-internal:streams_adapters';
 
 import { Buffer } from 'node-internal:internal_buffer';
 
@@ -60,6 +56,8 @@ import {
   AbortError,
   aggregateTwoErrors,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_STREAM_PREMATURE_CLOSE,
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MISSING_ARGS,
   ERR_OUT_OF_RANGE,
@@ -71,12 +69,11 @@ import {
 import {
   validateObject,
   validateAbortSignal,
+  validateBoolean,
   validateInteger,
 } from 'node-internal:validators';
 
 import { StringDecoder } from 'node-internal:internal_stringdecoder';
-
-import { isDuplexInstance } from 'node-internal:streams_duplex';
 
 // ======================================================================================
 // ReadableState
@@ -87,7 +84,6 @@ export function ReadableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream.
   // These options can be provided separately as readableXXX and writableXXX.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag. Used to make read(n) ignore n and to
   // make all the buffer merging and length checks go away.
@@ -195,16 +191,13 @@ Object.setPrototypeOf(Readable, Stream);
 export function Readable(options) {
   if (!(this instanceof Readable)) return new Readable(options);
 
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the ReadableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  this._readableState = new ReadableState(options, this, isDuplex);
+  this._readableState = new ReadableState(options, this, false);
   if (options) {
     if (typeof options.read === 'function') this._read = options.read;
     if (typeof options.destroy === 'function') this._destroy = options.destroy;
     if (typeof options.construct === 'function')
       this._construct = options.construct;
-    if (options.signal && !isDuplex) addAbortSignal(options.signal, this);
+    if (options.signal) addAbortSignal(options.signal, this);
   }
   Stream.call(this, options);
   construct(this, () => {
@@ -547,7 +540,7 @@ function emitReadable(stream) {
   state.needReadable = false;
   if (!state.emittedReadable) {
     state.emittedReadable = true;
-    process.nextTick(emitReadable_, stream);
+    nextTick(emitReadable_, stream);
   }
 }
 
@@ -578,7 +571,7 @@ function emitReadable_(stream) {
 function maybeReadMore(stream, state) {
   if (!state.readingMore && state.constructed) {
     state.readingMore = true;
-    process.nextTick(maybeReadMore_, stream, state);
+    nextTick(maybeReadMore_, stream, state);
   }
 }
 
@@ -643,7 +636,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   state.pipes.push(dest);
   const doEnd = !pipeOpts || pipeOpts.end !== false;
   const endFn = doEnd ? onend : unpipe;
-  if (state.endEmitted) process.nextTick(endFn);
+  if (state.endEmitted) nextTick(endFn);
   else src.once('end', endFn);
   dest.on('unpipe', onunpipe);
   function onunpipe(readable, unpipeInfo) {
@@ -835,7 +828,7 @@ Readable.prototype.on = function (ev, fn) {
       if (state.length) {
         emitReadable(this);
       } else if (!state.reading) {
-        process.nextTick(nReadingNextTick, this);
+        nextTick(nReadingNextTick, this);
       }
     }
   }
@@ -851,7 +844,7 @@ Readable.prototype.removeListener = function (ev, fn) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -865,7 +858,7 @@ Readable.prototype.removeAllListeners = function (ev) {
     // support once('readable', fn) cycles. This means that calling
     // resume within the same tick will have no
     // effect.
-    process.nextTick(updateReadableListening, this);
+    nextTick(updateReadableListening, this);
   }
   return res;
 };
@@ -908,7 +901,7 @@ Readable.prototype.resume = function () {
 function resume(stream, state) {
   if (!state.resumeScheduled) {
     state.resumeScheduled = true;
-    process.nextTick(resume_, stream, state);
+    nextTick(resume_, stream, state);
   }
 }
 
@@ -1225,7 +1218,7 @@ function endReadable(stream) {
   const state = stream._readableState;
   if (!state.endEmitted) {
     state.ended = true;
-    process.nextTick(endReadableNT, state, stream);
+    nextTick(endReadableNT, state, stream);
   }
 }
 
@@ -1240,7 +1233,7 @@ function endReadableNT(state, stream) {
     state.endEmitted = true;
     stream.emit('end');
     if (stream.writable && stream.allowHalfOpen === false) {
-      process.nextTick(endWritableNT, stream);
+      nextTick(endWritableNT, stream);
     } else if (state.autoDestroy) {
       // In case of duplex streams we need a way to detect
       // if the writable side is ready for autoDestroy as well.
@@ -1344,8 +1337,8 @@ export function from(Readable, iterable, opts) {
   };
   readable._destroy = function (error, cb) {
     close(error).then(
-      () => process.nextTick(cb, error),
-      (err) => process.nextTick(cb, err || error)
+      () => nextTick(cb, error),
+      (err) => nextTick(cb, err || error)
     );
   };
   async function close(error) {
@@ -1605,7 +1598,6 @@ async function forEach(fn, options) {
     await fn(value, options);
     return kEmpty;
   }
-  // eslint-disable-next-line no-unused-vars
   for await (const _ of map.call(this, forEachFn, options));
 }
 
@@ -1856,3 +1848,194 @@ Readable.prototype.reduce = reduce;
 Readable.prototype.toArray = toArray;
 Readable.prototype.some = some;
 Readable.prototype.find = find;
+
+/**
+ * @typedef {import('./queuingstrategies').QueuingStrategy} QueuingStrategy
+ * @param {Readable} streamReadable
+ * @param {{
+ *  strategy : QueuingStrategy
+ * }} [options]
+ * @returns {ReadableStream}
+ */
+export function newReadableStreamFromStreamReadable(
+  streamReadable,
+  options = {},
+  createTypeBytes = false
+) {
+  // Not using the internal/streams/utils isReadableNodeStream utility
+  // here because it will return false if streamReadable is a Duplex
+  // whose readable option is false. For a Duplex that is not readable,
+  // we want it to pass this check but return a closed ReadableStream.
+  if (typeof streamReadable?._readableState !== 'object') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'streamReadable',
+      'stream.Readable',
+      streamReadable
+    );
+  }
+
+  if (isDestroyed(streamReadable) || !isReadable(streamReadable)) {
+    const readable = new ReadableStream();
+    readable.cancel();
+    return readable;
+  }
+
+  const objectMode = streamReadable.readableObjectMode;
+  const highWaterMark = streamReadable.readableHighWaterMark;
+
+  const evaluateStrategyOrFallback = (strategy) => {
+    // If there is a strategy available, use it
+    if (strategy) return strategy;
+
+    if (objectMode) {
+      // When running in objectMode explicitly but no strategy, we just fall
+      // back to CountQueuingStrategy
+      return new CountQueuingStrategy({ highWaterMark });
+    }
+
+    // When not running in objectMode explicitly, we just fall
+    // back to a minimal strategy that just specifies the highWaterMark
+    // and no size algorithm. Using a ByteLengthQueuingStrategy here
+    // is unnecessary.
+    return { highWaterMark };
+  };
+
+  const strategy = evaluateStrategyOrFallback(options?.strategy);
+
+  let controller;
+
+  function onData(chunk) {
+    // Copy the Buffer to detach it from the pool.
+    if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
+    controller.enqueue(chunk);
+    if (controller.desiredSize <= 0) streamReadable.pause();
+  }
+
+  streamReadable.pause();
+
+  const cleanup = eos(streamReadable, (error) => {
+    if (error?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+      const err = new AbortError(undefined, { cause: error });
+      error = err;
+    }
+
+    cleanup();
+    // This is a protection against non-standard, legacy streams
+    // that happen to emit an error event again after finished is called.
+    streamReadable.on('error', () => {});
+    if (error) return controller.error(error);
+    controller.close();
+  });
+
+  streamReadable.on('data', onData);
+
+  return new ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      pull() {
+        streamReadable.resume();
+      },
+
+      cancel(reason) {
+        ERR_STREAM_PREMATURE_CLOSE;
+        destroy.call(streamReadable, reason);
+      },
+      type: createTypeBytes ? 'bytes' : undefined,
+    },
+    strategy
+  );
+}
+
+/**
+ * @param {ReadableStream} readableStream
+ * @param {{
+ *   highWaterMark? : number,
+ *   encoding? : string,
+ *   objectMode? : boolean,
+ *   signal? : AbortSignal,
+ * }} [options]
+ * @returns {Readable}
+ */
+export function newStreamReadableFromReadableStream(
+  readableStream,
+  options = {}
+) {
+  if (!(readableStream instanceof ReadableStream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'readableStream',
+      'ReadableStream',
+      readableStream
+    );
+  }
+
+  validateObject(options, 'options');
+  const { highWaterMark, encoding, objectMode = false, signal } = options;
+
+  if (encoding !== undefined && !Buffer.isEncoding(encoding))
+    throw new ERR_INVALID_ARG_VALUE(encoding, 'options.encoding');
+  validateBoolean(objectMode, 'options.objectMode');
+
+  const reader = readableStream.getReader();
+  let closed = false;
+
+  const readable = new Readable({
+    objectMode,
+    highWaterMark,
+    encoding,
+    signal,
+
+    read() {
+      reader.read().then(
+        (chunk) => {
+          if (chunk.done) {
+            // Value should always be undefined here.
+            readable.push(null);
+          } else {
+            readable.push(chunk.value);
+          }
+        },
+        (error) => {
+          destroy.call(readable, error);
+        }
+      );
+    },
+
+    destroy(error, callback) {
+      function done() {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => {
+            throw error;
+          });
+        }
+      }
+
+      if (!closed) {
+        reader.cancel(error).then(done, done);
+        return;
+      }
+      done();
+    },
+  });
+
+  reader.closed.then(
+    () => {
+      closed = true;
+    },
+    (error) => {
+      closed = true;
+      destroy.call(readable, error);
+    }
+  );
+
+  return readable;
+}

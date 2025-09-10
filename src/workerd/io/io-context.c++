@@ -244,10 +244,22 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
+kj::Date IoContext::IncomingRequest::now() {
+  metrics->clockRead();
+  return ioChannelFactory->getTimer().now();
+}
+
 IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!wasDelivered) {
     // Request was never added to context->incomingRequests in the first place.
     return;
+  }
+
+  // Hack: We need to report an accurate time stamps for the STW outcome event, but the timer may
+  // not be available when the outcome event gets reported. Define the outcome event time as the
+  // time when the incoming request shuts down.
+  KJ_IF_SOME(w, workerTracer) {
+    w->recordTimestamp(now());
   }
 
   if (&context->incomingRequests.front() == this) {
@@ -402,7 +414,8 @@ void IoContext::logUncaughtExceptionAsync(
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
   kj::Maybe<RequestObserver&> metrics;
   if (!incomingRequests.empty()) metrics = getMetrics();
-  runImpl(runnable, false, Worker::Lock::TakeSynchronously(metrics), kj::none, true);
+  runImpl(
+      runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
 
 void IoContext::abort(kj::Exception&& e) {
@@ -823,8 +836,7 @@ size_t IoContext::getTimeoutCount() {
 }
 
 kj::Date IoContext::now(IncomingRequest& incomingRequest) {
-  kj::Date adjustedTime = incomingRequest.ioChannelFactory->getTimer().now();
-  incomingRequest.metrics->clockRead();
+  kj::Date adjustedTime = incomingRequest.now();
 
   KJ_IF_SOME(maybeNextTimeout, timeoutManager->getNextTimeout()) {
     // Don't return a time beyond when the next setTimeout() callback is intended to run. This
@@ -855,7 +867,12 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));
-  auto ret = func(tracing, getIoChannelFactory());
+  kj::Own<WorkerInterface> ret;
+  KJ_IF_SOME(existing, options.existingTraceContext) {
+    ret = func(existing, getIoChannelFactory());
+  } else {
+    ret = func(tracing, getIoChannelFactory());
+  }
 
   if (options.wrapMetrics) {
     auto& metrics = getMetrics();
@@ -892,6 +909,20 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
+      });
+}
+
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return getSubrequest(
+      [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
+    return getSubrequestChannelImpl(
+        channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
+  },
+      SubrequestOptions{
+        .inHouse = isInHouse,
+        .wrapMetrics = !isInHouse,
+        .existingTraceContext = traceContext,
       });
 }
 
@@ -960,6 +991,11 @@ kj::Own<kj::HttpClient> IoContext::getHttpClientWithSpans(uint channel,
     kj::Vector<Span::Tag> tags) {
   return asHttpClient(getSubrequestChannelWithSpans(
       channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), kj::mv(tags)));
+}
+
+kj::Own<kj::HttpClient> IoContext::getHttpClient(
+    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext) {
+  return asHttpClient(getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), traceContext));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClientNoChecks(uint channel,
@@ -1106,10 +1142,9 @@ void IoContext::runInContextScope(Worker::LockType lockType,
 }
 
 void IoContext::runImpl(Runnable& runnable,
-    bool takePendingEvent,
     Worker::LockType lockType,
     kj::Maybe<InputGate::Lock> inputLock,
-    bool allowPermanentException) {
+    Runnable::Exceptional exceptional) {
   KJ_IF_SOME(l, inputLock) {
     KJ_REQUIRE(l.isFor(KJ_ASSERT_NONNULL(actor).getInputGate()));
   }
@@ -1117,12 +1152,9 @@ void IoContext::runImpl(Runnable& runnable,
   getIoChannelFactory().getTimer().syncTime();
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
-    if (!allowPermanentException) {
-      workerLock.requireNoPermanentException();
-    }
-
     kj::Own<void> event;
-    if (takePendingEvent) {
+    if (!exceptional) {
+      workerLock.requireNoPermanentException();
       // Prevent prematurely detecting a hang while we're still executing JavaScript.
       // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
       //   not be necessary.

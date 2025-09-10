@@ -30,6 +30,7 @@ class SqliteKvRegulator: public SqliteDatabase::Regulator {
 class SqliteKv: private SqliteDatabase::ResetListener {
  public:
   explicit SqliteKv(SqliteDatabase& db);
+  ~SqliteKv() noexcept(false);
 
   using KeyPtr = kj::StringPtr;
   using ValuePtr = kj::ArrayPtr<const kj::byte>;
@@ -48,6 +49,10 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   template <typename Func>
   uint list(
       KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback);
+
+  // List returning a cursor which can be iterated one at a time.
+  class ListCursor;
+  kj::Own<ListCursor> list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order);
 
   // Store a value into the table.
   void put(KeyPtr key, ValuePtr value);
@@ -139,11 +144,74 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // has to be repeated after a reset, whereas the statements do not need to be recreated.
   bool tableCreated = false;
 
+  kj::Maybe<ListCursor&> currentCursor;
+
+  void cancelCurrentCursor();
+
   Initialized& ensureInitialized();
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
 
   void beforeSqliteReset() override;
+};
+
+// Iterator over list results.
+class SqliteKv::ListCursor {
+ public:
+  template <typename... Params>
+  ListCursor(kj::Badge<SqliteKv>, SqliteKv& parent, Params&&... params) {
+    parent.cancelCurrentCursor();
+    state.emplace(parent, kj::fwd<Params>(params)...);
+    parent.currentCursor = *this;
+  }
+  ListCursor(decltype(nullptr)) {}
+
+  template <typename Func>
+  uint forEach(Func&& callback) {
+    auto& query = KJ_UNWRAP_OR(state, return 0).query;
+    size_t count = 0;
+    while (!query.isDone()) {
+      callback(query.getText(0), query.getBlob(1));
+      query.nextRow();
+      ++count;
+    }
+    return count;
+  };
+
+  struct KeyValuePair {
+    kj::StringPtr key;
+    kj::ArrayPtr<const byte> value;
+  };
+  kj::Maybe<KeyValuePair> next();
+
+  // If true, the cursor was canceled due to a new list() operation starting. Only one list() is
+  // allowed at a time.
+  bool wasCanceled() {
+    return canceled;
+  }
+
+ private:
+  struct State {
+    SqliteKv& parent;
+    SqliteDatabase::Query query;
+
+    template <typename... Params>
+    State(SqliteKv& parent, SqliteDatabase::Statement& stmt, Params&&... params)
+        : parent(parent),
+          query(stmt.run(kj::fwd<Params>(params)...)) {}
+    ~State() noexcept(false) {
+      parent.currentCursor = kj::none;
+    }
+  };
+
+  kj::Maybe<State> state;
+
+  // Are we at the beginning of the list?
+  bool first = true;
+
+  bool canceled = false;
+
+  friend class SqliteKv;
 };
 
 // =======================================================================================
@@ -171,48 +239,7 @@ bool SqliteKv::get(KeyPtr key, Func&& callback) {
 template <typename Func>
 uint SqliteKv::list(
     KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback) {
-  if (!tableCreated) return 0;
-  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return 0);
-
-  auto iterate = [&](SqliteDatabase::Query&& query) {
-    size_t count = 0;
-    while (!query.isDone()) {
-      callback(query.getText(0), query.getBlob(1));
-      query.nextRow();
-      ++count;
-    }
-    return count;
-  };
-
-  if (order == Order::FORWARD) {
-    KJ_IF_SOME(e, end) {
-      KJ_IF_SOME(l, limit) {
-        return iterate(stmts.stmtListEndLimit.run(begin, e, (int64_t)l));
-      } else {
-        return iterate(stmts.stmtListEnd.run(begin, e));
-      }
-    } else {
-      KJ_IF_SOME(l, limit) {
-        return iterate(stmts.stmtListLimit.run(begin, (int64_t)l));
-      } else {
-        return iterate(stmts.stmtList.run(begin));
-      }
-    }
-  } else {
-    KJ_IF_SOME(e, end) {
-      KJ_IF_SOME(l, limit) {
-        return iterate(stmts.stmtListEndLimitReverse.run(begin, e, (int64_t)l));
-      } else {
-        return iterate(stmts.stmtListEndReverse.run(begin, e));
-      }
-    } else {
-      KJ_IF_SOME(l, limit) {
-        return iterate(stmts.stmtListLimitReverse.run(begin, (int64_t)l));
-      } else {
-        return iterate(stmts.stmtListReverse.run(begin));
-      }
-    }
-  }
+  return list(begin, end, limit, order)->forEach(kj::fwd<Func>(callback));
 }
 
 }  // namespace workerd

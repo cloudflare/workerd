@@ -1,5 +1,5 @@
-load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
 load("//:build/eslint_test.bzl", "eslint_test")
+load("//:build/wd_ts_project.bzl", "wd_ts_project")
 load("//:build/wpt_test.bzl", "wpt_test")
 
 srcs = glob(
@@ -13,15 +13,11 @@ filegroup(
     srcs = [file.removesuffix(".ts") + ".js" for file in glob(["harness/*.ts"])],
 )
 
-ts_project(
+wd_ts_project(
     name = "wpt-all@tsproject",
     srcs = srcs,
-    allow_js = True,
-    composite = True,
-    declaration = True,
-    source_map = True,
-    tsconfig = "tsconfig.json",
-    visibility = ["//visibility:public"],
+    source_map = False,
+    tsconfig_json = "tsconfig.json",
     deps = [
         "//:node_modules/@types/node",
     ],
@@ -66,6 +62,7 @@ wpt_test(
 
 wpt_test(
     name = "dom/events",
+    compat_flags = ["pedantic_wpt"],
     config = "dom/events-test.ts",
     wpt_directory = "@wpt//:dom/events@module",
 )
@@ -113,4 +110,12 @@ wpt_test(
     size = "large",
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
+)
+
+wpt_test(
+    name = "fs",
+    size = "large",
+    compat_flags = ["enable_web_file_system"],
+    config = "fs-test.ts",
+    wpt_directory = "@wpt//:fs@module",
 )

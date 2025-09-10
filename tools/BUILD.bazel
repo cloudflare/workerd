@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
 
 js_library(
     name = "base-eslint",
@@ -7,6 +8,14 @@ js_library(
     deps = [
         "//:node_modules/@eslint/js",
         "//:node_modules/@types/node",
+        "//:node_modules/eslint",
+        "//:node_modules/typescript",
         "//:node_modules/typescript-eslint",
     ],
+)
+
+ts_config(
+    name = "base-tsconfig",
+    src = "base.tsconfig.json",
+    visibility = ["//visibility:public"],
 )

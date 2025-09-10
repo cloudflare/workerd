@@ -8,12 +8,10 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/list.h>
-#include <capnp/message.h>
 #include <kj/async.h>
 #include <kj/compat/http.h>
 #include <kj/map.h>
 #include <kj/string.h>
-#include <kj/tuple.h>
 
 namespace workerd::server {
 
@@ -51,6 +49,12 @@ class ContainerClient final: public rpc::Container::Server {
   kj::String imageName;
   kj::TaskSet& waitUntilTasks;
 
+  static constexpr kj::StringPtr defaultEnv[] = {"CLOUDFLARE_COUNTRY_A2=XX"_kj,
+    "CLOUDFLARE_DEPLOYMENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
+    "CLOUDFLARE_LOCATION=loc01"_kj, "CLOUDFLARE_REGION=REGN"_kj,
+    "CLOUDFLARE_APPLICATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"_kj,
+    "CLOUDFLARE_DURABLE_OBJECT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"_kj};
+
   // Docker-specific Port implementation
   class DockerPort;
 
@@ -76,6 +80,7 @@ class ContainerClient final: public rpc::Container::Server {
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
+  kj::Promise<void> destroyContainer();
 };
 
 }  // namespace workerd::server

@@ -8,6 +8,7 @@
 #include "util.h"
 #include "wrappable.h"
 
+#include <v8-function.h>
 #include <v8-promise.h>
 
 #include <kj/async.h>
@@ -33,13 +34,13 @@ struct OpaqueWrappable<T, false>: public Wrappable {
   T value;
   bool movedAway = false;
 
-  kj::StringPtr jsgGetMemoryName() const override {
+  kj::StringPtr jsgGetMemoryName() const override final {
     return "OpaqueWrappable"_kjc;
   }
-  size_t jsgGetMemorySelfSize() const override {
+  size_t jsgGetMemorySelfSize() const override final {
     return sizeof(OpaqueWrappable);
   }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
+  void jsgGetMemoryInfo(MemoryTracker& tracker) const override final {
     Wrappable::jsgGetMemoryInfo(tracker);
   }
 };
@@ -49,16 +50,6 @@ struct OpaqueWrappable<T, true>: public OpaqueWrappable<T, false> {
   // When T is GC-visitable, make sure to implement visitation.
 
   using OpaqueWrappable<T, false>::OpaqueWrappable;
-
-  kj::StringPtr jsgGetMemoryName() const override {
-    return "OpaqueWrappable"_kjc;
-  }
-  size_t jsgGetMemorySelfSize() const override {
-    return sizeof(OpaqueWrappable);
-  }
-  void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
-    Wrappable::jsgGetMemoryInfo(tracker);
-  }
 
   void jsgVisitForGc(GcVisitor& visitor) override {
     if (!this->movedAway) {
@@ -353,8 +344,8 @@ class Promise {
           [&] { check(v8Resolver.getHandle(js)->Reject(js.v8Context(), exception)); });
     }
 
-    void reject(Lock& js, kj::Exception exception) {
-      reject(js, makeInternalError(js.v8Isolate, kj::mv(exception)));
+    void reject(Lock& js, kj::Exception exception, ExceptionToJsOptions options = {}) {
+      reject(js, exceptionToJs(js.v8Isolate, kj::mv(exception), options));
     }
 
     Resolver addRef(Lock& js) {
@@ -496,9 +487,9 @@ Promise<T> Lock::rejectedPromise(jsg::Value exception) {
 }
 
 template <typename T>
-Promise<T> Lock::rejectedPromise(kj::Exception&& exception) {
+Promise<T> Lock::rejectedPromise(kj::Exception&& exception, ExceptionToJsOptions options) {
   return withinHandleScope(
-      [&] { return rejectedPromise<T>(makeInternalError(v8Isolate, kj::mv(exception))); });
+      [&] { return rejectedPromise<T>(exceptionToJs(kj::mv(exception), options)); });
 }
 
 template <class Func>
@@ -722,8 +713,7 @@ class UnhandledRejectionHandler {
     explicit UnhandledRejection(jsg::Lock& js,
         jsg::V8Ref<v8::Promise> promise,
         jsg::Value value,
-        v8::Local<v8::Message> message,
-        size_t rejectionNumber);
+        v8::Local<v8::Message> message);
 
     ~UnhandledRejection();
 
@@ -748,8 +738,6 @@ class UnhandledRejectionHandler {
     inline bool isAlive() {
       return !promise.IsEmpty() && !value.IsEmpty();
     }
-
-    size_t rejectionNumber;
 
     uint hashCode() const {
       return hash;
@@ -798,7 +786,6 @@ class UnhandledRejectionHandler {
 
   kj::Function<Handler> handler;
   bool scheduled = false;
-  size_t rejectionCount = 0;
 
   using UnhandledRejectionsTable =
       kj::Table<UnhandledRejection, kj::HashIndex<UnhandledRejectionCallbacks>>;

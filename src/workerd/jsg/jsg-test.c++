@@ -442,7 +442,10 @@ KJ_TEST("External memory adjustment") {
       adjuster.set(100);
       auto adjuster2 = kj::mv(adjuster);
       KJ_ASSERT(adjuster2.getAmount() == 100);
-      KJ_ASSERT(adjuster.getAmount() == 0);
+
+      // Checking that the amount is zero after the adjuster is moved away would be nice to have,
+      // but we should aim to avoid use-after-move entirely.
+      // KJ_ASSERT(adjuster.getAmount() == 0);
     }
     // Note that we are not testing the actual effect on the isolate itself here.
     // While we have added a getExternalMemory() API to the isolate via a patch in
@@ -503,6 +506,42 @@ KJ_TEST("External memory adjustment - defered") {
   // Making an adjustment anyway won't do anything but also won't crash
   auto adjuster3 = target->getAdjustment(500);
   KJ_ASSERT(target->getPendingMemoryUpdateForTest() == 400);
+}
+
+KJ_TEST("Memory Allocation Error Propagation") {
+  class MyAllocator final: public v8::ArrayBuffer::Allocator {
+   public:
+    void* Allocate(size_t length) override {
+      return nullptr;
+    }
+    void* AllocateUninitialized(size_t length) override {
+      return nullptr;
+    }
+    void Free(void* data, size_t length) override {}
+    size_t MaxAllocationSize() const override {
+      return 10;
+    }
+  };
+
+  MyAllocator allocator;
+  v8::Isolate::CreateParams createParams;
+  createParams.constraints.ConfigureDefaults(10, 10);
+  createParams.array_buffer_allocator = &allocator;
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>(), createParams);
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    KJ_EXPECT_THROW_MESSAGE(
+        "Failed to allocate ArrayBuffer backing store", lock.allocBackingStore(100 * 1024));
+  });
+}
+
+KJ_TEST("JS Lock has a capnp::SchemaLoader") {
+  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
+  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(
+        lock, lock.newContext<IsolateUuidContext>().getHandle(lock), [&](jsg::Lock& js) {
+      KJ_ASSERT(js.getCapnpSchemaLoader<IsolateUuidContext>().getAllLoaded().size() == 0);
+    });
+  });
 }
 
 }  // namespace

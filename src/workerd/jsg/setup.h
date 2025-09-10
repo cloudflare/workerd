@@ -134,8 +134,15 @@ class IsolateBase {
   }
 
   inline void setAllowEval(kj::Badge<Lock>, bool allow) {
+    if (alwaysAllowEval) return;
     evalAllowed = allow;
   }
+
+  inline void setAllowsAllowEval() {
+    alwaysAllowEval = true;
+    evalAllowed = true;
+  }
+
   inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
     jspiEnabled = enabled;
   }
@@ -147,6 +154,10 @@ class IsolateBase {
     nodeJsCompatEnabled = enabled;
   }
 
+  inline void setNodeJsProcessV2Enabled(kj::Badge<Lock>, bool enabled) {
+    nodeJsProcessV2Enabled = enabled;
+  }
+
   inline bool areWarningsLogged() const {
     return maybeLogger != kj::none;
   }
@@ -156,6 +167,10 @@ class IsolateBase {
 
   inline bool isNodeJsCompatEnabled() const {
     return nodeJsCompatEnabled;
+  }
+
+  inline bool isNodeJsProcessV2Enabled() const {
+    return nodeJsProcessV2Enabled;
   }
 
   inline bool shouldSetToStringTag() const {
@@ -235,8 +250,22 @@ class IsolateBase {
     return throwOnUnrecognizedImportAssertion;
   }
 
+  void setUsingEnhancedErrorSerialization() {
+    usingEnhancedErrorSerialization = true;
+  }
+
+  bool getUsingEnhancedErrorSerialization() const {
+    return usingEnhancedErrorSerialization;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
+  }
+
+  // Allows an object to register an that will be dropped when the destroy
+  // queue is drained under the isolate lock.
+  void destroyUnderLock(kj::Own<void> item) {
+    deferDestruction(kj::mv(item));
   }
 
  private:
@@ -269,13 +298,15 @@ class IsolateBase {
     Wrappable* wrappable;
   };
 
-  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete>;
+  using Item = kj::OneOf<v8::Global<v8::Data>, RefToDelete, kj::Own<void>>;
 
   V8System& v8System;
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
   v8::Isolate* ptr;
+  // When true, evalAllowed is true and switching it to false is a no-op.
+  bool alwaysAllowEval = false;
   bool evalAllowed = false;
   bool jspiEnabled = false;
 
@@ -287,9 +318,11 @@ class IsolateBase {
   bool captureThrowsAsRejections = false;
   bool asyncContextTrackingEnabled = false;
   bool nodeJsCompatEnabled = false;
+  bool nodeJsProcessV2Enabled = false;
   bool setToStringTag = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
+  bool usingEnhancedErrorSerialization = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
@@ -693,7 +726,8 @@ class Isolate: public IsolateBase {
       //   a Ref.
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
-      context.getHandle(v8Isolate)->SetAlignedPointerInEmbedderData(3, wrapper);
+      jsg::setAlignedPointerInEmbedderData(
+          context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
       return context;
     }
 
@@ -799,13 +833,12 @@ class Isolate: public IsolateBase {
     if (KJ_LIKELY(!hasExtraWrappers)) {
       return wrappers[0].get();
     } else {
-      auto ptr = context->GetAlignedPointerFromEmbedderData(3);
-      if (KJ_LIKELY(ptr != nullptr)) {
-        return static_cast<TypeWrapper*>(ptr);
-      } else {
-        // This can happen when we create dummy contexts such as in worker.c++.
-        return wrappers[0].get();
+      KJ_IF_SOME(data,
+          jsg::getAlignedPointerFromEmbedderData<TypeWrapper>(
+              context, ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER)) {
+        return &data;
       }
+      return wrappers[0].get();
     }
   }
 

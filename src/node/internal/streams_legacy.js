@@ -23,9 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
 import { EventEmitter } from 'node-internal:events';
 
 import { Buffer } from 'node-internal:internal_buffer';
@@ -38,7 +35,7 @@ Object.setPrototypeOf(Stream.prototype, EventEmitter.prototype);
 Object.setPrototypeOf(Stream, EventEmitter);
 
 Stream.prototype.pipe = function (dest, options) {
-  const source = this;
+  const source = this; // eslint-disable-line @typescript-eslint/no-this-alias
   function ondata(chunk) {
     if (dest.writable && dest.write(chunk) === false && source.pause) {
       source.pause();

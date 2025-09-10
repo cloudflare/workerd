@@ -876,58 +876,56 @@ jsg::Ref<DigestStream> DigestStream::constructor(jsg::Lock& js, Algorithm algori
   auto stream = js.alloc<DigestStream>(newWritableStreamJsController(),
       interpretAlgorithmParam(kj::mv(algorithm)), kj::mv(paf.resolver), kj::mv(paf.promise));
 
-  stream->getController().setup(js,
-      UnderlyingSink{
-        .write =
-            [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
-    return js.tryCatch([&] {
-      // Make sure what we got can be interpreted as bytes...
-      std::shared_ptr<v8::BackingStore> backing;
-      if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
-        jsg::BufferSource source(js, chunk);
-        if (source.size() == 0) return js.resolvedPromise();
+  // clang-format off
+  stream->getController().setup(js, UnderlyingSink{
+    .write = [&stream = *stream](jsg::Lock& js, v8::Local<v8::Value> chunk, auto c) mutable {
+      return js.tryCatch([&] {
+        // Make sure what we got can be interpreted as bytes...
+        std::shared_ptr<v8::BackingStore> backing;
+        if (chunk->IsArrayBuffer() || chunk->IsArrayBufferView()) {
+          jsg::BufferSource source(js, chunk);
+          if (source.size() == 0) return js.resolvedPromise();
 
-        KJ_IF_SOME(error, stream.write(js, source.asArrayPtr())) {
+          KJ_IF_SOME(error, stream.write(js, source.asArrayPtr())) {
+            return js.rejectedPromise<void>(kj::mv(error));
+          } else {
+          }  // Here to silence a compiler warning
+          stream.bytesWritten += source.size();
+          return js.resolvedPromise();
+        } else if (chunk->IsString()) {
+          // If we receive a string, we'll convert that to UTF-8 bytes and digest that.
+          auto str = js.toString(chunk);
+          if (str.size() == 0) return js.resolvedPromise();
+          KJ_IF_SOME(error, stream.write(js, str.asBytes())) {
+            return js.rejectedPromise<void>(kj::mv(error));
+          }
+          stream.bytesWritten += str.size();
+          return js.resolvedPromise();
+        }
+        return js.rejectedPromise<void>(
+            js.typeError("DigestStream is a byte stream but received an object of "
+                        "non-ArrayBuffer/ArrayBufferView/string type on its writable side."));
+      }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    },
+    .abort = [&stream = *stream](jsg::Lock& js, auto reason) mutable {
+      return js.tryCatch([&] {
+        stream.abort(js, jsg::JsValue(reason));
+        return js.resolvedPromise();
+      }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    },
+    .close = [&stream = *stream](jsg::Lock& js) mutable {
+      return js.tryCatch([&] {
+        // If sink.close returns a non kj::none value, that means the sink was errored
+        // and we return a rejected promise here. Otherwise, we return resolved.
+        KJ_IF_SOME(error, stream.close(js)) {
           return js.rejectedPromise<void>(kj::mv(error));
         } else {
         }  // Here to silence a compiler warning
-        stream.bytesWritten += source.size();
         return js.resolvedPromise();
-      } else if (chunk->IsString()) {
-        // If we receive a string, we'll convert that to UTF-8 bytes and digest that.
-        auto str = js.toString(chunk);
-        if (str.size() == 0) return js.resolvedPromise();
-        KJ_IF_SOME(error, stream.write(js, str.asBytes())) {
-          return js.rejectedPromise<void>(kj::mv(error));
-        }
-        stream.bytesWritten += str.size();
-        return js.resolvedPromise();
-      }
-      return js.rejectedPromise<void>(
-          js.typeError("DigestStream is a byte stream but received an object of "
-                       "non-ArrayBuffer/ArrayBufferView/string type on its writable side."));
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  },
-        .abort =
-            [&stream = *stream](jsg::Lock& js, auto reason) mutable {
-    return js.tryCatch([&] {
-      stream.abort(js, jsg::JsValue(reason));
-      return js.resolvedPromise();
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  },
-        .close =
-            [&stream = *stream](jsg::Lock& js) mutable {
-    return js.tryCatch([&] {
-      // If sink.close returns a non kj::none value, that means the sink was errored
-      // and we return a rejected promise here. Otherwise, we return resolved.
-      KJ_IF_SOME(error, stream.close(js)) {
-        return js.rejectedPromise<void>(kj::mv(error));
-      } else {
-      }  // Here to silence a compiler warning
-      return js.resolvedPromise();
-    }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
-  }},
-      kj::none);
+      }, [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); });
+    }
+  }, kj::none);
+  // clang-format on
 
   return kj::mv(stream);
 }

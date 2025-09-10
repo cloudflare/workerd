@@ -26,7 +26,7 @@
 import { default as path } from 'node:path';
 import {
   FilterList,
-  UnknownFunc,
+  type UnknownFunc,
   sanitize_unpaired_surrogates,
   getHostInfo,
   getBindingPath,
@@ -96,6 +96,7 @@ export type TestRunnerConfig = {
 
 type Env = {
   unsafe: { eval: (code: string) => void };
+  SIDECAR_HOSTNAME: string | null;
   HTTP_PORT: string | null;
   HTTPS_PORT: string | null;
   [key: string]: unknown;
@@ -167,11 +168,7 @@ class RunnerState {
     if (unexpectedFailures.length > 0) {
       console.error(
         'The following tests unexpectedly failed:',
-        JSON.stringify(
-          unexpectedFailures.map((v) => v.toString()),
-          null,
-          2
-        )
+        JSON.stringify(unexpectedFailures, null, 2)
       );
     }
 
@@ -200,12 +197,10 @@ class RunnerState {
 }
 
 declare global {
-  /* eslint-disable no-var -- https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-4.html#type-checking-for-globalthis */
   // Current RunnerState
   var state: RunnerState;
   // All RunnerStates (to get results later)
   var results: { [file: string]: RunnerState };
-  /* eslint-enable no-var */
 }
 
 const COLORS = {
@@ -417,7 +412,10 @@ async function runTest(
     );
   }
 
-  const testUrl = new URL(path.join(moduleBase, file), 'http://localhost');
+  const testUrl = new URL(
+    path.join(moduleBase, file),
+    `http://${env.SIDECAR_HOSTNAME ?? 'localhost'}`
+  );
 
   // If the environment variable HTTP_PORT is set, the wpt server is running as a sidecar.
   // Update the URL's port so we can connect to it
@@ -515,12 +513,12 @@ class WPTTestResult {
   duration: number = 0;
 
   constructor(result: RunnerState, options: TestRunnerOptions) {
-    this.test = WPTTestResult.getTestNameFromUrl(result.testUrl);
+    this.test = WPTTestResult.#getTestNameFromUrl(result.testUrl);
     this.status = options.disabledTests === true ? 'ERROR' : 'OK';
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
   }
 
-  private static getTestNameFromUrl(testUrl: URL): string {
+  static #getTestNameFromUrl(testUrl: URL): string {
     const testNameUrl = new URL(testUrl);
     testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
     return testNameUrl.href.slice(testNameUrl.origin.length);

@@ -22,8 +22,6 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-/* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
 import { EventEmitter } from 'node-internal:events';
@@ -31,8 +29,9 @@ import { EventEmitter } from 'node-internal:events';
 import { Stream } from 'node-internal:streams_legacy';
 
 import { Buffer } from 'node-internal:internal_buffer';
-
-import * as process from 'node-internal:process';
+import { nextTick } from 'node-internal:internal_process';
+import { normalizeEncoding } from 'node-internal:internal_utils';
+import { validateBoolean, validateObject } from 'node-internal:validators';
 
 import {
   nop,
@@ -42,17 +41,17 @@ import {
   addAbortSignal,
   construct,
   destroy,
+  eos,
+  isWritableEnded,
+  isWritable,
+  isDestroyed,
   undestroy,
   errorOrDestroy,
   kOnConstructed,
 } from 'node-internal:streams_util';
 
 import {
-  newStreamWritableFromWritableStream,
-  newWritableStreamFromStreamWritable,
-} from 'node-internal:streams_adapters';
-
-import {
+  AbortError,
   ERR_INVALID_ARG_TYPE,
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MULTIPLE_CALLBACK,
@@ -62,9 +61,10 @@ import {
   ERR_STREAM_NULL_VALUES,
   ERR_STREAM_WRITE_AFTER_END,
   ERR_UNKNOWN_ENCODING,
+  ERR_STREAM_PREMATURE_CLOSE,
 } from 'node-internal:internal_errors';
 
-import { isDuplexInstance } from 'node-internal:streams_duplex';
+const encoder = new TextEncoder();
 
 // ======================================================================================
 // WritableState
@@ -75,7 +75,6 @@ export function WritableState(options, stream, isDuplex) {
   // However, some cases require setting options to different
   // values for the readable and the writable sides of the duplex stream,
   // e.g. options.readableObjectMode vs. options.writableObjectMode, etc.
-  if (typeof isDuplex !== 'boolean') isDuplex = isDuplexInstance(stream);
 
   // Object stream flag to indicate whether or not this stream
   // contains buffers or objects.
@@ -225,20 +224,9 @@ Object.setPrototypeOf(Writable.prototype, Stream.prototype);
 Object.setPrototypeOf(Writable, Stream);
 
 export function Writable(options) {
-  // Writable ctor is applied to Duplexes, too.
-  // `realHasInstance` is necessary because using plain `instanceof`
-  // would return false, as no `_writableState` property is attached.
+  if (!(this instanceof Writable)) return new Writable(options);
 
-  // Trying to use the custom `instanceof` for Writable here will also break the
-  // Node.js LazyTransform implementation, which has a non-trivial getter for
-  // `_writableState` that would lead to infinite recursion.
-
-  // Checking for a Stream.Duplex instance is faster here instead of inside
-  // the WritableState constructor, at least with V8 6.5.
-  const isDuplex = isDuplexInstance(this);
-  if (!isDuplex && !Writable[Symbol.hasInstance](this))
-    return new Writable(options);
-  this._writableState = new WritableState(options, this, isDuplex);
+  this._writableState = new WritableState(options, this, false);
   if (options) {
     if (typeof options.write === 'function') this._write = options.write;
     if (typeof options.writev === 'function') this._writev = options.writev;
@@ -311,7 +299,7 @@ function _write(stream, chunk, encoding, cb) {
     err = new ERR_STREAM_DESTROYED('write');
   }
   if (err) {
-    process.nextTick(cb, err);
+    nextTick(cb, err);
     errorOrDestroy(stream, err, true);
     return err;
   }
@@ -420,7 +408,7 @@ function onwrite(stream, er) {
   state.writelen = 0;
   if (er) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
-    er.stack; // eslint-disable-line no-unused-expressions
+    er.stack;
 
     if (!state.errored) {
       state.errored = er;
@@ -432,7 +420,7 @@ function onwrite(stream, er) {
       stream._readableState.errored = er;
     }
     if (sync) {
-      process.nextTick(onwriteError, stream, state, er, cb);
+      nextTick(onwriteError, stream, state, er, cb);
     } else {
       onwriteError(stream, state, er, cb);
     }
@@ -457,7 +445,7 @@ function onwrite(stream, er) {
           stream,
           state,
         };
-        process.nextTick(afterWriteTick, state.afterWriteTickInfo);
+        nextTick(afterWriteTick, state.afterWriteTickInfo);
       }
     } else {
       afterWrite(stream, state, 1, cb);
@@ -627,7 +615,7 @@ function end(chunk, encoding, cb) {
   }
   if (typeof cb === 'function') {
     if (err || state.finished) {
-      process.nextTick(cb, err);
+      nextTick(cb, err);
     } else {
       state[kOnFinished].push(cb);
     }
@@ -674,7 +662,7 @@ function callFinal(stream, state) {
       // Some streams assume 'finish' will be emitted
       // asynchronously relative to _final callback.
       state.pendingcb++;
-      process.nextTick(finish, stream, state);
+      nextTick(finish, stream, state);
     }
   }
   state.sync = true;
@@ -705,7 +693,7 @@ function finishMaybe(stream, state, sync = false) {
     if (state.pendingcb === 0) {
       if (sync) {
         state.pendingcb++;
-        process.nextTick(() => {
+        nextTick(() => {
           ((stream, state) => {
             if (needFinish(state)) {
               finish(stream, state);
@@ -854,7 +842,7 @@ Writable.prototype.destroy = function (err, cb) {
     !state.destroyed &&
     (state.bufferedIndex < state.buffered.length || state[kOnFinished].length)
   ) {
-    process.nextTick(errorBuffer, state);
+    nextTick(errorBuffer, state);
   }
   destroy.call(this, err, cb);
   return this;
@@ -879,3 +867,274 @@ export function toWeb(streamWritable) {
 
 Writable.fromWeb = fromWeb;
 Writable.toWeb = toWeb;
+
+/**
+ * @param {Writable} streamWritable
+ * @returns {WritableStream}
+ */
+export function newWritableStreamFromStreamWritable(streamWritable) {
+  // Not using the internal/streams/utils isWritableNodeStream utility
+  // here because it will return false if streamWritable is a Duplex
+  // whose writable option is false. For a Duplex that is not writable,
+  // we want it to pass this check but return a closed WritableStream.
+  // We check if the given stream is a stream.Writable or http.OutgoingMessage
+  const checkIfWritableOrOutgoingMessage =
+    streamWritable &&
+    typeof streamWritable?.write === 'function' &&
+    typeof streamWritable?.on === 'function';
+  if (!checkIfWritableOrOutgoingMessage) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'streamWritable',
+      'stream.Writable',
+      streamWritable
+    );
+  }
+
+  if (isDestroyed(streamWritable) || !isWritable(streamWritable)) {
+    const writable = new WritableStream();
+    writable.close();
+    return writable;
+  }
+
+  const highWaterMark = streamWritable.writableHighWaterMark;
+  const strategy = streamWritable.writableObjectMode
+    ? new CountQueuingStrategy({ highWaterMark })
+    : { highWaterMark };
+
+  let controller;
+  let backpressurePromise;
+  let closed;
+
+  function onDrain() {
+    if (backpressurePromise !== undefined) backpressurePromise.resolve();
+  }
+
+  const cleanup = eos(streamWritable, (error) => {
+    if (error?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+      const err = new AbortError(undefined, { cause: error });
+      error = err;
+    }
+
+    cleanup();
+    // This is a protection against non-standard, legacy streams
+    // that happen to emit an error event again after finished is called.
+    streamWritable.on('error', () => {});
+    if (error != null) {
+      if (backpressurePromise !== undefined) backpressurePromise.reject(error);
+      // If closed is not undefined, the error is happening
+      // after the WritableStream close has already started.
+      // We need to reject it here.
+      if (closed !== undefined) {
+        closed.reject(error);
+        closed = undefined;
+      }
+      controller.error(error);
+      controller = undefined;
+      return;
+    }
+
+    if (closed !== undefined) {
+      closed.resolve();
+      closed = undefined;
+      return;
+    }
+    controller.error(new AbortError());
+    controller = undefined;
+  });
+
+  streamWritable.on('drain', onDrain);
+
+  return new WritableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      async write(chunk) {
+        if (streamWritable.writableNeedDrain || !streamWritable.write(chunk)) {
+          backpressurePromise = Promise.withResolvers();
+          return backpressurePromise.promise.finally(() => {
+            backpressurePromise = undefined;
+          });
+        }
+      },
+
+      abort(reason) {
+        destroy.call(streamWritable, reason);
+      },
+
+      close() {
+        if (closed === undefined && !isWritableEnded(streamWritable)) {
+          closed = Promise.withResolvers();
+          streamWritable.end();
+          return closed.promise;
+        }
+
+        controller = undefined;
+        return Promise.resolve();
+      },
+    },
+    strategy
+  );
+}
+
+/**
+ * @param {WritableStream} writableStream
+ * @param {{
+ *   decodeStrings? : boolean,
+ *   highWaterMark? : number,
+ *   objectMode? : boolean,
+ *   signal? : AbortSignal,
+ * }} [options]
+ * @returns {Writable}
+ */
+export function newStreamWritableFromWritableStream(
+  writableStream,
+  options = {}
+) {
+  if (!(writableStream instanceof WritableStream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'writableStream',
+      'WritableStream',
+      writableStream
+    );
+  }
+
+  validateObject(options, 'options');
+  const {
+    highWaterMark,
+    decodeStrings = true,
+    objectMode = false,
+    signal,
+  } = options;
+
+  validateBoolean(objectMode, 'options.objectMode');
+  validateBoolean(decodeStrings, 'options.decodeStrings');
+
+  const writer = writableStream.getWriter();
+  let closed = false;
+
+  const writable = new Writable({
+    highWaterMark,
+    objectMode,
+    decodeStrings,
+    signal,
+
+    writev(chunks, callback) {
+      function done(error) {
+        error = error.filter((e) => e);
+        try {
+          callback(error.length === 0 ? undefined : error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => destroy.call(writable, error));
+        }
+      }
+
+      writer.ready.then(() => {
+        return Promise.all(chunks.map((data) => writer.write(data))).then(
+          done,
+          done
+        );
+      }, done);
+    },
+
+    write(chunk, encoding, callback) {
+      if (typeof chunk === 'string' && decodeStrings && !objectMode) {
+        const enc = normalizeEncoding(encoding);
+
+        if (enc === 'utf8') {
+          chunk = encoder.encode(chunk);
+        } else {
+          chunk = Buffer.from(chunk, encoding);
+          chunk = new Uint8Array(
+            chunk.buffer,
+            chunk.byteOffset,
+            chunk.byteLength
+          );
+        }
+      }
+
+      function done(error) {
+        try {
+          callback(error);
+        } catch (error) {
+          destroy.call(writable, error);
+        }
+      }
+
+      writer.ready.then(() => {
+        return writer.write(chunk).then(done, done);
+      }, done);
+    },
+
+    destroy(error, callback) {
+      function done() {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => {
+            throw error;
+          });
+        }
+      }
+
+      if (!closed) {
+        if (error != null) {
+          writer.abort(error).then(done, done);
+        } else {
+          writer.close().then(done, done);
+        }
+        return;
+      }
+
+      done();
+    },
+
+    final(callback) {
+      function done(error) {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => destroy.call(writable, error));
+        }
+      }
+
+      if (!closed) {
+        writer.close().then(done, done);
+      }
+    },
+  });
+
+  writer.closed.then(
+    () => {
+      // If the WritableStream closes before the stream.Writable has been
+      // ended, we signal an error on the stream.Writable.
+      closed = true;
+      if (!isWritableEnded(writable))
+        destroy.call(writable, new ERR_STREAM_PREMATURE_CLOSE());
+    },
+    (error) => {
+      // If the WritableStream errors before the stream.Writable has been
+      // destroyed, signal an error on the stream.Writable.
+      closed = true;
+      destroy.call(writable, error);
+    }
+  );
+
+  return writable;
+}

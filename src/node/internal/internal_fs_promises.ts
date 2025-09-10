@@ -23,14 +23,8 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// TODO(node-fs): These will be remove as development continues.
-/* eslint-disable @typescript-eslint/require-await */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-confusing-void-expression */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import * as fssync from 'node-internal:internal_fs_sync';
+import { EventEmitter } from 'node-internal:events';
 import { default as cffs } from 'cloudflare-internal:filesystem';
 import type {
   MkdirTempSyncOptions,
@@ -40,7 +34,16 @@ import type {
   StatOptions,
 } from 'node-internal:internal_fs_sync';
 import {
+  type ReadStream,
+  type ReadStreamOptions,
+  type WriteStream,
+  type WriteStreamOptions,
+  createReadStream,
+  createWriteStream,
+} from 'node-internal:internal_fs_streams';
+import {
   kBadge,
+  kFileHandle,
   Stats,
   validatePosition,
   type Position,
@@ -49,6 +52,7 @@ import {
   type FilePath,
   type ReadDirOptions,
   type WriteSyncOptions,
+  type ValidEncoding,
 } from 'node-internal:internal_fs_utils';
 import type { Dirent } from 'node-internal:internal_fs';
 import { Buffer } from 'node-internal:internal_buffer';
@@ -57,7 +61,11 @@ import {
   ERR_EBADF,
   ERR_UNSUPPORTED_OPERATION,
 } from 'node-internal:internal_errors';
-import { validateUint32 } from 'node-internal:validators';
+import {
+  validateBoolean,
+  validateObject,
+  validateUint32,
+} from 'node-internal:validators';
 import * as constants from 'node-internal:internal_fs_constants';
 import type {
   BigIntStatsFs,
@@ -67,15 +75,19 @@ import type {
   GlobOptionsWithoutFileTypes,
   MakeDirectoryOptions,
   OpenDirOptions,
-  ReadSyncOptions,
+  ReadAsyncOptions,
   RmOptions,
   RmDirOptions,
   StatsFs,
   WriteFileOptions,
 } from 'node:fs';
+import type {
+  ReadableWebStreamOptions,
+  CreateReadStreamOptions,
+} from 'node:fs/promises';
 import { isArrayBufferView } from 'node-internal:internal_types';
 
-class FileHandle {
+export class FileHandle extends EventEmitter {
   // The FileHandle class is a wrapper around a file descriptor.
   // When the #handle is cleared, the reference to the underlying
   // file descriptor is dropped. The user is expected to call
@@ -84,11 +96,13 @@ class FileHandle {
   // collected.
   #fd: number | undefined;
   #handle: cffs.FdHandle | undefined;
+  [kFileHandle] = true;
 
   constructor(badge: symbol, fd: number) {
     if (badge !== kBadge) {
       throw new TypeError('Illegal constructor');
     }
+    super();
     this.#fd = fd;
     this.#handle = cffs.getFdHandle(fd);
   }
@@ -136,76 +150,84 @@ class FileHandle {
     await fsync(this.#fd);
   }
 
-  async read<T extends NodeJS.ArrayBufferView>(
-    bufferOrOptions: T | ReadSyncOptions = {},
-    offsetOrOptions: number | ReadSyncOptions = {},
+  read<T extends NodeJS.ArrayBufferView>(
+    bufferOrOptions: T | ReadAsyncOptions<T> = {},
+    offsetOrOptions: number | ReadAsyncOptions<T> = {},
     length?: number,
     position: Position = null
   ): Promise<{ bytesRead: number; buffer: T }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-
-    let options: any;
-    if (isArrayBufferView(bufferOrOptions)) {
-      if (typeof offsetOrOptions === 'number') {
-        options = {
-          buffer: bufferOrOptions,
-          offset: offsetOrOptions,
-          length: length ?? bufferOrOptions.byteLength,
-          position: position ?? null,
-        };
-      } else {
-        options = {
-          buffer: bufferOrOptions,
-          ...offsetOrOptions,
-        };
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
       }
-    } else {
-      options = bufferOrOptions;
+
+      let options: ReadAsyncOptions<T>;
+      if (isArrayBufferView(bufferOrOptions)) {
+        if (typeof offsetOrOptions === 'number') {
+          options = {
+            buffer: bufferOrOptions,
+            offset: offsetOrOptions,
+            length: length ?? bufferOrOptions.byteLength,
+            position: position ?? null,
+          };
+        } else {
+          options = {
+            buffer: bufferOrOptions,
+            ...offsetOrOptions,
+          };
+        }
+      } else {
+        options = bufferOrOptions;
+      }
+
+      const {
+        buffer = Buffer.alloc(16384),
+        offset: actualOffset = buffer.byteOffset,
+        length: actualLength = buffer.byteLength - buffer.byteOffset,
+        position: actualPosition = null,
+      } = options;
+
+      validateUint32(actualOffset, 'offset');
+      validateUint32(actualLength, 'length');
+      validatePosition(actualPosition, 'position');
+
+      const bytesRead = fssync.readSync(
+        this.#fd,
+        buffer as NodeJS.ArrayBufferView,
+        actualOffset,
+        actualLength,
+        actualPosition
+      );
+
+      return Promise.resolve({
+        bytesRead,
+        buffer: buffer as T,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-
-    const {
-      buffer = Buffer.alloc(16384),
-      offset: actualOffset = buffer.byteOffset,
-      length: actualLength = buffer.byteLength - buffer.byteOffset,
-      position: actualPosition = null,
-    } = options || {};
-
-    validateUint32(actualOffset, 'offset');
-    validateUint32(actualLength, 'length');
-    validatePosition(actualPosition, 'position');
-
-    const bytesRead = fssync.readSync(
-      this.#fd,
-      buffer,
-      actualOffset,
-      actualLength,
-      actualPosition
-    );
-
-    return {
-      bytesRead,
-      buffer,
-    };
   }
 
-  async readv<T extends NodeJS.ArrayBufferView>(
+  readv<T extends NodeJS.ArrayBufferView>(
     buffers: T[],
     position: Position = null
   ): Promise<{ bytesRead: number; buffers: T[] }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesRead = fssync.readvSync(this.#fd, buffers, position);
+      return Promise.resolve({
+        bytesRead,
+        buffers,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesRead = fssync.readvSync(this.#fd, buffers, position);
-    return {
-      bytesRead,
-      buffers,
-    };
   }
 
   async readFile(
-    options: BufferEncoding | null | ReadFileSyncOptions = {}
+    options: ValidEncoding | ReadFileSyncOptions = {}
   ): Promise<string | Buffer> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
@@ -213,7 +235,11 @@ class FileHandle {
     return await readFile(this.#fd, options);
   }
 
-  readLines(_options: any = undefined): void {
+  readLines(_options: CreateReadStreamOptions = {}): void {
+    // TODO(node-fs): This method is not yet implemented. In Node.js,
+    // it depends on the readline module which has not yet been
+    // implemented in the workers runtime. We'll want to implement
+    // it first then come back and implement this method.
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
@@ -241,93 +267,113 @@ class FileHandle {
     await futimes(this.#fd, atime, mtime);
   }
 
-  async write(
+  write(
     buffer: NodeJS.ArrayBufferView | string,
     offsetPositionOrOptions: WriteSyncOptions | Position = null,
-    lengthOrEncoding?: number | BufferEncoding | null,
+    lengthOrEncoding?: number | ValidEncoding,
     position: Position = null
   ): Promise<{ bytesWritten: number; buffer: NodeJS.ArrayBufferView }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+
+      if (typeof buffer === 'string') {
+        buffer = Buffer.from(buffer, lengthOrEncoding as string);
+      }
+
+      const bytesWritten = fssync.writeSync(
+        this.#fd,
+        buffer,
+        offsetPositionOrOptions,
+        lengthOrEncoding,
+        position
+      );
+
+      return Promise.resolve({
+        bytesWritten,
+        buffer,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-
-    if (typeof buffer === 'string') {
-      buffer = Buffer.from(buffer, lengthOrEncoding as string);
-    }
-
-    const bytesWritten = fssync.writeSync(
-      this.#fd,
-      buffer,
-      offsetPositionOrOptions,
-      lengthOrEncoding,
-      position
-    );
-
-    return {
-      bytesWritten,
-      buffer,
-    };
   }
 
-  async writev(
+  writev(
     buffers: NodeJS.ArrayBufferView[],
     position: Position = null
   ): Promise<{ bytesWritten: number; buffers: NodeJS.ArrayBufferView[] }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesWritten = fssync.writevSync(this.#fd, buffers, position);
+      return Promise.resolve({
+        bytesWritten,
+        buffers,
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesWritten = fssync.writevSync(this.#fd, buffers, position);
-    return {
-      bytesWritten,
-      buffers,
-    };
   }
 
-  async writeFile(
+  writeFile(
     data: string | Buffer,
-    options: BufferEncoding | null | WriteFileOptions = {}
+    options: ValidEncoding | WriteFileOptions = {}
   ): Promise<{ bytesWritten: number; buffer: Buffer }> {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
+    try {
+      if (this.#fd === undefined) {
+        throw new ERR_EBADF({ syscall: 'stat' });
+      }
+      const bytesWritten = fssync.writeFileSync(this.#fd, data, options);
+      return Promise.resolve({
+        bytesWritten,
+        buffer: isArrayBufferView(data)
+          ? data
+          : Buffer.from(data, options as BufferEncoding),
+      });
+    } catch (err) {
+      return Promise.reject(err as Error);
     }
-    const bytesWritten = fssync.writeFileSync(this.#fd, data, options);
-    return {
-      bytesWritten,
-      buffer: isArrayBufferView(data)
-        ? data
-        : Buffer.from(data, options as BufferEncoding),
-    };
   }
 
-  async close(): Promise<void> {
-    if (this.#handle !== undefined) this.#handle.close();
-    this.#fd = undefined;
-    this.#handle = undefined;
+  close(): Promise<void> {
+    try {
+      this.#handle?.close();
+      this.#fd = undefined;
+      this.#handle = undefined;
+      (this as unknown as EventEmitter).emit('close');
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(err as Error);
+    }
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
 
-  readableWebStream(_options: any = {}): void {
+  readableWebStream(
+    options: ReadableWebStreamOptions = {}
+  ): ReadableStream<Uint8Array> {
     if (this.#fd === undefined) {
       throw new ERR_EBADF({ syscall: 'stat' });
     }
-    throw new Error('not implemented');
+    validateObject(options, 'options');
+    // Node.js actually defaults autoClose to false here because of backwards
+    // compatibility issues but will change to autoClose = true in a semver-major
+    // soon.
+    const { autoClose = true } = options;
+    validateBoolean(autoClose, 'options.autoClose');
+    return getReadableWebStream(this, { autoClose });
   }
 
-  createReadStream(_options: any = undefined): void {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-    throw new Error('not implemented');
+  createReadStream(options: ReadStreamOptions = {}): ReadStream {
+    return createReadStream('', { ...options, fd: this });
   }
 
-  createWriteStream(_options: any = undefined): void {
-    if (this.#fd === undefined) {
-      throw new ERR_EBADF({ syscall: 'stat' });
-    }
-    throw new Error('not implemented');
+  createWriteStream(_options: WriteStreamOptions = {}): WriteStream {
+    return createWriteStream('', { ..._options, fd: this });
   }
 }
 
@@ -339,7 +385,9 @@ export function access(
   // rather than forwarding them to the callback, the promise version throws a errors
   // asynchronously by rejecting the promise. So we can rely on accessSync to do the
   // input validation for us.
-  return Promise.try(() => fssync.accessSync(path, mode));
+  return Promise.try(() => {
+    fssync.accessSync(path, mode);
+  });
 }
 
 export function appendFile(
@@ -355,11 +403,15 @@ export function appendFile(
 }
 
 export function chmod(path: FilePath, mode: number): Promise<void> {
-  return Promise.try(() => fssync.chmodSync(path, mode));
+  return Promise.try(() => {
+    fssync.chmodSync(path, mode);
+  });
 }
 
 export function chown(path: FilePath, uid: number, gid: number): Promise<void> {
-  return Promise.try(() => fssync.chownSync(path, uid, gid));
+  return Promise.try(() => {
+    fssync.chownSync(path, uid, gid);
+  });
 }
 
 export function copyFile(
@@ -367,7 +419,9 @@ export function copyFile(
   dest: FilePath,
   mode: number
 ): Promise<void> {
-  return Promise.try(() => fssync.copyFileSync(src, dest, mode));
+  return Promise.try(() => {
+    fssync.copyFileSync(src, dest, mode);
+  });
 }
 
 export function cp(
@@ -375,34 +429,48 @@ export function cp(
   dest: FilePath,
   options: CopySyncOptions
 ): Promise<void> {
-  return Promise.try(() => fssync.cpSync(src, dest, options));
+  return Promise.try(() => {
+    fssync.cpSync(src, dest, options);
+  });
 }
 
 function fchmod(fd: number, mode: string | number): Promise<void> {
-  return Promise.try(() => fssync.fchmodSync(fd, mode));
+  return Promise.try(() => {
+    fssync.fchmodSync(fd, mode);
+  });
 }
 
 function fchown(fd: number, uid: number, gid: number): Promise<void> {
-  return Promise.try(() => fssync.fchownSync(fd, uid, gid));
+  return Promise.try(() => {
+    fssync.fchownSync(fd, uid, gid);
+  });
 }
 
 function fdatasync(fd: number): Promise<void> {
-  return Promise.try(() => fssync.fdatasyncSync(fd));
+  return Promise.try(() => {
+    fssync.fdatasyncSync(fd);
+  });
 }
 
 function fsync(fd: number): Promise<void> {
-  return Promise.try(() => fssync.fsyncSync(fd));
+  return Promise.try(() => {
+    fssync.fsyncSync(fd);
+  });
 }
 
 function fstat(
   fd: number,
   options: StatOptions = {}
 ): Promise<Stats | undefined> {
-  return Promise.try(() => fssync.fstatSync(fd, options));
+  return Promise.try(() => {
+    return fssync.fstatSync(fd, options);
+  });
 }
 
 function ftruncate(fd: number, len: number = 0): Promise<void> {
-  return Promise.try(() => fssync.ftruncateSync(fd, len));
+  return Promise.try(() => {
+    fssync.ftruncateSync(fd, len);
+  });
 }
 
 function futimes(
@@ -410,11 +478,15 @@ function futimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.futimesSync(fd, atime, mtime));
+  return Promise.try(() => {
+    fssync.futimesSync(fd, atime, mtime);
+  });
 }
 
 export function lchmod(path: FilePath, mode: number): Promise<void> {
-  return Promise.try(() => fssync.lchmodSync(path, mode));
+  return Promise.try(() => {
+    fssync.lchmodSync(path, mode);
+  });
 }
 
 export function lchown(
@@ -422,7 +494,9 @@ export function lchown(
   uid: number,
   gid: number
 ): Promise<void> {
-  return Promise.try(() => fssync.lchownSync(path, uid, gid));
+  return Promise.try(() => {
+    fssync.lchownSync(path, uid, gid);
+  });
 }
 
 export function lutimes(
@@ -430,18 +504,24 @@ export function lutimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.lutimesSync(path, atime, mtime));
+  return Promise.try(() => {
+    fssync.lutimesSync(path, atime, mtime);
+  });
 }
 
 export function link(existingPath: FilePath, newPath: FilePath): Promise<void> {
-  return Promise.try(() => fssync.linkSync(existingPath, newPath));
+  return Promise.try(() => {
+    fssync.linkSync(existingPath, newPath);
+  });
 }
 
 export function lstat(
   path: FilePath,
   options: StatOptions = {}
 ): Promise<Stats | undefined> {
-  return Promise.try(() => fssync.lstatSync(path, options));
+  return Promise.try(() => {
+    return fssync.lstatSync(path, options);
+  });
 }
 
 export function mkdir(
@@ -484,35 +564,41 @@ export function readdir(
 
 export function readFile(
   path: number | FilePath,
-  options: BufferEncoding | null | ReadFileSyncOptions = {}
+  options: ValidEncoding | ReadFileSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.readFileSync(path, options));
 }
 
 export function readlink(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.readlinkSync(path, options));
 }
 
 export function realpath(
   path: FilePath,
-  options: BufferEncoding | null | ReadLinkSyncOptions = {}
+  options: ValidEncoding | ReadLinkSyncOptions = {}
 ): Promise<string | Buffer> {
   return Promise.try(() => fssync.realpathSync(path, options));
 }
 
 export function rename(oldPath: FilePath, newPath: FilePath): Promise<void> {
-  return Promise.try(() => fssync.renameSync(oldPath, newPath));
+  return Promise.try(() => {
+    fssync.renameSync(oldPath, newPath);
+  });
 }
 
 export function rmdir(path: FilePath, options: RmDirOptions): Promise<void> {
-  return Promise.try(() => fssync.rmdirSync(path, options));
+  return Promise.try(() => {
+    fssync.rmdirSync(path, options);
+  });
 }
 
 export function rm(path: FilePath, options: RmOptions = {}): Promise<void> {
-  return Promise.try(() => fssync.rmSync(path, options));
+  return Promise.try(() => {
+    fssync.rmSync(path, options);
+  });
 }
 
 export function stat(
@@ -534,15 +620,21 @@ export function symlink(
   path: FilePath,
   type: SymlinkType = null
 ): Promise<void> {
-  return Promise.try(() => fssync.symlinkSync(target, path, type));
+  return Promise.try(() => {
+    fssync.symlinkSync(target, path, type);
+  });
 }
 
 export function truncate(path: FilePath, len: number = 0): Promise<void> {
-  return Promise.try(() => fssync.truncateSync(path, len));
+  return Promise.try(() => {
+    fssync.truncateSync(path, len);
+  });
 }
 
 export function unlink(path: FilePath): Promise<void> {
-  return Promise.try(() => fssync.unlinkSync(path));
+  return Promise.try(() => {
+    fssync.unlinkSync(path);
+  });
 }
 
 export function utimes(
@@ -550,7 +642,9 @@ export function utimes(
   atime: RawTime | Date,
   mtime: RawTime | Date
 ): Promise<void> {
-  return Promise.try(() => fssync.utimesSync(path, atime, mtime));
+  return Promise.try(() => {
+    fssync.utimesSync(path, atime, mtime);
+  });
 }
 
 export function watch(): Promise<void> {
@@ -561,7 +655,7 @@ export function watch(): Promise<void> {
 export function writeFile(
   path: number | FilePath,
   data: string | ArrayBufferView,
-  options: BufferEncoding | null | WriteFileOptions = {}
+  options: ValidEncoding | WriteFileOptions = {}
 ): Promise<void> {
   return Promise.try(() => {
     // While writeFileSync returns the number of bytes written,
@@ -582,4 +676,51 @@ export function glob(
   // which is not yet available in the workers runtime. This will be
   // explored for implementation separately in the future.
   throw new ERR_UNSUPPORTED_OPERATION();
+}
+
+function getReadableWebStream(
+  fh: FileHandle,
+  options: ReadableWebStreamOptions
+): ReadableStream<Uint8Array> {
+  const readFn = fh.read.bind(fh);
+  const { autoClose } = options;
+  let controller: ReadableByteStreamController;
+  const ondone = async (): Promise<void> => {
+    if (autoClose) await fh.close();
+  };
+
+  const readable = new ReadableStream({
+    type: 'bytes',
+    autoAllocateChunkSize: 16384,
+    start(c: ReadableByteStreamController): void {
+      controller = c;
+    },
+
+    async pull(controller: ReadableByteStreamController): Promise<void> {
+      const req = controller.byobRequest as ReadableStreamBYOBRequest;
+      const view = req.view;
+      const { bytesRead } = await readFn(
+        view as Uint8Array,
+        (view as Uint8Array).byteOffset,
+        (view as Uint8Array).byteLength
+      );
+
+      if (bytesRead === 0) {
+        controller.close();
+        await ondone();
+      }
+
+      req.respond(bytesRead);
+    },
+
+    async cancel(): Promise<void> {
+      await ondone();
+    },
+  });
+
+  fh.once('close', () => {
+    controller.close();
+  });
+
+  return readable;
 }

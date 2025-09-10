@@ -10,7 +10,8 @@ def wd_rust_binary(
         visibility = None,
         tags = [],
         cxx_bridge_src = None,
-        cxx_bridge_deps = []):
+        cxx_bridge_deps = [],
+        test_size = "small"):
     """Define rust binary.
 
     Args:
@@ -37,8 +38,7 @@ def wd_rust_binary(
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
             deps = cxx_bridge_deps + [
-                "@workerd-cxx//:cxx",
-                "//src/rust/cxx-integration:cxx-include",
+                "@workerd-cxx//:core",
             ],
         )
 
@@ -82,4 +82,5 @@ def wd_rust_binary(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        size = test_size,
     )

@@ -69,7 +69,8 @@ class ModuleRegistry {
   };
 
   static inline ModuleRegistry* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistry*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistry>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   struct CapnpModuleInfo {
@@ -242,13 +243,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   static kj::Own<ModuleRegistryImpl<TypeWrapper>> install(
       v8::Isolate* isolate, v8::Local<v8::Context> context, CompilationObserver& observer) {
     auto registry = kj::heap<ModuleRegistryImpl<TypeWrapper>>(observer);
-    context->SetAlignedPointerInEmbedderData(2, registry.get());
+    jsg::setAlignedPointerInEmbedderData(
+        context, jsg::ContextPointerSlot::MODULE_REGISTRY, registry.get());
     isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
     return kj::mv(registry);
   }
 
   static inline ModuleRegistryImpl* from(jsg::Lock& js) {
-    return static_cast<ModuleRegistryImpl*>(js.v8Context()->GetAlignedPointerFromEmbedderData(2));
+    return &KJ_ASSERT_NONNULL(jsg::getAlignedPointerFromEmbedderData<ModuleRegistryImpl>(
+        js.v8Context(), jsg::ContextPointerSlot::MODULE_REGISTRY));
   }
 
   void setDynamicImportCallback(kj::Function<DynamicImportCallback> func) override {
@@ -473,7 +476,9 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     // be found.
     using Key = typename Entry::Key;
     auto resolveOption = ModuleRegistry::ResolveOption::DEFAULT;
-    if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
+    if (entries.find(Key(referrer, Type::BUNDLE)) != kj::none) {
+      // The referrer is found in the module bundle, so we use the default.
+    } else if (entries.find(Key(referrer, Type::BUILTIN)) != kj::none) {
       resolveOption = ModuleRegistry::ResolveOption::INTERNAL_ONLY;
     }
 
@@ -676,6 +681,29 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     }
   }
 
+  // Handle process module redirection based on enable_nodejs_process_v2 flag
+  if (spec == "node:process") {
+    auto processSpec = isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                    : "node-internal:legacy_process"_kj;
+    try {
+      // Use resolveInternalImport for internal modules
+      auto moduleNamespace = registry->resolveInternalImport(js, processSpec);
+      v8::Local<v8::Promise::Resolver> resolver;
+      if (v8::Promise::Resolver::New(context).ToLocal(&resolver) &&
+          resolver->Resolve(context, moduleNamespace.getHandle(js)).IsJust()) {
+        return resolver->GetPromise();
+      }
+      return v8::Local<v8::Promise>();
+    } catch (JsExceptionThrown&) {
+      if (!tryCatch.CanContinue() || tryCatch.Exception().IsEmpty()) {
+        return v8::MaybeLocal<v8::Promise>();
+      }
+      return makeRejected(tryCatch.Exception());
+    } catch (kj::Exception& ex) {
+      return makeRejected(js.exceptionToJs(kj::mv(ex)).getHandle(js));
+    }
+  }
+
   auto maybeSpecifierPath = ([&]() -> kj::Maybe<kj::Path> {
     // If the specifier begins with one of our known prefixes, let's not resolve
     // it against the referrer.
@@ -716,7 +744,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
 
     return makeRejected(tryCatch.Exception());
   } catch (kj::Exception& ex) {
-    return makeRejected(makeInternalError(js.v8Isolate, kj::mv(ex)));
+    return makeRejected(exceptionToJs(js.v8Isolate, kj::mv(ex)));
   }
   KJ_UNREACHABLE;
 }

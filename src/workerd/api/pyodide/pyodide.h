@@ -23,6 +23,8 @@
 
 namespace workerd::api::pyodide {
 
+const auto PYTHON_PACKAGES_URL =
+    "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
 class PyodideBundleManager {
  public:
   void setPyodideBundleData(kj::String version, kj::Array<unsigned char> data) const;
@@ -49,6 +51,7 @@ struct PythonConfig {
   kj::Maybe<kj::Own<const kj::Directory>> packageDiskCacheRoot;
   kj::Maybe<kj::Own<const kj::Directory>> pyodideDiskCacheRoot;
   const PyodideBundleManager pyodideBundleManager;
+  const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
   bool loadSnapshotFromDisk;
@@ -128,8 +131,6 @@ class PyodideMetadataReader: public jsg::Object {
     bool snapshotToDisk;
     bool createBaselineSnapshot;
     kj::Maybe<kj::Array<kj::byte>> memorySnapshot;
-    kj::Maybe<kj::Array<kj::String>> durableObjectClasses;
-    kj::Maybe<kj::Array<kj::String>> entrypointClasses;
 
     State(kj::String mainModule,
         kj::Array<kj::String> names,
@@ -142,9 +143,7 @@ class PyodideMetadataReader: public jsg::Object {
         bool isTracing,
         bool snapshotToDisk,
         bool createBaselineSnapshot,
-        kj::Maybe<kj::Array<kj::byte>> memorySnapshot,
-        kj::Maybe<kj::Array<kj::String>> durableObjectClasses,
-        kj::Maybe<kj::Array<kj::String>> entrypointClasses)
+        kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
           requirements(kj::mv(requirements)),
@@ -155,11 +154,13 @@ class PyodideMetadataReader: public jsg::Object {
           isTracingFlag(isTracing),
           snapshotToDisk(snapshotToDisk),
           createBaselineSnapshot(createBaselineSnapshot),
-          memorySnapshot(kj::mv(memorySnapshot)),
-          durableObjectClasses(kj::mv(durableObjectClasses)),
-          entrypointClasses(kj::mv(entrypointClasses)) {}
+          memorySnapshot(kj::mv(memorySnapshot)) {
+      verifyNoMainModuleInVendor();
+    }
 
     State(const State& other);
+
+    void verifyNoMainModuleInVendor();
 
     kj::Own<State> clone();
   };
@@ -228,20 +229,6 @@ class PyodideMetadataReader: public jsg::Object {
 
   kj::HashSet<kj::String> getTransitiveRequirements();
 
-  kj::Maybe<kj::ArrayPtr<kj::String>> getDurableObjectClasses() {
-    KJ_IF_SOME(cls, state->durableObjectClasses) {
-      return cls.asPtr();
-    }
-    return kj::none;
-  }
-
-  kj::Maybe<kj::ArrayPtr<kj::String>> getEntrypointClasses() {
-    KJ_IF_SOME(cls, state->entrypointClasses) {
-      return cls.asPtr();
-    }
-    return kj::none;
-  }
-
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
@@ -263,8 +250,6 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getTransitiveRequirements);
-    JSG_METHOD(getDurableObjectClasses);
-    JSG_METHOD(getEntrypointClasses);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 
@@ -321,7 +306,8 @@ struct ArtifactBundler_State {
   kj::Own<ArtifactBundler_State> clone() {
     return kj::heap<ArtifactBundler_State>(packageManager,
         existingSnapshot.map(
-            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }));
+            [](kj::Array<const kj::byte>& data) { return kj::heapArray<const kj::byte>(data); }),
+        isValidating);
   }
 };
 
@@ -468,7 +454,8 @@ class SimplePythonLimiter: public jsg::Object {
       kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
       auto diffMs = diff / kj::MILLISECONDS;
 
-      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
+      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit ",
+          diffMs, "<=", startupLimitMs);
     }
   }
 
@@ -480,8 +467,8 @@ class SimplePythonLimiter: public jsg::Object {
 
 class SetupEmscripten: public jsg::Object {
  public:
-  SetupEmscripten(const EmscriptenRuntime& emscriptenRuntime)
-      : emscriptenRuntime(emscriptenRuntime) {};
+  SetupEmscripten(EmscriptenRuntime emscriptenRuntime)
+      : emscriptenRuntime(kj::mv(emscriptenRuntime)) {};
 
   jsg::JsValue getModule(jsg::Lock& js);
 
@@ -490,7 +477,7 @@ class SetupEmscripten: public jsg::Object {
   }
 
  private:
-  const EmscriptenRuntime& emscriptenRuntime;
+  EmscriptenRuntime emscriptenRuntime;
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
@@ -505,28 +492,6 @@ kj::Array<kj::String> getPythonPackageFiles(kj::StringPtr lockFileContents,
 
 // Constructs the path to a Python package in the package repository
 kj::String getPyodidePackagePath(kj::StringPtr packagesVersion, kj::StringPtr filename);
-
-// Downloads a package with retry logic (up to 3 attempts with 5-second delays)
-kj::Promise<kj::Maybe<kj::Array<byte>>> downloadPackageWithRetry(kj::HttpClient& client,
-    kj::Timer& timer,
-    kj::HttpHeaderTable& headerTable,
-    kj::StringPtr url,
-    kj::StringPtr path);
-
-// Loads a single Python package, either from disk cache or by downloading it
-kj::Promise<void> loadPyodidePackage(const PythonConfig& pyConfig,
-    const PyodidePackageManager& pyodidePackageManager,
-    kj::StringPtr packagesVersion,
-    kj::StringPtr filename,
-    kj::HttpClient& client,
-    kj::Timer& timer,
-    kj::HttpHeaderTable& table);
-
-// Preloads all required Python packages for a worker
-void fetchPyodidePackages(const PythonConfig& pyConfig,
-    const PyodidePackageManager& pyodidePackageManager,
-    kj::ArrayPtr<kj::String> pythonRequirements,
-    workerd::PythonSnapshotRelease::Reader pythonSnapshotRelease);
 
 template <class Registry>
 void registerPyodideModules(Registry& registry, auto featureFlags) {

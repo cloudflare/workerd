@@ -7,11 +7,13 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
-#include <workerd/io/supported-compatibility-date.capnp.h>
+#include <workerd/io/supported-compatibility-date.embed.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
+#include <workerd/server/cpp-capnp-schema.embed.h>
+#include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
-#include <workerd/server/workerd-meta.capnp.h>
+#include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
@@ -647,7 +649,7 @@ class NetworkWithLoopback final: public kj::Network {
 
 class CliMain final: public SchemaFileImpl::ErrorReporter {
  public:
-  CliMain(kj::ProcessContext& context, char** argv)
+  CliMain(StructuredLoggingProcessContext& context, char** argv)
       : context(context),
         argv(argv),
         server(kj::heap<Server>(*fs,
@@ -839,8 +841,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto features = message.getRoot<CompatibilityFlags>();
       features.setPythonWorkers(true);
       auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(features));
-      auto version = getPythonBundleName(pythonRelease);
-      KJ_ASSERT_NONNULL(fetchPyodideBundle(config, version), "Failed to get Pyodide bundle");
 
       auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
 
@@ -1344,6 +1344,12 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
       TRACE_EVENT("workerd", "serveImpl()");
       auto config = getConfig();
+
+      // Configure structured logging in the process context
+      if (config.getStructuredLogging()) {
+        context.enableStructuredLogging();
+      }
+
       auto platform = jsg::defaultPlatform(0);
       WorkerdPlatform v8Platform(*platform);
       jsg::V8System v8System(v8Platform,
@@ -1454,7 +1460,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 #endif
 
  private:
-  kj::ProcessContext& context;
+  StructuredLoggingProcessContext& context;
   char** argv;
 
   bool binaryConfig = false;
@@ -1652,7 +1658,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 }  // namespace workerd::server
 
 int main(int argc, char* argv[]) {
-  ::kj::TopLevelProcessContext context(argv[0]);
+  workerd::server::StructuredLoggingProcessContext context(argv[0]);
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif

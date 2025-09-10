@@ -36,7 +36,7 @@ interface Container @0x9aaceefc06523bca {
     # The container runtime should validate the environment variables input.
   }
 
-  monitor @2 ();
+  monitor @2 () -> (exitCode: Int32);
   # Waits for the container to shut down.
   #
   # If the container shuts down because the root process exited with a success status, or because

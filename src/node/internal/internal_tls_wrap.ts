@@ -25,7 +25,7 @@
 
 import {
   Socket,
-  SocketOptions,
+  type SocketOptions,
   _normalizeArgs,
   onConnectionOpened,
   onConnectionClosed,
@@ -522,7 +522,10 @@ TLSSocket.prototype._start = function _start(this: TLSSocket): void {
 
     this._handle.socket.closed.then(
       onConnectionClosed.bind(this),
-      this.destroy.bind(socket)
+      (error: unknown): void => {
+        // Do not call this.destroy.bind(this) since user can override it.
+        this.destroy(error as Error);
+      }
     );
   } catch (error) {
     this.destroy(error as Error);
@@ -713,7 +716,7 @@ export function connect(...args: unknown[]): TLSSocket {
     lookup: options.lookup,
     rejectUnauthorized:
       options.rejectUnauthorized !== undefined
-        ? Boolean(options.rejectUnauthorized)
+        ? Boolean(options.rejectUnauthorized) // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
         : true,
   });
 

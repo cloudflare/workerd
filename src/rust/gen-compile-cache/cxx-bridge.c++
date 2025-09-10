@@ -4,10 +4,10 @@
 #include <workerd/jsg/type-wrapper.h>
 #include <workerd/jsg/setup.h>
 
-#include <workerd/rust/cxx-integration/lib.rs.h>
-
 #include <capnp/serialize.h>
+#include <kj-rs/kj-rs.h>
 
+using namespace kj_rs;
 namespace workerd::rust::gen_compile_cache {
 
 namespace {
@@ -36,11 +36,11 @@ constexpr v8::ScriptCompiler::CompileOptions compileOptions = v8::ScriptCompiler
   auto data = ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& isolateLock) {
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
-      auto resourceName = jsg::newExternalOneByteString(js, fromRust(path));
+      auto resourceName = jsg::newExternalOneByteString(js, from<Rust>(path));
       v8::ScriptOrigin origin(resourceName, resourceLineOffset, resourceColumnOffset,
           resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
 
-      auto contentStr = jsg::newExternalOneByteString(js, fromRust(source));
+      auto contentStr = jsg::newExternalOneByteString(js, from<Rust>(source));
       auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
       auto module =
           jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));

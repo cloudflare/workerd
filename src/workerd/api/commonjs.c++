@@ -10,12 +10,12 @@ namespace workerd::api {
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, kj::Path path)
     : module(js.alloc<CommonJsModuleObject>(js, path.toString(true))),
       pathOrSpecifier(kj::mv(path)),
-      exports(js.v8Isolate, module->getExports(js)) {}
+      exports(js, module->getExports(js)) {}
 
 CommonJsModuleContext::CommonJsModuleContext(jsg::Lock& js, const jsg::Url& specifier)
     : module(js.alloc<CommonJsModuleObject>(js, kj::str(specifier.getHref()))),
       pathOrSpecifier(specifier.clone()),
-      exports(js.v8Isolate, module->getExports(js)) {}
+      exports(js, module->getExports(js)) {}
 
 jsg::JsValue CommonJsModuleContext::require(jsg::Lock& js, kj::String specifier) {
   if (isNodeJsCompatEnabled(js)) {
@@ -117,21 +117,21 @@ jsg::Ref<CommonJsModuleObject> CommonJsModuleContext::getModule(jsg::Lock& js) {
 }
 
 jsg::JsValue CommonJsModuleContext::getExports(jsg::Lock& js) const {
-  return jsg::JsValue(exports.getHandle(js));
+  return exports.getHandle(js);
 }
-void CommonJsModuleContext::setExports(jsg::Value value) {
-  exports = kj::mv(value);
+void CommonJsModuleContext::setExports(jsg::Lock& js, jsg::JsValue value) {
+  exports = jsg::JsRef(js, value);
 }
 
 CommonJsModuleObject::CommonJsModuleObject(jsg::Lock& js, kj::String path)
-    : exports(js.v8Isolate, v8::Object::New(js.v8Isolate)),
+    : exports(js, js.obj()),
       path(kj::mv(path)) {}
 
 jsg::JsValue CommonJsModuleObject::getExports(jsg::Lock& js) const {
-  return jsg::JsValue(exports.getHandle(js));
+  return exports.getHandle(js);
 }
-void CommonJsModuleObject::setExports(jsg::Value value) {
-  exports = kj::mv(value);
+void CommonJsModuleObject::setExports(jsg::Lock& js, jsg::JsValue value) {
+  exports = jsg::JsRef(js, value);
 }
 
 kj::StringPtr CommonJsModuleObject::getPath() const {

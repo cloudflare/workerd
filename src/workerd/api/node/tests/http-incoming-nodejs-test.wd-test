@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "http-incoming-nodejs-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "http-incoming-nodejs-test.js")
+        ],
+        compatibilityDate = "2025-01-15",
+        compatibilityFlags = ["nodejs_compat", "experimental", "enable_nodejs_http_modules"],
+        bindings = [],
+      )
+    ),
+    ( name = "internet", network = ( allow = ["private"] ) ),
+  ],
+);

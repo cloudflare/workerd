@@ -11,7 +11,7 @@
         // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
         // precludes the use of sandboxing during the build (see
         // https://bazel.build/docs/user-manual#execution-strategy).
-        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//..."],
+        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//..."]
       },
       "group": {
         "kind": "build",
@@ -37,7 +37,13 @@
         // correctly (https://github.com/bazelbuild/bazel/issues/6327). This `spawn_strategy`
         // precludes the use of sandboxing during the build (see
         // https://bazel.build/docs/user-manual#execution-strategy).
-        "args": ["build", "-c", "dbg", "--spawn_strategy=local", "//src/workerd/server:workerd"],
+        "args": [
+          "build",
+          "-c",
+          "dbg",
+          "--spawn_strategy=local",
+          "//src/workerd/server:workerd"
+        ]
       },
       "group": {
         "kind": "build",
@@ -208,7 +214,7 @@
       "label": "Symlink external directory",
       "command": "${workspaceFolder}/tools/unix/create-external.sh",
       "windows": {
-        "command": "${workspaceFolder}/tools/windows/create-external.bat",
+        "command": "${workspaceFolder}/tools/windows/create-external.bat"
       },
       "group": "build",
       "problemMatcher": [],
@@ -227,29 +233,29 @@
       "command": "/bin/sh",
       "args": [
         "-c",
-        "'rm -rf ${workspaceFolder}/bazel-out/test_tmpdir; mkdir ${workspaceFolder}/bazel-out/test_tmpdir'",
+        "'rm -rf ${workspaceFolder}/bazel-out/test_tmpdir; mkdir ${workspaceFolder}/bazel-out/test_tmpdir'"
       ],
       "windows": {
         "args": [
           "/c",
           "'del /q/s ${workspaceFolder}/bazel-out/test_tmpdir & mkdir ${workspaceFolder}/bazel-out/test_tmpdir'"
-        ],
+        ]
       },
       "hide": true,
       "type": "shell",
       "runOptions": {
-        "reevaluateOnRerun": true,
-      },
+        "reevaluateOnRerun": true
+      }
     },
     {
       "label": "Prepare workerd wd-test (dbg)",
-      "dependsOn": ["Bazel build workerd (dbg)", "Prepare wd-test TEST_TMPDIR" ],
+      "dependsOn": ["Bazel build workerd (dbg)", "Prepare wd-test TEST_TMPDIR"],
       "dependsOrder": "sequence",
       "group": "build",
       "detail": "Builds a debug workerd and prepares a test directory for wd-test",
       "hide": false,
       "runOptions": {
-        "reevaluateOnRerun": true,
+        "reevaluateOnRerun": true
       }
     },
     {
@@ -263,16 +269,16 @@
     {
       "label": "Format all",
       "command": "python3",
-      "args": [ "${workspaceFolder}/tools/cross/format.py" ],
+      "args": ["${workspaceFolder}/tools/cross/format.py"],
       "group": "build",
       "problemMatcher": [],
       "presentation": {
         "reveal": "never",
         "focus": false,
-        "panel": "shared",
+        "panel": "shared"
       },
       "runOptions": {
-        "reevaluateOnRerun": true,
+        "reevaluateOnRerun": true
       }
     }
   ]

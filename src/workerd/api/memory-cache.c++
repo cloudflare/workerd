@@ -54,7 +54,7 @@ SharedMemoryCache::~SharedMemoryCache() noexcept(false) {
 
 void SharedMemoryCache::suggest(const Limits& limits) const {
   auto data = this->data.lockExclusive();
-  bool isKnownLimit = data->suggestedLimits.find(limits) != data->suggestedLimits.end();
+  bool isKnownLimit = data->suggestedLimits.contains(limits);
   data->suggestedLimits.insert(limits);
   if (!isKnownLimit) {
     resize(*data);
@@ -134,21 +134,35 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     kj::Own<CacheValue>&& value,
     kj::Maybe<double> expiration) const {
   size_t valueSize = value->bytes.size();
+
+  auto writeSpan = IoContext::current().makeTraceSpan("memory_cache_write"_kjc);
+  writeSpan.setTag("key"_kjc, kj::str(key));
+  writeSpan.setTag("value_size"_kjc, static_cast<double>(valueSize));
+  writeSpan.setTag("has_expiration"_kjc, expiration != kj::none);
+
   if (valueSize > data.effectiveLimits.maxValueSize) {
     // Silently drop the value. For consistency, also drop the previous value,
     // if one exists, such that a subsequent read() will not return an outdated
     // value. Note that removeIfExistsWhileLocked(key) will update the
     // totalValueSize if necessary, so we don't need to do that here.
+    writeSpan.setTag("write_rejected"_kjc, true);
+    writeSpan.setTag("rejection_reason"_kjc, kj::str("value_too_large"));
+    writeSpan.setTag("max_value_size"_kjc, static_cast<double>(data.effectiveLimits.maxValueSize));
     removeIfExistsWhileLocked(data, key);
     return;
   }
 
   if (hasExpired(expiration)) {
+    writeSpan.setTag("write_rejected"_kjc, true);
+    writeSpan.setTag("rejection_reason"_kjc, kj::str("already_expired"));
     removeIfExistsWhileLocked(data, key);
     return;
   }
 
   kj::Maybe<MemoryCacheEntry&> existingEntry = data.cache.find(key.asPtr());
+  bool isUpdate = existingEntry != kj::none;
+  size_t evictionCount = 0;
+
   KJ_IF_SOME(entry, existingEntry) {
     size_t oldValueSize = entry.size();
     KJ_ASSERT(data.totalValueSize >= oldValueSize);
@@ -158,6 +172,7 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
       // We have already released the existing entry for our key, so there is no
       // risk of evicting it.
       evictNextWhileLocked(data);
+      evictionCount++;
     }
     updatedEntry.liveliness = data.stepLiveliness();
     updatedEntry.value = kj::mv(value);
@@ -168,10 +183,12 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     // Ensure that adding a new key won't push us over the limit.
     if (data.cache.size() >= data.effectiveLimits.maxKeys) {
       evictNextWhileLocked(data);
+      evictionCount++;
     }
     // Ensure that the size of the new value won't push us over the limit.
     while (data.totalValueSize + valueSize > data.effectiveLimits.maxTotalValueSize) {
       evictNextWhileLocked(data);
+      evictionCount++;
     }
     MemoryCacheEntry newEntry = {
       kj::str(key),
@@ -182,6 +199,12 @@ void SharedMemoryCache::putWhileLocked(ThreadUnsafeData& data,
     data.cache.insert(kj::mv(newEntry));
     data.totalValueSize += valueSize;
   }
+
+  writeSpan.setTag("write_success"_kjc, true);
+  writeSpan.setTag("is_update"_kjc, isUpdate);
+  writeSpan.setTag("evictions_triggered"_kjc, static_cast<double>(evictionCount));
+  writeSpan.setTag("cache_total_size_after"_kjc, static_cast<double>(data.totalValueSize));
+  writeSpan.setTag("cache_entry_count_after"_kjc, static_cast<double>(data.cache.size()));
 }
 
 void SharedMemoryCache::evictNextWhileLocked(
@@ -189,10 +212,18 @@ void SharedMemoryCache::evictNextWhileLocked(
   // The caller is responsible for ensuring that the cache is not empty already.
   KJ_REQUIRE(data.cache.size() > 0);
 
+  // Create eviction span - only called from IO context
+  auto evictionSpan = IoContext::current().makeTraceSpan("memory_cache_eviction"_kjc);
+
   // If there is an entry that has expired already, evict that one.
   MemoryCacheEntry& maybeExpired = *data.cache.ordered<3>().begin();
   KJ_ASSERT(data.totalValueSize >= maybeExpired.size());
   if (hasExpired(maybeExpired.expiration, allowOutsideIoContext)) {
+    evictionSpan.setTag("eviction_reason"_kjc, kj::str("expiration"));
+    evictionSpan.setTag("evicted_key"_kjc, kj::str(maybeExpired.key));
+    evictionSpan.setTag("evicted_size"_kjc, static_cast<double>(maybeExpired.size()));
+    evictionSpan.setTag("cache_size_before"_kjc, static_cast<double>(data.totalValueSize));
+    evictionSpan.setTag("cache_entries_before"_kjc, static_cast<double>(data.cache.size()));
     data.totalValueSize -= maybeExpired.size();
     data.cache.erase(maybeExpired);
     return;
@@ -200,6 +231,11 @@ void SharedMemoryCache::evictNextWhileLocked(
 
   // Otherwise, if no entry has expired, evict the least recently used entry.
   MemoryCacheEntry& leastRecentlyUsed = *data.cache.ordered<1>().begin();
+  evictionSpan.setTag("eviction_reason"_kjc, kj::str("lru"));
+  evictionSpan.setTag("evicted_key"_kjc, kj::str(leastRecentlyUsed.key));
+  evictionSpan.setTag("evicted_size"_kjc, static_cast<double>(leastRecentlyUsed.size()));
+  evictionSpan.setTag("cache_size_before"_kjc, static_cast<double>(data.totalValueSize));
+  evictionSpan.setTag("cache_entries_before"_kjc, static_cast<double>(data.cache.size()));
   KJ_ASSERT(data.totalValueSize >= leastRecentlyUsed.size());
   data.totalValueSize -= leastRecentlyUsed.size();
   data.cache.erase(leastRecentlyUsed);
@@ -243,35 +279,69 @@ SharedMemoryCache::Use::~Use() noexcept(false) {
 }
 
 kj::Maybe<kj::Own<CacheValue>> SharedMemoryCache::Use::getWithoutFallback(
-    const kj::String& key, SpanBuilder& span) const {
+    const kj::String& key, SpanBuilder& readSpan) const {
   kj::Locked<ThreadUnsafeData> data = [&] {
     auto memoryCacheLockRecord =
-        ScopedDurationTagger(span, memoryCachekLockWaitTimeTag, cache->timer);
+        ScopedDurationTagger(readSpan, memoryCachekLockWaitTimeTag, cache->timer);
     return cache->data.lockExclusive();
   }();
-  return cache->getWhileLocked(*data, key);
+  auto result = cache->getWhileLocked(*data, key);
+
+  // Track cache hit/miss
+  readSpan.setTag("cache_hit"_kjc, result != kj::none);
+  KJ_IF_SOME(value, result) {
+    readSpan.setTag("entry_size"_kjc, static_cast<double>(value->bytes.size()));
+  }
+  readSpan.setTag("cache_total_size"_kjc, static_cast<double>(data->totalValueSize));
+  readSpan.setTag("cache_entry_count"_kjc, static_cast<double>(data->cache.size()));
+
+  return result;
 }
 
 kj::OneOf<kj::Own<CacheValue>, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>>
-SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& span) const {
+SharedMemoryCache::Use::getWithFallback(const kj::String& key, SpanBuilder& readSpan) const {
   kj::Locked<ThreadUnsafeData> data = [&] {
     auto memoryCacheLockRecord =
-        ScopedDurationTagger(span, memoryCachekLockWaitTimeTag, cache->timer);
+        ScopedDurationTagger(readSpan, memoryCachekLockWaitTimeTag, cache->timer);
     return cache->data.lockExclusive();
   }();
   KJ_IF_SOME(existingValue, cache->getWhileLocked(*data, key)) {
+    // Cache hit
+    readSpan.setTag("cache_hit"_kjc, true);
+    readSpan.setTag("entry_size"_kjc, static_cast<double>(existingValue->bytes.size()));
+    readSpan.setTag("cache_total_size"_kjc, static_cast<double>(data->totalValueSize));
+    readSpan.setTag("cache_entry_count"_kjc, static_cast<double>(data->cache.size()));
     return kj::mv(existingValue);
   } else KJ_IF_SOME(existingInProgress, data->inProgress.find(key)) {
+    // Cache miss - but another request is already fetching this key
+    readSpan.setTag("cache_hit"_kjc, false);
+    readSpan.setTag("coalesced_request"_kjc, true);
+    readSpan.setTag("waiting_on_inflight"_kjc, true);
+    readSpan.setTag(
+        "inflight_waiters_count"_kjc, static_cast<double>(existingInProgress->waiting.size() + 1));
+
+    // Create a span to track how long we wait for the inflight request
+    auto waitSpan = readSpan.newChild("memory_cache_coalesce_wait"_kjc);
+    waitSpan.setTag("key"_kjc, kj::str(key));
+    waitSpan.setTag("waiters_ahead"_kjc, static_cast<double>(existingInProgress->waiting.size()));
+
     // We return a Promise, but we keep the fulfiller. We might fulfill it
     // from a different thread, so we need a cross-thread fulfiller here.
     auto pair = kj::newPromiseAndCrossThreadFulfiller<GetWithFallbackOutcome>();
-    existingInProgress->waiting.push_back(InProgress::Waiter{kj::mv(pair.fulfiller)});
+    existingInProgress->waiting.emplace(kj::mv(pair.fulfiller));
     // We have to register a pending event with the I/O context so that the
     // runtime does not detect a hanging promise. Another fallback is in
     // progress and once it settles, we will fulfill the promise that we return
     // here, either with the produced value or with another fallback task.
-    return pair.promise.attach(IoContext::current().registerPendingEvent());
+    return pair.promise.attach(IoContext::current().registerPendingEvent(), kj::mv(waitSpan));
   } else {
+    // Cache miss - this request will fetch from upstream
+    readSpan.setTag("cache_hit"_kjc, false);
+    readSpan.setTag("coalesced_request"_kjc, false);
+    readSpan.setTag("initiating_fallback"_kjc, true);
+    readSpan.setTag("cache_total_size"_kjc, static_cast<double>(data->totalValueSize));
+    readSpan.setTag("cache_entry_count"_kjc, static_cast<double>(data->cache.size()));
+
     auto& newEntry = data->inProgress.insert(kj::heap<InProgress>(kj::str(key)));
     auto inProgress = newEntry.get();
     return kj::Promise<GetWithFallbackOutcome>(prepareFallback(*inProgress));
@@ -298,18 +368,24 @@ SharedMemoryCache::Use::FallbackDoneCallback SharedMemoryCache::Use::prepareFall
   });
 
   return [this, &inProgress, &status = statusRef, deferredCancel = kj::mv(deferredCancel)](
-             kj::Maybe<FallbackResult> maybeResult) mutable {
+             kj::Maybe<FallbackResult> maybeResult, SpanBuilder& fallbackSpan) mutable {
     KJ_IF_SOME(result, maybeResult) {
       // The fallback succeeded. Store the value in the cache and propagate it to
       // all waiting requests, even if it has expired already.
       status.hasSettled = true;
+
       auto data = cache->data.lockExclusive();
+      size_t waiterCount = inProgress.waiting.size();
+
       cache->putWhileLocked(
           *data, kj::str(inProgress.key), kj::atomicAddRef(*result.value), result.expiration);
-      for (auto& waiter: inProgress.waiting) {
-        waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value));
-      }
+
+      inProgress.waiting.drainTo(
+          [&](auto&& waiter) { waiter.fulfiller->fulfill(kj::atomicAddRef(*result.value)); });
       data->inProgress.eraseMatch(inProgress.key);
+
+      // Track the completion of fallback and distribution to waiters
+      fallbackSpan.setTag("waiters_notified"_kjc, static_cast<double>(waiterCount));
     } else {
       // The fallback failed for some reason. We do not care much about why it
       // failed. If there are other queued fallbacks, handelFallbackFailure will
@@ -327,12 +403,10 @@ void SharedMemoryCache::Use::handleFallbackFailure(InProgress& inProgress) const
   // queue. Otherwise, just delete the queue entirely.
   {
     auto data = cache->data.lockExclusive();
-    auto next = inProgress.waiting.begin();
-    if (next != inProgress.waiting.end()) {
-      nextFulfiller = kj::mv(next->fulfiller);
-      inProgress.waiting.erase(next);
+
+    KJ_IF_SOME(next, inProgress.waiting.pop()) {
+      nextFulfiller = kj::mv(next.fulfiller);
     } else {
-      // Queue is empty, erase it.
       data->inProgress.eraseMatch(inProgress.key);
     }
   }
@@ -395,16 +469,21 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       KJ_CASE_ONEOF(result, kj::Own<CacheValue>) {
         // Optimization: Don't even release the isolate lock if the value is already in cache.
         jsg::Deserializer deserializer(js, result->bytes.asPtr());
-        return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
+        auto value = jsg::JsRef(js, deserializer.readValue(js));
+
+        return js.resolvedPromise(kj::mv(value));
       }
       KJ_CASE_ONEOF(promise, kj::Promise<SharedMemoryCache::Use::GetWithFallbackOutcome>) {
         return IoContext::current().awaitIo(js, kj::mv(promise),
-            [fallback = kj::mv(fallback), key = kj::str(key.value), span = kj::mv(readSpan),
+            [fallback = kj::mv(fallback), key = kj::str(key.value), readSpan = kj::mv(readSpan),
                 userSpan = kj::mv(userReadSpan), self = JSG_THIS](
                 jsg::Lock& js, SharedMemoryCache::Use::GetWithFallbackOutcome cacheResult) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
           KJ_SWITCH_ONEOF(cacheResult) {
             KJ_CASE_ONEOF(serialized, kj::Own<CacheValue>) {
+              readSpan.setTag("fallback_cache_hit"_kjc, true);
+              readSpan.setTag("entry_size"_kjc, static_cast<double>(serialized->bytes.size()));
+
               jsg::Deserializer deserializer(js, serialized->bytes.asPtr());
               return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
             }
@@ -412,27 +491,51 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
               auto& context = IoContext::current();
               auto heapCallback = kj::heap(kj::mv(callback));
 
+              // Create a span for the fallback execution
+              auto fallbackSpan = readSpan.newChild("memory_cache_fallback"_kjc);
+              fallbackSpan.setTag("key"_kjc, kj::str(key));
+
+              // Wrap the spans in RefcountedWrapper so they can be shared between then/catch
+              auto fallbackSpanRc = kj::refcountedWrapper<SpanBuilder>(kj::mv(fallbackSpan));
+              auto readSpanRc = kj::refcountedWrapper<SpanBuilder>(kj::mv(readSpan));
+
               return js.evalNow([&]() { return fallback(js, kj::mv(key)); })
                   .then(js,
-                      [callback = context.addObject(*heapCallback)](jsg::Lock& js,
+                      [callback = context.addObject(*heapCallback),
+                          fallbackSpan = fallbackSpanRc->addWrappedRef(),
+                          readSpan = readSpanRc->addWrappedRef()](jsg::Lock& js,
                           CacheValueProduceResult result) mutable -> jsg::JsRef<jsg::JsValue> {
                 // NOTE: `callback` is IoPtr, not IoOwn. The catch block gets the IoOwn, which
                 //   ensures the object still exists at this point.
+                fallbackSpan->setTag("fallback_success"_kjc, true);
+
                 auto serialized = hackySerialize(js, result.value);
+                fallbackSpan->setTag(
+                    "fallback_result_size"_kjc, static_cast<double>(serialized->bytes.size()));
+
                 KJ_IF_SOME(expiration, result.expiration) {
                   JSG_REQUIRE(
                       !kj::isNaN(expiration), TypeError, "Expiration time must not be NaN.");
+                  fallbackSpan->setTag("has_expiration"_kjc, true);
+                } else {
+                  fallbackSpan->setTag("has_expiration"_kjc, false);
                 }
                 (*callback)(
-                    SharedMemoryCache::Use::FallbackResult{kj::mv(serialized), result.expiration});
+                    SharedMemoryCache::Use::FallbackResult{kj::mv(serialized), result.expiration},
+                    *fallbackSpan);
                 return kj::mv(result.value);
               })
                   .catch_(js,
                   JSG_VISITABLE_LAMBDA(
-                      (self = kj::mv(self), callback = context.addObject(kj::mv(heapCallback))),
+                      (self = kj::mv(self), callback = context.addObject(kj::mv(heapCallback)),
+                          fallbackSpan = fallbackSpanRc->addWrappedRef(),
+                          readSpan = readSpanRc->addWrappedRef()),
                       (self),
                       (jsg::Lock & js, jsg::Value&& exception) mutable->jsg::JsRef<jsg::JsValue> {
-                        (*callback)(kj::none);
+                        fallbackSpan->setTag("fallback_success"_kjc, false);
+                        fallbackSpan->setTag(
+                            "fallback_error"_kjc, kj::str(exception.getHandle(js)));
+                        (*callback)(kj::none, *fallbackSpan);
                         js.throwException(kj::mv(exception));
                       }));
             }
@@ -447,6 +550,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> MemoryCache::read(jsg::Lock& js,
       jsg::Deserializer deserializer(js, cacheValue->bytes.asPtr());
       return js.resolvedPromise(jsg::JsRef(js, deserializer.readValue(js)));
     }
+    readSpan.setTag("cache_hit"_kjc, false);
     return js.resolvedPromise(jsg::JsRef(js, js.undefined()));
   }
 }
@@ -458,7 +562,12 @@ void MemoryCache::delete_(jsg::Lock& js, jsg::NonCoercible<kj::String> key) {
     return;
   }
 
+  auto deleteSpan = IoContext::current().makeTraceSpan("memory_cache_delete"_kjc);
+  deleteSpan.setTag("key"_kjc, kj::str(key.value));
+
   cacheUse.delete_(key.value);
+
+  deleteSpan.setTag("delete_completed"_kjc, true);
 }
 
 // ======================================================================================

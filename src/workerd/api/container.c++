@@ -56,13 +56,20 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
   return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).sendIgnoringResult())
-      .then(js, [this](jsg::Lock& js) {
+      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
+      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
     running = false;
+    auto exitCode = results.getExitCode();
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
       js.throwException(kj::mv(error));
+    }
+
+    if (exitCode != 0) {
+      auto err = js.error(kj::str("Container exited with unexpected exit code: ", exitCode));
+      KJ_ASSERT_NONNULL(err.tryCast<jsg::JsObject>()).set(js, "exitCode", js.num(exitCode));
+      js.throwException(err);
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
@@ -130,7 +137,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     // We need to convert the URL from proxy format (full URL in request line) to host format
     // (path in request line, hostname in Host header).
     auto newHeaders = headers.cloneShallow();
-    newHeaders.set(kj::HttpHeaderId::HOST, parsedUrl.host);
+    newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
     // Make a TCP connection...

@@ -496,7 +496,6 @@ FOR_EACH_BUILTIN_TYPE(DECLARE_BUILTIN_TYPE)
   F(jsg::Name, JsgImplType::Type::JSG_NAME)                                                        \
   F(jsg::SelfRef, JsgImplType::Type::JSG_SELF_REF)                                                 \
   F(jsg::Unimplemented, JsgImplType::Type::JSG_UNIMPLEMENTED)                                      \
-  F(jsg::Varargs, JsgImplType::Type::JSG_VARARGS)                                                  \
   F(v8::Isolate*, JsgImplType::Type::V8_ISOLATE)                                                   \
   F(v8::FunctionCallbackInfo<v8::Value>, JsgImplType::Type::V8_FUNCTION_CALLBACK_INFO)             \
   F(v8::PropertyCallbackInfo<v8::Value>, JsgImplType::Type::V8_PROPERTY_CALLBACK_INFO)
@@ -644,11 +643,6 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    ++members;
-  }
-
   template <const char* name, typename Getter, Getter getter>
   inline void registerInspectProperty() { /* not included */ }
 
@@ -749,17 +743,6 @@ struct MembersBuilder {
     prop.setLazy(true);
     using GetterTraits = FunctionTraits<Getter>;
     BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
-  }
-
-  template <const char* name, const char* moduleName, bool readOnly>
-  inline void registerLazyJsInstanceProperty() {
-    auto prop = members[memberIndex++].initProperty();
-    prop.setName(name);
-    prop.setReadonly(readOnly);
-    prop.setLazy(true);
-    auto jsBuiltin = prop.initType().initJsBuiltin();
-    jsBuiltin.setModule(moduleName);
-    jsBuiltin.setExport(name);
   }
 
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>

@@ -2,15 +2,14 @@
 
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
-#include <workerd/util/uuid.h>
+#include <workerd/util/checked-queue.h>
 
 #include <kj/hash.h>
 #include <kj/map.h>
 #include <kj/mutex.h>
 #include <kj/table.h>
-#include <kj/timer.h>
+#include <kj/time.h>
 
-#include <list>
 #include <set>
 
 namespace workerd {
@@ -185,13 +184,13 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     // expired). If no such value exists, nothing is returned, regardless of any
     // in-progress fallbacks trying to produce such a value.
     kj::Maybe<kj::Own<CacheValue>> getWithoutFallback(
-        const kj::String& key, SpanBuilder& span) const;
+        const kj::String& key, SpanBuilder& readSpan) const;
 
     struct FallbackResult {
       kj::Own<CacheValue> value;
       kj::Maybe<double> expiration;
     };
-    using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>)>;
+    using FallbackDoneCallback = kj::Function<void(kj::Maybe<FallbackResult>, SpanBuilder&)>;
     using GetWithFallbackOutcome = kj::OneOf<kj::Own<CacheValue>, FallbackDoneCallback>;
 
     // Returns either:
@@ -200,7 +199,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     //    or to a FallbackDoneCallback. In the latter case, the caller should
     //    invoke the fallback function.
     kj::OneOf<kj::Own<CacheValue>, kj::Promise<GetWithFallbackOutcome>> getWithFallback(
-        const kj::String& key, SpanBuilder& span) const;
+        const kj::String& key, SpanBuilder& readSpan) const;
 
     void delete_(const kj::String& key) const;
 
@@ -232,7 +231,7 @@ class SharedMemoryCache: public kj::AtomicRefcounted {
     struct Waiter {
       kj::Own<kj::CrossThreadPromiseFulfiller<Use::GetWithFallbackOutcome>> fulfiller;
     };
-    std::list<Waiter> waiting;
+    workerd::util::Queue<Waiter> waiting;
 
     InProgress(kj::String&& key): key(kj::mv(key)) {}
 

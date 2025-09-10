@@ -10,21 +10,122 @@ IN_REQUEST_CONTEXT variable.
 """
 
 import sys
-from functools import wraps
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
+from functools import partial, wraps
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from importlib.abc import Loader
+    from importlib.machinery import ModuleSpec
+    from types import ModuleType
+
+    CreateImportContext = Callable[[ModuleSpec], AbstractContextManager]
+    ExecImportContext = Callable[[ModuleType], AbstractContextManager]
+    BeforeFirstRequest = Callable[[ModuleType], None]
+else:
+    from typing import Any
+
+    BeforeFirstRequest = Any
+    CreateImportContext = Any
+    ExecImportContext = Any
+    Loader = Any
+    ModuleSpec = Any
+    ModuleType = Any
+
+
+@dataclass
+class PatchInfo:
+    create: CreateImportContext = nullcontext
+    exec: ExecImportContext = nullcontext
+    before_first_request: BeforeFirstRequest | None = None
+
+
+patches: dict[str, PatchInfo] = {}
+
+
+# The public-facing interface here is:
+# * register_create_patch
+# * register_exec_patch
+# * register_before_first_request
+# * block_calls
+
+
+def register_create_patch(
+    name: str, context_manager: CreateImportContext | None = None
+) -> None:
+    """This registers a context_manager that will be used around the create_module call when the
+    package named "name" is imported.
+
+    It can either be used like register_exec_patch("cryptography.exceptions", rust_package_context)
+    or as a decorator.
+    """
+    if context_manager is None:
+        return partial(register_create_patch, name)
+    d = patches.setdefault(name, PatchInfo())
+    d.create = context_manager
+    return context_manager
+
+
+def register_exec_patch(
+    name: str, context_manager: ExecImportContext | None = None
+) -> None:
+    """This registers a context_manager that will be used around the exec_module call when the
+    package named "name" is imported.
+
+    It can either be used like register_create_patch("tiktoken._tiktoken", rust_package_context)
+    or as a decorator.
+    """
+    if context_manager is None:
+        return partial(register_exec_patch, name)
+    d = patches.setdefault(name, PatchInfo())
+    d.exec = context_manager
+    return context_manager
+
+
+# Question: How do I decide whether to use register_create_patch or register_exec_patch?
+#
+# Answer: For pure Python packages, use register_exec_patch(). For extension modules, figure it out
+# by trial and error.
+
+
+def register_before_first_request(
+    name: str, handler: BeforeFirstRequest | None = None
+) -> None:
+    """This registers a callback that will be called before the first request if the package named
+    "name" was imported. Used for reseeding rng for instance.
+    """
+    if handler is None:
+        return partial(register_before_first_request, name)
+    d = patches.setdefault(name, PatchInfo())
+    d.before_first_request = handler
+    return handler
+
+
+before_first_request_handlers: list[BeforeFirstRequest] = []
 
 
 class PatchLoader:
-    """Loader that calls the original loader in the given context manager"""
+    """Loader that calls the original exec_module in the given context manager"""
 
-    def __init__(self, orig_loader, import_context):
+    def __init__(self, orig_loader: Loader, patch_info: PatchInfo):
         self.orig_loader = orig_loader
-        self.import_context = import_context
+        self.patch_info = patch_info
 
     def __getattr__(self, name):
         return getattr(self.orig_loader, name)
 
-    def exec_module(self, module):
-        with self.import_context(module):
+    def create_module(self, spec: ModuleSpec) -> ModuleType | None:
+        with self.patch_info.create(spec):
+            return self.orig_loader.create_module(spec)
+
+    def exec_module(self, module: ModuleType) -> None:
+        if self.patch_info.before_first_request:
+            before_first_request_handlers.append(
+                partial(self.patch_info.before_first_request, module)
+            )
+        with self.patch_info.exec(module):
             self.orig_loader.exec_module(module)
 
 
@@ -32,9 +133,6 @@ class PatchFinder:
     """Finder that returns our PatchLoader if get_import_context returns an import
     context for the module. Otherwise, return None.
     """
-
-    def __init__(self, get_import_context):
-        self.get_import_context = get_import_context
 
     def invalidate_caches(self):
         pass
@@ -45,8 +143,8 @@ class PatchFinder:
         path,
         target,
     ):
-        import_context = self.get_import_context(fullname)
-        if not import_context:
+        import_context = patches.get(fullname, None)
+        if import_context is None:
             # Not ours
             return None
 
@@ -66,8 +164,8 @@ class PatchFinder:
         return spec
 
     @staticmethod
-    def install(get_import_context):
-        sys.meta_path.insert(0, PatchFinder(get_import_context))
+    def install():
+        sys.meta_path.insert(0, PatchFinder())
 
     @staticmethod
     def remove():
@@ -77,8 +175,8 @@ class PatchFinder:
         del sys.meta_path[idx]
 
 
-def install_import_patch_manager(get_import_context):
-    PatchFinder.install(get_import_context)
+def install_import_patch_manager():
+    PatchFinder.install()
 
 
 def remove_import_patch_manager():
@@ -97,7 +195,11 @@ ORIG_MODULES = {}
 
 
 def block_calls(module, *, allowlist=()):
-    # Called from the import context for modules that need to block calls.
+    """Make top level calls to methods from the module that are not in allowlist fail.
+
+    It gets removed automatically before the first request. Generally used with
+    register_before_first_request.
+    """
     sys.modules[module.__name__] = BlockedCallModule(module, allowlist)
     ORIG_MODULES[module.__name__] = module
 

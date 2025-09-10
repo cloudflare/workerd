@@ -4,6 +4,7 @@
 #include <workerd/io/trace.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker-interface.h>
+#include <workerd/util/checked-queue.h>
 
 #include <list>
 
@@ -37,9 +38,8 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
-  // TODO(streaming-tail-workers): Specify the correct type as specified in the
-  // internal capnp definition.
-  static constexpr uint16_t TYPE = 11;
+  // Specify same type as with TraceCustomEventImpl here by default.
+  static constexpr uint16_t TYPE = 2;
 
   rpc::TailStreamTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
@@ -73,7 +73,7 @@ struct TailStreamWriterState {
     kj::Maybe<rpc::TailStreamTarget::Client> capability;
     bool pumping = false;
     bool onsetSeen = false;
-    std::list<tracing::TailEvent> queue;
+    workerd::util::Queue<tracing::TailEvent> queue;
 
     Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
   };

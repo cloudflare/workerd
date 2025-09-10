@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <workerd/util/strong-bool.h>
+
+#include <v8-local-handle.h>
+
 #include <kj/common.h>
 #include <kj/exception.h>
 #include <kj/string.h>
@@ -129,6 +133,11 @@ struct CompilationObserver {
   virtual kj::Own<void> onJsonCompilationStart(v8::Isolate* isolate, size_t inputSize) const {
     return kj::Own<void>();
   }
+
+  virtual void onCompileCacheFound(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheRejected(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheGenerated(v8::Isolate* isolate) const {}
+  virtual void onCompileCacheGenerationFailed(v8::Isolate* isolate) const {}
 };
 
 struct InternalExceptionObserver {
@@ -138,17 +147,29 @@ struct InternalExceptionObserver {
     bool isInternal;
     bool isFromRemote;
     bool isDurableObjectReset;
+    using InternalErrorId = kj::FixedArray<char, 24>;
+    kj::Maybe<InternalErrorId> internalErrorId;
   };
 
-  // Called when an internal exception is created (see makeInternalError).
+  // Called when an internal exception is created (see exceptionToJs).
   // Used to collect metrics on various internal error conditions.
   virtual void reportInternalException(const kj::Exception&, Detail detail) {}
 };
+
+WD_STRONG_BOOL(IsCodeLike);
 
 struct IsolateObserver: public CompilationObserver,
                         public InternalExceptionObserver,
                         public ResolveObserver {
   virtual ~IsolateObserver() noexcept(false) {}
+
+  // Called when eval(), new Function(), or similar dynamic code generation
+  // is performed. Note that the source here may not be a string if isCodeLike
+  // is YES.
+  virtual void onDynamicEval(
+      v8::Local<v8::Context> context, v8::Local<v8::Value> source, IsCodeLike isCodeLike) {
+    // Default is to do nothing.
+  }
 };
 
 }  // namespace workerd::jsg

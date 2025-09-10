@@ -73,7 +73,7 @@ const kBufferGen = Symbol('kBufferGen');
 const kBytesRead = Symbol('kBytesRead');
 const kBytesWritten = Symbol('kBytesWritten');
 const kUpdateTimer = Symbol('kUpdateTimer');
-const normalizedArgsSymbol = Symbol('normalizedArgs');
+export const normalizedArgsSymbol = Symbol('normalizedArgs');
 export const kReinitializeHandle = Symbol('kReinitializeHandle');
 
 // Once the socket has been opened, the socket info provided by the
@@ -388,7 +388,9 @@ Socket.prototype._unrefTimer = function _unrefTimer(this: Socket): void {
   for (let s: Socket | null = this; s != null; s = s._parentWrap) {
     if (s[kTimeout] != null) {
       clearTimeout(s[kTimeout] as unknown as number);
-      s[kTimeout] = this.setTimeout(s.timeout, s._onTimeout.bind(s));
+      s[kTimeout] = this.setTimeout(s.timeout, (): void => {
+        s._onTimeout();
+      });
     }
   }
 };
@@ -416,7 +418,9 @@ Socket.prototype.setTimeout = function (
     }
   } else {
     // @ts-expect-error TS2740 Required to not overcomplicate types
-    this[kTimeout] = setTimeout(this._onTimeout.bind(this), msecs);
+    this[kTimeout] = setTimeout((): void => {
+      this._onTimeout();
+    }, msecs);
     if (callback !== undefined) {
       validateFunction(callback, 'callback');
       this.once('timeout', callback);
@@ -650,12 +654,12 @@ Socket.prototype._final = function (
   );
 };
 
-// @ts-expect-error TS2322 No easy way to enable this.
 Socket.prototype.end = function (
   this: Socket,
-  data: string | Uint8Array,
-  encoding?: NodeJS.BufferEncoding,
-  cb?: () => void
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+  data?: string | Uint8Array | NodeJS.BufferEncoding | VoidFunction,
+  encoding?: NodeJS.BufferEncoding | VoidFunction,
+  cb?: VoidFunction
 ): Socket {
   // @ts-expect-error this fails after upgrading to @types/node@22.14
   Duplex.prototype.end.call(this, data, encoding, cb);
@@ -754,7 +758,10 @@ Socket.prototype.destroySoon = function (this: Socket): void {
   if (this.writableFinished) {
     this.destroy();
   } else {
-    this.once('finish', this.destroy.bind(this));
+    this.once('finish', () => {
+      // Do not call this.destroy.bind(this) since user can override it.
+      this.destroy();
+    });
   }
 };
 
@@ -1222,7 +1229,10 @@ function initializeConnection(
 
       handle.closed.then(
         onConnectionClosed.bind(socket),
-        socket.destroy.bind(socket)
+        (error: unknown): void => {
+          // Do not call socket.destroy.bind(socket) since user can override it.
+          socket.destroy(error as Error);
+        }
       );
     } catch (err) {
       socket.destroy(err as Error);
@@ -1404,7 +1414,7 @@ export function tryReadStart(socket: Socket): void {
 function writeAfterFIN(
   this: Socket,
   chunk: Uint8Array | string,
-  encoding?: NodeJS.BufferEncoding | null,
+  encoding?: NodeJS.BufferEncoding | null | ((err?: Error) => void),
   cb?: (err?: Error) => void
 ): boolean {
   if (!this.writableEnded) {
@@ -1431,12 +1441,11 @@ function writeAfterFIN(
 
 function onReadableStreamEnd(this: Socket): void {
   if (!this.allowHalfOpen) {
-    // @ts-expect-error TS2554 Required due to @types/node
     this.write = writeAfterFIN;
   }
 }
 
-function getTimerDuration(msecs: unknown, name: string): number {
+export function getTimerDuration(msecs: unknown, name: string): number {
   validateNumber(msecs, name);
   if (msecs < 0 || !Number.isFinite(msecs)) {
     throw new ERR_OUT_OF_RANGE(name, 'a non-negative finite number', msecs);
@@ -1450,16 +1459,25 @@ function getTimerDuration(msecs: unknown, name: string): number {
   return msecs;
 }
 
-function toNumber(x: unknown): number | false {
+export function toNumber(x: unknown): number | false {
   return (x = Number(x)) >= 0 ? (x as number) : false;
 }
 
-function isPipeName(s: unknown): boolean {
+export function isPipeName(s: unknown): boolean {
   return typeof s === 'string' && toNumber(s) === false;
 }
 
-export function _normalizeArgs(args: unknown[]): unknown[] {
-  let arr: unknown[];
+export type NormalizedArgs = [
+  {
+    path?: string;
+    port?: number;
+    host?: string;
+  },
+  ((...args: unknown[]) => void) | null,
+];
+
+export function _normalizeArgs(args: unknown[]): NormalizedArgs {
+  let arr: NormalizedArgs;
 
   if (args.length === 0) {
     arr = [{}, null];
@@ -1491,7 +1509,7 @@ export function _normalizeArgs(args: unknown[]): unknown[] {
 
   const cb = args[args.length - 1];
   if (typeof cb !== 'function') arr = [options, null];
-  else arr = [options, cb];
+  else arr = [options, cb as (...args: unknown[]) => unknown];
 
   // @ts-expect-error TS2554 Required due to @types/node
   arr[normalizedArgsSymbol] = true;

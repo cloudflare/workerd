@@ -1,19 +1,14 @@
 {
+  "extends": "../../../tools/base.tsconfig.json",
   "compilerOptions": {
-    "target": "esnext",
     "lib": ["esnext", "webworker"],
-    "strict": true,
-    "moduleResolution": "node",
-    "esModuleInterop": true,
     "sourceMap": true,
     "paths": {
       "@workerd/*": ["../../bazel-bin/src/workerd/*"]
     },
-    "composite": true,
     "declaration": true,
     "skipLibCheck": true,
-    "allowJs": true
+    "types": ["@types/node"]
   },
-  "include": ["**/*.ts"],
-  "exclude": ["wpt/**"]
+  "include": ["**/*.ts"]
 }

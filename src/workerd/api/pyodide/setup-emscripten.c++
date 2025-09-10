@@ -31,24 +31,15 @@ void instantiateEmscriptenSetupModule(jsg::Lock& js, v8::Local<v8::Module>& modu
   KJ_ASSERT(module->GetStatus() == v8::Module::kEvaluated);
 }
 
-v8::Local<v8::Function> getInstantiateEmscriptenModule(
-    jsg::Lock& js, v8::Local<v8::Module>& module) {
+jsg::JsFunction getInstantiateEmscriptenModule(jsg::Lock& js, v8::Local<v8::Module>& module) {
   auto instantiateEmscriptenModule =
       js.v8Get(module->GetModuleNamespace().As<v8::Object>(), "instantiateEmscriptenModule"_kj);
   KJ_ASSERT(instantiateEmscriptenModule->IsFunction());
-  return instantiateEmscriptenModule.As<v8::Function>();
-}
-
-template <typename... Args>
-jsg::JsValue callFunction(jsg::Lock& js, v8::Local<v8::Function>& func, Args... args) {
-  v8::LocalVector<v8::Value> argv(
-      js.v8Isolate, std::initializer_list<v8::Local<v8::Value>>{args...});
-  return jsg::JsValue(
-      jsg::check(func->Call(js.v8Context(), js.v8Null(), argv.size(), argv.data())));
+  return jsg::JsFunction(instantiateEmscriptenModule.As<v8::Function>());
 }
 
 jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
-    v8::Local<v8::Function>& func,
+    const jsg::JsFunction& func,
     bool isWorkerd,
     capnp::Data::Reader pythonStdlibZipReader,
     capnp::Data::Reader pyodideAsmWasmReader) {
@@ -56,14 +47,15 @@ jsg::JsValue callInstantiateEmscriptenModule(jsg::Lock& js,
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));
 
-  auto pythonStdlibZip = v8::ArrayBuffer::New(js.v8Isolate, pythonStdlibZipReader.size(),
-      v8::BackingStoreInitializationMode::kUninitialized);
+  auto backingStore =
+      js.allocBackingStore(pythonStdlibZipReader.size(), jsg::Lock::AllocOption::UNINITIALIZED);
+  auto pythonStdlibZip = v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backingStore));
   memcpy(pythonStdlibZip->Data(), pythonStdlibZipReader.begin(), pythonStdlibZipReader.size());
   auto pyodideAsmWasm = jsg::check(v8::WasmModuleObject::Compile(js.v8Isolate,
       v8::MemorySpan<const uint8_t>(pyodideAsmWasmReader.begin(), pyodideAsmWasmReader.size())));
   return resolvePromise(js,
-      callFunction(
-          js, func, js.boolean(isWorkerd), kj::mv(pythonStdlibZip), kj::mv(pyodideAsmWasm)));
+      func.call(js, js.null(), js.boolean(isWorkerd), jsg::JsValue(pythonStdlibZip),
+          jsg::JsValue(pyodideAsmWasm)));
 }
 
 EmscriptenRuntime EmscriptenRuntime::initialize(
@@ -81,14 +73,11 @@ EmscriptenRuntime EmscriptenRuntime::initialize(
       pyodideAsmWasmReader = module.getData();
     }
   }
-  auto context = js.v8Context();
-  Worker::setupContext(js, context, Worker::ConsoleMode::INSPECTOR_ONLY);
   auto module = loadEmscriptenSetupModule(js, KJ_ASSERT_NONNULL(emsciptenSetupJsReader));
   instantiateEmscriptenSetupModule(js, module);
   auto instantiateEmscriptenModule = getInstantiateEmscriptenModule(js, module);
   auto emscriptenModule = callInstantiateEmscriptenModule(js, instantiateEmscriptenModule,
       isWorkerd, KJ_ASSERT_NONNULL(pythonStdlibZipReader), KJ_ASSERT_NONNULL(pyodideAsmWasmReader));
-  auto contextToken = jsg::JsValue(context->GetSecurityToken());
-  return EmscriptenRuntime{contextToken.addRef(js), emscriptenModule.addRef(js)};
+  return EmscriptenRuntime{emscriptenModule.addRef(js)};
 }
 }  // namespace workerd::api::pyodide

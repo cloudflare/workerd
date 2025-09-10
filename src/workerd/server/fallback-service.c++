@@ -5,6 +5,7 @@
 #include <kj/async-io.h>
 #include <kj/compat/http.h>
 #include <kj/compat/url.h>
+#include <kj/debug.h>
 #include <kj/one-of.h>
 #include <kj/string.h>
 #include <kj/thread.h>
@@ -128,8 +129,8 @@ ModuleOrRedirect tryResolveV1(ImportType type,
         auto client = kj::newHttpClient(io.provider->getTimer(), *headerTable, *addr, {});
 
         kj::HttpHeaders headers(*headerTable);
-        headers.set(kMethod, getMethodFromType(type));
-        headers.set(kj::HttpHeaderId::HOST, "localhost"_kj);
+        headers.setPtr(kMethod, getMethodFromType(type));
+        headers.setPtr(kj::HttpHeaderId::HOST, "localhost"_kj);
 
         auto request = client->request(kj::HttpMethod::GET, spec, headers, kj::none);
 
@@ -207,7 +208,7 @@ ModuleOrRedirect tryResolveV2(ImportType type,
         auto client = kj::newHttpClient(io.provider->getTimer(), *headerTable, *addr, {});
 
         kj::HttpHeaders headers(*headerTable);
-        headers.set(kj::HttpHeaderId::HOST, "localhost");
+        headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
 
         auto request = client->request(kj::HttpMethod::POST, "/", headers, payload.size());
         {

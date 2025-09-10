@@ -43,14 +43,14 @@ KJ_TEST("getPythonSnapshotRelease") {
   featureFlags.setPythonWorkers20250116(true);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.27.7");
+    KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
   }
 
   featureFlags.setPythonWorkersDevPyodide(false);
   {
     auto res = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
-    KJ_ASSERT(res.getPyodide() == "0.27.7");
+    KJ_ASSERT(res.getPyodide() == "0.28.2");
     KJ_ASSERT(res.getFlagName() == "pythonWorkers20250116");
   }
 }
@@ -242,7 +242,6 @@ w["h
   KJ_REQUIRE(result.size() == 0);
 }
 
-using pyodide::ArtifactBundler;
 using pyodide::PythonModuleInfo;
 
 template <typename... Params>
@@ -360,8 +359,8 @@ KJ_TEST("Filters out so") {
 }
 
 KJ_TEST("Filters out vendor stuff") {
-  auto workerModules =
-      strArray("vendor/a.py", "vendor/package/b.py", "vendor/c.so", "vendor/x.txt");
+  auto workerModules = strArray("python_modules/a.py", "python_modules/package/b.py",
+      "python_modules/c.so", "python_modules/x.txt");
   auto imports = strArray("a", "package", "x");
   auto result = filterPythonScriptImports(kj::mv(workerModules), kj::mv(imports), "");
   KJ_REQUIRE(result.size() == 1);

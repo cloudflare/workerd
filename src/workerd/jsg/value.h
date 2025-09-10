@@ -513,32 +513,6 @@ class StringWrapper {
     return wrap(js, context, creator, value.asPtr());
   }
 
-  template <StringLike T>
-  kj::Maybe<T> tryUnwrap(
-      Lock& js, v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
-    size_t utf8_length = simdutf::utf8_length_from_latin1(handle.data, handle.length);
-    kj::Array<char> buf = kj::heapArray<char>(utf8_length + 1);
-    buf[utf8_length] = '\0';
-    if (utf8_length == handle.length) {
-      buf.first(handle.length).copyFrom(kj::arrayPtr(handle.data, handle.length));
-    } else {
-      size_t actual_length =
-          simdutf::convert_latin1_to_utf8_safe(handle.data, handle.length, buf.begin(), buf.size());
-      KJ_ASSERT(actual_length == utf8_length);
-    }
-    if constexpr (kj::isSameType<kj::String, T>()) {
-      return js.accountedKjString(kj::mv(buf));
-    } else if constexpr (kj::isSameType<ByteString, T>()) {
-      return js.accountedByteString(kj::mv(buf));
-    } else if constexpr (kj::isSameType<USVString, T>()) {
-      return js.accountedUSVString(kj::mv(buf));
-    } else if constexpr (kj::isSameType<DOMString, T>()) {
-      return js.accountedDOMString(kj::mv(buf));
-    } else {
-      return kj::mv(buf);
-    }
-  }
-
   kj::Maybe<kj::String> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
@@ -1106,14 +1080,15 @@ class ArrayBufferWrapper {
           begin, size, [](void* begin, size_t size, void* ownerPtr) {
         delete reinterpret_cast<kj::Array<byte>*>(ownerPtr);
       }, ownerPtr);
+      KJ_REQUIRE(backing != nullptr, "Failed to create ArrayBuffer backing store");
 
       return v8::ArrayBuffer::New(isolate, kj::mv(backing));
     } else {
       // The Array is not already inside the sandbox.  We have to make a copy and move it in.
       // For performance reasons we might want to throw here and fix all callers to allocate
       // inside the sandbox.
-      std::unique_ptr<v8::BackingStore> in_sandbox = v8::ArrayBuffer::NewBackingStore(
-          isolate, size, v8::BackingStoreInitializationMode::kUninitialized);
+      auto& js = Lock::from(isolate);
+      auto in_sandbox = js.allocBackingStore(size, Lock::AllocOption::UNINITIALIZED);
 
       memcpy(in_sandbox->Data(), value.begin(), size);
 
@@ -1483,7 +1458,7 @@ class ExceptionWrapper {
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       kj::Exception exception) {
-    return makeInternalError(js.v8Isolate, kj::mv(exception));
+    return js.exceptionToJsValue(kj::mv(exception)).getHandle(js);
   }
 
   kj::Maybe<kj::Exception> tryUnwrap(Lock& js,
@@ -1527,18 +1502,10 @@ class ExceptionWrapper {
       } else {
 
         static const constexpr kj::StringPtr PREFIXES[] = {
-          // JavaScript intrinsic Error Types
-          "Error"_kj,
-          "RangeError"_kj,
-          "TypeError"_kj,
-          "SyntaxError"_kj,
-          "ReferenceError"_kj,
-          // WASM Error Types
-          "CompileError"_kj,
-          "LinkError"_kj,
-          "RuntimeError"_kj,
-          // JSG_RESOURCE_TYPE Error Types
-          "DOMException"_kj,
+#define V(name, _) name##_kj,
+          JS_ERROR_TYPES(V)
+#undef V
+              "DOMException"_kj,
         };
 
         kj::String reason;

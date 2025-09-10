@@ -23,7 +23,12 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { FilterList, UnknownFunc, TestFn, PromiseTestFn } from './common';
+import {
+  FilterList,
+  type UnknownFunc,
+  type TestFn,
+  type PromiseTestFn,
+} from './common';
 
 declare global {
   function promise_test(
@@ -271,7 +276,7 @@ globalThis.promise_test = (func, name, properties): void => {
 };
 
 class AsyncTest extends Test {
-  private resolve: () => void;
+  #resolve: () => void;
 
   constructor(name: string, properties: unknown) {
     super(name, properties);
@@ -279,12 +284,12 @@ class AsyncTest extends Test {
     // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is being used as a valid generic in this context
     const { promise, resolve } = Promise.withResolvers<void>();
     this.promise = promise;
-    this.resolve = resolve;
+    this.#resolve = resolve;
   }
 
   override done(): void {
     super.done();
-    this.resolve();
+    this.#resolve();
   }
 }
 

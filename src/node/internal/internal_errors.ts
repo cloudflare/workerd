@@ -862,8 +862,78 @@ export class ERR_EEXIST extends NodeSyscallError {
   }
 }
 
+export class ERR_EPERM extends NodeSyscallError {
+  constructor(options: { syscall: string; errno?: number }) {
+    super('EPERM', 'Operation not permitted', options.syscall);
+    this.errno = options.errno ?? 1; // EPERM
+  }
+}
+
 export class ERR_DIR_CLOSED extends NodeError {
   constructor() {
     super('ERR_DIR_CLOSED', 'Directory is closed');
+  }
+}
+
+export class ERR_HTTP_HEADERS_SENT extends NodeError {
+  constructor(action: string) {
+    super(
+      'ERR_HTTP_HEADERS_SENT',
+      `Cannot ${action} headers after they are sent to the client`
+    );
+  }
+}
+
+export class ERR_HTTP_CONTENT_LENGTH_MISMATCH extends NodeError {
+  constructor(actual: number, expected: number) {
+    super(
+      'ERR_HTTP_CONTENT_LENGTH_MISMATCH',
+      `Request body length does not match content-length header. Expected: ${expected}, Actual: ${actual}`
+    );
+  }
+}
+
+export class ERR_HTTP_BODY_NOT_ALLOWED extends NodeError {
+  constructor() {
+    super(
+      'ERR_HTTP_BODY_NOT_ALLOWED',
+      'Request with GET/HEAD method cannot have body'
+    );
+  }
+}
+
+export class ERR_INVALID_PROTOCOL extends NodeTypeError {
+  constructor(actual: string, expected: string) {
+    super(
+      'ERR_INVALID_PROTOCOL',
+      `Protocol "${actual}" not supported. Expected "${expected}"`
+    );
+  }
+}
+
+export class ERR_UNESCAPED_CHARACTERS extends NodeTypeError {
+  constructor(field: string) {
+    super('ERR_UNESCAPED_CHARACTERS', `${field} contains unescaped characters`);
+  }
+}
+
+export class ERR_SYSTEM_ERROR extends NodeError {
+  constructor(message: string) {
+    super('ERR_SYSTEM_ERROR', message);
+  }
+}
+
+export class ERR_HTTP_INVALID_STATUS_CODE extends NodeRangeError {
+  constructor(statusCode: string | number) {
+    super('ERR_HTTP_INVALID_STATUS_CODE', `Invalid status code: ${statusCode}`);
+  }
+}
+
+export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
+  constructor() {
+    super(
+      'ERR_SERVER_ALREADY_LISTEN',
+      'Listen method has been called more than once without closing.'
+    );
   }
 }

@@ -257,11 +257,12 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
   FileSystemHandle: typeof FileSystemHandle;
   FileSystemFileHandle: typeof FileSystemFileHandle;
   FileSystemDirectoryHandle: typeof FileSystemDirectoryHandle;
   FileSystemWritableFileStream: typeof FileSystemWritableFileStream;
-  FileSystemSyncAccessHandle: typeof FileSystemSyncAccessHandle;
   StorageManager: typeof StorageManager;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
@@ -416,7 +417,7 @@ type ExportedHandlerTraceHandler<Env = unknown> = (
   ctx: ExecutionContext,
 ) => void | Promise<void>;
 type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent,
+  event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -496,6 +497,9 @@ interface AlarmInvocationInfo {
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
 }
+declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
+}
 interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
   alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
@@ -524,8 +528,9 @@ interface DurableObjectId {
   toString(): string;
   equals(other: DurableObjectId): boolean;
   readonly name?: string;
+  readonly jurisdiction?: string;
 }
-interface DurableObjectNamespace<
+declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -535,6 +540,10 @@ interface DurableObjectNamespace<
   idFromString(id: string): DurableObjectId;
   get(
     id: DurableObjectId,
+    options?: DurableObjectNamespaceGetDurableObjectOptions,
+  ): DurableObjectStub<T>;
+  getByName(
+    name: string,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
   getExisting(
@@ -562,10 +571,11 @@ type DurableObjectLocationHint =
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-interface DurableObjectClass {}
+declare abstract class DurableObjectClass {}
 interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
   exports: any;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -647,6 +657,7 @@ interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -688,12 +699,20 @@ declare class WebSocketRequestResponsePair {
   get response(): string;
 }
 interface DurableObjectFacets {
-  get(name: string, options: DurableObjectFacetsGetOptions): Fetcher;
+  get(
+    name: string,
+    getStartupOptions: () =>
+      | DurableObjectFacetsStartupOptions
+      | Promise<DurableObjectFacetsStartupOptions>,
+  ): Fetcher;
   abort(name: string, reason: any): void;
   delete(name: string): void;
 }
-interface DurableObjectFacetsGetOptions {
-  $class: DurableObjectClass;
+interface DurableObjectFacetsStartupOptions {
+  $class:
+    | DurableObjectClass
+    | LoopbackDurableObjectNamespace
+    | LoopbackColoLocalActorNamespace;
   id?: DurableObjectId | string;
 }
 interface AnalyticsEngineDataset {
@@ -758,7 +777,7 @@ declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
    */
-  get currentTarget(): EventTarget | undefined;
+  get currentTarget(): EventTarget | null;
   /**
    * Returns the object to which event is dispatched (its target).
    *
@@ -782,7 +801,7 @@ declare class Event {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/isTrusted)
    */
-  get isTrusted(): boolean;
+  readonly isTrusted: boolean;
   /**
    * @deprecated
    *
@@ -1398,6 +1417,47 @@ interface ErrorEventErrorEventInit {
   error?: any;
 }
 /**
+ * A message received by a target object.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
+ */
+declare class MessageEvent extends Event {
+  constructor(type: string, initializer: MessageEventInit);
+  /**
+   * Returns the data of the message.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
+   */
+  readonly data: any;
+  /**
+   * Returns the origin of the message, for server-sent events and cross-document messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
+   */
+  readonly origin: string | null;
+  /**
+   * Returns the last event ID string, for server-sent events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
+   */
+  readonly lastEventId: string;
+  /**
+   * Returns the WindowProxy of the source window, for cross-document messaging, and the MessagePort being attached, in the connect event fired at SharedWorkerGlobalScope objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
+   */
+  readonly source: MessagePort | null;
+  /**
+   * Returns the MessagePort array sent with the message, for cross-document messaging and channel messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
+   */
+  readonly ports: MessagePort[];
+}
+interface MessageEventInit {
+  data: ArrayBuffer | string;
+}
+/**
  * Provides a way to easily construct a set of key/value pairs representing form fields and their values, which can then be easily sent using the XMLHttpRequest.send() method. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
@@ -1756,8 +1816,19 @@ interface RequestInit<Cf = CfProperties> {
   signal?: AbortSignal | null;
   encodeResponseBody?: "automatic" | "manual";
 }
-type Service<T extends Rpc.WorkerEntrypointBranded | undefined = undefined> =
-  Fetcher<T>;
+type Service<
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? Fetcher<InstanceType<T>>
+  : T extends Rpc.WorkerEntrypointBranded
+    ? Fetcher<T>
+    : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+      ? never
+      : Fetcher<undefined>;
 type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
@@ -2597,6 +2668,7 @@ interface TraceItem {
   readonly scriptVersion?: ScriptVersion;
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
+  readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
@@ -2904,23 +2976,6 @@ interface CloseEventInit {
   reason?: string;
   wasClean?: boolean;
 }
-/**
- * A message received by a target object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
- */
-declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
-  /**
-   * Returns the data of the message.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
-   */
-  readonly data: ArrayBuffer | string;
-}
-interface MessageEventInit {
-  data: ArrayBuffer | string;
-}
 type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -3136,6 +3191,8 @@ declare abstract class FileSystemHandle {
   get name(): string;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemHandle/isSameEntry) */
   isSameEntry(other: FileSystemHandle): Promise<boolean>;
+  getUniqueId(): Promise<string>;
+  remove(options?: FileSystemHandleRemoveOptions): Promise<void>;
 }
 /**
  * Available only in secure contexts.
@@ -3149,8 +3206,6 @@ declare abstract class FileSystemFileHandle extends FileSystemHandle {
   createWritable(
     options?: FileSystemFileHandleFileSystemCreateWritableOptions,
   ): Promise<FileSystemWritableFileStream>;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemFileHandle/createSyncAccessHandle) */
-  createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>;
 }
 /**
  * Available only in secure contexts.
@@ -3175,7 +3230,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemDirectoryHandle/resolve) */
   resolve(possibleDescendant: FileSystemHandle): Promise<string[]>;
-  entries(): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
   keys(): AsyncIterableIterator<string>;
   values(): AsyncIterableIterator<FileSystemHandle>;
   forEach(
@@ -3186,7 +3241,7 @@ declare abstract class FileSystemDirectoryHandle extends FileSystemHandle {
     ) => void,
     thisArg?: any,
   ): void;
-  [Symbol.asyncIterator](): AsyncIterableIterator<FileSystemDirectoryHandleEntryType>;
+  [Symbol.asyncIterator](): AsyncIterableIterator<[string, FileSystemHandle]>;
 }
 /**
  * Available only in secure contexts.
@@ -3200,37 +3255,12 @@ declare abstract class FileSystemWritableFileStream extends WritableStream {
       | Blob
       | (ArrayBuffer | ArrayBufferView)
       | string
-      | FileSystemWritableFileStreamWriteParams,
+      | FileSystemFileWriteParams,
   ): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/seek) */
   seek(position: number): Promise<void>;
   /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemWritableFileStream/truncate) */
   truncate(size: number): Promise<void>;
-}
-/**
- * Available only in secure contexts.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle)
- */
-declare abstract class FileSystemSyncAccessHandle {
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/read) */
-  read(
-    buffer: ArrayBuffer | ArrayBufferView,
-    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
-  ): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/write) */
-  write(
-    buffer: ArrayBuffer | ArrayBufferView,
-    options?: FileSystemSyncAccessHandleFileSystemReadWriteOptions,
-  ): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/truncate) */
-  truncate(newSize: number): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/getSize) */
-  getSize(): number;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/flush) */
-  flush(): void;
-  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/FileSystemSyncAccessHandle/close) */
-  close(): void;
 }
 /**
  * Available only in secure contexts.
@@ -3253,18 +3283,85 @@ interface FileSystemDirectoryHandleFileSystemGetDirectoryOptions {
 interface FileSystemDirectoryHandleFileSystemRemoveOptions {
   recursive: boolean;
 }
-interface FileSystemSyncAccessHandleFileSystemReadWriteOptions {
-  at?: number;
-}
-interface FileSystemWritableFileStreamWriteParams {
+interface FileSystemFileWriteParams {
   type: string;
   size?: number;
   position?: number;
-  data?: Blob | (ArrayBuffer | ArrayBufferView) | string;
+  data?: (Blob | (ArrayBuffer | ArrayBufferView) | string) | null;
 }
-interface FileSystemDirectoryHandleEntryType {
-  key: string;
-  value: FileSystemHandle;
+interface FileSystemHandleRemoveOptions {
+  recursive?: boolean;
+}
+/**
+ * This Channel Messaging API interface represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+declare abstract class MessagePort extends EventTarget {
+  /**
+   * Posts a message through the channel. Objects listed in transfer are transferred, not just cloned, meaning that they are no longer usable on the sending side.
+   *
+   * Throws a "DataCloneError" DOMException if transfer contains duplicate objects or port, or if message could not be cloned.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * Disconnects the port, so that it is no longer active.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * Begins dispatching messages received on the port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * This Channel Messaging API interface allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+declare class MessageChannel {
+  constructor();
+  /**
+   * Returns the first MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * Returns the second MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+interface MessagePortPostMessageOptions {
+  transfer?: any[];
+}
+interface LoopbackDurableObjectNamespace extends DurableObjectNamespace {}
+interface LoopbackColoLocalActorNamespace extends ColoLocalActorNamespace {}
+interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
+  put<T>(key: string, value: T): void;
+  delete(key: string): boolean;
+}
+interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
 }
 type AiImageClassificationInput = {
   image: number[];
@@ -6129,7 +6226,7 @@ type AiModelListType = Record<string, any>;
 declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
     Options extends AiOptions,
@@ -6186,6 +6283,12 @@ type GatewayOptions = {
   eventId?: string;
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
+};
+type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
 };
 type AiGatewayPatchLog = {
   score?: number | null;
@@ -6280,7 +6383,7 @@ declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
     options?: {
-      gateway?: GatewayOptions;
+      gateway?: UniversalGatewayOptions;
       extraHeaders?: object;
     },
   ): Promise<Response>;
@@ -6311,6 +6414,7 @@ type AutoRagSearchRequest = {
 };
 type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
+  system_prompt?: string;
 };
 type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
@@ -6392,6 +6496,12 @@ interface BasicImageTransformations {
    */
   fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
   /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
    * "left", "right", "top", "bottom", "auto", or "center" (the default),
@@ -6404,6 +6514,7 @@ interface BasicImageTransformations {
    * source image.
    */
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -6717,13 +6828,13 @@ interface IncomingRequestCfPropertiesBase extends Record<string, unknown> {
    *
    * @example 395747
    */
-  asn: number;
+  asn?: number;
   /**
    * The organization which owns the ASN of the incoming request.
    *
    * @example "Google Cloud"
    */
-  asOrganization: string;
+  asOrganization?: string;
   /**
    * The original value of the `Accept-Encoding` header if Cloudflare modified it.
    *
@@ -6848,7 +6959,7 @@ interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<HostMetadata> {
    * This field is only present if you have Cloudflare for SaaS enabled on your account
    * and you have followed the [required steps to enable it]((https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/custom-metadata/)).
    */
-  hostMetadata: HostMetadata;
+  hostMetadata?: HostMetadata;
 }
 interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
@@ -7394,6 +7505,11 @@ interface D1Meta {
      */
     sql_duration_ms: number;
   };
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
 }
 interface D1Response {
   success: true;
@@ -7533,6 +7649,22 @@ declare module "cloudflare:email" {
   };
   export { _EmailMessage as EmailMessage };
 }
+/**
+ * Hello World binding to serve as an explanatory example. DO NOT USE
+ */
+interface HelloWorldBinding {
+  /**
+   * Retrieve the current stored value
+   */
+  get(): Promise<{
+    value: string;
+    ms?: number;
+  }>;
+  /**
+   * Set a new stored value
+   */
+  set(value: string): Promise<void>;
+}
 interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
@@ -7614,7 +7746,9 @@ type ImageTransform = {
   fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
   flip?: "h" | "v" | "hv";
   gamma?: number;
+  segment?: "foreground";
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -7656,6 +7790,9 @@ type ImageDrawOptions = {
   bottom?: number;
   right?: number;
 };
+type ImageInputOptions = {
+  encoding?: "base64";
+};
 type ImageOutputOptions = {
   format:
     | "image/jpeg"
@@ -7667,6 +7804,7 @@ type ImageOutputOptions = {
     | "rgba";
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 interface ImagesBinding {
   /**
@@ -7674,13 +7812,19 @@ interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
    * @returns A transform handle
    */
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): ImageTransformer;
 }
 interface ImageTransformer {
   /**
@@ -7706,6 +7850,9 @@ interface ImageTransformer {
    */
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
+type ImageTransformationOutputOptions = {
+  encoding?: "base64";
+};
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
@@ -7718,9 +7865,113 @@ interface ImageTransformationResult {
   /**
    * The bytes of the response
    */
-  image(): ReadableStream<Uint8Array>;
+  image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 interface ImagesError extends Error {
+  readonly code: number;
+  readonly message: string;
+  readonly stack?: string;
+}
+/**
+ * Media binding for transforming media streams.
+ * Provides the entry point for media transformation operations.
+ */
+interface MediaBinding {
+  /**
+   * Creates a media transformer from an input stream.
+   * @param media - The input media bytes
+   * @returns A MediaTransformer instance for applying transformations
+   */
+  input(media: ReadableStream<Uint8Array>): MediaTransformer;
+}
+/**
+ * Media transformer for applying transformation operations to media content.
+ * Handles sizing, fitting, and other input transformation parameters.
+ */
+interface MediaTransformer {
+  /**
+   * Applies transformation options to the media content.
+   * @param transform - Configuration for how the media should be transformed
+   * @returns A generator for producing the transformed media output
+   */
+  transform(
+    transform: MediaTransformationInputOptions,
+  ): MediaTransformationGenerator;
+}
+/**
+ * Generator for producing media transformation results.
+ * Configures the output format and parameters for the transformed media.
+ */
+interface MediaTransformationGenerator {
+  /**
+   * Generates the final media output with specified options.
+   * @param output - Configuration for the output format and parameters
+   * @returns The final transformation result containing the transformed media
+   */
+  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
+}
+/**
+ * Result of a media transformation operation.
+ * Provides multiple ways to access the transformed media content.
+ */
+interface MediaTransformationResult {
+  /**
+   * Returns the transformed media as a readable stream of bytes.
+   * @returns A stream containing the transformed media data
+   */
+  media(): ReadableStream<Uint8Array>;
+  /**
+   * Returns the transformed media as an HTTP response object.
+   * @returns The transformed media as a Response, ready to store in cache or return to users
+   */
+  response(): Response;
+  /**
+   * Returns the MIME type of the transformed media.
+   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
+   */
+  contentType(): string;
+}
+/**
+ * Configuration options for transforming media input.
+ * Controls how the media should be resized and fitted.
+ */
+type MediaTransformationInputOptions = {
+  /** How the media should be resized to fit the specified dimensions */
+  fit?: "contain" | "cover" | "scale-down";
+  /** Target width in pixels */
+  width?: number;
+  /** Target height in pixels */
+  height?: number;
+};
+/**
+ * Configuration options for Media Transformations output.
+ * Controls the format, timing, and type of the generated output.
+ */
+type MediaTransformationOutputOptions = {
+  /**
+   * Output mode determining the type of media to generate
+   */
+  mode?: "video" | "spritesheet" | "frame" | "audio";
+  /** Whether to include audio in the output */
+  audio?: boolean;
+  /**
+   * Starting timestamp for frame extraction or start time for clips. (e.g. '2s').
+   */
+  time?: string;
+  /**
+   * Duration for video clips, audio extraction, and spritesheet generation (e.g. '5s').
+   */
+  duration?: string;
+  /**
+   * Output format for the generated media.
+   */
+  format?: "jpg" | "png" | "m4a";
+};
+/**
+ * Error object for media transformation operations.
+ * Extends the standard Error interface with additional media-specific information.
+ */
+interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
@@ -8024,6 +8275,22 @@ declare namespace Rpc {
 declare namespace Cloudflare {
   interface Env {}
 }
+declare module "cloudflare:node" {
+  export interface DefaultHandler {
+    fetch?(request: Request): Response | Promise<Response>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    test?(controller: TestController): void | Promise<void>;
+  }
+  export function httpServerHandler(
+    options: {
+      port: number;
+    },
+    handlers?: Omit<DefaultHandler, "fetch">,
+  ): DefaultHandler;
+}
 declare module "cloudflare:workers" {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
   export const RpcStub: {
@@ -8135,6 +8402,7 @@ declare module "cloudflare:workers" {
       step: WorkflowStep,
     ): Promise<unknown>;
   }
+  export function waitUntil(promise: Promise<unknown>): void;
   export const env: Cloudflare.Env;
 }
 interface SecretsStoreSecret {
@@ -8160,7 +8428,7 @@ declare namespace TailStream {
     readonly type: "fetch";
     readonly method: string;
     readonly url: string;
-    readonly cfJson: string;
+    readonly cfJson?: object;
     readonly headers: Header[];
   }
   interface JsRpcEventInfo {
@@ -8209,10 +8477,6 @@ declare namespace TailStream {
       | HibernatableWebSocketEventInfoError
       | HibernatableWebSocketEventInfoMessage;
   }
-  interface Resume {
-    readonly type: "resume";
-    readonly attachment?: any;
-  }
   interface CustomEventInfo {
     readonly type: "custom";
   }
@@ -8237,20 +8501,17 @@ declare namespace TailStream {
     readonly tag?: string;
     readonly message?: string;
   }
-  interface Trigger {
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
-  }
   interface Onset {
     readonly type: "onset";
+    readonly attributes: Attribute[];
+    // id for the span being opened by this Onset event.
+    readonly spanId: string;
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
-    readonly trigger?: Trigger;
     readonly info:
       | FetchEventInfo
       | JsRpcEventInfo
@@ -8260,7 +8521,6 @@ declare namespace TailStream {
       | EmailEventInfo
       | TraceEventInfo
       | HibernatableWebSocketEventInfo
-      | Resume
       | CustomEventInfo;
   }
   interface Outcome {
@@ -8269,12 +8529,11 @@ declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
-  interface Hibernate {
-    readonly type: "hibernate";
-  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
+    // id for the span being opened by this SpanOpen event.
+    readonly spanId: string;
     readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
@@ -8295,18 +8554,15 @@ declare namespace TailStream {
   interface Log {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
-    readonly message: string;
+    readonly message: object;
   }
+  // This marks the worker handler return information.
+  // This is separate from Outcome because the worker invocation can live for a long time after
+  // returning. For example - Websockets that return an http upgrade response but then continue
+  // streaming information or SSE http connections.
   interface Return {
     readonly type: "return";
     readonly info?: FetchResponseInfo;
-  }
-  interface Link {
-    readonly type: "link";
-    readonly label?: string;
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
   }
   interface Attribute {
     readonly name: string;
@@ -8324,38 +8580,55 @@ declare namespace TailStream {
     readonly type: "attributes";
     readonly info: Attribute[];
   }
-  interface TailEvent {
+  type EventType =
+    | Onset
+    | Outcome
+    | SpanOpen
+    | SpanClose
+    | DiagnosticChannelEvent
+    | Exception
+    | Log
+    | Return
+    | Attributes;
+  // Context in which this trace event lives.
+  interface SpanContext {
+    // Single id for the entire top-level invocation
+    // This should be a new traceId for the first worker stage invoked in the eyeball request and then
+    // same-account service-bindings should reuse the same traceId but cross-account service-bindings
+    // should use a new traceId.
     readonly traceId: string;
+    // spanId in which this event is handled
+    // for Onset and SpanOpen events this would be the parent span id
+    // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+    // For Hibernate and Mark this would be the span under which they were emitted.
+    // spanId is not set ONLY if:
+    //  1. This is an Onset event
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    readonly spanId?: string;
+  }
+  interface TailEvent<Event extends EventType> {
+    // invocation id of the currently invoked worker stage.
+    // invocation id will always be unique to every Onset event and will be the same until the Outcome event.
     readonly invocationId: string;
-    readonly spanId: string;
+    // Inherited spanContext for this event.
+    readonly spanContext: SpanContext;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event:
-      | Onset
-      | Outcome
-      | Hibernate
-      | SpanOpen
-      | SpanClose
-      | DiagnosticChannelEvent
-      | Exception
-      | Log
-      | Return
-      | Link
-      | Attributes;
+    readonly event: Event;
   }
-  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-  type TailEventHandlerName =
-    | "outcome"
-    | "hibernate"
-    | "spanOpen"
-    | "spanClose"
-    | "diagnosticChannel"
-    | "exception"
-    | "log"
-    | "return"
-    | "link"
-    | "attributes";
-  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
+  type TailEventHandler<Event extends EventType = EventType> = (
+    event: TailEvent<Event>,
+  ) => void | Promise<void>;
+  type TailEventHandlerObject = {
+    outcome?: TailEventHandler<Outcome>;
+    spanOpen?: TailEventHandler<SpanOpen>;
+    spanClose?: TailEventHandler<SpanClose>;
+    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+    exception?: TailEventHandler<Exception>;
+    log?: TailEventHandler<Log>;
+    return?: TailEventHandler<Return>;
+    attributes?: TailEventHandler<Attributes>;
+  };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.

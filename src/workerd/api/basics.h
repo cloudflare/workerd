@@ -129,8 +129,8 @@ class Event: public jsg::Object {
 
   // The currentTarget is the EventTarget on which the Event is being
   // dispatched. This will be set every time dispatchEvent() is called
-  // successfully and will remain set after dispatching is completed.
-  jsg::Optional<jsg::Ref<EventTarget>> getCurrentTarget();
+  // successfully and will be null after dispatchEvent returns.
+  kj::Maybe<jsg::Ref<EventTarget>> getCurrentTarget();
 
   // Because we don't support hierarchical EventTargets, this function
   // will always return the same value as getCurrentTarget().
@@ -155,11 +155,23 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        // The original implementation had getTarget simply deferring to
+        // getCurrentTarget, the new impl moves the original impl into
+        // getTarget here so having currentTarget point to getTarget
+        // preserves the original behavior.
+        JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_PROTOTYPE_PROPERTY(target, getTarget);
-      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getCurrentTarget);
+      JSG_READONLY_PROTOTYPE_PROPERTY(srcElement, getTarget);
       JSG_READONLY_PROTOTYPE_PROPERTY(timeStamp, getTimestamp);
-      JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(isTrusted, getIsTrusted);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(isTrusted, getIsTrusted);
+      }
 
       JSG_PROTOTYPE_PROPERTY(cancelBubble, getCancelBubble, setCancelBubble);
     } else {
@@ -170,7 +182,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
       JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
-      JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      if (flags.getPedanticWpt()) {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getTarget);
+      }
       JSG_READONLY_INSTANCE_PROPERTY(target, getTarget);
       JSG_READONLY_INSTANCE_PROPERTY(srcElement, getCurrentTarget);
       JSG_READONLY_INSTANCE_PROPERTY(timeStamp, getTimestamp);
@@ -293,6 +309,11 @@ class EventTarget: public jsg::Object {
     warnOnSpecialEvents = true;
   }
 
+  // The EventListenerCallback, if given, is called whenever addEventListener
+  // or removeEventListener is invoked to report the number of registered
+  // handlers for the event.
+  using EventListenerCallback = jsg::Function<void(kj::StringPtr, size_t)>;
+
   // ---------------------------------------------------------------------------
   // JS API
 
@@ -324,7 +345,8 @@ class EventTarget: public jsg::Object {
 
   struct HandlerObject {
     HandlerFunction handleEvent;
-    JSG_STRUCT(handleEvent);
+    jsg::SelfRef self;
+    JSG_STRUCT(handleEvent, self);
 
     // TODO(cleanup): Get rid of this override and parse the type directly in param-extractor.rs
     JSG_STRUCT_TS_OVERRIDE({
@@ -336,7 +358,8 @@ class EventTarget: public jsg::Object {
   void addEventListener(jsg::Lock& js,
       kj::String type,
       kj::Maybe<jsg::Identified<Handler>> maybeHandler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions);
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
   void removeEventListener(jsg::Lock& js,
       kj::String type,
       kj::Maybe<jsg::HashableV8Ref<v8::Object>> maybeHandler,
@@ -376,6 +399,11 @@ class EventTarget: public jsg::Object {
       jsg::Lock& js, kj::String type, jsg::Function<void(jsg::Ref<Event>)> func, bool once = false);
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+ protected:
+  void setEventListenerCallback(EventListenerCallback&& callback) {
+    maybeListenerCallback = kj::mv(callback);
+  }
 
  private:
   // RAII-style listener that can be attached to an EventTarget.
@@ -512,6 +540,8 @@ class EventTarget: public jsg::Object {
   // emit a warning to help users debug things but we'll otherwise ignore it.
   bool warnOnHandlerReturn = true;
 
+  kj::Maybe<EventListenerCallback> maybeListenerCallback;
+
   void visitForGc(jsg::GcVisitor& visitor);
 
   friend class NativeHandler;
@@ -561,7 +591,8 @@ class AbortSignal final: public EventTarget {
 
   static jsg::Ref<AbortSignal> any(jsg::Lock& js,
       kj::Array<jsg::Ref<AbortSignal>> signals,
-      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler);
+      const jsg::TypeHandler<EventTarget::HandlerFunction>& handler,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   // While AbortSignal extends EventTarget, and our EventTarget implementation will
   // automatically support onabort being set as an own property, the spec defines
@@ -573,7 +604,8 @@ class AbortSignal final: public EventTarget {
   void addEventListener(jsg::Lock& js,
       kj::String type,
       jsg::Identified<Handler> handler,
-      jsg::Optional<AddEventListenerOpts> maybeOptions);
+      jsg::Optional<AddEventListenerOpts> maybeOptions,
+      const jsg::TypeHandler<jsg::Ref<EventTarget>>& eventTargetHandler);
 
   JSG_RESOURCE_TYPE(AbortSignal, CompatibilityFlags::Reader flags) {
     JSG_INHERIT(EventTarget);

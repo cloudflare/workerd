@@ -5,7 +5,9 @@
 #include "actor-state.h"
 
 #include "actor.h"
+#include "export-loopback.h"
 #include "sql.h"
+#include "sync-kv.h"
 #include "util.h"
 
 #include <workerd/api/web-socket.h>
@@ -127,7 +129,7 @@ jsg::JsRef<jsg::JsValue> listResultsToMap(
     auto map = js.map();
     size_t cachedReadBytes = 0;
     size_t uncachedReadBytes = 0;
-    for (auto entry: value) {
+    for (const auto& entry: value) {
       auto& bytesRef =
           entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedReadBytes : uncachedReadBytes;
       bytesRef += entry.key.size() + entry.value.size();
@@ -164,7 +166,7 @@ getMultipleResultsToMap(size_t numInputKeys) {
       auto map = js.map();
       uint32_t cachedUnits = 0;
       uint32_t uncachedUnits = 0;
-      for (auto entry: value) {
+      for (const auto& entry: value) {
         auto& unitsRef =
             entry.status == ActorCacheOps::CacheStatus::CACHED ? cachedUnits : uncachedUnits;
         unitsRef += billingUnits(entry.key.size() + entry.value.size());
@@ -304,14 +306,12 @@ jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
   });
 }
 
-jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
-    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+kj::Maybe<DurableObjectStorageOperations::CompiledListOptions> DurableObjectStorageOperations::
+    compileListOptions(kj::Maybe<ListOptions>& maybeOptions) {
   kj::String start;
   kj::Maybe<kj::String> end;
   bool reverse = false;
   kj::Maybe<uint> limit;
-
-  auto makeEmptyResult = [&]() { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); };
 
   KJ_IF_SOME(o, maybeOptions) {
     KJ_IF_SOME(s, o.start) {
@@ -358,7 +358,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
           // `start` is within the prefix, so need not be modified.
         } else {
           // `start` comes after the last value with the prefix, so there's no overlap.
-          return makeEmptyResult();
+          return kj::none;
         }
 
         // Calculate the first key that sorts after all keys with the given prefix.
@@ -379,7 +379,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
           KJ_IF_SOME(e, end) {
             if (e <= prefix) {
               // No keys could possibly match both the end and the prefix.
-              return makeEmptyResult();
+              return kj::none;
             } else if (e.startsWith(prefix)) {
               // `end` is within the prefix, so need not be modified.
             } else {
@@ -399,9 +399,22 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
   KJ_IF_SOME(e, end) {
     if (e <= start) {
       // Key range is empty.
-      return makeEmptyResult();
+      return kj::none;
     }
   }
+
+  return CompiledListOptions{
+    .start = kj::mv(start),
+    .end = kj::mv(end),
+    .reverse = reverse,
+    .limit = limit,
+  };
+}
+
+jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
+    jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+  auto [start, end, reverse, limit] = KJ_UNWRAP_OR(compileListOptions(maybeOptions),
+      { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); });
 
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
   ActorCacheOps::ReadOptions readOptions = options;
@@ -673,11 +686,21 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
+
+      // If a critical error forced an automatic rollback, we throw an exception to convey failure
+      // to the caller of transactionSync(), even if the callback did not throw.
+      JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
+          "Cannot commit transaction due to an earlier SQL critical error");
+
       sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      // If a critical error forced an automatic rollback, we skip the rollback and release
+      // attempt, because savepoints should already be released.
+      if (!sqlite.observedCriticalError()) {
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+        sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      }
       js.throwException(kj::mv(exception));
     });
   } else {
@@ -743,8 +766,43 @@ SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
   }
 }
 
+SqliteKv& DurableObjectStorage::getSqliteKv(jsg::Lock& js) {
+  KJ_IF_SOME(kv, cache->getSqliteKv()) {
+    // Actor is SQLite-backed but let's make sure SQL is configured to be enabled.
+    if (enableSql) {
+      return kv;
+    } else {
+      // We're presumably running local workerd, which always uses SQLite for DO storage, but we're
+      // trying to simulate a non-SQLite DO namespace for testing purposes.
+      JSG_FAIL_REQUIRE(Error,
+          "The storage.kv (synchronous KV) API is only available for SQLite-backed Durable "
+          "Objects, but this object's namespace is not declared to use SQLite. You can use "
+          "the older, asyncronous interface via methods of `storage` itself (e.g. "
+          "`storage.get()`). Alternatively, to enable SQLite, change `new_classes` to "
+          "`new_sqlite_classes` within the 'migrations' field in your wrangler.jsonc or "
+          "wrangler.toml file. If using workerd directly, set `enableSql = true` in your workerd "
+          "config for the class. Note that this change cannot be made after the class is "
+          "already deployed to production.");
+    }
+  } else {
+    // We're in production (not local workerd) and this DO namespace is not backed by SQLite.
+    JSG_FAIL_REQUIRE(Error,
+        "The storage.kv (synchronous KV) API is only available for SQLite-backed Durable "
+        "Objects, but this object's namespace is not declared to use SQLite. You can use "
+        "the older, asyncronous interface via methods of `storage` itself (e.g. "
+        "`storage.get()`). SQLite can be enabled on a new Durable Object class by using the "
+        "`new_sqlite_classes` instead of `new_classes` under `migrations` in your "
+        "wrangler.jsonc or wrangler.toml, but an already-deployed class cannot be converted "
+        "to SQLite (except by deleting the existing data).");
+  }
+}
+
 jsg::Ref<SqlStorage> DurableObjectStorage::getSql(jsg::Lock& js) {
   return js.alloc<SqlStorage>(JSG_THIS);
+}
+
+jsg::Ref<SyncKvStorage> DurableObjectStorage::getKv(jsg::Lock& js) {
+  return js.alloc<SyncKvStorage>(JSG_THIS);
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
@@ -823,13 +881,11 @@ void DurableObjectTransaction::maybeRollback() {
 class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
   FacetOutgoingFactory(Worker::Actor::FacetManager& facetManager,
-      uint actorClassChannel,
       kj::String name,
-      Worker::Actor::Id id)
+      kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo)
       : facetManager(facetManager),
-        actorClassChannel(actorClassChannel),
         name(kj::mv(name)),
-        id(kj::mv(id)) {}
+        getStartInfo(kj::mv(getStartInfo)) {}
 
   kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) override {
     auto& context = IoContext::current();
@@ -842,11 +898,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
 
       // Lazily initialize actorChannel
       if (actorChannel == kj::none) {
-        actorChannel = facetManager.getFacet(name,
-            {
-              .actorClassChannel = actorClassChannel,
-              .id = kj::mv(id),
-            });
+        actorChannel = facetManager.getFacet(name, kj::mv(getStartInfo));
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
@@ -859,34 +911,63 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
 
  private:
   Worker::Actor::FacetManager& facetManager;
-  uint actorClassChannel;
   kj::String name;
-  Worker::Actor::Id id;  // moved away when `actorChannel` is initialized
+
+  // This is moved away when `actorChannel` is initialized.
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
   kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
 };
 
-jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js, kj::String name, GetOptions options) {
+jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
+    kj::String name,
+    jsg::Function<jsg::Promise<StartupOptions>()> getStartupOptions) {
   auto& fm = getFacetManager();
   auto& ioCtx = IoContext::current();
 
-  Worker::Actor::Id id;
-  KJ_IF_SOME(i, options.id) {
-    KJ_SWITCH_ONEOF(i) {
-      KJ_CASE_ONEOF(doId, jsg::Ref<DurableObjectId>) {
-        id = doId->getInner().clone();
+  kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo =
+      ioCtx.makeReentryCallback(
+          [&ioCtx, getStartupOptions = kj::mv(getStartupOptions)](jsg::Lock& js) mutable {
+    return getStartupOptions(js).then(js, [&ioCtx](jsg::Lock& js, StartupOptions options) {
+      Worker::Actor::Id id;
+      KJ_IF_SOME(i, options.id) {
+        KJ_SWITCH_ONEOF(i) {
+          KJ_CASE_ONEOF(doId, jsg::Ref<DurableObjectId>) {
+            id = doId->getInner().clone();
+          }
+          KJ_CASE_ONEOF(strId, kj::String) {
+            id = kj::mv(strId);
+          }
+        }
+      } else {
+        // Child inherits parent ID.
+        id = ioCtx.getActorOrThrow().cloneId();
       }
-      KJ_CASE_ONEOF(strId, kj::String) {
-        id = kj::mv(strId);
-      }
-    }
-  } else {
-    // Child inherits parent ID.
-    id = ioCtx.getActorOrThrow().cloneId();
-  }
+
+      DurableObjectClass& actorClass = [&]() -> DurableObjectClass& {
+        KJ_SWITCH_ONEOF(options.$class) {
+          KJ_CASE_ONEOF(bare, jsg::Ref<DurableObjectClass>) {
+            return *bare.get();
+          }
+          KJ_CASE_ONEOF(loopback, jsg::Ref<LoopbackDurableObjectNamespace>) {
+            return loopback->getClass();
+          }
+          KJ_CASE_ONEOF(loopback, jsg::Ref<LoopbackColoLocalActorNamespace>) {
+            return loopback->getClass();
+          }
+        }
+        KJ_UNREACHABLE;
+      }();
+
+      return Worker::Actor::FacetManager::StartInfo{
+        .actorClass = actorClass.getChannel(ioCtx),
+        .id = kj::mv(id),
+      };
+    });
+  });
 
   kj::Own<Fetcher::OutgoingFactory> factory =
-      kj::heap<FacetOutgoingFactory>(fm, options.$class->getChannel(), kj::mv(name), kj::mv(id));
+      kj::heap<FacetOutgoingFactory>(fm, kj::mv(name), kj::mv(getStartInfo));
 
   auto requiresHost = FeatureFlags::get(js).getDurableObjectFetchRequiresSchemeAuthority()
       ? Fetcher::RequiresHostAndProtocol::YES
@@ -926,13 +1007,15 @@ kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> ActorState::getId(jsg::Lock&
 
 DurableObjectState::DurableObjectState(jsg::Lock& js,
     Worker::Actor::Id actorId,
-    jsg::JsRef<jsg::JsValue> exports,
+    jsg::JsValue exports,
+    jsg::JsValue props,
     kj::Maybe<jsg::Ref<DurableObjectStorage>> storage,
     kj::Maybe<rpc::Container::Client> container,
     bool containerRunning,
     kj::Maybe<Worker::Actor::FacetManager&> facetManager)
     : id(kj::mv(actorId)),
-      exports(kj::mv(exports)),
+      exports(js, exports),
+      props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
         return js.alloc<Container>(kj::mv(cap), containerRunning);

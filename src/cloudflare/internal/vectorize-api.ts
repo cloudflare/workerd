@@ -1,20 +1,23 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { default as flags } from 'workerd:compatibility-flags';
+
+const queryMetadataOptional =
+  !!Cloudflare.compatibilityFlags['vectorize_query_metadata_optional'];
 
 interface Fetcher {
   fetch: typeof fetch;
 }
 
-enum Operation {
-  INDEX_GET = 0,
-  VECTOR_QUERY = 1,
-  VECTOR_INSERT = 2,
-  VECTOR_UPSERT = 3,
-  VECTOR_GET = 4,
-  VECTOR_DELETE = 5,
-}
+const Operation = {
+  INDEX_GET: 'INDEX_GET',
+  VECTOR_QUERY: 'VECTOR_QUERY',
+  VECTOR_INSERT: 'VECTOR_INSERT',
+  VECTOR_UPSERT: 'VECTOR_UPSERT',
+  VECTOR_GET: 'VECTOR_GET',
+  VECTOR_DELETE: 'VECTOR_DELETE',
+} as const;
+type OperationKey = keyof typeof Operation;
 
 type VectorizeVersion = 'v1' | 'v2';
 
@@ -32,12 +35,26 @@ function toNdJson(arr: object[]): string {
  * and not visible to end users.
  */
 class VectorizeIndexImpl implements Vectorize {
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly fetcher: Fetcher;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly indexId: string;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly indexVersion: VectorizeVersion;
+  // eslint-disable-next-line no-restricted-syntax
+  private readonly useNdJson: boolean;
+
   constructor(
-    private readonly fetcher: Fetcher,
-    private readonly indexId: string,
-    private readonly indexVersion: VectorizeVersion,
-    private readonly useNdJson: boolean
-  ) {}
+    fetcher: Fetcher,
+    indexId: string,
+    indexVersion: VectorizeVersion,
+    useNdJson: boolean
+  ) {
+    this.fetcher = fetcher;
+    this.indexId = indexId;
+    this.indexVersion = indexVersion;
+    this.useNdJson = useNdJson;
+  }
 
   async describe(): Promise<VectorizeIndexInfo> {
     const endpoint =
@@ -69,7 +86,7 @@ class VectorizeIndexImpl implements Vectorize {
         );
       }
       const compat = {
-        queryMetadataOptional: flags.vectorizeQueryMetadataOptional,
+        queryMetadataOptional,
       };
       const res = await this._send(
         Operation.VECTOR_QUERY,
@@ -208,8 +225,9 @@ class VectorizeIndexImpl implements Vectorize {
     return await toJson<VectorizeAsyncMutation>(res);
   }
 
+  // eslint-disable-next-line no-restricted-syntax
   private async _send(
-    operation: Operation,
+    operation: OperationKey,
     endpoint: string,
     init: RequestInit
   ): Promise<Response> {
@@ -251,6 +269,7 @@ class VectorizeIndexImpl implements Vectorize {
     return res;
   }
 
+  // eslint-disable-next-line no-restricted-syntax
   private async queryImplV2(
     vectorParams: QueryImplV2Params,
     options?: VectorizeQueryOptions

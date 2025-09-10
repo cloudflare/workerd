@@ -6,10 +6,16 @@
 import {
   _checkIsHttpToken,
   _checkInvalidHeaderChar,
+  chunkExpression,
 } from 'node-internal:internal_http';
 import { METHODS } from 'node-internal:internal_http_constants';
-export { _checkIsHttpToken, _checkInvalidHeaderChar };
-export const chunkExpression = /(?:^|\W)chunked(?:$|\W)/i;
+import { kIncomingMessage } from 'node-internal:internal_http_util';
+export {
+  _checkIsHttpToken,
+  _checkInvalidHeaderChar,
+  chunkExpression,
+  kIncomingMessage,
+};
 export const continueExpression = /(?:^|\W)100-continue(?:$|\W)/i;
 export const methods = METHODS;
 
@@ -19,4 +25,5 @@ export default {
   chunkExpression,
   continueExpression,
   methods,
+  kIncomingMessage,
 };

@@ -34,6 +34,7 @@ constexpr T reverse(T value) {
 }
 
 template <Uint64OrUint32 T>
+// NOLINTNEXTLINE(edgeworker-multiple-bool-args)
 constexpr std::array<T, crcTableSize> gen_crc_table(T polynomial, bool reflectIn, bool reflectOut) {
   constexpr auto numIterations = sizeof(polynomial) * 8;  // number of bits in polynomial
   auto crcTable = std::array<T, crcTableSize>{};

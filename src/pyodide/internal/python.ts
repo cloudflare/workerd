@@ -15,7 +15,10 @@ import {
   entropyAfterRuntimeInit,
   entropyBeforeTopLevel,
   getRandomValues,
+  entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
+import { legacyVendorPath } from 'pyodide-internal:metadata';
+import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
@@ -25,7 +28,7 @@ import {
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
 
 import { default as UnsafeEval } from 'internal:unsafe-eval';
-import { reportError } from 'pyodide-internal:util';
+import { PythonRuntimeError, reportError } from 'pyodide-internal:util';
 import { loadPackages } from 'pyodide-internal:loadPackage';
 import { default as MetadataReader } from 'pyodide-internal:runtime-generated/metadata';
 import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
@@ -36,7 +39,10 @@ import { TRANSITIVE_REQUIREMENTS } from 'pyodide-internal:metadata';
  * `noInitialRun: true` and so the C runtime is in an incoherent state until we
  * restore the linear memory from the snapshot.
  */
-function prepareWasmLinearMemory(Module: Module): void {
+function prepareWasmLinearMemory(
+  Module: Module,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
+): void {
   enterJaegerSpan('preload_dynamic_libs', () => {
     preloadDynamicLibs(Module);
   });
@@ -55,7 +61,7 @@ function prepareWasmLinearMemory(Module: Module): void {
     adjustSysPath(Module);
   }
   if (Module.API.version !== '0.26.0a2') {
-    finalizeBootstrap(Module);
+    finalizeBootstrap(Module, pyodide_entrypoint_helper);
   }
 }
 
@@ -65,15 +71,17 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
+      LEGACY_VENDOR_PATH = "${legacyVendorPath}" == "true"
       VENDOR_PATH = "/session/metadata/vendor"
-      SESSION_PATH = "/session/metadata"
+      PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
       # adjustSysPath adds the session path, but it is immortalised by the memory snapshot. This
       # code runs irrespective of the memory snapshot.
-      if SESSION_PATH in sys.path:
-        sys.path.remove(SESSION_PATH)
-      if VENDOR_PATH in sys.path:
+      if VENDOR_PATH in sys.path and LEGACY_VENDOR_PATH:
         sys.path.remove(VENDOR_PATH)
+
+      if PYTHON_MODULES_PATH in sys.path:
+        sys.path.remove(PYTHON_MODULES_PATH)
 
       # Insert vendor path after system paths but before site-packages
       # System paths are typically: ['/session', '/lib/python312.zip', '/lib/python3.12', '/lib/python3.12/lib-dynload']
@@ -84,7 +92,9 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       # that reproduces this (vendor_dir).
       for i, path in enumerate(sys.path):
         if 'site-packages' in path:
-          sys.path[i:i] = [SESSION_PATH, VENDOR_PATH]
+          if LEGACY_VENDOR_PATH:
+            sys.path.insert(i, VENDOR_PATH)
+          sys.path.insert(i, PYTHON_MODULES_PATH)
           break
       else:
         # If no site-packages found, fail
@@ -106,16 +116,34 @@ function validatePyodideVersion(pyodide: Pyodide): void {
     return;
   }
   if (pyodide.version !== expectedPyodideVersion) {
-    throw new Error(
+    throw new PythonRuntimeError(
       `Pyodide version mismatch, expected '${expectedPyodideVersion}'`
     );
   }
 }
 
+const origSetTimeout = globalThis.setTimeout.bind(this);
+function setTimeoutTopLevelPatch(
+  handler: () => void,
+  timeout: number | undefined
+): number {
+  // Redirect top level setTimeout(cb, 0) to queueMicrotask().
+  // If we don't know how to handle it, call normal setTimeout() to force failure.
+  if (typeof handler === 'string') {
+    return origSetTimeout(handler, timeout);
+  }
+  if (timeout) {
+    return origSetTimeout(handler, timeout);
+  }
+  queueMicrotask(handler);
+  return 0;
+}
+
 export function loadPyodide(
   isWorkerd: boolean,
   lockfile: PackageLock,
-  indexURL: string
+  indexURL: string,
+  pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): Pyodide {
   try {
     const Module = enterJaegerSpan('instantiate_emscripten', () =>
@@ -128,7 +156,12 @@ export function loadPyodide(
     }
     Module.setUnsafeEval(UnsafeEval);
     Module.setGetRandomValues(getRandomValues);
-    Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
+    Module.setSetTimeout(
+      setTimeoutTopLevelPatch as typeof setTimeout,
+      clearTimeout,
+      setInterval,
+      clearInterval
+    );
 
     entropyMountFiles(Module);
     enterJaegerSpan('load_packages', () => {
@@ -138,7 +171,7 @@ export function loadPyodide(
     });
 
     enterJaegerSpan('prepare_wasm_linear_memory', () => {
-      prepareWasmLinearMemory(Module);
+      prepareWasmLinearMemory(Module, pyodide_entrypoint_helper);
     });
 
     maybeCollectSnapshot(Module);
@@ -149,7 +182,7 @@ export function loadPyodide(
     if (Module.API.version === '0.26.0a2') {
       // Finish setting up Pyodide's ffi so we can use the nice Python interface
       // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module);
+      finalizeBootstrap(Module, pyodide_entrypoint_helper);
     }
     const pyodide = Module.API.public_api;
 
@@ -173,4 +206,9 @@ export function loadPyodide(
     // but no traceback. This gives us a full traceback.
     reportError(e as Error);
   }
+}
+
+export function beforeRequest(Module: Module): void {
+  entropyBeforeRequest(Module);
+  Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 }

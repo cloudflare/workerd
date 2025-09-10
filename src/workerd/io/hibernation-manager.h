@@ -9,7 +9,7 @@
 #include <workerd/api/web-socket.h>
 #include <workerd/jsg/jsg.h>
 
-#include <kj/debug.h>
+#include <kj/exception.h>
 
 #include <list>
 

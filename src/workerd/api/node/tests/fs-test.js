@@ -1,7 +1,15 @@
 // Copyright (c) 2017-2022 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { ifError, ok, rejects, strictEqual, throws } from 'node:assert';
+import {
+  ifError,
+  ok,
+  rejects,
+  deepStrictEqual,
+  strictEqual,
+  notStrictEqual,
+  throws,
+} from 'node:assert';
 
 import {
   existsSync,
@@ -30,12 +38,25 @@ import {
   writeFile,
   appendFile,
   read,
+  readdir,
+  readlink,
+  realpath,
+  mkdtemp,
+  ReadStream,
+  WriteStream,
+  readdirSync,
+  readlinkSync,
   readv,
   readFile,
   rename,
   copyFile,
+  realpathSync,
+  mkdtempSync,
   constants,
+  promises,
 } from 'node:fs';
+
+import { join } from 'node:path';
 
 const { COPYFILE_EXCL } = constants;
 
@@ -119,6 +140,18 @@ export const openCloseTest = {
     // Can close non-existent file descriptors
     closeSync(123);
 
+    ['a', {}, null].forEach((i) => {
+      throws(() => closeSync(i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => close(i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => close(0, i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
+
     {
       const { promise, resolve, reject } = Promise.withResolvers();
       close(fd, (err) => {
@@ -168,12 +201,20 @@ export const ftruncateTest = {
     }
 
     {
-      const { promise, resolve, reject } = Promise.withResolvers();
-      ftruncate(fd, -1, (err) => {
-        if (err) return reject(err);
-        resolve();
+      throws(() => ftruncate(fd, -1, () => {}), {
+        code: 'ERR_OUT_OF_RANGE',
       });
-      await rejects(promise, kErrOutOfRange);
+    }
+
+    {
+      throws(() => ftruncateSync(fd, 0xffffffff), {
+        message: /File size limit exceeded/,
+      });
+      throws(() => ftruncateSync(fd, 0x08000000 + 1), {
+        message: /File size limit exceeded/,
+      });
+      // 0x08000000 is the maximum allowed file size.
+      ftruncateSync(fd, 0x08000000);
     }
 
     closeSync(fd);
@@ -242,7 +283,9 @@ export const writeSyncTest = {
       kErrInvalidArgType
     );
     throws(() => writeSync(123, 'Hello World'), kErrEBadf);
-    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), kErrOutOfRange);
+    throws(() => writeSync(fd, Buffer.alloc(2), { offset: 5 }), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => writeSync(fd, Buffer.alloc(2), { length: 5 }),
       kErrInvalidArgValue
@@ -302,10 +345,9 @@ export const writeAsyncCallbackTest = {
       () => write(fd, 'Hello World', { position: 'hello' }, mustNotCall),
       kErrInvalidArgType
     );
-    throws(
-      () => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall),
-      kErrOutOfRange
-    );
+    throws(() => write(fd, Buffer.alloc(2), { offset: 5 }, mustNotCall), {
+      code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+    });
     throws(
       () => write(fd, Buffer.alloc(2), { length: 5 }, mustNotCall),
       kErrInvalidArgValue
@@ -418,7 +460,7 @@ export const writeSyncTest4 = {
 
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 100, 3), {
-      message: /out of bounds/,
+      message: /outside of buffer bounds/,
     });
     // Specifying an offset or length beyond the buffer size is not allowed.
     throws(() => writeSync(fd, Buffer.from('Hello World'), 0, 100), {
@@ -613,6 +655,28 @@ export const writeFileSyncTest = {
   },
 };
 
+export const appendFileSyncFlush = {
+  test() {
+    ok(!existsSync('/tmp/test.txt'));
+
+    // The flush option really is not supported in any particular way in
+    // our implementation but let's verify it.
+    appendFileSync('/tmp/test.txt', 'hello world', { flush: true });
+
+    ['no', {}, null, -1].forEach((i) => {
+      throws(
+        () => appendFileSync('/tmp/test.txt', 'hello world', { flush: 'no' }),
+        {
+          code: 'ERR_INVALID_ARG_TYPE',
+        }
+      );
+    });
+
+    ok(existsSync('/tmp/test.txt'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'hello world');
+  },
+};
+
 export const writeFileAsyncCallbackTest = {
   async test() {
     ok(!existsSync('/tmp/test.txt'));
@@ -636,6 +700,10 @@ export const writeFileAsyncCallbackTest = {
 
     await new Promise((resolve, reject) => {
       appendFile('/tmp/test.txt', '!!!!', (err) => {
+        strictEqual(
+          readFileSync('/tmp/test.txt').toString(),
+          'Hello World!!!!'
+        );
         if (err) return reject(err);
         resolve();
       });
@@ -655,6 +723,43 @@ export const writeFileAsyncCallbackTest = {
     });
     strictEqual(readFileSync(fd).toString(), 'Hello World!!!!##');
     closeSync(fd);
+
+    // We can use the promise API as well.
+    await promises.appendFile('/tmp/test.txt', '!!!');
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      'Hello World!!!!##!!!'
+    );
+  },
+};
+
+export const appendFileCases = {
+  async test() {
+    ok(!existsSync('/tmp/test.txt'));
+    // It accepts bufers
+    appendFileSync('/tmp/test.txt', Buffer.from('Hello World'));
+    ok(existsSync('/tmp/test.txt'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World');
+
+    // With the callback API also
+    const { promise, resolve, reject } = Promise.withResolvers();
+    appendFile('/tmp/test.txt', Buffer.from('!!!!'), (err) => {
+      if (err) return reject(err);
+      strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World!!!!');
+      resolve();
+    });
+    await promise;
+
+    // And the promises API
+    await promises.appendFile('/tmp/test.txt', Buffer.from('!!!'));
+    strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World!!!!!!!');
+
+    // But invalid types throw errors
+    [123, {}, null, []].forEach((data) => {
+      throws(() => appendFileSync('/tmp/test.txt', data), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
   },
 };
 
@@ -773,6 +878,59 @@ export const copyAndRenameSyncTest = {
       readFileSync('/tmp/test2.txt').toString()
     );
 
+    copyFileSync('/tmp/test.txt', '/tmp/test4.txt', 0);
+    // Both files exist
+    ok(existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test4.txt'));
+
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      readFileSync('/tmp/test4.txt').toString()
+    );
+
+    throws(
+      () => copyFileSync('/tmp/test.txt', '/tmp/test4.txt', COPYFILE_EXCL),
+      {
+        code: 'EEXIST',
+      }
+    );
+
+    throws(
+      () =>
+        copyFileSync(
+          '/tmp/test.txt',
+          '/tmp/nope.txt',
+          constants.COPYFILE_FICLONE_FORCE
+        ),
+      {
+        message: /unsupported/,
+      }
+    );
+
+    copyFileSync('/tmp/test.txt', '/tmp/test5.txt', constants.COPYFILE_FICLONE);
+    // Both files exist
+    ok(existsSync('/tmp/test.txt'));
+    ok(existsSync('/tmp/test5.txt'));
+
+    strictEqual(
+      readFileSync('/tmp/test.txt').toString(),
+      readFileSync('/tmp/test5.txt').toString()
+    );
+
+    [false, 1, {}, [], null, undefined].forEach((i) => {
+      throws(() => copyFileSync(i, '/tmp/nope.txt'), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+      throws(() => copyFileSync('/tmp/test.txt', i), {
+        code: 'ERR_INVALID_ARG_TYPE',
+      });
+    });
+    [false, {}, [], null].forEach((i) => {
+      throws(() => copyFileSync('/tmp/test.txt', '/tmp/test2.txt', i), {
+        code: 'ERR_INVALID_ARG_VALUE',
+      });
+    });
+
     // We can modify one of the files and the other remains unchanged
     writeFileSync('/tmp/test.txt', 'Hello World 2');
     strictEqual(readFileSync('/tmp/test.txt').toString(), 'Hello World 2');
@@ -855,5 +1013,242 @@ export const copyAndRenameAsyncCallbackTest = {
     ok(!existsSync('/tmp/test.txt'));
     ok(existsSync('/tmp/test3.txt'));
     strictEqual(readFileSync('/tmp/test3.txt').toString(), 'Hello World 2');
+  },
+};
+
+export const fsCwdTest = {
+  test() {
+    process.chdir('/bundle');
+
+    throws(
+      () => {
+        writeFileSync('test-cwd.txt', 'Hello from original cwd');
+      },
+      { code: 'EPERM' }
+    );
+
+    process.chdir('/tmp');
+
+    writeFileSync('test-cwd.txt', 'Hello from /tmp');
+    ok(existsSync('test-cwd.txt'));
+    ok(existsSync('/tmp/test-cwd.txt'));
+
+    ok(existsSync('test-cwd.txt'));
+    ok(!existsSync(`/bundle/test-cwd.txt`));
+
+    strictEqual(readFileSync('test-cwd.txt').toString(), 'Hello from /tmp');
+    strictEqual(
+      readFileSync('/tmp/test-cwd.txt').toString(),
+      'Hello from /tmp'
+    );
+
+    process.chdir('/bundle');
+
+    ok(!existsSync('test-cwd.txt'));
+    throws(
+      () => {
+        readFileSync('test-cwd.txt');
+      },
+      { code: 'ENOENT' }
+    );
+
+    unlinkSync('/tmp/test-cwd.txt');
+  },
+};
+
+export const readBadEncoding = {
+  test() {
+    const kErrorObj = {
+      code: 'ERR_INVALID_ARG_VALUE',
+    };
+    throws(() => readFileSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(
+      () => appendFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(() => readdirSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => readlinkSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(
+      () => writeFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(
+      () => appendFileSync('/tmp/test.txt', 'data', 'bad-encoding'),
+      kErrorObj
+    );
+    throws(() => realpathSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => mkdtempSync('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => ReadStream('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+    throws(() => WriteStream('/tmp/test.txt', 'bad-encoding'), kErrorObj);
+
+    throws(
+      () => writeFile('/tmp/test.txt', 'data', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => appendFile('/tmp/test.txt', 'data', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+
+    function mustNotCall() {
+      throw new Error('This function must not be called');
+    }
+
+    throws(
+      () => readFile('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => readdir('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => readlink('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => realpath('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+    throws(
+      () => mkdtemp('/tmp/test.txt', 'bad-encoding', mustNotCall),
+      kErrorObj
+    );
+  },
+};
+
+export const fsConstantsTest = {
+  test() {
+    // Check if the two constants accepted by chmod() on Windows are defined.
+    notStrictEqual(constants.S_IRUSR, undefined);
+    notStrictEqual(constants.S_IWUSR, undefined);
+
+    // Check null prototype.
+    strictEqual(Object.getPrototypeOf(constants), null);
+
+    const knownFsConstantNames = [
+      'UV_FS_SYMLINK_DIR',
+      'UV_FS_SYMLINK_JUNCTION',
+      'O_RDONLY',
+      'O_WRONLY',
+      'O_RDWR',
+      'UV_DIRENT_UNKNOWN',
+      'UV_DIRENT_FILE',
+      'UV_DIRENT_DIR',
+      'UV_DIRENT_LINK',
+      'UV_DIRENT_FIFO',
+      'UV_DIRENT_SOCKET',
+      'UV_DIRENT_CHAR',
+      'UV_DIRENT_BLOCK',
+      'S_IFMT',
+      'S_IFREG',
+      'S_IFDIR',
+      'S_IFCHR',
+      'S_IFBLK',
+      'S_IFIFO',
+      'S_IFLNK',
+      'S_IFSOCK',
+      'O_CREAT',
+      'O_EXCL',
+      'UV_FS_O_FILEMAP',
+      'O_NOCTTY',
+      'O_TRUNC',
+      'O_APPEND',
+      'O_DIRECTORY',
+      'O_EXCL',
+      'O_NOATIME',
+      'O_NOFOLLOW',
+      'O_SYNC',
+      'O_DSYNC',
+      'O_SYMLINK',
+      'O_DIRECT',
+      'O_NONBLOCK',
+      'S_IRWXU',
+      'S_IRUSR',
+      'S_IWUSR',
+      'S_IXUSR',
+      'S_IRWXG',
+      'S_IRGRP',
+      'S_IWGRP',
+      'S_IXGRP',
+      'S_IRWXO',
+      'S_IROTH',
+      'S_IWOTH',
+      'S_IXOTH',
+      'F_OK',
+      'R_OK',
+      'W_OK',
+      'X_OK',
+      'UV_FS_COPYFILE_EXCL',
+      'COPYFILE_EXCL',
+      'UV_FS_COPYFILE_FICLONE',
+      'COPYFILE_FICLONE',
+      'UV_FS_COPYFILE_FICLONE_FORCE',
+      'COPYFILE_FICLONE_FORCE',
+      'EXTENSIONLESS_FORMAT_JAVASCRIPT',
+      'EXTENSIONLESS_FORMAT_WASM',
+    ];
+
+    const fsConstantNames = Object.keys(constants);
+    const unknownFsConstantNames = fsConstantNames.filter((constant) => {
+      return !knownFsConstantNames.includes(constant);
+    });
+    deepStrictEqual(
+      unknownFsConstantNames,
+      [],
+      `Unknown fs.constants: ${unknownFsConstantNames.join(', ')}`
+    );
+
+    strictEqual(typeof constants.COPYFILE_EXCL, 'number');
+    strictEqual(typeof constants.COPYFILE_FICLONE, 'number');
+    strictEqual(typeof constants.COPYFILE_FICLONE_FORCE, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_EXCL, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_FICLONE, 'number');
+    strictEqual(typeof constants.UV_FS_COPYFILE_FICLONE_FORCE, 'number');
+    strictEqual(constants.COPYFILE_EXCL, constants.UV_FS_COPYFILE_EXCL);
+    strictEqual(constants.COPYFILE_FICLONE, constants.UV_FS_COPYFILE_FICLONE);
+    strictEqual(
+      constants.COPYFILE_FICLONE_FORCE,
+      constants.UV_FS_COPYFILE_FICLONE_FORCE
+    );
+  },
+};
+
+export const fmapIgnoredTest = {
+  test() {
+    const filename = '/tmp/foo';
+    const text = 'Memory File Mapping Test';
+
+    const mw =
+      constants.UV_FS_O_FILEMAP |
+      constants.O_TRUNC |
+      constants.O_CREAT |
+      constants.O_WRONLY;
+    const mr = constants.UV_FS_O_FILEMAP | constants.O_RDONLY;
+
+    writeFileSync(filename, text, { flag: mw });
+    const r1 = readFileSync(filename, { encoding: 'utf8', flag: mr });
+    strictEqual(r1, text);
+  },
+};
+
+export const fileNamesWithNullBytesTest = {
+  test() {
+    const filename = '/tmp/test\0.txt';
+    throws(() => writeFileSync(filename, 'Hello World'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+  },
+};
+
+export const fileNamesWithSurrogatePairsTest = {
+  test() {
+    const tempdir = mkdtempSync('/tmp/emoji-fruit-🍇 🍈 🍉 🍊 🍋');
+    ok(existsSync(tempdir));
+    const filename = '🚀🔥🛸.txt';
+    const content = 'Test content';
+    writeFileSync(join(tempdir, filename), content);
+    const readContent = readFileSync(join(tempdir, filename), 'utf8');
+    strictEqual(readContent, content);
   },
 };

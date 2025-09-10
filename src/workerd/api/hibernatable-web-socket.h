@@ -12,7 +12,6 @@
 #include <workerd/io/worker.h>
 
 #include <kj/debug.h>
-#include <kj/time.h>
 
 namespace workerd::api {
 

@@ -22,23 +22,26 @@ export default {
 
     // Accumulate the span info for easier testing
     return (event) => {
+      // span ids are simple counters for tests, but invocation ID allows us to differentiate them
+      let spanKey = event.invocationId + event.spanContext.spanId;
       switch (event.event.type) {
         case 'spanOpen':
-          // The span ids will change between tests, but Map preserves insertion order
-          spans.set(event.spanId, { name: event.event.name });
+          spans.set(event.invocationId + event.event.spanId, {
+            name: event.event.name,
+          });
           break;
         case 'attributes': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(spanKey);
           for (let { name, value } of event.event.info) {
             span[name] = value;
           }
-          spans.set(event.spanId, span);
+          spans.set(spanKey, span);
           break;
         }
         case 'spanClose': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(spanKey);
           span['closed'] = true;
-          spans.set(event.spanId, span);
+          spans.set(spanKey, span);
           break;
         }
         case 'outcome':
@@ -62,173 +65,329 @@ export const test = {
 
     // spans emitted by kv-test.js in execution order
     let expected = [
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          closed: true,
+        },
+        name: 'span_0',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          closed: true,
+        },
+        name: 'span_1',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          closed: true,
+        },
+        name: 'span_2',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          closed: true,
+        },
+        name: 'span_3',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.cacheTtl': 100n,
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.cache_ttl': 100n,
+          closed: true,
+        },
+        name: 'span_4',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          closed: true,
+        },
+        name: 'span_5',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'json',
+          closed: true,
+        },
+        name: 'span_6',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'json',
+          closed: true,
+        },
+        name: 'span_7',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'arrayBuffer',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'arrayBuffer',
+          closed: true,
+        },
+        name: 'span_8',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'banana',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'banana',
+          closed: true,
+        },
+        name: 'span_9',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_getWithMetadata',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'getWithMetadata',
-        closed: true,
+        expected: {
+          name: 'kv_getWithMetadata',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'getWithMetadata',
+          'cloudflare.kv.query.key': 'key1',
+          'cloudflare.kv.response.metadata': true,
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+        },
+        name: 'span_10',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.keys': 'key1',
+          closed: true,
+        },
+        name: 'span_11',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'json',
+          'cloudflare.kv.query.keys': 'key1',
+          closed: true,
+        },
+        name: 'span_12',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
+        expected: {
+          name: 'kv_get_bulk',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get_bulk',
+          'cloudflare.kv.query.type': 'json',
+          'cloudflare.kv.query.keys': 'key1, key2',
+          closed: true,
+        },
+        name: 'span_13',
       },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          'cloudflare.kv.response.metadata': true,
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+        },
+        name: 'span_14',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          closed: true,
+        },
+        name: 'span_15',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          closed: true,
+        },
+        name: 'span_16',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          'cloudflare.kv.response.metadata': true,
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+        },
+        name: 'span_17',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          'cloudflare.kv.query.type': 'json',
+          'cloudflare.kv.response.metadata': true,
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+        },
+        name: 'span_18',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'stream',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          'cloudflare.kv.query.type': 'stream',
+          'cloudflare.kv.response.metadata': true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+          closed: true,
+        },
+        name: 'span_19',
       },
-      { closed: true, name: 'worker' },
       {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'arrayBuffer',
-        closed: true,
+        expected: {
+          name: 'kv_get',
+          'db.system': 'cloudflare-kv',
+          'db.operation.name': 'get',
+          'cloudflare.kv.query.type': 'arrayBuffer',
+          'cloudflare.kv.response.metadata': true,
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+        },
+        name: 'span_20',
       },
-      { closed: true, name: 'worker' },
-      { closed: true, name: 'worker' },
+      {
+        expected: {
+          name: 'kv_list',
+          'cloudflare.binding_type': 'KV',
+          'db.operation.name': 'list',
+          'cloudflare.kv.query.prefix': 'te',
+          'db.namespace': 'KV',
+          'db.system': 'cloudflare-kv',
+          closed: true,
+          'cloudflare.kv.response.returned_rows': 3n,
+          'cloudflare.kv.response.cache_status': 'HIT',
+          'cloudflare.kv.response.list_complete': false,
+          'cloudflare.kv.response.cursor': '6Ck1la0VxJ0djhidm1MdX2FyD',
+          'cloudflare.kv.response.expiration': 1234n,
+        },
+        name: 'span_21',
+      },
+      {
+        expected: {
+          name: 'kv_list',
+          'db.system': 'cloudflare-kv',
+          'cloudflare.binding_type': 'KV',
+          'db.operation.name': 'list',
+          'cloudflare.kv.query.cursor': '123',
+          'cloudflare.kv.query.limit': 100n,
+          'cloudflare.kv.query.prefix': 'te',
+          'cloudflare.kv.response.returned_rows': 100n,
+          'db.namespace': 'KV',
+          closed: true,
+          'cloudflare.kv.response.cache_status': 'HIT',
+          'cloudflare.kv.response.list_complete': true,
+          'cloudflare.kv.response.expiration': 1234n,
+        },
+        name: 'span_22',
+      },
+      {
+        expected: {
+          name: 'kv_list',
+          closed: true,
+          'cloudflare.binding_type': 'KV',
+          'db.operation.name': 'list',
+          'cloudflare.kv.query.prefix': 'not-found',
+          'cloudflare.kv.response.returned_rows': 0n,
+          'db.namespace': 'KV',
+          'db.system': 'cloudflare-kv',
+          'cloudflare.kv.response.cache_status': 'HIT',
+          'cloudflare.kv.response.list_complete': true,
+        },
+        name: 'span_23',
+      },
+      {
+        expected: {
+          name: 'kv_put',
+          'cloudflare.kv.query.key': 'foo_with_exp',
+          'db.operation.name': 'put',
+          'db.system': 'cloudflare-kv',
+          'cloudflare.kv.query.value_type': 'text',
+          'cloudflare.kv.query.expiration': 10n,
+          'cloudflare.kv.query.payload.size': 4n,
+          closed: true,
+        },
+        name: 'span_24',
+      },
+      {
+        expected: {
+          name: 'kv_put',
+          'cloudflare.kv.query.key': 'foo_with_expTtl',
+          'db.operation.name': 'put',
+          'db.system': 'cloudflare-kv',
+          'cloudflare.kv.query.value_type': 'text',
+          'cloudflare.kv.query.expiration_ttl': 15n,
+          'cloudflare.kv.query.payload.size': 23n,
+          closed: true,
+        },
+        name: 'span_25',
+      },
+      {
+        expected: {
+          name: 'kv_put',
+          'cloudflare.kv.query.key': 'foo_with_expTtl',
+          'db.operation.name': 'put',
+          'db.system': 'cloudflare-kv',
+          'cloudflare.kv.query.value_type': 'ArrayBuffer',
+          'cloudflare.kv.query.expiration_ttl': 15n,
+          'cloudflare.kv.query.payload.size': 256n,
+          closed: true,
+        },
+        name: 'span_26',
+      },
     ];
 
-    assert.deepStrictEqual(received, expected);
+    assert.equal(
+      received.length,
+      expected.length,
+      `Expected ${expected.length} received ${received.length} spans`
+    );
+    let errors = [];
+    for (let i = 0; i < received.length; i++) {
+      try {
+        assert.deepStrictEqual(received[i], expected[i].expected);
+      } catch (e) {
+        console.error(`${expected[i].name} does not match`);
+        console.log(e);
+        errors.push(e);
+      }
+    }
+    if (errors.length > 0) {
+      throw 'kv spans are incorrect';
+    }
   },
 };

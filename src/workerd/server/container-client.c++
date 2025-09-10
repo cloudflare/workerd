@@ -179,10 +179,10 @@ kj::Promise<ContainerClient::Response> ContainerClient::dockerApiRequest(kj::Net
   auto connection = co_await address->connect();
   auto httpClient = kj::newHttpClient(headerTable, *connection).attach(kj::mv(connection));
   kj::HttpHeaders headers(headerTable);
-  headers.set(kj::HttpHeaderId::HOST, "localhost");
+  headers.setPtr(kj::HttpHeaderId::HOST, "localhost");
 
   KJ_IF_SOME(requestBody, body) {
-    headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
     headers.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(requestBody.size()));
 
     auto req = httpClient->request(method, endpoint, headers, requestBody.size());
@@ -271,12 +271,17 @@ kj::Promise<void> ContainerClient::createContainer(
     }
   }
 
-  // Add environment variables if provided
+  auto envSize = environment.map([](auto& env) { return env.size(); }).orDefault(0);
+  auto jsonEnv = jsonRoot.initEnv(envSize + kj::size(defaultEnv));
+
   KJ_IF_SOME(env, environment) {
-    auto jsonEnv = jsonRoot.initEnv(env.size());
     for (uint32_t i: kj::zeroTo(env.size())) {
       jsonEnv.set(i, env[i]);
     }
+  }
+
+  for (uint32_t i: kj::zeroTo(kj::size(defaultEnv))) {
+    jsonEnv.set(envSize + i, defaultEnv[i]);
   }
 
   auto hostConfig = jsonRoot.initHostConfig();
@@ -286,17 +291,23 @@ kj::Promise<void> ContainerClient::createContainer(
   // where the container we're managing is stuck at "exited" state.
   hostConfig.initRestartPolicy().setName("on-failure");
 
-  auto endpoint = kj::str("/containers/create?name=", containerName);
-  auto response = co_await dockerApiRequest(
-      network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint), codec.encode(jsonRoot));
+  auto response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+      kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
+
+  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
+  // In that case we destroy and re-create the container.
+  if (response.statusCode == 409) {
+    co_await destroyContainer();
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/create?name=", containerName), codec.encode(jsonRoot));
+  }
 
   // statusCode 201 refers to "container created successfully"
-  // statusCode 409 refers to "conflict". Occurs when a container with the given name exists.
-  // Both are fine, so long as the container exists. Though we might want to call destroy and
-  // recreate on 409 in the future.
-  if (response.statusCode != 201 && response.statusCode != 409) {
+  if (response.statusCode != 201) {
     JSG_REQUIRE(response.statusCode != 404, Error, "No such image available named ", imageName);
-    JSG_FAIL_REQUIRE(Error, "Create container failed with: ", response.body);
+    JSG_REQUIRE(response.statusCode != 409, Error, "Container already exists");
+    JSG_FAIL_REQUIRE(
+        Error, "Create container failed with [", response.statusCode, "] ", response.body);
   }
 }
 
@@ -335,6 +346,28 @@ kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
       "Stopping container failed with: ", response.body);
 }
 
+// Destroys the container.
+// No-op when the container does not exist.
+// Wait for the container to actually be stopped and removed when it exists.
+kj::Promise<void> ContainerClient::destroyContainer() {
+  auto endpoint = kj::str("/containers/", containerName, "?force=true");
+  auto response = co_await dockerApiRequest(
+      network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
+  // statusCode 204 refers to "no error"
+  // statusCode 404 refers to "no such container"
+  // Both of which are fine for us since we're tearing down the container anyway.
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
+      "Removing a container failed with: ", response.body);
+  // Do not send a wait request if container doesn't exist. This avoids sending an
+  // unnecessary request.
+  if (response.statusCode == 204) {
+    response = co_await dockerApiRequest(network, kj::str(dockerPath), kj::HttpMethod::POST,
+        kj::str("/containers/", containerName, "/wait?condition=removed"));
+    JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
+        "Waiting for container removal failed with: ", response.statusCode, response.body);
+  }
+}
+
 kj::Promise<void> ContainerClient::status(StatusContext context) {
   const auto [isRunning, _ports] = co_await inspectContainer();
   context.getResults().setRunning(isRunning);
@@ -362,6 +395,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   // Monitor is often called right after start but the api layer's start does not await the RPC's
   // start response. That means that the createContainer call might not have even started yet.
   // If it hasn't, we'll give it 3 tries before failing.
+  auto results = context.getResults();
   for (int i = 0; i < 3; i++) {
     // Docker API: POST /containers/{id}/wait - wait for container to exit
     auto endpoint = kj::str("/containers/", containerName, "/wait");
@@ -377,32 +411,14 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
     // Parse JSON response
     auto jsonRoot = decodeJsonResponse<docker_api::Docker::ContainerMonitorResponse>(response.body);
     auto statusCode = jsonRoot.getStatusCode();
-    JSG_REQUIRE(statusCode == 0, Error, "Container exited with unexpected exit code: ", statusCode);
+    results.setExitCode(statusCode);
     co_return;
   }
   JSG_FAIL_REQUIRE(Error, "Monitor failed to find container");
 }
 
 kj::Promise<void> ContainerClient::destroy(DestroyContext context) {
-  const auto [running, _ports] = co_await inspectContainer();
-  if (running) {
-    co_await stopContainer();
-    auto endpoint = kj::str("/containers/", containerName, "?force=true");
-    auto response = co_await dockerApiRequest(
-        network, kj::str(dockerPath), kj::HttpMethod::DELETE, kj::mv(endpoint));
-    // statusCode 204 refers to "no error"
-    // statusCode 404 refers to "no such container"
-    // Both of which are fine for us since we're tearing down the container anyway.
-    JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 404, Error,
-        "Removing a container failed with: ", response.body);
-    {
-      endpoint = kj::str("/containers/", containerName, "/wait");
-      response = co_await dockerApiRequest(
-          network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
-      JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 404, Error,
-          "Waiting for container removal failed with: ", response.statusCode, response.body);
-    }
-  }
+  co_await destroyContainer();
 }
 
 kj::Promise<void> ContainerClient::signal(SignalContext context) {

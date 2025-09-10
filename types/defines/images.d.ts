@@ -32,7 +32,9 @@ type ImageTransform = {
   fit?: 'scale-down' | 'contain' | 'pad' | 'squeeze' | 'cover' | 'crop';
   flip?: 'h' | 'v' | 'hv';
   gamma?: number;
+  segment?: 'foreground';
   gravity?:
+    | 'face'
     | 'left'
     | 'right'
     | 'top'
@@ -48,21 +50,23 @@ type ImageTransform = {
   rotate?: 0 | 90 | 180 | 270;
   saturation?: number;
   sharpen?: number;
-  trim?: "border" | {
-    top?: number;
-    bottom?: number;
-    left?: number;
-    right?: number;
-    width?: number;
-    height?: number;
-    border?:
-      | boolean
-      | {
-          color?: string;
-          tolerance?: number;
-          keep?: number;
-        };
-  };
+  trim?:
+    | 'border'
+    | {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+        width?: number;
+        height?: number;
+        border?:
+          | boolean
+          | {
+              color?: string;
+              tolerance?: number;
+              keep?: number;
+            };
+      };
 };
 
 type ImageDrawOptions = {
@@ -72,6 +76,10 @@ type ImageDrawOptions = {
   left?: number;
   bottom?: number;
   right?: number;
+};
+
+type ImageInputOptions = {
+  encoding?: 'base64';
 };
 
 type ImageOutputOptions = {
@@ -85,6 +93,7 @@ type ImageOutputOptions = {
     | 'rgba';
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 
 interface ImagesBinding {
@@ -93,13 +102,19 @@ interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
+  ): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
    * @returns A transform handle
    */
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions
+  ): ImageTransformer;
 }
 
 interface ImageTransformer {
@@ -129,6 +144,10 @@ interface ImageTransformer {
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
 
+type ImageTransformationOutputOptions = {
+  encoding?: 'base64';
+};
+
 interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
@@ -141,7 +160,7 @@ interface ImageTransformationResult {
   /**
    * The bytes of the response
    */
-  image(): ReadableStream<Uint8Array>;
+  image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 
 interface ImagesError extends Error {

@@ -48,41 +48,6 @@ class EventSource: public EventTarget {
     }
   };
 
-  class MessageEvent final: public Event {
-   public:
-    explicit MessageEvent(kj::Maybe<kj::String> type,
-        kj::String data,
-        kj::String lastEventId,
-        kj::Maybe<jsg::Url&> url)
-        : Event(kj::mv(type).orDefault([] { return kj::str("message"); })),
-          data(kj::mv(data)),
-          lastEventId(kj::mv(lastEventId)),
-          origin(url.map([](auto& url) { return url.getOrigin(); })) {}
-
-    static jsg::Ref<MessageEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(MessageEvent) {
-      JSG_INHERIT(Event);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(data, getData);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(lastEventId, getLastEventId);
-    }
-
-   private:
-    kj::String data;
-    kj::String lastEventId;
-    kj::Maybe<kj::Array<const char>> origin;
-
-    kj::StringPtr getData() {
-      return data;
-    }
-    kj::StringPtr getLastEventId() {
-      return lastEventId;
-    }
-    kj::Maybe<kj::ArrayPtr<const char>> getOrigin() {
-      return origin.map([](auto& a) -> kj::ArrayPtr<const char> { return a.asPtr(); });
-    }
-  };
-
   struct EventSourceInit {
     // We don't actually make use of the standard withCredentials option. If this is set to
     // any truthy value, we'll throw.
@@ -266,4 +231,4 @@ class EventSource: public EventTarget {
 
 #define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
   api::EventSource, api::EventSource::ErrorEvent, api::EventSource::OpenEvent,                     \
-      api::EventSource::MessageEvent, api::EventSource::EventSourceInit
+      api::EventSource::EventSourceInit

@@ -148,6 +148,7 @@ class TraceItem final: public jsg::Object {
   jsg::Optional<ScriptVersion> getScriptVersion();
   jsg::Optional<kj::StringPtr> getDispatchNamespace();
   jsg::Optional<kj::Array<kj::StringPtr>> getScriptTags();
+  jsg::Optional<kj::StringPtr> getDurableObjectId();
   kj::StringPtr getExecutionModel();
   kj::ArrayPtr<jsg::Ref<OTelSpan>> getSpans();
   kj::StringPtr getOutcome();
@@ -170,6 +171,7 @@ class TraceItem final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptVersion, getScriptVersion);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(dispatchNamespace, getDispatchNamespace);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(scriptTags, getScriptTags);
+    JSG_LAZY_READONLY_INSTANCE_PROPERTY(durableObjectId, getDurableObjectId);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(outcome, getOutcome);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(executionModel, getExecutionModel);
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(truncated, getTruncated);
@@ -190,6 +192,7 @@ class TraceItem final: public jsg::Object {
   kj::Maybe<ScriptVersion> scriptVersion;
   kj::Maybe<kj::String> dispatchNamespace;
   jsg::Optional<kj::Array<kj::String>> scriptTags;
+  kj::Maybe<kj::String> durableObjectId;
   kj::String executionModel;
   kj::Array<jsg::Ref<OTelSpan>> spans;
   kj::String outcome;

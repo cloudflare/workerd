@@ -4,8 +4,6 @@
 
 #include "jsg-test.h"
 
-#include <workerd/util/autogate.h>
-
 namespace workerd::jsg::test {
 namespace {
 

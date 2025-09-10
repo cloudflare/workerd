@@ -46,6 +46,7 @@ class FileFdHandle final: public jsg::Object {
 
  private:
   kj::Maybe<kj::Own<void>> fdHandle;
+  v8::Isolate* isolate;
 };
 
 class FileSystemModule final: public jsg::Object {
@@ -162,6 +163,22 @@ class FileSystemModule final: public jsg::Object {
     return FileFdHandle::constructor(js, fd);
   }
 
+  struct CpOptions {
+    bool deferenceSymlinks;
+    bool recursive;
+    bool force;
+    bool errorOnExist;
+    JSG_STRUCT(deferenceSymlinks, recursive, force, errorOnExist);
+  };
+
+  void cp(jsg::Lock& js, FilePath src, FilePath dest, CpOptions options);
+
+  struct OpenAsBlobOptions {
+    jsg::Optional<kj::String> type;
+    JSG_STRUCT(type);
+  };
+  jsg::Ref<Blob> openAsBlob(jsg::Lock& js, FilePath path, OpenAsBlobOptions options);
+
   JSG_RESOURCE_TYPE(FileSystemModule) {
     JSG_METHOD(stat);
     JSG_METHOD(setLastModified);
@@ -180,6 +197,8 @@ class FileSystemModule final: public jsg::Object {
     JSG_METHOD(rm);
     JSG_METHOD(readdir);
     JSG_METHOD(getFdHandle);
+    JSG_METHOD(cp);
+    JSG_METHOD(openAsBlob);
   }
 
  private:
@@ -190,64 +209,30 @@ class FileSystemModule final: public jsg::Object {
   uint32_t tmpFileCounter = 0;
 };
 
-// Create a Node.js-style "UVException". The UVException is an
-// ordinary Error object with additional properties like code,
-// syscall, path, and destination properties. It is primarily
-// used to represent file system API errors.
-jsg::JsValue createUVException(jsg::Lock& js,
-    int errorno,
-    kj::StringPtr syscall,
-    kj::StringPtr message = nullptr,
-    kj::StringPtr path = nullptr,
-    kj::StringPtr dest = nullptr);
-
-// Throw a Node.js-style "UVException". The UVException is an
-// ordinary Error object with additional properties like code,
-// syscall, path, and destination properties. It is primarily
-// used to represent file system API errors.
-[[noreturn]] void throwUVException(jsg::Lock& js,
-    int errorno,
-    kj::StringPtr syscall,
-    kj::StringPtr message = nullptr,
-    kj::StringPtr path = nullptr,
-    kj::StringPtr dest = nullptr);
-
-// This is an intentionally truncated list of the error codes that Node.js/libuv
-// uses. We won't need all of the error codes that libuv uses.
-#define UV_ERRNO_MAP(XX)                                                                           \
-  XX(EACCES, "permission denied")                                                                  \
-  XX(EBADF, "bad file descriptor")                                                                 \
-  XX(EEXIST, "file already exists")                                                                \
-  XX(EFBIG, "file too large")                                                                      \
-  XX(EINVAL, "invalid argument")                                                                   \
-  XX(EISDIR, "illegal operation on a directory")                                                   \
-  XX(ELOOP, "too many symbolic links encountered")                                                 \
-  XX(EMFILE, "too many open files")                                                                \
-  XX(ENAMETOOLONG, "name too long")                                                                \
-  XX(ENFILE, "file table overflow")                                                                \
-  XX(ENOBUFS, "no buffer space available")                                                         \
-  XX(ENODEV, "no such device")                                                                     \
-  XX(ENOENT, "no such file or directory")                                                          \
-  XX(ENOMEM, "not enough memory")                                                                  \
-  XX(ENOSPC, "no space left on device")                                                            \
-  XX(ENOSYS, "function not implemented")                                                           \
-  XX(ENOTDIR, "not a directory")                                                                   \
-  XX(ENOTEMPTY, "directory not empty")                                                             \
-  XX(EPERM, "operation not permitted")                                                             \
-  XX(EMLINK, "too many links")                                                                     \
-  XX(EIO, "input/output error")
-
-#define XX(code, _) constexpr int UV_##code = -code;
-UV_ERRNO_MAP(XX)
-#undef XX
-
 // ======================================================================================
 // An implementation of the WHATWG Web File System API (https://fs.spec.whatwg.org/)
 // All of the classes in this part of the impl are defined by the spec.
 
-class FileSystemSyncAccessHandle;
 class FileSystemWritableFileStream;
 
+// This provides access to a file or directory in the virutual file system via a "standardized"
+// API. We use quotes around standardized because the API is still very much a work in progress
+// as a Web standard and is not fully baked yet, at least not within a single specification
+// document. There are bits and pieces of the API defined in various places, including the WHATWG
+// spec, WICG proposals, Web Platform Tests, etc. The Web Platform Tests include tests for parts of
+// the API that are not yet fully defined with the tests not actually marked as tentative, etc. We
+// implement what is defined so far using the Web Platform Tests and the specific characteristics
+// of the underlying virtual file system in workers as a guide.
+//
+// There are two kinds of handles, FileSystemFileHandle and FileSystemDirectoryHandle. Both of these
+// extend from FileSystemHandle. A FileSystemHandle holds the locator, which in our implementation
+// is a file URL pointing to a location in the worker's virtual file system. When the
+// FileSystemHandle is created, we validate that the locator points to a valid location in the
+// VFS, however the file may be modified, deleted, etc after the handle is created. This means
+// that the handle may become invalid after creation but then may become valid again. The actual
+// underlying file or directory is checked each time an operation is performed on the handle.
+//
+// Two handles are considered the same if they point to the same location and have the same type.
 class FileSystemHandle: public jsg::Object {
   // TODO(node-fs): The spec defines FileSystemHandle objects as being
   // serializable, meaning that they should work with structured cloning.
@@ -259,7 +244,8 @@ class FileSystemHandle: public jsg::Object {
   // file handle. It would still likely be useful tho. As a follow up
   // step, we will implement serialization/deserialization of these objects.
  public:
-  FileSystemHandle(jsg::USVString name): name(kj::mv(name)) {}
+  FileSystemHandle(const workerd::VirtualFileSystem& vfs, jsg::Url&& locator, jsg::USVString name);
+
   const jsg::USVString& getName(jsg::Lock& js) {
     return name;
   }
@@ -268,30 +254,65 @@ class FileSystemHandle: public jsg::Object {
     // Implemented by subclasses.
     KJ_UNIMPLEMENTED("getKind() not implemented");
   }
-  virtual jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) {
-    // Implemented by subclasses.
-    KJ_UNIMPLEMENTED("isSameEntry() not implemented");
-  }
+
+  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other);
+
+  struct RemoveOptions {
+    jsg::Optional<bool> recursive;
+    JSG_STRUCT(recursive);
+  };
+  jsg::Promise<void> remove(jsg::Lock& js,
+      jsg::Optional<RemoveOptions> options,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+
+  jsg::Promise<kj::StringPtr> getUniqueId(
+      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
 
   JSG_RESOURCE_TYPE(FileSystemHandle) {
     JSG_READONLY_PROTOTYPE_PROPERTY(kind, getKind);
     JSG_READONLY_PROTOTYPE_PROPERTY(name, getName);
     JSG_METHOD(isSameEntry);
+    JSG_METHOD(getUniqueId);
+    JSG_METHOD(remove);
   }
 
+ protected:
+  const jsg::Url& getLocator() const {
+    return locator;
+  }
+  const workerd::VirtualFileSystem& getVfs() const {
+    return vfs;
+  }
+
+  bool canBeModifiedCurrently(jsg::Lock&) const;
+
  private:
+  const workerd::VirtualFileSystem& vfs;
+  const jsg::Url locator;
   jsg::USVString name;
 };
 
-class FileSystemFileHandle: public FileSystemHandle {
+struct FileSystemFileWriteParams {
+  kj::String type;  // one of: write, seek, truncate
+  jsg::Optional<uint32_t> size;
+  jsg::Optional<uint32_t> position;
+  // Yes, wrapping the kj::Maybe with a jsg::Optional is intentional here. We need to
+  // be able to accept null or undefined values and handle them per the spec.
+  jsg::Optional<kj::Maybe<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>>> data;
+  JSG_STRUCT(type, size, position, data);
+};
+
+using FileSystemWritableData =
+    kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, FileSystemFileWriteParams>;
+
+class FileSystemFileHandle final: public FileSystemHandle {
  public:
-  FileSystemFileHandle(jsg::USVString name, kj::Rc<workerd::File> inner);
+  FileSystemFileHandle(
+      const workerd::VirtualFileSystem& vfs, jsg::Url locator, jsg::USVString name);
 
   kj::StringPtr getKind(jsg::Lock& js) override {
     return "file"_kj;
   }
-
-  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) override;
 
   struct FileSystemCreateWritableOptions {
     jsg::Optional<bool> keepExistingData;
@@ -303,73 +324,80 @@ class FileSystemFileHandle: public FileSystemHandle {
 
   jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
       jsg::Optional<FileSystemCreateWritableOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
-
-  jsg::Promise<jsg::Ref<FileSystemSyncAccessHandle>> createSyncAccessHandle(jsg::Lock& js);
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
+      const jsg::TypeHandler<FileSystemWritableData>& dataHandler);
 
   JSG_RESOURCE_TYPE(FileSystemFileHandle) {
     JSG_INHERIT(FileSystemHandle);
     JSG_METHOD(getFile);
     JSG_METHOD(createWritable);
-    JSG_METHOD(createSyncAccessHandle);
   }
 
  private:
-  kj::Rc<workerd::File> inner;
+  mutable size_t writableCount = 0;
+  friend class FileSystemWritableFileStream;
 };
 
 class FileSystemDirectoryHandle final: public FileSystemHandle {
-  // TODO(node-fs): Per the spec, FileSystemDirectoryHandler objects are
-  // expected to be async iterables. Here we implement it as a sync iterable.
-  // The effect ends up being largely the same but it's obviously better to
-  // use the asyn iterable API instead. We should implement this before we
-  // ship this feature.
- public:
-  struct EntryType {
-    jsg::USVString key;
-    jsg::Ref<FileSystemHandle> value;
-    JSG_STRUCT(key, value);
-    EntryType(jsg::USVString key, jsg::Ref<FileSystemHandle> value)
-        : key(kj::mv(key)),
-          value(kj::mv(value)) {}
-  };
-
  private:
-  using EntryIteratorType = EntryType;
+  // The actual entry type is an array of two elements, the first being the key,
+  // the second being the value.
+  using EntryType = kj::OneOf<jsg::JsRef<jsg::JsString>, jsg::Ref<FileSystemHandle>>;
+  using EntryIteratorType = kj::Array<EntryType>;
   using KeyIteratorType = jsg::USVString;
   using ValueIteratorType = jsg::Ref<FileSystemHandle>;
 
   struct IteratorState final {
-    jsg::Ref<FileSystemDirectoryHandle> parent;
-    kj::Array<jsg::Ref<FileSystemHandle>> entries;
-    uint index = 0;
+    struct Listing {
+      jsg::Ref<FileSystemDirectoryHandle> parent;
+      kj::Array<jsg::Ref<FileSystemHandle>> entries;
+      uint index = 0;
+    };
+    using Errored = jsg::JsRef<jsg::JsValue>;
+    kj::OneOf<Listing, Errored> state;
 
     IteratorState(
         jsg::Ref<FileSystemDirectoryHandle> parent, kj::Array<jsg::Ref<FileSystemHandle>> entries)
-        : parent(kj::mv(parent)),
-          entries(kj::mv(entries)) {}
+        : state(Listing{
+            .parent = kj::mv(parent),
+            .entries = kj::mv(entries),
+          }) {}
+    IteratorState(jsg::JsRef<jsg::JsValue> exception): state(kj::mv(exception)) {}
 
     void visitForGc(jsg::GcVisitor& visitor) {
-      visitor.visit(parent);
-      visitor.visitAll(entries);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          visitor.visit(listing.parent);
+          visitor.visitAll(listing.entries);
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          visitor.visit(exception);
+        }
+      }
     }
 
     JSG_MEMORY_INFO(IteratorState) {
-      tracker.trackField("parent", parent);
-      for (auto& entry: entries) {
-        tracker.trackField("entry", entry);
+      KJ_SWITCH_ONEOF(state) {
+        KJ_CASE_ONEOF(listing, Listing) {
+          tracker.trackField("parent", listing.parent);
+          for (auto& entry: listing.entries) {
+            tracker.trackField("entry", entry);
+          }
+        }
+        KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+          tracker.trackField("exception", exception);
+        }
       }
     }
   };
 
  public:
-  FileSystemDirectoryHandle(jsg::USVString name, kj::Rc<workerd::Directory> inner);
+  FileSystemDirectoryHandle(
+      const workerd::VirtualFileSystem& vfs, jsg::Url locator, jsg::USVString name);
 
   kj::StringPtr getKind(jsg::Lock& js) override {
     return "directory"_kj;
   }
-
-  jsg::Promise<bool> isSameEntry(jsg::Lock& js, jsg::Ref<FileSystemHandle> other) override;
 
   struct FileSystemGetFileOptions {
     bool create = false;
@@ -402,12 +430,7 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
       const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
 
   // TODO(node-fs): We are not currently implementing the resolve() method
-  // as defined in the spec. This is a bit tricky as it requires us to work
-  // backwards through the parent directories to find the path to the file.
-  // However, our file node's do not currently have a parent pointer, nor do
-  // they know through which path they are accessible through. Support for this
-  // is not critical so we likely won't implement this before we ship the feature
-  // but it is something we should consider doing in the future.
+  // as defined in the spec.
   jsg::Promise<kj::Array<jsg::USVString>> resolve(
       jsg::Lock& js, jsg::Ref<FileSystemHandle> possibleDescendant);
 
@@ -434,7 +457,8 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
       jsg::Function<void(
           jsg::USVString, jsg::Ref<FileSystemHandle>, jsg::Ref<FileSystemDirectoryHandle>)>
           callback,
-      jsg::Optional<jsg::Value> thisArg);
+      jsg::Optional<jsg::Value> thisArg,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
 
   JSG_RESOURCE_TYPE(FileSystemDirectoryHandle) {
     JSG_INHERIT(FileSystemHandle);
@@ -445,31 +469,43 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
     JSG_METHOD(entries);
     JSG_METHOD(keys);
     JSG_METHOD(values);
-    JSG_ASYNC_ITERABLE(entries);
     JSG_METHOD(forEach);
+    JSG_ASYNC_ITERABLE(entries);
+
+    JSG_TS_OVERRIDE({
+      entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
+      [Symbol.asyncIterator]() : AsyncIterableIterator<[string, FileSystemHandle]>;
+    });
   }
 
  private:
-  kj::Rc<workerd::Directory> inner;
-
   template <typename Type>
   static jsg::Promise<kj::Maybe<Type>> iteratorNext(jsg::Lock& js, IteratorState& state) {
-    if (state.index >= state.entries.size()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
-    }
+    KJ_SWITCH_ONEOF(state.state) {
+      KJ_CASE_ONEOF(listing, IteratorState::Listing) {
+        if (listing.index >= listing.entries.size()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::none);
+        }
 
-    auto& entry = state.entries[state.index++];
+        auto& entry = listing.entries[listing.index++];
 
-    if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(
-          EntryType(js.accountedUSVString(entry->getName(js)), entry.addRef()));
-    } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
-    } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
-      return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
-    } else {
-      static_assert(false, "invalid iterator type");
+        if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
+          EntryIteratorType result = kj::arr(
+              EntryType(jsg::JsRef(js, js.str(entry->getName(js)))), EntryType(entry.addRef()));
+          return js.resolvedPromise<kj::Maybe<Type>>(kj::mv(result));
+        } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(js.accountedUSVString(entry->getName(js)));
+        } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
+          return js.resolvedPromise<kj::Maybe<Type>>(entry.addRef());
+        } else {
+          static_assert(false, "invalid iterator type");
+        }
+      }
+      KJ_CASE_ONEOF(exception, jsg::JsRef<jsg::JsValue>) {
+        return js.rejectedPromise<kj::Maybe<Type>>(exception.getHandle(js));
+      }
     }
+    KJ_UNREACHABLE;
   }
 
   template <typename Type>
@@ -479,9 +515,11 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
   }
 };
 
-class FileSystemWritableFileStream: public WritableStream {
+class FileSystemWritableFileStream final: public WritableStream {
  public:
-  struct State: public kj::Refcounted {
+  struct State final: public kj::Refcounted {
+    const workerd::VirtualFileSystem& vfs;
+
     // The FileSystemWritableFileStream is a bit transactional in nature.
     // All writes are done to a temporary file. When the stream is closed
     // without an error, the original file data is replaced with the data
@@ -492,8 +530,10 @@ class FileSystemWritableFileStream: public WritableStream {
     // is closed.
     kj::Maybe<kj::Rc<workerd::File>> temp;
 
-    // The file we will be writing to.
-    kj::Maybe<kj::Rc<workerd::File>> file;
+    // The file handle we are writing to
+    jsg::Ref<FileSystemFileHandle> file;
+
+    kj::Maybe<kj::Own<void>> lock;
 
     // A note on file position and sizes. In the spec, file sizes and positions
     // are defined in terms of unsigned long long, or 64-bits. We are using
@@ -502,14 +542,19 @@ class FileSystemWritableFileStream: public WritableStream {
     // is WAY more than our isolate heap limit. A uint32_t is more than enough
     // for our purposes.
     uint32_t position = 0;
-    State(kj::Rc<workerd::File> file, kj::Rc<workerd::File> temp)
-        : temp(kj::mv(temp)),
-          file(kj::mv(file)) {}
+    State(jsg::Lock& js,
+        const workerd::VirtualFileSystem& vfs,
+        jsg::Ref<FileSystemFileHandle> file,
+        kj::Rc<workerd::File> temp)
+        : vfs(vfs),
+          temp(kj::mv(temp)),
+          file(kj::mv(file)),
+          lock(vfs.lock(js, this->file->getLocator())) {}
 
     void clear() {
       temp = kj::none;
-      file = kj::none;
       position = 0;
+      lock = kj::none;
     }
   };
 
@@ -518,16 +563,10 @@ class FileSystemWritableFileStream: public WritableStream {
 
   static jsg::Ref<FileSystemWritableFileStream> constructor() = delete;
 
-  struct WriteParams {
-    kj::String type;  // one of: write, seek, truncate
-    jsg::Optional<uint32_t> size;
-    jsg::Optional<uint32_t> position;
-    jsg::Optional<kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String>> data;
-    JSG_STRUCT(type, size, position, data);
-  };
+  using WriteParams = FileSystemFileWriteParams;
 
   jsg::Promise<void> write(jsg::Lock& js,
-      kj::OneOf<jsg::Ref<Blob>, jsg::BufferSource, kj::String, WriteParams> data,
+      FileSystemWritableData data,
       const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
   jsg::Promise<void> seek(jsg::Lock& js,
       uint32_t position,
@@ -542,45 +581,16 @@ class FileSystemWritableFileStream: public WritableStream {
     JSG_METHOD(truncate);
   }
 
+  static jsg::Promise<void> writeImpl(jsg::Lock& js,
+      FileSystemWritableData data, State& state,
+      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+
  private:
   kj::Rc<State> sharedState;
-};
 
-class FileSystemSyncAccessHandle final: public jsg::Object {
- public:
-  FileSystemSyncAccessHandle(kj::Rc<workerd::File> inner);
-
-  struct FileSystemReadWriteOptions {
-    jsg::Optional<uint32_t> at;
-    JSG_STRUCT(at);
-  };
-
-  uint32_t read(
-      jsg::Lock& js, jsg::BufferSource buffer, jsg::Optional<FileSystemReadWriteOptions> options);
-  uint32_t write(jsg::Lock& js,
-      jsg::BufferSource buffer,
-      jsg::Optional<FileSystemReadWriteOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
-
-  void truncate(jsg::Lock& js,
-      uint32_t newSize,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
-  uint32_t getSize(jsg::Lock& js);
-  void flush(jsg::Lock& js);
-  void close(jsg::Lock& js);
-
-  JSG_RESOURCE_TYPE(FileSystemSyncAccessHandle) {
-    JSG_METHOD(read);
-    JSG_METHOD(write);
-    JSG_METHOD(truncate);
-    JSG_METHOD(getSize);
-    JSG_METHOD(flush);
-    JSG_METHOD(close);
+  void visitForGc(jsg::GcVisitor& visitor) {
+    visitor.visit(sharedState->file);
   }
-
- private:
-  kj::Maybe<kj::Rc<workerd::File>> inner;
-  uint32_t position = 0;
 };
 
 class StorageManager final: public jsg::Object {
@@ -596,20 +606,19 @@ class StorageManager final: public jsg::Object {
 #define EW_WEB_FILESYSTEM_ISOLATE_TYPE                                                             \
   workerd::api::FileSystemHandle, workerd::api::FileSystemFileHandle,                              \
       workerd::api::FileSystemDirectoryHandle, workerd::api::FileSystemWritableFileStream,         \
-      workerd::api::FileSystemSyncAccessHandle, workerd::api::StorageManager,                      \
+      workerd::api::StorageManager,                                                                \
       workerd::api::FileSystemFileHandle::FileSystemCreateWritableOptions,                         \
       workerd::api::FileSystemDirectoryHandle::FileSystemGetFileOptions,                           \
       workerd::api::FileSystemDirectoryHandle::FileSystemGetDirectoryOptions,                      \
       workerd::api::FileSystemDirectoryHandle::FileSystemRemoveOptions,                            \
-      workerd::api::FileSystemSyncAccessHandle::FileSystemReadWriteOptions,                        \
       workerd::api::FileSystemWritableFileStream::WriteParams,                                     \
-      workerd::api::FileSystemDirectoryHandle::EntryType,                                          \
       workerd::api::FileSystemDirectoryHandle::EntryIterator,                                      \
       workerd::api::FileSystemDirectoryHandle::KeyIterator,                                        \
       workerd::api::FileSystemDirectoryHandle::ValueIterator,                                      \
       workerd::api::FileSystemDirectoryHandle::EntryIterator::Next,                                \
       workerd::api::FileSystemDirectoryHandle::KeyIterator::Next,                                  \
-      workerd::api::FileSystemDirectoryHandle::ValueIterator::Next
+      workerd::api::FileSystemDirectoryHandle::ValueIterator::Next,                                \
+      workerd::api::FileSystemHandle::RemoveOptions
 
 #define EW_FILESYSTEM_ISOLATE_TYPES                                                                \
   workerd::api::FileSystemModule, workerd::api::Stat, workerd::api::FileSystemModule::StatOptions, \
@@ -620,6 +629,8 @@ class StorageManager final: public jsg::Object {
       workerd::api::FileSystemModule::RenameOrCopyOptions,                                         \
       workerd::api::FileSystemModule::MkdirOptions, workerd::api::FileSystemModule::RmOptions,     \
       workerd::api::FileSystemModule::DirEntHandle,                                                \
-      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle
+      workerd::api::FileSystemModule::ReadDirOptions, workerd::api::FileFdHandle,                  \
+      workerd::api::FileSystemModule::CpOptions,                                                   \
+      workerd::api::FileSystemModule::OpenAsBlobOptions
 
 }  // namespace workerd::api

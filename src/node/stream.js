@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-/* eslint-disable */
-
 import { pipeline } from 'node-internal:streams_pipeline';
 import {
   destroyer,

@@ -72,7 +72,7 @@ struct HeadersContext: public jsg::Object, public jsg::ContextGlobal {
       auto kFoo = builder.add("foo");
       auto headersTable = builder.build();
       kj::HttpHeaders kjHeaders(*headersTable);
-      kjHeaders.set(kFoo, "test");
+      kjHeaders.setPtr(kFoo, "test");
 
       auto headers =
           js.alloc<workerd::api::Headers>(js, kjHeaders, workerd::api::Headers::Guard::NONE);

@@ -257,6 +257,8 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy;
   CountQueuingStrategy: typeof CountQueuingStrategy;
   ErrorEvent: typeof ErrorEvent;
+  MessageChannel: typeof MessageChannel;
+  MessagePort: typeof MessagePort;
   EventSource: typeof EventSource;
   ReadableStreamBYOBRequest: typeof ReadableStreamBYOBRequest;
   ReadableStreamDefaultController: typeof ReadableStreamDefaultController;
@@ -413,7 +415,7 @@ export type ExportedHandlerTraceHandler<Env = unknown> = (
   ctx: ExecutionContext,
 ) => void | Promise<void>;
 export type ExportedHandlerTailStreamHandler<Env = unknown> = (
-  event: TailStream.TailEvent,
+  event: TailStream.TailEvent<TailStream.Onset>,
   env: Env,
   ctx: ExecutionContext,
 ) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
@@ -521,7 +523,7 @@ export interface DurableObjectId {
   equals(other: DurableObjectId): boolean;
   readonly name?: string;
 }
-export interface DurableObjectNamespace<
+export declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -531,6 +533,10 @@ export interface DurableObjectNamespace<
   idFromString(id: string): DurableObjectId;
   get(
     id: DurableObjectId,
+    options?: DurableObjectNamespaceGetDurableObjectOptions,
+  ): DurableObjectStub<T>;
+  getByName(
+    name: string,
     options?: DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStub<T>;
   jurisdiction(
@@ -556,6 +562,7 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
 }
 export interface DurableObjectState {
   waitUntil(promise: Promise<any>): void;
+  props: any;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -636,6 +643,7 @@ export interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -1374,6 +1382,47 @@ export interface ErrorEventErrorEventInit {
   error?: any;
 }
 /**
+ * A message received by a target object.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
+ */
+export declare class MessageEvent extends Event {
+  constructor(type: string, initializer: MessageEventInit);
+  /**
+   * Returns the data of the message.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
+   */
+  readonly data: any;
+  /**
+   * Returns the origin of the message, for server-sent events and cross-document messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/origin)
+   */
+  readonly origin: string | null;
+  /**
+   * Returns the last event ID string, for server-sent events.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/lastEventId)
+   */
+  readonly lastEventId: string;
+  /**
+   * Returns the WindowProxy of the source window, for cross-document messaging, and the MessagePort being attached, in the connect event fired at SharedWorkerGlobalScope objects.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/source)
+   */
+  readonly source: MessagePort | null;
+  /**
+   * Returns the MessagePort array sent with the message, for cross-document messaging and channel messaging.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/ports)
+   */
+  readonly ports: MessagePort[];
+}
+export interface MessageEventInit {
+  data: ArrayBuffer | string;
+}
+/**
  * Provides a way to easily construct a set of key/value pairs representing form fields and their values, which can then be easily sent using the XMLHttpRequest.send() method. It uses the same format a form would use if the encoding type were set to "multipart/form-data".
  *
  * [MDN Reference](https://developer.mozilla.org/docs/Web/API/FormData)
@@ -1714,7 +1763,7 @@ export interface Request<
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Request/cache)
    */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
 }
 export interface RequestInit<Cf = CfProperties> {
   /* A string to set request's method. */
@@ -1728,7 +1777,7 @@ export interface RequestInit<Cf = CfProperties> {
   fetcher?: Fetcher | null;
   cf?: Cf;
   /* A string indicating how the request will interact with the browser's cache to set request's cache. */
-  cache?: "no-store";
+  cache?: "no-store" | "no-cache";
   /* A cryptographic hash of the resource to be fetched by request. Sets request's integrity. */
   integrity?: string;
   /* An AbortSignal to set request's signal. */
@@ -1736,8 +1785,18 @@ export interface RequestInit<Cf = CfProperties> {
   encodeResponseBody?: "automatic" | "manual";
 }
 export type Service<
-  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
-> = Fetcher<T>;
+  T extends
+    | (new (...args: any[]) => Rpc.WorkerEntrypointBranded)
+    | Rpc.WorkerEntrypointBranded
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? Fetcher<InstanceType<T>>
+  : T extends Rpc.WorkerEntrypointBranded
+    ? Fetcher<T>
+    : T extends Exclude<Rpc.EntrypointBranded, Rpc.WorkerEntrypointBranded>
+      ? never
+      : Fetcher<undefined>;
 export type Fetcher<
   T extends Rpc.EntrypointBranded | undefined = undefined,
   Reserved extends string = never,
@@ -2528,6 +2587,7 @@ export interface TraceItem {
   readonly scriptVersion?: ScriptVersion;
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
+  readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
@@ -2823,23 +2883,6 @@ export interface CloseEventInit {
   reason?: string;
   wasClean?: boolean;
 }
-/**
- * A message received by a target object.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent)
- */
-export declare class MessageEvent extends Event {
-  constructor(type: string, initializer: MessageEventInit);
-  /**
-   * Returns the data of the message.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageEvent/data)
-   */
-  readonly data: ArrayBuffer | string;
-}
-export interface MessageEventInit {
-  data: ArrayBuffer | string;
-}
 export type WebSocketEventMap = {
   close: CloseEvent;
   message: MessageEvent;
@@ -3032,6 +3075,75 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+}
+/**
+ * This Channel Messaging API interface represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort)
+ */
+export declare abstract class MessagePort extends EventTarget {
+  /**
+   * Posts a message through the channel. Objects listed in transfer are transferred, not just cloned, meaning that they are no longer usable on the sending side.
+   *
+   * Throws a "DataCloneError" DOMException if transfer contains duplicate objects or port, or if message could not be cloned.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/postMessage)
+   */
+  postMessage(
+    data?: any,
+    options?: any[] | MessagePortPostMessageOptions,
+  ): void;
+  /**
+   * Disconnects the port, so that it is no longer active.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/close)
+   */
+  close(): void;
+  /**
+   * Begins dispatching messages received on the port.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessagePort/start)
+   */
+  start(): void;
+  get onmessage(): any | null;
+  set onmessage(value: any | null);
+}
+/**
+ * This Channel Messaging API interface allows us to create a new message channel and send data through it via its two MessagePort properties.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel)
+ */
+export declare class MessageChannel {
+  constructor();
+  /**
+   * Returns the first MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port1)
+   */
+  readonly port1: MessagePort;
+  /**
+   * Returns the second MessagePort object.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/MessageChannel/port2)
+   */
+  readonly port2: MessagePort;
+}
+export interface MessagePortPostMessageOptions {
+  transfer?: any[];
+}
+export interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
+  put<T>(key: string, value: T): void;
+  delete(key: string): boolean;
+}
+export interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
 }
 export type AiImageClassificationInput = {
   image: number[];
@@ -5900,7 +6012,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId: string): AutoRAG;
+  autorag(autoragId?: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
     Options extends AiOptions,
@@ -5957,6 +6069,12 @@ export type GatewayOptions = {
   eventId?: string;
   requestTimeoutMs?: number;
   retries?: GatewayRetries;
+};
+export type UniversalGatewayOptions = Exclude<GatewayOptions, "id"> & {
+  /**
+   ** @deprecated
+   */
+  id?: string;
 };
 export type AiGatewayPatchLog = {
   score?: number | null;
@@ -6051,7 +6169,7 @@ export declare abstract class AiGateway {
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
     options?: {
-      gateway?: GatewayOptions;
+      gateway?: UniversalGatewayOptions;
       extraHeaders?: object;
     },
   ): Promise<Response>;
@@ -6082,6 +6200,7 @@ export type AutoRagSearchRequest = {
 };
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
   stream?: boolean;
+  system_prompt?: string;
 };
 export type AutoRagAiSearchRequestStreaming = Omit<
   AutoRagAiSearchRequest,
@@ -6163,6 +6282,12 @@ export interface BasicImageTransformations {
    */
   fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
   /**
+   * Image segmentation using artificial intelligence models. Sets pixels not
+   * within selected segment area to transparent e.g "foreground" sets every
+   * background pixel as transparent.
+   */
+  segment?: "foreground";
+  /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
    * "left", "right", "top", "bottom", "auto", or "center" (the default),
@@ -6175,6 +6300,7 @@ export interface BasicImageTransformations {
    * source image.
    */
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -6491,13 +6617,13 @@ export interface IncomingRequestCfPropertiesBase
    *
    * @example 395747
    */
-  asn: number;
+  asn?: number;
   /**
    * The organization which owns the ASN of the incoming request.
    *
    * @example "Google Cloud"
    */
-  asOrganization: string;
+  asOrganization?: string;
   /**
    * The original value of the `Accept-Encoding` header if Cloudflare modified it.
    *
@@ -6624,7 +6750,7 @@ export interface IncomingRequestCfPropertiesCloudflareForSaaSEnterprise<
    * This field is only present if you have Cloudflare for SaaS enabled on your account
    * and you have followed the [required steps to enable it]((https://developers.cloudflare.com/cloudflare-for-platforms/cloudflare-for-saas/domain-support/custom-metadata/)).
    */
-  hostMetadata: HostMetadata;
+  hostMetadata?: HostMetadata;
 }
 export interface IncomingRequestCfPropertiesCloudflareAccessOrApiShield {
   /**
@@ -7177,6 +7303,11 @@ export interface D1Meta {
      */
     sql_duration_ms: number;
   };
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
 }
 export interface D1Response {
   success: true;
@@ -7309,6 +7440,22 @@ export declare type EmailExportedHandler<Env = unknown> = (
   env: Env,
   ctx: ExecutionContext,
 ) => void | Promise<void>;
+/**
+ * Hello World binding to serve as an explanatory example. DO NOT USE
+ */
+export interface HelloWorldBinding {
+  /**
+   * Retrieve the current stored value
+   */
+  get(): Promise<{
+    value: string;
+    ms?: number;
+  }>;
+  /**
+   * Set a new stored value
+   */
+  set(value: string): Promise<void>;
+}
 export interface Hyperdrive {
   /**
    * Connect directly to Hyperdrive as if it's your database, returning a TCP socket.
@@ -7390,7 +7537,9 @@ export type ImageTransform = {
   fit?: "scale-down" | "contain" | "pad" | "squeeze" | "cover" | "crop";
   flip?: "h" | "v" | "hv";
   gamma?: number;
+  segment?: "foreground";
   gravity?:
+    | "face"
     | "left"
     | "right"
     | "top"
@@ -7432,6 +7581,9 @@ export type ImageDrawOptions = {
   bottom?: number;
   right?: number;
 };
+export type ImageInputOptions = {
+  encoding?: "base64";
+};
 export type ImageOutputOptions = {
   format:
     | "image/jpeg"
@@ -7443,6 +7595,7 @@ export type ImageOutputOptions = {
     | "rgba";
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 export interface ImagesBinding {
   /**
@@ -7450,13 +7603,19 @@ export interface ImagesBinding {
    * @throws {@link ImagesError} with code 9412 if input is not an image
    * @param stream The image bytes
    */
-  info(stream: ReadableStream<Uint8Array>): Promise<ImageInfoResponse>;
+  info(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): Promise<ImageInfoResponse>;
   /**
    * Begin applying a series of transformations to an image
    * @param stream The image bytes
    * @returns A transform handle
    */
-  input(stream: ReadableStream<Uint8Array>): ImageTransformer;
+  input(
+    stream: ReadableStream<Uint8Array>,
+    options?: ImageInputOptions,
+  ): ImageTransformer;
 }
 export interface ImageTransformer {
   /**
@@ -7482,6 +7641,9 @@ export interface ImageTransformer {
    */
   output(options: ImageOutputOptions): Promise<ImageTransformationResult>;
 }
+export type ImageTransformationOutputOptions = {
+  encoding?: "base64";
+};
 export interface ImageTransformationResult {
   /**
    * The image as a response, ready to store in cache or return to users
@@ -7494,9 +7656,113 @@ export interface ImageTransformationResult {
   /**
    * The bytes of the response
    */
-  image(): ReadableStream<Uint8Array>;
+  image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 export interface ImagesError extends Error {
+  readonly code: number;
+  readonly message: string;
+  readonly stack?: string;
+}
+/**
+ * Media binding for transforming media streams.
+ * Provides the entry point for media transformation operations.
+ */
+export interface MediaBinding {
+  /**
+   * Creates a media transformer from an input stream.
+   * @param media - The input media bytes
+   * @returns A MediaTransformer instance for applying transformations
+   */
+  input(media: ReadableStream<Uint8Array>): MediaTransformer;
+}
+/**
+ * Media transformer for applying transformation operations to media content.
+ * Handles sizing, fitting, and other input transformation parameters.
+ */
+export interface MediaTransformer {
+  /**
+   * Applies transformation options to the media content.
+   * @param transform - Configuration for how the media should be transformed
+   * @returns A generator for producing the transformed media output
+   */
+  transform(
+    transform: MediaTransformationInputOptions,
+  ): MediaTransformationGenerator;
+}
+/**
+ * Generator for producing media transformation results.
+ * Configures the output format and parameters for the transformed media.
+ */
+export interface MediaTransformationGenerator {
+  /**
+   * Generates the final media output with specified options.
+   * @param output - Configuration for the output format and parameters
+   * @returns The final transformation result containing the transformed media
+   */
+  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
+}
+/**
+ * Result of a media transformation operation.
+ * Provides multiple ways to access the transformed media content.
+ */
+export interface MediaTransformationResult {
+  /**
+   * Returns the transformed media as a readable stream of bytes.
+   * @returns A stream containing the transformed media data
+   */
+  media(): ReadableStream<Uint8Array>;
+  /**
+   * Returns the transformed media as an HTTP response object.
+   * @returns The transformed media as a Response, ready to store in cache or return to users
+   */
+  response(): Response;
+  /**
+   * Returns the MIME type of the transformed media.
+   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
+   */
+  contentType(): string;
+}
+/**
+ * Configuration options for transforming media input.
+ * Controls how the media should be resized and fitted.
+ */
+export type MediaTransformationInputOptions = {
+  /** How the media should be resized to fit the specified dimensions */
+  fit?: "contain" | "cover" | "scale-down";
+  /** Target width in pixels */
+  width?: number;
+  /** Target height in pixels */
+  height?: number;
+};
+/**
+ * Configuration options for Media Transformations output.
+ * Controls the format, timing, and type of the generated output.
+ */
+export type MediaTransformationOutputOptions = {
+  /**
+   * Output mode determining the type of media to generate
+   */
+  mode?: "video" | "spritesheet" | "frame" | "audio";
+  /** Whether to include audio in the output */
+  audio?: boolean;
+  /**
+   * Starting timestamp for frame extraction or start time for clips. (e.g. '2s').
+   */
+  time?: string;
+  /**
+   * Duration for video clips, audio extraction, and spritesheet generation (e.g. '5s').
+   */
+  duration?: string;
+  /**
+   * Output format for the generated media.
+   */
+  format?: "jpg" | "png" | "m4a";
+};
+/**
+ * Error object for media transformation operations.
+ * Extends the standard Error interface with additional media-specific information.
+ */
+export interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
@@ -7778,7 +8044,7 @@ export declare namespace TailStream {
     readonly type: "fetch";
     readonly method: string;
     readonly url: string;
-    readonly cfJson: string;
+    readonly cfJson?: object;
     readonly headers: Header[];
   }
   interface JsRpcEventInfo {
@@ -7827,10 +8093,6 @@ export declare namespace TailStream {
       | HibernatableWebSocketEventInfoError
       | HibernatableWebSocketEventInfoMessage;
   }
-  interface Resume {
-    readonly type: "resume";
-    readonly attachment?: any;
-  }
   interface CustomEventInfo {
     readonly type: "custom";
   }
@@ -7855,20 +8117,17 @@ export declare namespace TailStream {
     readonly tag?: string;
     readonly message?: string;
   }
-  interface Trigger {
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
-  }
   interface Onset {
     readonly type: "onset";
+    readonly attributes: Attribute[];
+    // id for the span being opened by this Onset event.
+    readonly spanId: string;
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
-    readonly trigger?: Trigger;
     readonly info:
       | FetchEventInfo
       | JsRpcEventInfo
@@ -7878,7 +8137,6 @@ export declare namespace TailStream {
       | EmailEventInfo
       | TraceEventInfo
       | HibernatableWebSocketEventInfo
-      | Resume
       | CustomEventInfo;
   }
   interface Outcome {
@@ -7887,12 +8145,11 @@ export declare namespace TailStream {
     readonly cpuTime: number;
     readonly wallTime: number;
   }
-  interface Hibernate {
-    readonly type: "hibernate";
-  }
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
+    // id for the span being opened by this SpanOpen event.
+    readonly spanId: string;
     readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
@@ -7913,18 +8170,15 @@ export declare namespace TailStream {
   interface Log {
     readonly type: "log";
     readonly level: "debug" | "error" | "info" | "log" | "warn";
-    readonly message: string;
+    readonly message: object;
   }
+  // This marks the worker handler return information.
+  // This is separate from Outcome because the worker invocation can live for a long time after
+  // returning. For example - Websockets that return an http upgrade response but then continue
+  // streaming information or SSE http connections.
   interface Return {
     readonly type: "return";
     readonly info?: FetchResponseInfo;
-  }
-  interface Link {
-    readonly type: "link";
-    readonly label?: string;
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
   }
   interface Attribute {
     readonly name: string;
@@ -7942,38 +8196,55 @@ export declare namespace TailStream {
     readonly type: "attributes";
     readonly info: Attribute[];
   }
-  interface TailEvent {
+  type EventType =
+    | Onset
+    | Outcome
+    | SpanOpen
+    | SpanClose
+    | DiagnosticChannelEvent
+    | Exception
+    | Log
+    | Return
+    | Attributes;
+  // Context in which this trace event lives.
+  interface SpanContext {
+    // Single id for the entire top-level invocation
+    // This should be a new traceId for the first worker stage invoked in the eyeball request and then
+    // same-account service-bindings should reuse the same traceId but cross-account service-bindings
+    // should use a new traceId.
     readonly traceId: string;
+    // spanId in which this event is handled
+    // for Onset and SpanOpen events this would be the parent span id
+    // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+    // For Hibernate and Mark this would be the span under which they were emitted.
+    // spanId is not set ONLY if:
+    //  1. This is an Onset event
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    readonly spanId?: string;
+  }
+  interface TailEvent<Event extends EventType> {
+    // invocation id of the currently invoked worker stage.
+    // invocation id will always be unique to every Onset event and will be the same until the Outcome event.
     readonly invocationId: string;
-    readonly spanId: string;
+    // Inherited spanContext for this event.
+    readonly spanContext: SpanContext;
     readonly timestamp: Date;
     readonly sequence: number;
-    readonly event:
-      | Onset
-      | Outcome
-      | Hibernate
-      | SpanOpen
-      | SpanClose
-      | DiagnosticChannelEvent
-      | Exception
-      | Log
-      | Return
-      | Link
-      | Attributes;
+    readonly event: Event;
   }
-  type TailEventHandler = (event: TailEvent) => void | Promise<void>;
-  type TailEventHandlerName =
-    | "outcome"
-    | "hibernate"
-    | "spanOpen"
-    | "spanClose"
-    | "diagnosticChannel"
-    | "exception"
-    | "log"
-    | "return"
-    | "link"
-    | "attributes";
-  type TailEventHandlerObject = Record<TailEventHandlerName, TailEventHandler>;
+  type TailEventHandler<Event extends EventType = EventType> = (
+    event: TailEvent<Event>,
+  ) => void | Promise<void>;
+  type TailEventHandlerObject = {
+    outcome?: TailEventHandler<Outcome>;
+    spanOpen?: TailEventHandler<SpanOpen>;
+    spanClose?: TailEventHandler<SpanClose>;
+    diagnosticChannel?: TailEventHandler<DiagnosticChannelEvent>;
+    exception?: TailEventHandler<Exception>;
+    log?: TailEventHandler<Log>;
+    return?: TailEventHandler<Return>;
+    attributes?: TailEventHandler<Attributes>;
+  };
   type TailEventHandlerType = TailEventHandler | TailEventHandlerObject;
 }
 // Copyright (c) 2022-2023 Cloudflare, Inc.

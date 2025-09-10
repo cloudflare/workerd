@@ -182,8 +182,7 @@ jsg::BufferSource Rsa::cipher(jsg::Lock& js,
 
     JSG_REQUIRE(labelCopy != nullptr, DOMOperationError,
         "Failed to allocate space for RSA-OAEP label copy", tryDescribeOpensslErrors());
-    auto ptr = l.asArrayPtr();
-    std::copy(ptr.begin(), ptr.end(), labelCopy);
+    kj::arrayPtr(labelCopy, l.size()).copyFrom(l.asArrayPtr());
 
     // EVP_PKEY_CTX_set0_rsa_oaep_label below takes ownership of the buffer passed in (must have
     // been OPENSSL_malloc-allocated).

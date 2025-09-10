@@ -1,7 +1,11 @@
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
-import { simpleRunPython } from 'pyodide-internal:util';
+import {
+  PythonRuntimeError,
+  PythonUserError,
+  simpleRunPython,
+} from 'pyodide-internal:util';
 import { default as EmbeddedPackagesTarReader } from 'pyodide-internal:packages_tar_reader';
 
 const canonicalizeNameRegex = /[-_.]+/g;
@@ -46,9 +50,17 @@ function createTarFsInfo(): TarFSInfo {
  * in /usr/lib.
  */
 class VirtualizedDir {
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private rootInfo: TarFSInfo; // site-packages directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private dynlibTarFs: TarFSInfo; // /usr/lib directory
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private soFiles: FilePath[];
+  // TODO(soon): Can we use the # syntax here?
+  // eslint-disable-next-line no-restricted-syntax
   private loadedRequirements: Set<string>;
   constructor() {
     this.rootInfo = createTarFsInfo();
@@ -67,7 +79,7 @@ class VirtualizedDir {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new Error(
+        throw new PythonRuntimeError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -114,7 +126,7 @@ class VirtualizedDir {
     for (const soFile of soFiles) {
       // If folder is in list of requirements include .so file in list to preload.
       const [pkg, ...rest] = soFile.split('/');
-      if (requirements.has(pkg)) {
+      if (requirements.has(pkg!)) {
         this.soFiles.push(rest);
       }
     }
@@ -122,7 +134,9 @@ class VirtualizedDir {
     for (const req of requirements) {
       const child = tarInfo.children!.get(req);
       if (!child) {
-        throw new Error(`Requirement ${req} not found in pyodide packages tar`);
+        throw new PythonUserError(
+          `Requirement ${req} not found in pyodide packages tar`
+        );
       }
       this.mountOverlay(child, 'site');
       this.loadedRequirements.add(req);
@@ -197,7 +211,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new Error(
+  throw new PythonRuntimeError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }

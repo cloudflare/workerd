@@ -54,11 +54,11 @@
 // │   └── random
 // └── tmp
 //
-// We can access the filesystem using VirtualFileSystem::tryGetCurrent():
+// We can access the filesystem using VirtualFileSystem::current():
 //
 // ```cpp
 // jsg::Lock& js = ...
-// KJ_IF_SOME(vfs, VirtualFileSystem::tryGetCurrent(js)) {
+// auto& vfs = VirtualFileSystem::current(js);
 // // Resolve the root of the file system
 // KJ_IF_SOME(node, vfs.resolve(js, "file:///path/to/thing"_url)) {
 //   KJ_SWITCH_ONEOF(node) {
@@ -125,7 +125,18 @@
 // destroyed/closed rather than leaking for the entire process. We use just a
 // simple in-memory table to track the file descriptors and their associated
 // files/directories.
-
+//
+// Note: It is important to keep in mind that Directory, File, and SymbolicLink
+// instances are kj::Refcounted objects. We utilize the Isolate lock to safely
+// manage the refcounts to avoid having to make these AtomicRefcounted, which
+// would carry additional overhead. This means that it is essentially that all
+// references to these objects, and all operations on them, as well as dropping
+// the references, are done while holding the isolate lock. It is particularly
+// necessary to take care when capturing these objects, for instance, into a
+// kj Promise then lambda. If the promise is dropped outside of the isolate lock,
+// the refcount will be decremented outside of the lock, causing issues. The
+// bottom line is that you should always be holding the isolate lock when
+// interacting with the virtual file system.
 namespace workerd {
 
 // TODO(node-fs): Currently, all files and directories use a fixed last
@@ -282,11 +293,24 @@ class File: public kj::Refcounted {
   virtual void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const = 0;
 
   // Creates a copy of this file.
-  virtual kj::Rc<File> clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
+  virtual kj::OneOf<FsError, kj::Rc<File>> clone(jsg::Lock& js) KJ_WARN_UNUSED_RESULT = 0;
 
   // Replaces the contents of this file with the given file if possible.
   // If this file is read-only, an exception will be thrown.
   virtual kj::Maybe<FsError> replace(jsg::Lock& js, kj::Rc<File> file) KJ_WARN_UNUSED_RESULT = 0;
+
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
+
+  // Ensures that the symlink instance itself is counted towards the isolate
+  // memory limit.
+  virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
+    // Non-op by default.
+  };
 };
 
 // A directory in the virtual file system. If the directory is read-only,
@@ -306,6 +330,12 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   virtual size_t count(
       jsg::Lock& js, kj::Maybe<FsType> typeFilter = kj::none) KJ_WARN_UNUSED_RESULT = 0;
 
+  // Provides a simple iterator iterface over the directory entries. It is important
+  // to only use these iterators while holding the isolate lock as entries may have
+  // their refcounts incremented and decremented while iterating. To avoid issues using
+  // the iterators using idiomatic C++ syntax, we don't require passing the jsg::Lock&
+  // to the begin() and end() methods so it is important to ensure they are only called
+  // while holding the lock.
   using Item = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
   using Entry = kj::HashMap<kj::String, Item>::Entry;
   virtual Entry* begin() = 0;
@@ -363,7 +393,7 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   };
 
   // Tries to remove the file, directory, or symlink at the given path. If the
-  // node does not exist, true will be returned. If the node is a directory and
+  // node does not exist, false will be returned. If the node is a directory and
   // the recursive option is not set, an exception will be thrown if the directory
   // is not empty. If the directory is read only, an exception will be thrown.
   // If the node is a file, it will be removed regardless of the recursive option
@@ -387,6 +417,18 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
   // add method. If the directory is not added, it will be deleted
   // when the handle is dropped.
   static kj::Rc<Directory> newWritable() KJ_WARN_UNUSED_RESULT;
+
+  // As a utility in some cases, we need the ability to create empty read-only
+  // directories.
+  static kj::Rc<Directory> newEmptyReadonly() KJ_WARN_UNUSED_RESULT;
+
+  // Variation of newWritable that ensures the Directory instance itself is
+  // counted towwards the isolate memory limit. This should be the typical
+  // case for directories created by user code, such as when creating a
+  // temporary directory under /tmp. This should not be used for directories
+  // that are created by the runtime that aren't directly under the users
+  // control, such as the /tmp directory itself.
+  static kj::Rc<Directory> newWritable(jsg::Lock& js) KJ_WARN_UNUSED_RESULT;
 
   // Used to build a new read-only directory. All files and directories added
   // may or may not be writable. The directory will not be initially included
@@ -421,6 +463,20 @@ class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory>
    private:
     Map entries;
   };
+
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  virtual kj::StringPtr getUniqueId(jsg::Lock&) const = 0;
+
+  // Ensures that the directory instance itself is counted towards the isolate
+  // memory limit. Not every directory needs to be counted so we don't do this
+  // by default automatically for every Directory instance.
+  virtual void countTowardsIsolateLimit(jsg::Lock& js) const {
+    // Non-op by default.
+  }
 };
 
 // The equivalent to a symbolic link. A symlink holds a reference to the
@@ -448,9 +504,22 @@ class SymbolicLink final: public kj::Refcounted {
 
   jsg::Url getTargetUrl() const KJ_WARN_UNUSED_RESULT;
 
+  // Returns a UUID that uniquely identifies this fs node. The value stable across
+  // multiple calls to getUniqueId() on the same node, but is not guaranteed to
+  // be stable across worker restarts. This is primarily useful for implementing
+  // the FileSystemHandle.getUniqueId() API, which is not yet fully standardized
+  // but is being implemented and has Web Platform Tests.
+  kj::StringPtr getUniqueId(jsg::Lock&) const;
+
+  // Ensures that the symlink instance itself is counted towards the isolate
+  // memory limit.
+  void countTowardsIsolateLimit(jsg::Lock& js) const;
+
  private:
   kj::Rc<Directory> root;
   kj::Path targetPath;
+  mutable kj::Maybe<kj::String> maybeUniqueId;
+  mutable kj::Maybe<jsg::ExternalMemoryAdjustment> maybeMemoryAdjustment;
 };
 
 using FsNode = kj::OneOf<kj::Rc<File>, kj::Rc<Directory>, kj::Rc<SymbolicLink>>;
@@ -458,6 +527,9 @@ using FsNodeWithError = kj::OneOf<FsError, kj::Rc<File>, kj::Rc<Directory>, kj::
 class FsMap;
 
 // The virtual file system interface. This is the main entry point for accessing the vfs.
+// It is important to always destroy the VirtualFileSystem instance under the isolate lock.
+// The VFS holds a table of Refcounted objects (File, Directory, SymbolicLink) that can only
+// be safely destroyed under the isolate lock.
 class VirtualFileSystem {
  public:
   virtual ~VirtualFileSystem() noexcept(false) {}
@@ -518,7 +590,7 @@ class VirtualFileSystem {
   virtual const jsg::Url& getDevRoot() const KJ_WARN_UNUSED_RESULT = 0;
 
   // Get the current virtual file system for the current isolate lock.
-  static kj::Maybe<const VirtualFileSystem&> tryGetCurrent(jsg::Lock&) KJ_WARN_UNUSED_RESULT;
+  static const VirtualFileSystem& current(jsg::Lock&) KJ_WARN_UNUSED_RESULT;
 
   // ==========================================================================
   // File Descriptor support
@@ -567,6 +639,13 @@ class VirtualFileSystem {
     uint32_t position = 0;
   };
 
+  enum class Stdio {
+    IN,
+    OUT,
+    ERR,
+  };
+  virtual kj::Rc<OpenedFile> getStdio(jsg::Lock& js, Stdio stdio) const KJ_WARN_UNUSED_RESULT = 0;
+
   // Attempts to open a file descriptor for the given file URL. It's critical
   // to understand that the file descriptor table is shared for the entire
   // worker. This means that if a file descriptor is opened, it will remain
@@ -599,6 +678,14 @@ class VirtualFileSystem {
   // Returns kj::none if the fd is not opened/known.
   virtual kj::Maybe<kj::Rc<OpenedFile>> tryGetFd(
       jsg::Lock& js, int fd) const KJ_WARN_UNUSED_RESULT = 0;
+
+  // Locks are used by the web file system to ensure that certain mutation operations
+  // are not permitted while a lock is held. These are not true locks, they are more
+  // like simple refcounts. While the refcount is greater than 0, the lock is held.
+  // The lock is released when the returned kj::Own<void> is dropped.
+  virtual kj::Own<void> lock(
+      jsg::Lock& js, const jsg::Url& locator) const KJ_WARN_UNUSED_RESULT = 0;
+  virtual bool isLocked(jsg::Lock& js, const jsg::Url& locator) const KJ_WARN_UNUSED_RESULT = 0;
 };
 
 kj::Own<VirtualFileSystem> newVirtualFileSystem(kj::Own<FsMap> fsMap,
@@ -672,8 +759,17 @@ class TmpDirStoreScope final {
     return dir.addRef();
   }
 
+  kj::PathPtr getCwd() const {
+    return kj::PathPtr(cwd);
+  }
+
+  void setCwd(kj::Path newCwd) {
+    cwd = kj::mv(newCwd);
+  }
+
  private:
   mutable kj::Rc<Directory> dir;
+  kj::Path cwd;
   bool onStack = false;
 };
 
@@ -718,4 +814,9 @@ kj::Rc<File> getDevZero() KJ_WARN_UNUSED_RESULT;
 kj::Rc<File> getDevFull() KJ_WARN_UNUSED_RESULT;
 kj::Rc<File> getDevRandom() KJ_WARN_UNUSED_RESULT;
 kj::Rc<Directory> getDevDirectory() KJ_WARN_UNUSED_RESULT;
+
+// Helper functions for current working directory management
+kj::Maybe<kj::PathPtr> getCurrentWorkingDirectory() KJ_WARN_UNUSED_RESULT;
+bool setCurrentWorkingDirectory(kj::Path newCwd) KJ_WARN_UNUSED_RESULT;
+
 }  // namespace workerd
