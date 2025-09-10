@@ -199,7 +199,6 @@ export const hrtime = Object.assign(
   }
 );
 
-// No-op functions for operations that don't need to work
 export function ref(): void {
   // no-op
 }
@@ -222,7 +221,6 @@ export function hasUncaughtExceptionCaptureCallback(): boolean {
   );
 }
 
-// Error-throwing functions for operations expected to have immediate returns/side-effects
 export function kill(_pid: number, _signal?: string | number): boolean {
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.kill');
 }
@@ -239,10 +237,8 @@ export function dlopen(
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.dlopen');
 }
 
-// Property with getter/setter
 export const exitCode: number | undefined = undefined;
 
-// Mock implementations that return default values
 export function getActiveResourcesInfo(): string[] {
   throw new ERR_METHOD_NOT_IMPLEMENTED('process.getActiveResourcesInfo');
 }
@@ -318,12 +314,12 @@ export function cpuUsage(_previousValue?: { user: number; system: number }): {
 // Properties and constants
 export const channel = null;
 export const connected = false;
-export const debugPort = 9229;
+export const debugPort = 0; // may be implemented to align with inspector in future
 export const noDeprecation = false;
 export const traceDeprecation = false;
 export const throwDeprecation = false;
 export const sourceMapsEnabled = false;
-export const execPath = '/usr/bin/workerd';
+export const execPath = '';
 
 export const permission = {
   has: (): boolean => {
