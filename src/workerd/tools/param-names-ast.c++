@@ -37,6 +37,7 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>

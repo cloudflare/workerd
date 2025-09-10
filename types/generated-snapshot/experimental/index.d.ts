@@ -3388,6 +3388,44 @@ interface SyncKvListOptions {
   reverse?: boolean;
   limit?: number;
 }
+interface WorkerStub {
+  getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): Fetcher<T>;
+  getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): DurableObjectClass<T>;
+}
+interface WorkerStubEntrypointOptions {
+  props?: any;
+}
+interface WorkerLoader {
+  get(
+    name: string,
+    getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
+  ): WorkerStub;
+}
+interface WorkerLoaderModule {
+  js?: string;
+  cjs?: string;
+  text?: string;
+  data?: ArrayBuffer;
+  json?: any;
+  py?: string;
+}
+interface WorkerLoaderWorkerCode {
+  compatibilityDate: string;
+  compatibilityFlags?: string[];
+  allowExperimental?: boolean;
+  mainModule: string;
+  modules: Record<string, WorkerLoaderModule | string>;
+  env?: any;
+  globalOutbound?: Fetcher | null;
+  tails?: Fetcher[];
+  streamingTails?: Fetcher[];
+}
 type AiImageClassificationInput = {
   image: number[];
 };
