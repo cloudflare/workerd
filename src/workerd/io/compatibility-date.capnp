@@ -1075,4 +1075,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
      $compatEnableDate("2025-09-21");
    # Enables PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
    # PerformanceObserver and PerformanceObserverEntryList global classes.
+
+  enableNodeJsDomainModule @124 :Bool
+    $compatEnableFlag("enable_nodejs_domain_module")
+    $compatDisableFlag("disable_nodejs_domain_module")
+    $experimental;
+    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+  # Enables the Node.js non-functional stub domain module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
 }
