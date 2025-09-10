@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/util/http-util.h>
 
@@ -129,6 +130,10 @@ class WorkerInterface: public kj::HttpService {
     // RequestObserver. The RequestObserver implementation will define what numbers correspond to
     // what types.
     virtual uint16_t getType() = 0;
+
+    // Get event info for tracing.
+    // Return none if this event type doesn't need tracing.
+    virtual kj::Maybe<tracing::EventInfo> getEventInfo() const { return kj::none; }
 
     // If the CustomEvent fails before any of the other methods are called, this may be invoked
     // to report the failure reason.
