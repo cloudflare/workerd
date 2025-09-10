@@ -1099,4 +1099,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
   # Enables the Node.js non-functional stub tty module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsPunycodeModule @127 :Bool
+    $compatEnableFlag("enable_nodejs_punycode_module")
+    $compatDisableFlag("disable_nodejs_punycode_module")
+    $experimental;
+  # Enables the Node.js deprecated punycode module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
 }

@@ -161,6 +161,12 @@ wd_test(
 )
 
 wd_test(
+    src = "punycode-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["punycode-nodejs-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "streams-test.wd-test",
     args = ["--experimental"],

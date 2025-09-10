@@ -141,6 +141,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsTtyModule();
     }
 
+    if (module.getName() == "node:punycode"_kj) {
+      return featureFlags.getEnableNodeJsPunycodeModule();
+    }
+
     return true;
   });
 
