@@ -732,87 +732,8 @@ jsg::JsString ServiceWorkerGlobalScope::btoa(jsg::Lock& js, jsg::JsString str) {
 
 #ifdef WORKERD_FUZZILLI
 void ServiceWorkerGlobalScope::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
-  v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  v8::Local<v8::Value> value = v8::Local<v8::Value>::Cast(args[0].getHandle(isolate));
-  v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
-  v8::String::Utf8Value operation(js.v8Isolate, str);
-  if (*operation == nullptr) {
-    KJ_LOG(ERROR, "Fuzzilli operation was null...\n");
-    fflush(stdout);
-    return;
-  }
-
-  if (strcmp(*operation, "FUZZILLI_CRASH") == 0) {
-    auto maybeArg =
-        v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
-    if (!maybeArg.IsJust()) {
-      KJ_LOG(ERROR, "Maybe arg is empty...\n");
-      fflush(stdout);
-      return;
-    }
-    int32_t arg = maybeArg.FromJust();
-    switch (arg) {
-      case 0:
-        IMMEDIATE_CRASH();
-        break;
-      case 1:
-        assert(0);
-        //CHECK(false);
-        break;
-      case 2:
-        assert(0);
-        //DCHECK(false);
-        break;
-      case 3: {
-        perform_wild_write();
-        break;
-      }
-      case 4: {
-        // Use-after-free, should be caught by ASan (if active).
-        auto* vec = new std::vector<int>(4);
-        delete vec;
-        USE(vec->at(0));
-#ifndef V8_USE_ADDRESS_SANITIZER
-        // The testcase must also crash on non-asan builds.
-        perform_wild_write();
-#endif  // !V8_USE_ADDRESS_SANITIZER
-        break;
-      }
-      case 5: {
-        // Out-of-bounds access (1), likely only crashes in ASan or
-        // "hardened"/"safe" libc++ builds.
-        std::vector<int> vec(5);
-        USE(vec[5]);
-        break;
-      }
-      case 6: {
-        // Out-of-bounds access (2), likely only crashes in ASan builds.
-        std::vector<int> vec(6);
-        //linter complains about this...
-        // NOLINTNEXTLINE(edgeworker-ban-memset)
-        memset(vec.data(), 42, 0x100);
-        break;
-      }
-      default:
-        assert(0);
-        break;
-    }
-  } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
-    FILE* fzliout = fdopen(REPRL_DWFD, "w");
-    if (!fzliout) {
-      fprintf(stderr, "Fuzzer output channel not available, printing to stdout instead\n");
-      fzliout = stdout;
-    }
-
-    value = v8::Local<v8::Value>::Cast(args[1].getHandle(isolate));
-    str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
-    v8::String::Utf8Value string(js.v8Isolate, str);
-    if (*string == nullptr) {
-      return;
-    }
-    fprintf(fzliout, "%s\n", *string);
-    fflush(fzliout);
-  }
+  // Delegate to the fuzzilli handler in fuzzilli.c++
+  fuzzilli_handler(js, args);
 }
 #endif
 
