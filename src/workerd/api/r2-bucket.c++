@@ -321,7 +321,7 @@ static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result
   }
 }
 
-static void addHeadResultSpanTags(
+void addHeadResultSpanTags(
     jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& headResult) {
   traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, headResult.getEtag());
   traceContext.userSpan.setTag("cloudflare.r2.response.size"_kjc, headResult.getSize());
