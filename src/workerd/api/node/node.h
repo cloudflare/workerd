@@ -129,6 +129,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsDomainModule();
     }
 
+    if (module.getName() == "node:child_process"_kj) {
+      return featureFlags.getEnableNodeJsChildProcessModule();
+    }
+
     if (module.getName() == "node:v8"_kj) {
       return featureFlags.getEnableNodeJsV8Module();
     }
