@@ -13,6 +13,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_OUT_OF_RANGE,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import processImpl from 'node-internal:process';
 import { Buffer } from 'node-internal:internal_buffer';
@@ -198,33 +199,255 @@ export const hrtime = Object.assign(
   }
 );
 
-// Unsupported features - implemented as 'undefined' so they can still be imported
-// statically via `import { channel } from 'node:process'` without breaking.
-// In future, these may yet be be possibly implemented or stubbed.
-export const exitCode = undefined,
-  channel = undefined,
-  connected = undefined,
-  binding = undefined,
-  debugPort = undefined,
-  dlopen = undefined,
-  finalization = undefined,
-  getActiveResourcesInfo = undefined,
-  setUncaughtExceptionCaptureCallback = undefined,
-  hasUncaughtExceptionCaptureCallback = undefined,
-  memoryUsage = undefined,
-  noDeprecation = undefined,
-  permission = undefined,
-  release = undefined,
-  report = undefined,
-  resourceUsage = undefined,
-  send = undefined,
-  traceDeprecation = undefined,
-  throwDeprecation = undefined,
-  sourceMapsEnabled = undefined,
-  threadCpuUsage = undefined,
-  kill = undefined,
-  ref = undefined,
-  unref = undefined;
+// No-op functions for operations that don't need to work
+export function ref(): void {
+  // no-op
+}
+
+export function unref(): void {
+  // no-op
+}
+
+export function setUncaughtExceptionCaptureCallback(
+  _fn?: (...args: unknown[]) => void
+): void {
+  throw new ERR_METHOD_NOT_IMPLEMENTED(
+    'process.setUncaughtExceptionCaptureCallback'
+  );
+}
+
+export function hasUncaughtExceptionCaptureCallback(): boolean {
+  throw new ERR_METHOD_NOT_IMPLEMENTED(
+    'process.hasUncaughtExceptionCaptureCallback'
+  );
+}
+
+// Error-throwing functions for operations expected to have immediate returns/side-effects
+export function kill(_pid: number, _signal?: string | number): boolean {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.kill');
+}
+
+export function binding(_name: string): unknown {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.binding');
+}
+
+export function dlopen(
+  _module: unknown,
+  _filename: string,
+  _flags?: number
+): void {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.dlopen');
+}
+
+// Property with getter/setter
+export const exitCode: number | undefined = undefined;
+
+// Mock implementations that return default values
+export function getActiveResourcesInfo(): string[] {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.getActiveResourcesInfo');
+}
+
+export function memoryUsage(): {
+  rss: number;
+  heapTotal: number;
+  heapUsed: number;
+  external: number;
+  arrayBuffers: number;
+} {
+  return {
+    rss: 0,
+    heapTotal: 0,
+    heapUsed: 0,
+    external: 0,
+    arrayBuffers: 0,
+  };
+}
+
+export function resourceUsage(): {
+  userCPUTime: number;
+  systemCPUTime: number;
+  maxRSS: number;
+  sharedMemorySize: number;
+  unsharedDataSize: number;
+  unsharedStackSize: number;
+  minorPageFault: number;
+  majorPageFault: number;
+  swappedOut: number;
+  fsRead: number;
+  fsWrite: number;
+  ipcSent: number;
+  ipcReceived: number;
+  signalsCount: number;
+  voluntaryContextSwitches: number;
+  involuntaryContextSwitches: number;
+} {
+  return {
+    userCPUTime: 0,
+    systemCPUTime: 0,
+    maxRSS: 0,
+    sharedMemorySize: 0,
+    unsharedDataSize: 0,
+    unsharedStackSize: 0,
+    minorPageFault: 0,
+    majorPageFault: 0,
+    swappedOut: 0,
+    fsRead: 0,
+    fsWrite: 0,
+    ipcSent: 0,
+    ipcReceived: 0,
+    signalsCount: 0,
+    voluntaryContextSwitches: 0,
+    involuntaryContextSwitches: 0,
+  };
+}
+
+export function threadCpuUsage(): {
+  user: number;
+  system: number;
+} {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.threadCpuUsage');
+}
+
+export function cpuUsage(_previousValue?: { user: number; system: number }): {
+  user: number;
+  system: number;
+} {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.cpuUsage');
+}
+
+// Properties and constants
+export const channel = null;
+export const connected = false;
+export const debugPort = 9229;
+export const noDeprecation = false;
+export const traceDeprecation = false;
+export const throwDeprecation = false;
+export const sourceMapsEnabled = false;
+export const execPath = '/usr/bin/workerd';
+
+export const permission = {
+  has: (): boolean => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('process.permission.has');
+  },
+};
+
+export const release = {
+  name: 'node',
+  lts: true,
+  sourceUrl: '',
+  headersUrl: '',
+};
+
+export const report = {
+  compact: false,
+  directory: '',
+  filename: '',
+  getReport: (): Record<string, unknown> => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.getReport');
+  },
+  reportOnFatalError: false,
+  reportOnSignal: false,
+  reportOnUncaughtException: false,
+  signal: 'SIGUSR2',
+  writeReport: (): string => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('process.report.writeReport');
+  },
+};
+
+export const finalization = {
+  register: (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('process.finalization.register');
+  },
+  registerBeforeExit: (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED(
+      'process.finalization.registerBeforeExit'
+    );
+  },
+  unregister: (): void => {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('process.finalization.unregister');
+  },
+};
+
+// Additional undocumented APIs
+export function _rawDebug(_message: string): void {
+  // no-op
+}
+
+export const moduleLoadList: string[] = [];
+export const _preload_modules: string[] = [];
+
+export function _linkedBinding(_name: string): unknown {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process._linkedBinding');
+}
+
+export const domain = null;
+export const _exiting = false;
+
+export function _getActiveRequests(): unknown[] {
+  return [];
+}
+
+export function _getActiveHandles(): unknown[] {
+  return [];
+}
+
+export function reallyExit(code?: number): never {
+  processImpl.exitImpl(code || 0);
+  throw new Error('Process exit');
+}
+
+export function _kill(_pid: number, _signal: number): boolean {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process._kill');
+}
+
+export function constrainedMemory(): number {
+  return 0;
+}
+
+export function availableMemory(): number {
+  // This may be implemented in future, for now this matches unenv
+  return 0;
+}
+
+export function execve(
+  _file: string,
+  _args: string[],
+  _env: Record<string, string>
+): never {
+  throw new ERR_METHOD_NOT_IMPLEMENTED('process.execve');
+}
+
+export function openStdin(): typeof stdin {
+  return stdin;
+}
+
+export function _fatalException(_err: Error): boolean {
+  return false;
+}
+
+export function _tickCallback(): void {
+  // no-op
+}
+
+export function _debugProcess(_pid: number): void {
+  // no-op
+}
+
+export function _debugEnd(): void {
+  // no-op
+}
+
+export function _startProfilerIdleNotifier(): void {
+  // no-op
+}
+
+export function _stopProfilerIdleNotifier(): void {
+  // no-op
+}
+
+export function send(_message: unknown, _sendHandle?: unknown): boolean {
+  return false;
+}
 
 export function getBuiltinModule(id: string): object {
   return processImpl.getBuiltinModule(id);
@@ -350,30 +573,52 @@ interface Process extends EventEmitter {
   hrtime: typeof hrtime;
   uptime: typeof uptime;
   loadEnvFile: typeof loadEnvFile;
-  exitCode: undefined;
-  channel: undefined;
-  connected: undefined;
-  binding: undefined;
-  debugPort: undefined;
-  dlopen: undefined;
-  finalization: undefined;
-  getActiveResourcesInfo: undefined;
-  setUncaughtExceptionCaptureCallback: undefined;
-  hasUncaughtExceptionCaptureCallback: undefined;
-  memoryUsage: undefined;
-  noDeprecation: undefined;
-  permission: undefined;
-  release: undefined;
-  report: undefined;
-  resourceUsage: undefined;
-  send: undefined;
-  traceDeprecation: undefined;
-  throwDeprecation: undefined;
-  sourceMapsEnabled: undefined;
-  stdin: undefined;
-  stdout: undefined;
-  stderr: undefined;
-  threadCpuUsage: undefined;
+  exitCode: typeof exitCode;
+  channel: typeof channel;
+  connected: typeof connected;
+  binding: typeof binding;
+  debugPort: typeof debugPort;
+  dlopen: typeof dlopen;
+  finalization: typeof finalization;
+  getActiveResourcesInfo: typeof getActiveResourcesInfo;
+  setUncaughtExceptionCaptureCallback: typeof setUncaughtExceptionCaptureCallback;
+  hasUncaughtExceptionCaptureCallback: typeof hasUncaughtExceptionCaptureCallback;
+  memoryUsage: typeof memoryUsage;
+  noDeprecation: typeof noDeprecation;
+  permission: typeof permission;
+  release: typeof release;
+  report: typeof report;
+  resourceUsage: typeof resourceUsage;
+  send: typeof send;
+  traceDeprecation: typeof traceDeprecation;
+  throwDeprecation: typeof throwDeprecation;
+  sourceMapsEnabled: typeof sourceMapsEnabled;
+  stdin: typeof stdin;
+  stdout: typeof stdout;
+  stderr: typeof stderr;
+  threadCpuUsage: typeof threadCpuUsage;
+  cpuUsage: typeof cpuUsage;
+  execPath: typeof execPath;
+  constrainedMemory: typeof constrainedMemory;
+  availableMemory: typeof availableMemory;
+  execve: typeof execve;
+  openStdin: typeof openStdin;
+  _rawDebug: typeof _rawDebug;
+  moduleLoadList: typeof moduleLoadList;
+  _linkedBinding: typeof _linkedBinding;
+  domain: typeof domain;
+  _exiting: typeof _exiting;
+  _getActiveRequests: typeof _getActiveRequests;
+  _getActiveHandles: typeof _getActiveHandles;
+  reallyExit: typeof reallyExit;
+  _kill: typeof _kill;
+  _fatalException: typeof _fatalException;
+  _tickCallback: typeof _tickCallback;
+  _debugProcess: typeof _debugProcess;
+  _debugEnd: typeof _debugEnd;
+  _startProfilerIdleNotifier: typeof _startProfilerIdleNotifier;
+  _stopProfilerIdleNotifier: typeof _stopProfilerIdleNotifier;
+  _preload_modules: typeof _preload_modules;
 }
 
 const _process = {
@@ -442,6 +687,28 @@ const _process = {
   stdout,
   stderr,
   threadCpuUsage,
+  cpuUsage,
+  execPath,
+  constrainedMemory,
+  availableMemory,
+  execve,
+  openStdin,
+  _rawDebug,
+  moduleLoadList,
+  _linkedBinding,
+  domain,
+  _exiting,
+  _getActiveRequests,
+  _getActiveHandles,
+  reallyExit,
+  _kill,
+  _fatalException,
+  _tickCallback,
+  _debugProcess,
+  _debugEnd,
+  _startProfilerIdleNotifier,
+  _stopProfilerIdleNotifier,
+  _preload_modules,
 };
 
 const process: Process = Object.setPrototypeOf(

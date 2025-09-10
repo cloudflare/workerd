@@ -27,24 +27,46 @@ export const processPlatform = {
 };
 
 // Verify process keys match default keys and features
+// EventEmitter properties appear on process via event inheritance but aren't on the named exports API
+const ignoreKeys = ['_events', '_eventsCount', '_maxListeners'];
+
 const keys = [
+  '_debugEnd',
+  '_debugProcess',
+  '_exiting',
+  '_fatalException',
+  '_getActiveHandles',
+  '_getActiveRequests',
+  '_kill',
+  '_linkedBinding',
+  '_preload_modules',
+  '_rawDebug',
+  '_startProfilerIdleNotifier',
+  '_stopProfilerIdleNotifier',
+  '_tickCallback',
   'abort',
   'allowedNodeEnvironmentFlags',
   'arch',
   'argv',
   'argv0',
+  'availableMemory',
   'binding',
   'channel',
   'chdir',
   'config',
   'connected',
+  'constrainedMemory',
+  'cpuUsage',
   'cwd',
   'debugPort',
   'default',
   'dlopen',
+  'domain',
   'emitWarning',
   'env',
   'execArgv',
+  'execPath',
+  'execve',
   'exit',
   'exitCode',
   'features',
@@ -63,12 +85,15 @@ const keys = [
   'kill',
   'loadEnvFile',
   'memoryUsage',
+  'moduleLoadList',
   'nextTick',
   'noDeprecation',
+  'openStdin',
   'permission',
   'pid',
   'platform',
   'ppid',
+  'reallyExit',
   'ref',
   'release',
   'report',
@@ -101,27 +126,27 @@ export const processKeys = {
     keys.splice(keys.indexOf('default'), 1);
     assert.deepStrictEqual(
       Object.keys(process)
-        .filter((v) => v[0] !== '_')
+        .filter((key) => !ignoreKeys.includes(key))
         .sort(),
       keys
     );
     assert.deepStrictEqual(
       Object.keys(processMod.default)
-        .filter((v) => v[0] !== '_')
+        .filter((key) => !ignoreKeys.includes(key))
         .sort(),
       keys
     );
     const processBuiltin = processMod.getBuiltinModule('process');
     assert.deepStrictEqual(
       Object.keys(processBuiltin)
-        .filter((v) => v[0] !== '_')
+        .filter((key) => !ignoreKeys.includes(key))
         .sort(),
       keys
     );
     const processBuiltinScheme = processMod.getBuiltinModule('node:process');
     assert.deepStrictEqual(
       Object.keys(processBuiltinScheme)
-        .filter((v) => v[0] !== '_')
+        .filter((key) => !ignoreKeys.includes(key))
         .sort(),
       keys
     );
@@ -340,36 +365,64 @@ export const processProperties = {
   },
 };
 
-// Properties which are undefined and NOT throwing stubs to ensure polyfillability
-// via if (!process.prop) process.prop = polyfill();
-// Some of these might be implemented at future dates.
-export const processUndefined = {
+// Test implemented process APIs - no longer undefined
+export const processImplemented = {
   test() {
-    // These may be implemented in future
-    assert.strictEqual(process.kill, undefined);
-    assert.strictEqual(process.ref, undefined);
-    assert.strictEqual(process.unref, undefined);
+    // No-op functions
+    assert.strictEqual(typeof process.ref, 'function');
+    assert.strictEqual(typeof process.unref, 'function');
+
+    // Error-throwing functions
+    assert.strictEqual(typeof process.kill, 'function');
+    assert.strictEqual(typeof process.binding, 'function');
+    assert.strictEqual(typeof process.dlopen, 'function');
+
+    // Mock implementations
+    assert.strictEqual(typeof process.memoryUsage, 'function');
+    assert.strictEqual(typeof process.resourceUsage, 'function');
+    assert.strictEqual(typeof process.threadCpuUsage, 'function');
+    assert.strictEqual(typeof process.cpuUsage, 'function');
+
+    // Properties with default values
     assert.strictEqual(process.exitCode, undefined);
-    assert.strictEqual(process.channel, undefined);
-    assert.strictEqual(process.connected, undefined);
-    assert.strictEqual(process.binding, undefined);
-    assert.strictEqual(process.debugPort, undefined);
-    assert.strictEqual(process.dlopen, undefined);
-    assert.strictEqual(process.finalization, undefined);
-    assert.strictEqual(process.getActiveResourcesInfo, undefined);
-    assert.strictEqual(process.setUncaughtExceptionCaptureCallback, undefined);
-    assert.strictEqual(process.hasUncaughtExceptionCaptureCallback, undefined);
-    assert.strictEqual(process.memoryUsage, undefined);
-    assert.strictEqual(process.noDeprecation, undefined);
-    assert.strictEqual(process.permission, undefined);
-    assert.strictEqual(process.release, undefined);
-    assert.strictEqual(process.report, undefined);
-    assert.strictEqual(process.resourceUsage, undefined);
-    assert.strictEqual(process.send, undefined);
-    assert.strictEqual(process.traceDeprecation, undefined);
-    assert.strictEqual(process.throwDeprecation, undefined);
-    assert.strictEqual(process.sourceMapsEnabled, undefined);
-    assert.strictEqual(process.threadCpuUsage, undefined);
+    assert.strictEqual(process.channel, null);
+    assert.strictEqual(process.connected, false);
+    assert.strictEqual(typeof process.debugPort, 'number');
+    assert.strictEqual(process.noDeprecation, false);
+    assert.strictEqual(process.traceDeprecation, false);
+    assert.strictEqual(process.throwDeprecation, false);
+    assert.strictEqual(process.sourceMapsEnabled, false);
+    assert.strictEqual(typeof process.execPath, 'string');
+
+    // Objects
+    assert.strictEqual(typeof process.permission, 'object');
+    assert.strictEqual(typeof process.release, 'object');
+    assert.strictEqual(typeof process.report, 'object');
+    assert.strictEqual(typeof process.finalization, 'object');
+
+    // Additional APIs
+    assert.strictEqual(typeof process.constrainedMemory, 'function');
+    assert.strictEqual(typeof process.availableMemory, 'function');
+    assert.strictEqual(typeof process.send, 'function');
+    assert.strictEqual(process.send('test'), false);
+
+    // Test that error-throwing functions actually throw
+    assert.throws(() => process.getActiveResourcesInfo(), {
+      message: /process\.getActiveResourcesInfo/,
+    });
+    assert.throws(() => process.setUncaughtExceptionCaptureCallback(), {
+      message: /process\.setUncaughtExceptionCaptureCallback/,
+    });
+    assert.throws(() => process.hasUncaughtExceptionCaptureCallback(), {
+      message: /process\.hasUncaughtExceptionCaptureCallback/,
+    });
+    assert.throws(() => process.kill(1), { message: /process\.kill/ });
+    assert.throws(() => process.binding('test'), {
+      message: /process\.binding/,
+    });
+    assert.throws(() => process.dlopen({}, 'test'), {
+      message: /process\.dlopen/,
+    });
   },
 };
 
