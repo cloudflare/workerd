@@ -51,12 +51,13 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     KJ_IF_SOME(b, this->bucket->bindingName()) {
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
     }
-    traceContext.userSpan.setTag(
-        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("UploadPart"_kjc));
     KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
-    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.part_number"_kjc, kj::str(partNumber));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -81,12 +82,35 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
                 Error, "SSE-C Key has invalid format");
             JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
             ssecBuilder.setKey(kj::str(keyString));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
           }
           KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
             JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
             ssecBuilder.setKey(kj::encodeHex(keyBuff));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
           }
         }
+      }
+    }
+
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(size));
+        }
+      }
+      KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(text.value.size()));
+      }
+      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(data.size()));
+      }
+      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+        traceContext.userSpan.setTag(
+            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(blob->getSize()));
       }
     }
 
@@ -111,6 +135,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
 
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::String etag = kj::str(responseBuilder.getEtag());
+      traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, kj::str(etag));
       UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
       return uploadedPart;
     });
@@ -137,7 +162,11 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
-    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
+    kj::String partIds =
+        kj::strArray(KJ_MAP(part, uploadedParts) { return kj::str(part.partNumber); }, ", ");
+    traceContext.userSpan.setTag("cloudflare.r2.request.uploaded_parts"_kjc, kj::str(partIds));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -176,6 +205,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
       auto parsedObject =
           parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
       KJ_IF_SOME(obj, parsedObject) {
+        addHeadResultSpanTags(js, traceContext, *obj.get());
         return obj.addRef();
       } else {
         KJ_FAIL_ASSERT(
@@ -200,11 +230,12 @@ jsg::Promise<void> R2MultipartUpload::abort(
       traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
     }
     traceContext.userSpan.setTag(
-        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+        "cloudflare.r2.operation"_kjc, kj::str("AbortMultipartUpload"_kjc));
     KJ_IF_SOME(b, this->bucket->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
-    traceContext.userSpan.setTag("cloudflare.r2.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
