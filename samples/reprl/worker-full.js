@@ -20,6 +20,8 @@ export default {
     //globalThis.CONSUMER_FETCH = env.CONSUMER.fetch;
 
     globalThis.env = env;
+    process = undefined;
+    globalThis.process = undefined;
     
     // used for scheduler.await
     globalThis.scheduler = scheduler;
