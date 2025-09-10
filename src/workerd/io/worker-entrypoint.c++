@@ -779,6 +779,16 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   this->incomingRequest = kj::none;
 
   auto& context = incomingRequest->getContext();
+  
+  // Set event info BEFORE calling run() to ensure onset event is reported before
+  // any user code executes (particularly important for actors whose constructors may run
+  // during delivered()).
+  KJ_IF_SOME(eventInfo, event->getEventInfo()) {
+    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+      t.setEventInfo(context.getInvocationSpanContext(), context.now(), kj::mv(eventInfo));
+    }
+  }
+  
   auto promise = event->run(kj::mv(incomingRequest), entrypointName, kj::mv(props), waitUntilTasks)
                      .attach(kj::mv(event));
 
