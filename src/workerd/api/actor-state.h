@@ -656,7 +656,9 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
-    JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
@@ -684,13 +686,23 @@ class DurableObjectState: public jsg::Object {
     // * Make `storage` non-optional
     // * Make `id` strictly `DurableObjectId` (it's only a string for colo-local actors which are
     //   not available publicly).
-    JSG_TS_OVERRIDE(<Props = unknown> {
-      readonly props: Props;
-      readonly exports: Cloudflare.Exports;
-      readonly id: DurableObjectId;
-      readonly storage: DurableObjectStorage;
-      blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
-    });
+    if (flags.getWorkerdExperimental()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    } else {
+      // No ctx.exports yet.
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly id: DurableObjectId;
+        readonly storage: DurableObjectStorage;
+        blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

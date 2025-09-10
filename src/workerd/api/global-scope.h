@@ -255,7 +255,9 @@ class ExecutionContext: public jsg::Object {
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
-    JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
+    }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
 
     if (flags.getWorkerdExperimental()) {
@@ -272,10 +274,16 @@ class ExecutionContext: public jsg::Object {
       JSG_METHOD(abort);
     }
 
-    JSG_TS_OVERRIDE(<Props = unknown> {
-      readonly props: Props;
-      readonly exports: Cloudflare.Exports;
-    });
+    if (flags.getWorkerdExperimental()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+      });
+    } else {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
