@@ -1,6 +1,9 @@
 #if defined(__linux__) && defined(WORKERD_FUZZILLI)
 #include "fuzzilli.h"
 
+#include <workerd/api/util.h>
+#include <workerd/jsg/jsg.h>
+
 #include <errno.h>
 #include <string.h>
 
@@ -33,6 +36,7 @@ void __sanitizer_cov_reset_edgeguards() {
   for (uint32_t* x = __edges_start; x < __edges_stop && N < MAX_EDGES; x++) *x = ++N;
 }
 
+// setup trace pc guard to let fuzzilli get some coverage info
 extern "C" void __sanitizer_cov_trace_pc_guard_init(uint32_t* start, uint32_t* stop) {
   // Avoid duplicate initialization
   if (start == stop || *start) return;
@@ -79,4 +83,94 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t* guard) {
   __shmem->edges[index / 8] |= 1 << (index % 8);
   *guard = 0;
 }
+
+void fuzzilli_handler(workerd::jsg::Lock& js, workerd::jsg::Arguments<workerd::jsg::Value>& args) {
+  if (args.size() == 0) {
+    // No arguments provided, just return
+    return;
+  }
+
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  v8::Local<v8::Value> value = v8::Local<v8::Value>::Cast(args[0].getHandle(isolate));
+  v8::Local<v8::String> str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+  v8::String::Utf8Value operation(js.v8Isolate, str);
+  if (*operation == nullptr) {
+    return;
+  }
+
+  if (strcmp(*operation, "FUZZILLI_CRASH") == 0) {
+    auto maybeArg =
+        v8::Local<v8::Int32>::Cast(args[1].getHandle(isolate))->Int32Value(js.v8Context());
+    if (!maybeArg.IsJust()) {
+      KJ_LOG(ERROR, "Maybe arg is empty...\n");
+      fflush(stdout);
+      return;
+    }
+    int32_t arg = maybeArg.FromJust();
+    switch (arg) {
+      case 0:
+        IMMEDIATE_CRASH();
+        break;
+      case 1:
+        assert(0);
+        //CHECK(false);
+        break;
+      case 2:
+        assert(0);
+        //DCHECK(false);
+        break;
+      case 3: {
+        perform_wild_write();
+        break;
+      }
+      case 4: {
+        // Use-after-free, should be caught by ASan (if active).
+        auto* vec = new std::vector<int>(4);
+        delete vec;
+        USE(vec->at(0));
+#ifndef V8_USE_ADDRESS_SANITIZER
+        // The testcase must also crash on non-asan builds.
+        perform_wild_write();
+#endif  // !V8_USE_ADDRESS_SANITIZER
+        break;
+      }
+      case 5: {
+        // Out-of-bounds access (1), likely only crashes in ASan or
+        // "hardened"/"safe" libc++ builds.
+        std::vector<int> vec(5);
+        USE(vec[5]);
+        break;
+      }
+      case 6: {
+        // Out-of-bounds access (2), likely only crashes in ASan builds.
+        std::vector<int> vec(6);
+        //linter complains about this...
+        // NOLINTNEXTLINE(edgeworker-ban-memset)
+        memset(vec.data(), 42, 0x100);
+        break;
+      }
+      default:
+        break;
+    }
+  } else if (strcmp(*operation, "FUZZILLI_PRINT") == 0) {
+    static FILE* fzliout = nullptr;
+    if (!fzliout) {
+      fzliout = fdopen(REPRL_DWFD, "w");
+      if (!fzliout) {
+        fprintf(stderr, "Fuzzer output channel not available, printing to stdout instead\n");
+        fzliout = stdout;
+      }
+    }
+
+    value = v8::Local<v8::Value>::Cast(args[1].getHandle(isolate));
+    str = workerd::jsg::check(value->ToDetailString(js.v8Context()));
+    v8::String::Utf8Value string(js.v8Isolate, str);
+    if (*string == nullptr) {
+      return;
+    }
+    fprintf(fzliout, "%s\n", *string);
+    fflush(fzliout);
+  }
+}
+
 #endif

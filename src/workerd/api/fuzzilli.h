@@ -1,7 +1,9 @@
 #pragma once
 
 #include <workerd/api/immediate-crash.h>
+#include <workerd/jsg/jsg.h>
 
+#include <assert.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +53,9 @@ void sanitizer_cov_reset_edgeguards();
 uint32_t sanitizer_cov_count_discovered_edges();
 void sanitizer_cov_prepare_for_hardware_sandbox();
 void cov_init_builtins_edges(uint32_t num_edges);
+
+void fuzzilli_handler(workerd::jsg::Lock& js, workerd::jsg::Arguments<workerd::jsg::Value>& args);
+
 // TODO: this would only work with the profiler like in d8
 // void cov_update_builtins_basic_block_coverage(const std::vector<bool>& cov_map);
 // https://github.com/v8/v8/blob/a63b49495eac716c1a4ccbef57e2e1c7e98f27e4/src/d8/d8.cc#L7284-L7286
