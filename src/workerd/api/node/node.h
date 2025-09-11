@@ -158,7 +158,7 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
     }
 
     if (module.getName() == "node:_stream_wrap"_kj) {
-      return featureFlags.getEnableNodeJsWorkerStreamWrapModule();
+      return featureFlags.getEnableNodeJsStreamWrapModule();
     }
 
     return true;
