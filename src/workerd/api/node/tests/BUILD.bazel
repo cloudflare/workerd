@@ -16,6 +16,18 @@ wd_test(
 )
 
 wd_test(
+    src = "cluster-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["cluster-nodejs-test.js"],
+)
+
+wd_test(
+    src = "child_process-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["child_process-nodejs-test.js"],
+)
+
+wd_test(
     src = "console-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["console-nodejs-test.js"],

@@ -1106,4 +1106,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js deprecated punycode module. It is required to use this flag with
   # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsClusterModule @128 :Bool
+    $compatEnableFlag("enable_nodejs_cluster_module")
+    $compatDisableFlag("disable_nodejs_cluster_module")
+    $experimental;
+  # Enables the Node.js non-functional stub cluster module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsChildProcessModule @129 :Bool
+    $compatEnableFlag("enable_nodejs_child_process_module")
+    $compatDisableFlag("disable_nodejs_child_process_module")
+    $experimental;
+  # Enables the Node.js non-functional stub child_process module. It is required to use this
+  #flag with nodejs_compat (or nodejs_compat_v2).
 }

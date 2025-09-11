@@ -129,6 +129,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsDomainModule();
     }
 
+    if (module.getName() == "node:child_process"_kj) {
+      return featureFlags.getEnableNodeJsChildProcessModule();
+    }
+
     if (module.getName() == "node:v8"_kj) {
       return featureFlags.getEnableNodeJsV8Module();
     }
@@ -139,6 +143,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
 
     if (module.getName() == "node:punycode"_kj) {
       return featureFlags.getEnableNodeJsPunycodeModule();
+    }
+
+    if (module.getName() == "node:cluster"_kj) {
+      return featureFlags.getEnableNodeJsClusterModule();
     }
 
     return true;
