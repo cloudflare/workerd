@@ -165,6 +165,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsWasiModule();
     }
 
+    if (module.getName() == "node:dgram"_kj) {
+      return featureFlags.getEnableNodeJsDgramModule();
+    }
+
     return true;
   });
 
