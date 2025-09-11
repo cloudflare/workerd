@@ -6,10 +6,13 @@
 #include "requirements.h"
 
 #include <workerd/api/pyodide/setup-emscripten.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
+#include <capnp/dynamic.h>
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
@@ -397,6 +400,28 @@ const kj::Array<kj::StringPtr> snapshotImports = kj::arr("_pyodide"_kj,
 
 kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
+}
+
+jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  auto obj = js.objNoProto();
+  auto dynamic = capnp::toDynamic(flags);
+  auto schema = dynamic.getSchema();
+
+  for (auto field: schema.getFields()) {
+    auto annotations = field.getProto().getAnnotations();
+
+    // Note that disable flags are not exposed.
+    for (auto annotation: annotations) {
+      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+        obj.setReadOnly(
+            js, annotation.getValue().getText(), js.boolean(dynamic.get(field).as<bool>()));
+      }
+    }
+  }
+
+  obj.seal(js);
+  return obj;
 }
 
 PyodideMetadataReader::State::State(const State& other)
