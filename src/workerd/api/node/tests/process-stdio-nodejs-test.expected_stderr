@@ -1,20 +1,2 @@
-Error Line 1
-Error Line 2
-Error Line 3
-Error First
-
-Error Second with empty line
-Error with trailing newlines
-
-
-Error Start
-Error Mid1
-Error Mid2
-Error End
-Test string write to stderr
-Test buffer write
-Hello
 console.error
 console.error interleaves
-24
-😀

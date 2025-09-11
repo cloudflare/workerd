@@ -180,14 +180,14 @@ Server::Server(kj::Filesystem& fs,
     kj::Timer& timer,
     kj::Network& network,
     kj::EntropySource& entropySource,
-    Worker::ConsoleMode consoleMode,
+    Worker::LoggingOptions loggingOptions,
     kj::Function<void(kj::String)> reportConfigError)
     : fs(fs),
       timer(timer),
       network(network),
       entropySource(entropySource),
       reportConfigError(kj::mv(reportConfigError)),
-      consoleMode(consoleMode),
+      loggingOptions(loggingOptions),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>(timer)),
       tasks(*this) {}
 
@@ -4292,13 +4292,13 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
+  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  isolateLoggingOptions.consoleMode = def.source.variant.is<WorkerSource::ScriptSource>() &&
+          !def.featureFlags.getNewModuleRegistry()
+      ? Worker::ConsoleMode::INSPECTOR_ONLY
+      : loggingOptions.consoleMode;
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy,
-      def.source.variant.is<WorkerSource::ScriptSource>() &&
-              !def.featureFlags.getNewModuleRegistry()
-          ? Worker::ConsoleMode::INSPECTOR_ONLY
-          : consoleMode,
-      structuredLogging);
+      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -5111,8 +5111,19 @@ kj::Promise<void> Server::run(
     jsg::V8System& v8System, config::Config::Reader config, kj::Promise<void> drainWhen) {
   TRACE_EVENT("workerd", "Server.run");
 
-  // Update structured logging setting from config
-  structuredLogging = StructuredLogging(config.getStructuredLogging());
+  // Update logging settings from config (overridding structuredLogging when so)
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
@@ -5504,6 +5515,20 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     config::Config::Reader config,
     kj::StringPtr servicePattern,
     kj::StringPtr entrypointPattern) {
+
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();

@@ -326,7 +326,7 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
             timer,
             mockNetwork,
             *this,
-            consoleMode,
+            Worker::LoggingOptions(consoleMode),
             [this](kj::String error) {
               if (expectedErrors.startsWith(error) && expectedErrors[error.size()] == '\n') {
                 expectedErrors = expectedErrors.slice(error.size() + 1);
@@ -5162,28 +5162,28 @@ KJ_TEST("Server: structured logging with console methods") {
   // process.stdout should be logs split by newline
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"stdoutstdout with")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: stdoutstdout with")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"multiple")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: multiple")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"newlines")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: newlines")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
     KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"logged")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stdout: logged")"), logline);
   });
 
   // process.stderr should be info
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"stderr")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: stderr")"), logline);
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
@@ -5195,8 +5195,8 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 
   expectLogLine(interceptorPipe.output.get(), [](kj::StringPtr logline) {
-    KJ_ASSERT(logline.contains(R"("level":"error")"), logline);
-    KJ_ASSERT(logline.contains(R"("message":"after await")"), logline);
+    KJ_ASSERT(logline.contains(R"("level":"log")"), logline);
+    KJ_ASSERT(logline.contains(R"("message":"stderr: after await")"), logline);
   });
 }
 

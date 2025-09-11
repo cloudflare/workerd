@@ -575,8 +575,7 @@ struct Worker::Isolate::Impl {
           progressCounter(impl.lockSuccessCount),
           oldCurrentApi(currentApi),
           limitEnforcer(isolate.getLimitEnforcer()),
-          consoleMode(isolate.consoleMode),
-          structuredLogging(isolate.structuredLogging),
+          loggingOptions(isolate.loggingOptions),
           lock(isolate.api->lock(stackScope)) {
       WarnAboutIsolateLockScope::maybeWarn();
 
@@ -624,7 +623,7 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      Worker::setupContext(*lock, context, consoleMode, structuredLogging);
+      Worker::setupContext(*lock, context, loggingOptions);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -659,11 +658,9 @@ struct Worker::Isolate::Impl {
 
     const IsolateLimitEnforcer& limitEnforcer;  // only so we can call getIsolateStats()
 
-    ConsoleMode consoleMode;
-
     // When structuredLogging is YES AND consoleMode is STDOUT js logs will be emitted to STDOUT
-    // as newline separated json objects.
-    StructuredLogging structuredLogging;
+    // as newline separated json objects
+    LoggingOptions loggingOptions;
 
    public:
     kj::Own<jsg::Lock> lock;
@@ -1019,14 +1016,12 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     kj::StringPtr id,
     kj::Own<IsolateLimitEnforcer> limitEnforcerParam,
     InspectorPolicy inspectorPolicy,
-    ConsoleMode consoleMode,
-    StructuredLogging structuredLogging)
+    LoggingOptions loggingOptions)
     : metrics(kj::mv(metricsParam)),
       id(kj::str(id)),
       limitEnforcer(kj::mv(limitEnforcerParam)),
       api(kj::mv(apiParam)),
-      consoleMode(consoleMode),
-      structuredLogging(structuredLogging),
+      loggingOptions(loggingOptions),
       featureFlagsForFl(makeCompatJson(decompileCompatibilityFlagsForFl(api->getFeatureFlags()))),
       impl(kj::heap<Impl>(*api, *metrics, *limitEnforcer, inspectorPolicy)),
       weakIsolateRef(WeakIsolateRef::wrap(this)),
@@ -1510,10 +1505,8 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
-void Worker::setupContext(jsg::Lock& lock,
-    v8::Local<v8::Context> context,
-    Worker::ConsoleMode consoleMode,
-    StructuredLogging structuredLogging) {
+void Worker::setupContext(
+    jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
   // Set WebAssembly.Module @@HasInstance
   setWebAssemblyModuleHasInstance(lock, context);
 
@@ -1529,9 +1522,9 @@ void Worker::setupContext(jsg::Lock& lock,
         lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
 
     auto f = lock.wrapSimpleFunction(context,
-        [consoleMode, level, structuredLogging, original = kj::mv(original)](
+        [loggingOptions, level, original = kj::mv(original)](
             jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      handleLog(js, consoleMode, level, structuredLogging, original, info);
+      handleLog(js, loggingOptions, level, original, info);
     });
     jsg::check(console->Set(context, methodStr, f));
   };
@@ -1846,9 +1839,8 @@ void Worker::processEntrypointClass(jsg::Lock& js,
 }
 
 void Worker::handleLog(jsg::Lock& js,
-    ConsoleMode consoleMode,
+    const LoggingOptions& loggingOptions,
     LogLevel level,
-    StructuredLogging structuredLogging,
     const v8::Global<v8::Function>& original,
     const v8::FunctionCallbackInfo<v8::Value>& info) {
   // Call original V8 implementation so messages sent to connected inspector if any
@@ -1945,7 +1937,7 @@ void Worker::handleLog(jsg::Lock& js,
     }
   }
 
-  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Lets us dump console.log()s to stdout when running test-runner with --verbose flag, to make
     // it easier to debug tests.  Note that when --verbose is not passed, KJ_LOG(INFO, ...) will
     // not even evaluate its arguments, so `message()` will not be called at all.
@@ -1964,7 +1956,7 @@ void Worker::handleLog(jsg::Lock& js,
 
     // Log warnings and errors to stderr
     // Always log to stdout when structuredLogging is enabled.
-    auto useStderr = level >= LogLevel::WARN && !structuredLogging;
+    auto useStderr = level >= LogLevel::WARN && !loggingOptions.structuredLogging;
     auto fd = useStderr ? stderr : stdout;
     auto tty = useStderr ? STDERR_TTY : STDOUT_TTY;
     auto colors =
@@ -1978,7 +1970,7 @@ void Worker::handleLog(jsg::Lock& js,
 
     auto levelStr = logLevelToString(level);
     args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    args[length + 1] = v8::Boolean::New(js.v8Isolate, bool(structuredLogging));
+    args[length + 1] = v8::Boolean::New(js.v8Isolate, bool(loggingOptions.structuredLogging));
     args[length + 2] = jsg::v8StrIntern(js.v8Isolate, levelStr);
     auto formatted = js.toString(
         jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
@@ -3252,7 +3244,7 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     });
   }
 
-  if (consoleMode == ConsoleMode::INSPECTOR_ONLY) {
+  if (loggingOptions.consoleMode == Worker::ConsoleMode::INSPECTOR_ONLY) {
     // Run with --verbose to log JS exceptions to stderr. Useful when running tests.
     KJ_LOG(INFO, "console warning", description);
   } else {

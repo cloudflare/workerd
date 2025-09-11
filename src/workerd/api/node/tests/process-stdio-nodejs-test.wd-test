@@ -14,5 +14,5 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
-  ],
+  ]
 );

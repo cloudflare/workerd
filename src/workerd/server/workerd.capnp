@@ -90,6 +90,25 @@ struct Config {
   # When false, logs use the traditional human-readable format.
   # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
   # This won't work for logs coming from service worker syntax workers with the old module registry.
+  # Note: This field is obsolete and deprecated. Use the logging struct instead.
+
+  logging @6 : LoggingOptions;
+  # Console and Stdio logging configuration options.
+}
+
+struct LoggingOptions {
+  structuredLogging @0 :Bool = false;
+  # Override of top-level structured logging (only when true).
+  # If true, logs will be emitted as JSON for structured logging.
+  # When false, logs use the traditional human-readable format.
+  # This affects the format of logs from KJ_LOG and exception reporting as well as js logs.
+  # This won't work for logs coming from service worker syntax workers with the old module registry.
+
+  stdoutPrefix @1 :Text;
+  # Set a custom prefix for process.stdout. Defaults to "stdout: ".
+
+  stderrPrefix @2 :Text;
+  # Set a custom prefix for process.stderr. Defaults to "stderr: ".
 }
 
 # ========================================================================================

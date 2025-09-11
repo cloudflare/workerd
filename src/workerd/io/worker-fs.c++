@@ -1755,17 +1755,29 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
 void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
   auto chars = bytes.asChars();
   size_t endPos = chars.size();
-  if (chars[endPos - 1] == '\n') endPos--;
+  if (endPos > 0 && chars[endPos - 1] == '\n') endPos--;
 
   KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
-    auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "error"_kj);
+    auto method = console.get(js, "log"_kj);
     if (method.isFunction()) {
       v8::Local<v8::Value> methodVal(method);
-      auto methodFunc = methodVal.As<v8::Function>();
-      v8::Local<v8::Value> args[] = {js.str(chars.first(endPos))};
-      jsg::check(methodFunc->Call(js.v8Context(), console, 1, args));
+      auto methodFunc = jsg::JsFunction(methodVal.As<v8::Function>());
+
+      kj::String outputStr;
+      auto isolate = &Worker::Isolate::from(js);
+      auto prefix = type == VirtualFileSystem::Stdio::OUT ? isolate->getStdoutPrefix()
+                                                          : isolate->getStderrPrefix();
+      if (endPos == 0) {
+        methodFunc.call(js, console, js.str(prefix));
+      } else if (prefix.size() > 0) {
+        methodFunc.call(js, console, js.str(kj::str(prefix, " "_kj, chars.first(endPos))));
+      } else {
+        methodFunc.call(js, console, js.str(chars.first(endPos)));
+      }
+      return;
     }
   }
+  KJ_LOG(WARNING, "No console.log implementation available for stdio logging");
 }
 
 // An StdioFile is a special file implementation used to represent stdin,

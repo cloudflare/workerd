@@ -35,6 +35,7 @@ class Isolate;
 namespace workerd {
 
 WD_STRONG_BOOL(StructuredLogging);
+WD_STRONG_BOOL(ProcessStdioPrefixed);
 
 namespace api {
 class DurableObjectState;
@@ -120,6 +121,36 @@ class Worker: public kj::AtomicRefcounted {
     STDOUT,
   };
 
+  struct LoggingOptions {
+    ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY;
+    StructuredLogging structuredLogging = StructuredLogging::NO;
+    ProcessStdioPrefixed processStdioPrefixed = ProcessStdioPrefixed::YES;
+    kj::String stdoutPrefix = kj::str("stdout:"_kj);
+    kj::String stderrPrefix = kj::str("stderr:"_kj);
+
+    LoggingOptions() = default;
+    LoggingOptions(LoggingOptions&&) = default;
+    LoggingOptions& operator=(LoggingOptions&&) = default;
+
+    explicit LoggingOptions(ConsoleMode mode): consoleMode(mode) {}
+
+    LoggingOptions(const LoggingOptions& other)
+        : consoleMode(other.consoleMode),
+          structuredLogging(other.structuredLogging),
+          processStdioPrefixed(other.processStdioPrefixed),
+          stdoutPrefix(kj::str(other.stdoutPrefix)),
+          stderrPrefix(kj::str(other.stderrPrefix)) {}
+
+    LoggingOptions& operator=(const LoggingOptions& other) {
+      consoleMode = other.consoleMode;
+      structuredLogging = other.structuredLogging;
+      processStdioPrefixed = other.processStdioPrefixed;
+      stdoutPrefix = kj::str(other.stdoutPrefix);
+      stderrPrefix = kj::str(other.stderrPrefix);
+      return *this;
+    }
+  };
+
   explicit Worker(kj::Own<const Script> script,
       kj::Own<WorkerObserver> metrics,
       kj::FunctionParam<void(jsg::Lock& lock,
@@ -185,10 +216,8 @@ class Worker: public kj::AtomicRefcounted {
   void setConnectOverride(kj::String networkAddress, ConnectFn connectFn);
   kj::Maybe<ConnectFn&> getConnectOverride(kj::StringPtr networkAddress);
 
-  static void setupContext(jsg::Lock& lock,
-      v8::Local<v8::Context> context,
-      Worker::ConsoleMode consoleMode,
-      StructuredLogging structuredLogging);
+  static void setupContext(
+      jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions);
 
  private:
   kj::Own<const Script> script;
@@ -214,9 +243,8 @@ class Worker: public kj::AtomicRefcounted {
   friend constexpr bool _kj_internal_isPolymorphic(AsyncWaiter*);
 
   static void handleLog(jsg::Lock& js,
-      ConsoleMode mode,
+      const LoggingOptions& loggingOptions,
       LogLevel level,
-      StructuredLogging structuredLogging,
       const v8::Global<v8::Function>& original,
       const v8::FunctionCallbackInfo<v8::Value>& info);
 
@@ -334,8 +362,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
       kj::StringPtr id,
       kj::Own<IsolateLimitEnforcer> limitEnforcer,
       InspectorPolicy inspectorPolicy,
-      ConsoleMode consoleMode = ConsoleMode::INSPECTOR_ONLY,
-      StructuredLogging structuredLogging = StructuredLogging::NO);
+      LoggingOptions loggingOptions = {});
 
   ~Isolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Isolate);
@@ -451,6 +478,15 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   bool isInspectorEnabled() const;
 
+  // Get the process stdio prefixed setting from logging options
+  inline kj::StringPtr getStdoutPrefix() const {
+    return loggingOptions.stdoutPrefix;
+  }
+
+  inline kj::StringPtr getStderrPrefix() const {
+    return loggingOptions.stderrPrefix;
+  }
+
   // Represents a weak reference back to the isolate that code within the isolate can use as an
   // indirect pointer when they want to be able to race destruction safely. A caller wishing to
   // use a weak reference to the isolate should acquire a strong reference to weakIsolateRef.
@@ -479,8 +515,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   kj::String id;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::Own<Api> api;
-  ConsoleMode consoleMode;
-  StructuredLogging structuredLogging;
+  LoggingOptions loggingOptions;
 
   // If non-null, a serialized JSON object with a single "flags" property, which is a list of
   // compatibility enable-flags that are relevant to FL.

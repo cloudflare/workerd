@@ -656,7 +656,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             io.provider->getTimer(),
             network,
             entropySource,
-            Worker::ConsoleMode::STDOUT,
+            Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),
             [&](kj::String error) {
               if (watcher == kj::none) {
                 // TODO(someday): Don't just fail on the first error, keep going in order to report
@@ -1346,7 +1346,8 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       auto config = getConfig();
 
       // Configure structured logging in the process context
-      if (config.getStructuredLogging()) {
+      if (config.hasLogging() ? config.getLogging().getStructuredLogging()
+                              : config.getStructuredLogging()) {
         context.enableStructuredLogging();
       }
 
