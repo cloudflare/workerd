@@ -44,7 +44,7 @@ const replServer :Workerd.Worker = (
   ],
 
   # Latest compatibility date
-  compatibilityDate = "2024-12-01",
+  compatibilityDate = "2025-05-01",
 
   # Enable all compatibility flags for maximum API coverage
   compatibilityFlags = [
