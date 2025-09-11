@@ -1129,9 +1129,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Enables the Node.js non-functional stub worker_threads module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
 
-  enableNodeJsWorkerStreamWrapModule @131 :Bool
-    $compatEnableFlag("enable_nodejs_worker_stream_wrap_module")
-    $compatDisableFlag("disable_nodejs_worker_stream_wrap_module")
+  enableNodeJsStreamWrapModule @131 :Bool
+    $compatEnableFlag("enable_nodejs_stream_wrap_module")
+    $compatDisableFlag("disable_nodejs_stream_wrap_module")
     $experimental;
   # Enables the Node.js non-functional stub _stream_wrap module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
