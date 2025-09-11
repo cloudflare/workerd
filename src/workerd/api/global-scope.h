@@ -9,6 +9,7 @@
 #include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
+#include "performance.h"
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -111,32 +112,6 @@ class Navigator: public jsg::Object {
     if (reader.getWebFileSystem()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(storage, getStorage);
     }
-  }
-};
-
-class Performance: public jsg::Object {
- public:
-  // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
-  // is no other appropriate time origin to use given that the Worker platform is intended to be
-  // treated like one big computer rather than many individual instances. In particular, if and
-  // when we start snapshotting applications after startup and then starting instances from that
-  // snapshot, what would the right time origin be? The time when the snapshot was created? This
-  // seems to leak implementation details in a weird way.
-  //
-  // Note that the purpose of `timeOrigin` is normally to allow `now()` to return a more-precise
-  // measurement. Measuring against a recent time allows the values returned by `now()` to be
-  // smaller in magnitude, which allows them to be more precise due to the nature of floating
-  // point numbers. In our case, though, we don't return precise measurements from this interface
-  // anyway, for Spectre reasons -- it returns the same as Date.now().
-  double getTimeOrigin() {
-    return 0.0;
-  }
-
-  double now();
-
-  JSG_RESOURCE_TYPE(Performance) {
-    JSG_READONLY_INSTANCE_PROPERTY(timeOrigin, getTimeOrigin);
-    JSG_METHOD(now);
   }
 };
 
@@ -780,6 +755,18 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(IdentityTransformStream);
     JSG_NESTED_TYPE(HTMLRewriter);
 
+    // Performance API
+    JSG_NESTED_TYPE(Performance);
+
+    if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_NESTED_TYPE(PerformanceEntry);
+      JSG_NESTED_TYPE(PerformanceMark);
+      JSG_NESTED_TYPE(PerformanceMeasure);
+      JSG_NESTED_TYPE(PerformanceResourceTiming);
+      JSG_NESTED_TYPE(PerformanceObserver);
+      JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    }
+
     JSG_TS_ROOT();
     JSG_TS_DEFINE(
       interface Console {
@@ -932,6 +919,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::Performance, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
