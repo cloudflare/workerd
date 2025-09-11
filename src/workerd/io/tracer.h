@@ -33,9 +33,18 @@ class TailStreamWriter final: public kj::Refcounted {
     uint32_t sequence = 0;
     State(Reporter reporter): reporter(kj::mv(reporter)) {}
   };
+
+  TailEvent createTailEvent(const InvocationSpanContext& context,
+      TailEvent::Event&& event,
+      kj::Date timestamp,
+      uint32_t& sequence);
+
   kj::Maybe<State> state;
   bool onsetSeen = false;
   bool outcomeSeen = false;
+  // Events received before onset are buffered here and flushed when onset arrives.
+  // This ensures onset is always the first event sent to streaming tail workers.
+  kj::Vector<TailEvent> bufferedEvents;
 };
 }  // namespace tracing
 
