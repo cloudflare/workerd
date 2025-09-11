@@ -273,7 +273,8 @@ class PyodideMetadataReader: public jsg::Object {
 struct MemorySnapshotResult {
   kj::Array<kj::byte> snapshot;
   kj::Array<kj::String> importedModulesList;
-  JSG_STRUCT(snapshot, importedModulesList);
+  kj::String snapshotType;
+  JSG_STRUCT(snapshot, importedModulesList, snapshotType);
 };
 
 // This used to be declared nested as ArtifactBundler::State, but then there was a need to
