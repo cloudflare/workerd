@@ -1149,4 +1149,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub dgram module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsInspectorModule @134 :Bool
+    $compatEnableFlag("enable_nodejs_inspector_module")
+    $compatDisableFlag("disable_nodejs_inspector_module")
+    $experimental;
+  # Enables the Node.js non-functional stub inspector module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
 }
