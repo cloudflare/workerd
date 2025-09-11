@@ -231,6 +231,13 @@ class PyodideMetadataReader: public jsg::Object {
 
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
+  // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
+  // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
+  // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
+  //
+  // This is only for use by our Python runtime.
+  jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -250,6 +257,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getTransitiveRequirements);
+    JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 

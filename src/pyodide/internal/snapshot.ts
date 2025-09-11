@@ -12,7 +12,7 @@ import {
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
   IS_DEDICATED_SNAPSHOT_ENABLED,
-  compatibilityFlags,
+  COMPATIBILITY_FLAGS,
   type CompatibilityFlags,
 } from 'pyodide-internal:metadata';
 import {
@@ -530,7 +530,7 @@ function makeLinearMemorySnapshot(
   const settings: SnapshotSettings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
     snapshotType,
-    compatFlags: compatibilityFlags,
+    compatFlags: COMPATIBILITY_FLAGS,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,

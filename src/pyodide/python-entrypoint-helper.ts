@@ -12,8 +12,8 @@ import {
   MAIN_MODULE_NAME,
   WORKERD_INDEX_URL,
   SHOULD_SNAPSHOT_TO_DISK,
-  workflowsEnabled,
-  legacyGlobalHandlers,
+  WORKFLOWS_ENABLED,
+  LEGACY_GLOBAL_HANDLERS,
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
@@ -286,7 +286,7 @@ function makeHandler(pyHandlerName: string): Handler {
   if (
     pyHandlerName === 'test' &&
     SHOULD_SNAPSHOT_TO_DISK &&
-    legacyGlobalHandlers
+    LEGACY_GLOBAL_HANDLERS
   ) {
     return async function () {
       await getPyodide();
@@ -355,11 +355,15 @@ function makeEntrypointProxyHandler(
         isDurableObject && SPECIAL_DO_HANDLER_NAMES.includes(prop);
       const isFetch = prop === 'fetch';
       const isWorkflowHandler = isWorkflow && prop === 'run';
-      if ((isKnownHandler || isKnownDoHandler) && legacyGlobalHandlers) {
+      if ((isKnownHandler || isKnownDoHandler) && LEGACY_GLOBAL_HANDLERS) {
         prop = 'on_' + prop;
       }
 
-      if (!legacyGlobalHandlers && prop === 'test' && SHOULD_SNAPSHOT_TO_DISK) {
+      if (
+        !LEGACY_GLOBAL_HANDLERS &&
+        prop === 'test' &&
+        SHOULD_SNAPSHOT_TO_DISK
+      ) {
         return async function () {
           await getPyodide();
           console.log('Stored snapshot to disk; quitting without running test');
@@ -382,7 +386,7 @@ function makeEntrypointProxyHandler(
           );
         }
 
-        if (workflowsEnabled && isWorkflowHandler) {
+        if (WORKFLOWS_ENABLED && isWorkflowHandler) {
           // we're hiding this behind a compat flag for now
           return await doPyCallHelper(
             true,
@@ -429,7 +433,7 @@ function makeEntrypointClass(
   for (let method of methods) {
     if (
       SUPPORTED_HANDLER_NAMES.includes(method.slice(3)) &&
-      legacyGlobalHandlers
+      LEGACY_GLOBAL_HANDLERS
     ) {
       // Remove the "on_" prefix.
       method = method.slice(3);
@@ -544,7 +548,7 @@ export async function initPython(): Promise<PythonInitResult> {
     introspectionMod.collect_entrypoint_classes(mainModule);
   handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
 
-  if (legacyGlobalHandlers) {
+  if (LEGACY_GLOBAL_HANDLERS) {
     // We add all handlers when running in workerd, so that we can handle the case where the
     // handler is not defined in our own code and throw a more helpful error. See
     // undefined-handler.wd-test.
