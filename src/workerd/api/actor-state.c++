@@ -902,7 +902,8 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
       }
 
       return KJ_REQUIRE_NONNULL(actorChannel)
-          ->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+          ->startRequest({.cfBlobJson = kj::mv(cfStr),
+            .tracing = TraceParentContext(tracing.span, *tracing.userSpan)});
     },
         {.inHouse = true,
           .wrapMetrics = true,

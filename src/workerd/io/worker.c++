@@ -1678,8 +1678,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
-            SpanBuilder currentUserSpan =
-                spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
+            // TODO
+            // SpanBuilder currentUserSpan =
+            //     spans.userParentSpan.newChild("lw:top_level_execution"_kjc);
 
             // Ensure that our worker top-level bootstrap has a temporary directory
             // storage scope. This is used to store temporary files created within

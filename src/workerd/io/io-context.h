@@ -30,6 +30,8 @@
 namespace workerd {
 class WorkerTracer;
 class BaseTracer;
+struct TraceContext;
+struct TraceParentContext;
 }  // namespace workerd
 
 namespace workerd {
@@ -210,6 +212,8 @@ class IoContext_IncomingRequest final {
 
   friend class IoContext;
 };
+
+typedef IoOwn<SpanBuilder> UserSpanBuilder;
 
 // IoContext holds state associated with a single I/O context. For stateless requests, each
 // incoming request runs in a unique I/O context. For actors, each actor runs in a unique I/O
@@ -922,7 +926,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // If called while the JS lock is held, uses the trace information from the current async
   // context, if available.
   [[nodiscard]] SpanBuilder makeTraceSpan(kj::ConstString operationName);
-  [[nodiscard]] SpanBuilder makeUserTraceSpan(kj::ConstString operationName);
+  [[nodiscard]] UserSpanBuilder makeUserTraceSpan(kj::ConstString operationName);
 
   // Implement per-IoContext rate limiting for Cache.put(). Pass the body of a Cache API PUT
   // request and get a possibly wrapped stream back.
@@ -1645,5 +1649,25 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhile(
 
   return kj::mv(result);
 }
+
+// TraceContext to keep track of user tracing/existing tracing better
+// TODO(o11y): When creating user child spans, verify that operationName is within a set of
+// supported operations. This is important to avoid adding spans to the wrong tracing system.
+
+// Interface to track trace context including both Jaeger and User spans.
+// TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
+// to both,... We expect that tracking user spans will not be needed in all places where we have the
+// existing spans, so synergies will be limited.
+struct TraceContext {
+  TraceContext(SpanBuilder span, UserSpanBuilder userSpan)
+      : span(kj::mv(span)),
+        userSpan(kj::mv(userSpan)) {}
+  TraceContext(TraceContext&& other) = default;
+  TraceContext& operator=(TraceContext&& other) = default;
+  KJ_DISALLOW_COPY(TraceContext);
+
+  SpanBuilder span;
+  UserSpanBuilder userSpan;
+};
 
 }  // namespace workerd

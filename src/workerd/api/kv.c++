@@ -54,22 +54,22 @@ static void parseListMetadata(TraceContext& traceContext,
     auto obj = KJ_ASSERT_NONNULL(listResponse.tryCast<jsg::JsObject>());
 
     KJ_IF_SOME(boolVal, obj.get(js, LIST_COMPLETE).tryCast<jsg::JsBoolean>()) {
-      traceContext.userSpan.setTag("cloudflare.kv.response.list_complete"_kjc, boolVal.value(js));
+      traceContext.userSpan->setTag("cloudflare.kv.response.list_complete"_kjc, boolVal.value(js));
     }
 
     KJ_IF_SOME(cursor, obj.get(js, CURSOR).tryCast<jsg::JsString>()) {
-      traceContext.userSpan.setTag("cloudflare.kv.response.cursor"_kjc, kj::str(cursor));
+      traceContext.userSpan->setTag("cloudflare.kv.response.cursor"_kjc, kj::str(cursor));
     }
 
     KJ_IF_SOME(expiration, obj.get(js, EXPIRATION).tryCast<jsg::JsNumber>()) {
       KJ_IF_SOME(value, expiration.value(js)) {
-        traceContext.userSpan.setTag("cloudflare.kv.response.expiration"_kjc, int64_t(value));
+        traceContext.userSpan->setTag("cloudflare.kv.response.expiration"_kjc, int64_t(value));
       }
     }
 
     KJ_IF_SOME(keysArr, obj.get(js, KEYS).tryCast<jsg::JsArray>()) {
       auto length = keysArr.size();
-      traceContext.userSpan.setTag(
+      traceContext.userSpan->setTag(
           "cloudflare.kv.response.returned_rows"_kjc, static_cast<int64_t>(length));
       for (int i = 0; i < length; i++) {
         js.withinHandleScope([&] {
@@ -148,14 +148,14 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
     KJ_IF_SOME(_options, options) {
       KJ_SWITCH_ONEOF(_options) {
         KJ_CASE_ONEOF(type, kj::String) {
-          traceContext.userSpan.setTag("cloudflare.kv.query.type"_kjc, kj::mv(type));
+          traceContext.userSpan->setTag("cloudflare.kv.query.type"_kjc, kj::mv(type));
         }
         KJ_CASE_ONEOF(o, GetOptions) {
           KJ_IF_SOME(type, o.type) {
-            traceContext.userSpan.setTag("cloudflare.kv.query.type"_kjc, kj::mv(type));
+            traceContext.userSpan->setTag("cloudflare.kv.query.type"_kjc, kj::mv(type));
           }
           KJ_IF_SOME(cacheTtl, o.cacheTtl) {
-            traceContext.userSpan.setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
+            traceContext.userSpan->setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
           }
         }
       }
@@ -252,8 +252,8 @@ kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsM
       auto traceSpan = context.makeTraceSpan("kv_get_bulk"_kjc);
       auto userSpan = context.makeUserTraceSpan("kv_get_bulk"_kjc);
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-      traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-      traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("get_bulk"_kjc));
+      traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+      traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("get_bulk"_kjc));
       return context.attachSpans(js,
           getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), false),
           kj::mv(traceContext));
@@ -262,8 +262,8 @@ kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsM
       auto traceSpan = context.makeTraceSpan("kv_get"_kjc);
       auto userSpan = context.makeUserTraceSpan("kv_get"_kjc);
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-      traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-      traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("get"_kjc));
+      traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+      traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("get"_kjc));
       return context.attachSpans(js,
           getSingle(js, context, traceContext, kj::mv(str), kj::mv(options)), kj::mv(traceContext));
     }
@@ -291,9 +291,9 @@ KvNamespace::getWithMetadata(jsg::Lock& js,
       auto traceSpan = context.makeTraceSpan("kv_get_bulk"_kjc);
       auto userSpan = context.makeUserTraceSpan("kv_get_bulk"_kjc);
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-      traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-      traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("get_bulk"_kjc));
-      traceContext.userSpan.setTag("cloudflare.kv.query.keys"_kjc, kj::str(name));
+      traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+      traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("get_bulk"_kjc));
+      traceContext.userSpan->setTag("cloudflare.kv.query.keys"_kjc, kj::str(name));
       return context.attachSpans(js,
           getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), true),
           kj::mv(traceContext));
@@ -302,9 +302,9 @@ KvNamespace::getWithMetadata(jsg::Lock& js,
       auto traceSpan = context.makeTraceSpan("kv_getWithMetadata"_kjc);
       auto userSpan = context.makeUserTraceSpan("kv_getWithMetadata"_kjc);
       TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
-      traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-      traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("getWithMetadata"_kjc));
-      traceContext.userSpan.setTag("cloudflare.kv.query.key"_kjc, kj::str(name));
+      traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+      traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("getWithMetadata"_kjc));
+      traceContext.userSpan->setTag("cloudflare.kv.query.key"_kjc, kj::str(name));
       return context.attachSpans(js,
           getWithMetadataSingle(js, context, traceContext, kj::mv(str), kj::mv(options)),
           kj::mv(traceContext));
@@ -332,16 +332,16 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
     KJ_SWITCH_ONEOF(oneOfOptions) {
       KJ_CASE_ONEOF(t, kj::String) {
         type = kj::str(t);
-        traceContext.userSpan.setTag("cloudflare.kv.query.type"_kjc, kj::mv(t));
+        traceContext.userSpan->setTag("cloudflare.kv.query.type"_kjc, kj::mv(t));
       }
       KJ_CASE_ONEOF(options, GetOptions) {
         KJ_IF_SOME(t, options.type) {
           type = kj::str(t);
-          traceContext.userSpan.setTag("cloudflare.kv.query.type"_kjc, kj::mv(t));
+          traceContext.userSpan->setTag("cloudflare.kv.query.type"_kjc, kj::mv(t));
         }
         KJ_IF_SOME(cacheTtl, options.cacheTtl) {
           url.query.add(kj::Url::QueryParam{kj::str("cache_ttl"), kj::str(cacheTtl)});
-          traceContext.userSpan.setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
+          traceContext.userSpan->setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
         }
       }
     }
@@ -359,7 +359,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
       -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
         response.headers->get(context.getHeaderIds().cfCacheStatus).map([&](kj::StringPtr cs) {
-      traceContext.userSpan.setTag("cloudflare.kv.response.cache_status"_kjc, kj::str(cs));
+      traceContext.userSpan->setTag("cloudflare.kv.response.cache_status"_kjc, kj::str(cs));
       return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
     });
 
@@ -376,7 +376,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
     auto metaheader = response.headers->get(context.getHeaderIds().cfKvMetadata);
     kj::Maybe<kj::String> maybeMeta;
     KJ_IF_SOME(m, metaheader) {
-      traceContext.userSpan.setTag("cloudflare.kv.response.metadata"_kjc, true);
+      traceContext.userSpan->setTag("cloudflare.kv.response.metadata"_kjc, true);
       maybeMeta = kj::str(m);
     }
 
@@ -443,30 +443,30 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     auto userSpan = context.makeUserTraceSpan("kv_list"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
 
-    traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-    traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("list"_kjc));
-    traceContext.userSpan.setTag("db.namespace"_kjc, kj::str(bindingName));
-    traceContext.userSpan.setTag("cloudflare.binding_type"_kjc, kj::str("KV"_kjc));
+    traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+    traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("list"_kjc));
+    traceContext.userSpan->setTag("db.namespace"_kjc, kj::str(bindingName));
+    traceContext.userSpan->setTag("cloudflare.binding_type"_kjc, kj::str("KV"_kjc));
 
     kj::Url url;
     url.scheme = kj::str("https");
     url.host = kj::str("fake-host");
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(limit, o.limit) {
-        traceContext.userSpan.setTag("cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
+        traceContext.userSpan->setTag("cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
         if (limit > 0) {
           url.query.add(kj::Url::QueryParam{kj::str("key_count_limit"), kj::str(limit)});
         }
       }
       KJ_IF_SOME(maybePrefix, o.prefix) {
         KJ_IF_SOME(prefix, maybePrefix) {
-          traceContext.userSpan.setTag("cloudflare.kv.query.prefix"_kjc, kj::str(prefix));
+          traceContext.userSpan->setTag("cloudflare.kv.query.prefix"_kjc, kj::str(prefix));
           url.query.add(kj::Url::QueryParam{kj::str("prefix"), kj::str(prefix)});
         }
       }
       KJ_IF_SOME(maybeCursor, o.cursor) {
         KJ_IF_SOME(cursor, maybeCursor) {
-          traceContext.userSpan.setTag("cloudflare.kv.query.cursor"_kjc, kj::str(cursor));
+          traceContext.userSpan->setTag("cloudflare.kv.query.cursor"_kjc, kj::str(cursor));
           url.query.add(kj::Url::QueryParam{kj::str("cursor"), kj::str(cursor)});
         }
       }
@@ -489,7 +489,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
       kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus =
           [&]() -> kj::Maybe<jsg::JsRef<jsg::JsValue>> {
         KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
-          traceContext.userSpan.setTag("cloudflare.kv.response.cache_status"_kjc, kj::str(cs));
+          traceContext.userSpan->setTag("cloudflare.kv.response.cache_status"_kjc, kj::str(cs));
           return jsg::JsRef<jsg::JsValue>(js, js.strIntern(cs));
         }
         return kj::none;
@@ -528,9 +528,9 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     auto userSpan = context.makeUserTraceSpan("kv_put"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
 
-    traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-    traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("put"_kjc));
-    traceContext.userSpan.setTag("cloudflare.kv.query.key"_kjc, kj::str(name));
+    traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+    traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("put"_kjc));
+    traceContext.userSpan->setTag("cloudflare.kv.query.key"_kjc, kj::str(name));
 
     kj::Url url;
     url.scheme = kj::str("https");
@@ -544,11 +544,11 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     // the URL's query parameters.
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(expiration, o.expiration) {
-        traceContext.userSpan.setTag("cloudflare.kv.query.expiration"_kjc, int64_t(expiration));
+        traceContext.userSpan->setTag("cloudflare.kv.query.expiration"_kjc, int64_t(expiration));
         url.query.add(kj::Url::QueryParam{kj::str("expiration"), kj::str(expiration)});
       }
       KJ_IF_SOME(expirationTtl, o.expirationTtl) {
-        traceContext.userSpan.setTag(
+        traceContext.userSpan->setTag(
             "cloudflare.kv.query.expiration_ttl"_kjc, int64_t(expirationTtl));
         url.query.add(kj::Url::QueryParam{kj::str("expiration_ttl"), kj::str(expirationTtl)});
       }
@@ -556,7 +556,7 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         KJ_IF_SOME(metadata, maybeMetadata) {
           kj::String json = metadata.getHandle(js).toJson(js);
           headers.set(context.getHeaderIds().cfKvMetadata, kj::mv(json));
-          traceContext.userSpan.setTag("cloudflare.kv.query.metadata"_kjc, true);
+          traceContext.userSpan->setTag("cloudflare.kv.query.metadata"_kjc, true);
         }
       }
     }
@@ -584,21 +584,21 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
       KJ_CASE_ONEOF(text, kj::String) {
         headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT_STRING);
         expectedBodySize = uint64_t(text.size());
-        traceContext.userSpan.setTag("cloudflare.kv.query.value_type"_kjc, kj::str("text"));
+        traceContext.userSpan->setTag("cloudflare.kv.query.value_type"_kjc, kj::str("text"));
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
         expectedBodySize = uint64_t(data.size());
-        traceContext.userSpan.setTag("cloudflare.kv.query.value_type"_kjc, kj::str("ArrayBuffer"));
+        traceContext.userSpan->setTag("cloudflare.kv.query.value_type"_kjc, kj::str("ArrayBuffer"));
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         expectedBodySize = stream->tryGetLength(StreamEncoding::IDENTITY);
-        traceContext.userSpan.setTag(
+        traceContext.userSpan->setTag(
             "cloudflare.kv.query.value_type"_kjc, kj::str("ReadableStream"));
       }
     }
 
     KJ_IF_SOME(bodySize, expectedBodySize) {
-      traceContext.userSpan.setTag("cloudflare.kv.query.payload.size"_kjc, int64_t(bodySize));
+      traceContext.userSpan->setTag("cloudflare.kv.query.payload.size"_kjc, int64_t(bodySize));
     }
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
@@ -659,8 +659,8 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
     auto userSpan = context.makeUserTraceSpan("kv_delete"_kjc);
     TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
 
-    traceContext.userSpan.setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
-    traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("delete"_kjc));
+    traceContext.userSpan->setTag("db.system"_kjc, kj::str("cloudflare-kv"_kjc));
+    traceContext.userSpan->setTag("db.operation.name"_kjc, kj::str("delete"_kjc));
 
     auto urlStr = kj::str("https://fake-host/", kj::encodeUriComponent(name), "?urlencoded=true");
 
