@@ -169,6 +169,11 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsDgramModule();
     }
 
+    if (module.getName() == "node:inspector"_kj ||
+        module.getName() == "node:inspector/promises"_kj) {
+      return featureFlags.getEnableNodeJsInspectorModule();
+    }
+
     return true;
   });
 

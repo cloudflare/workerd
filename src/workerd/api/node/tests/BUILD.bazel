@@ -609,6 +609,12 @@ wd_test(
 )
 
 wd_test(
+    src = "inspector-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["inspector-nodejs-test.js"],
+)
+
+wd_test(
     src = "vm-test.wd-test",
     args = ["--experimental"],
     data = ["vm-test.js"],
