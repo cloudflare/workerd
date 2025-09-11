@@ -502,7 +502,6 @@ uint32_t FileSystemModule::write(
       }
       return static_cast<uint32_t>(pos);
     };
-
     KJ_SWITCH_ONEOF(opened->node) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto pos = getPosition(js, opened, file, options);

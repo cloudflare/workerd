@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import {
+  ERR_BUFFER_OUT_OF_BOUNDS,
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
 } from 'node-internal:internal_errors';
@@ -391,22 +392,33 @@ export function validateWriteArgs(
   if (isArrayBufferView(buffer)) {
     if (typeof offsetOrOptions === 'object' && offsetOrOptions != null) {
       ({
-        offset = buffer.byteOffset,
+        offset = 0,
         length = buffer.byteLength,
         position = null,
       } = (offsetOrOptions as WriteSyncOptions | null) || {});
+      offset ??= 0;
+      validateInteger(offset, 'offset', 0);
+      offset += buffer.byteOffset;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (offset != null) {
+        validateInteger(offset, 'offset', 0);
+      }
+      offset ??= 0;
+      offset += buffer.byteOffset;
+      length ??= buffer.byteLength;
+      position ??= null;
     }
-    position ??= null;
-    offset ??= buffer.byteOffset;
-    length ??= buffer.byteLength;
 
-    validateInteger(offset, 'offset', 0);
     validatePosition(position, 'position');
     validateInteger(length, 'length', 0);
 
     // Validate that the offset + length do not exceed the buffer's byte length.
     if (length > buffer.byteLength) {
-      throw new ERR_INVALID_ARG_VALUE('offset', offset, 'out of bounds');
+      throw new ERR_BUFFER_OUT_OF_BOUNDS('length');
+    }
+    if (offset > length) {
+      throw new ERR_BUFFER_OUT_OF_BOUNDS('offset');
     }
 
     return {
