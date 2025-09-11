@@ -68,7 +68,7 @@ class OwnedObjectList {
 };
 
 // Object which receives possibly-cross-thread deletions of owned objects.
-class DeleteQueue: public kj::AtomicRefcounted, public kj::EnableAddRefToThis<DeleteQueue> {
+class DeleteQueue: public kj::AtomicRefcounted {
  public:
   DeleteQueue(): crossThreadDeleteQueue(State{kj::Vector<OwnedObject*>()}) {}
 

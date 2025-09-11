@@ -315,7 +315,7 @@ class File: public kj::Refcounted {
 
 // A directory in the virtual file system. If the directory is read-only,
 // then the mutation methods will throw an exception.
-class Directory: public kj::Refcounted, public kj::EnableAddRefToThis<Directory> {
+class Directory: public kj::Refcounted {
  public:
   // Returns the metadata for this node.
   virtual kj::Maybe<kj::OneOf<FsError, Stat>> stat(
