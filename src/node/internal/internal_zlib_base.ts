@@ -354,6 +354,8 @@ export class ZlibBase extends Transform {
   _info: boolean;
   _handle: ZlibHandleType | null = null;
   _writeState = new Uint32Array(2);
+  _writesInProgress: number = 0;
+  _hadWrites: boolean = false;
 
   [kError]: NodeError | undefined;
 
@@ -459,7 +461,25 @@ export class ZlibBase extends Transform {
   // This is the _flush function called by the transform class,
   // internally, when the last chunk has been written.
   override _flush(callback: () => void): void {
-    this._transform(Buffer.alloc(0), 'utf8', callback);
+    // If there are writes in progress, wait for them to complete
+    if (this._writesInProgress > 0) {
+      queueMicrotask(() => this._flush(callback));
+      return;
+    }
+
+    // If there were writes, add extra microtask to ensure data from processCallback has been pushed
+    if (this._hadWrites) {
+      queueMicrotask(() => {
+        const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+        chunk[kFlushFlag] = this._finishFlushFlag;
+        this._transform(chunk, 'utf8', callback);
+      });
+    } else {
+      // No writes occurred, flush immediately
+      const chunk = Buffer.alloc(0) as Buffer & { [kFlushFlag]?: number };
+      chunk[kFlushFlag] = this._finishFlushFlag;
+      this._transform(chunk, 'utf8', callback);
+    }
   }
 
   // Force Transform compat behavior.
@@ -546,8 +566,19 @@ export class ZlibBase extends Transform {
       return;
     }
 
+    // Track that we have a write in progress
+    if (chunk.byteLength > 0) {
+      this._hadWrites = true;
+    }
+    this._writesInProgress++;
+    const originalCb = cb;
+    const wrappedCb = () => {
+      this._writesInProgress--;
+      originalCb();
+    };
+
     this._handle.buffer = chunk;
-    this._handle.cb = cb;
+    this._handle.cb = wrappedCb;
     this._handle.availOutBefore = this._chunkSize - this._outOffset;
     this._handle.availInBefore = chunk.byteLength;
     this._handle.inOff = 0;

@@ -501,9 +501,9 @@ wd_test(
 )
 
 wd_test(
-    src = "fs-test.wd-test",
+    src = "fs-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["fs-test.js"],
+    data = ["fs-nodejs-test.js"],
 )
 
 wd_test(
