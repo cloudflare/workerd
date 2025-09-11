@@ -1830,6 +1830,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
   kj::HashMap<kj::String, kj::HashSet<kj::String>> namedEntrypoints;
   kj::Maybe<kj::HashSet<kj::String>> defaultEntrypoint;
   kj::HashSet<kj::String> actorClasses;
+  kj::HashSet<kj::String> workflowClasses;
 
   void addEntrypoint(kj::Maybe<kj::StringPtr> exportName, kj::Array<kj::String> methods) override {
     kj::HashSet<kj::String> set;
@@ -1856,6 +1857,7 @@ struct Server::ErrorReporter: public Worker::ValidationErrorReporter {
       set.insert(kj::mv(method));
     }
     namedEntrypoints.insert(kj::str(exportName), kj::mv(set));
+    workflowClasses.insert(kj::str(exportName));
   }
 };
 
@@ -4394,8 +4396,15 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
         .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
     }
     for (auto& ep: errorReporter.namedEntrypoints) {
-      ctxExports.add(Global{.name = kj::str(ep.key),
-        .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
+      // Workflow classes are treated as stateless entrypoints for runtime purposes, but should
+      // NOT be reflected in ctx.exports.
+      // TODO(someday): Currently Workflows must be given a name independent of their class name,
+      //   and the binding must reference that name. If the name were just the class name -- like
+      //   Durable Object namespaces -- then we could put a `Workflow` binding into `ctx.exports`.
+      if (!errorReporter.workflowClasses.contains(ep.key)) {
+        ctxExports.add(Global{.name = kj::str(ep.key),
+          .value = Global::LoopbackServiceStub{.channel = nextSubrequestChannel++}});
+      }
     }
 
     // Start numbering loopback channels for actor classes after the last actor channel and actor

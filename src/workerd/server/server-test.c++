@@ -4366,7 +4366,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
           modules = [
             ( name = "main.js",
               esModule =
-                `import { WorkerEntrypoint, DurableObject } from "cloudflare:workers";
+                `import { WorkerEntrypoint, DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
                 `export default {
                 `  async fetch(request, env, ctx) {
                 `    // First set the actor state the old fashion way, to make sure we get
@@ -4386,6 +4386,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `      ctx.exports.UnconfiguredActor.constructor.name,
                 `      await ctx.exports.MyEntrypoint.myProps(),
                 `      await ctx.exports.MyEntrypoint({props: {foo: 123, bar: "abc"}}).myProps(),
+                `      MyWorkflow in ctx.exports,
                 `    ].join(", "));
                 `  },
                 `  corge(i) { return `corge: ${i}` }
@@ -4406,6 +4407,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
                 `export class UnconfiguredActor extends DurableObject {
                 `  qux(i) { return `qux: ${i}` }
                 `}
+                `export class MyWorkflow extends WorkflowEntrypoint {}
             )
           ],
           bindings = [
@@ -4436,7 +4438,7 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
   auto conn = test.connect("test-addr");
   conn.httpGet200("/",
       "foo: 123, bar: 321, baz: 234, corge: 555, grault: 456, LoopbackDurableObjectClass, "
-      "{}, {\"foo\":123,\"bar\":\"abc\"}");
+      "{}, {\"foo\":123,\"bar\":\"abc\"}, false");
 }
 
 // =======================================================================================
