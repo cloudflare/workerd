@@ -161,6 +161,12 @@ wd_test(
 )
 
 wd_test(
+    src = "perf-hooks-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["perf-hooks-nodejs-test.js"],
+)
+
+wd_test(
     src = "path-test.wd-test",
     args = ["--experimental"],
     data = ["path-test.js"],
