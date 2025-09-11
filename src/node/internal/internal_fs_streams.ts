@@ -812,6 +812,7 @@ function writeAll(
   if (this.fd == null) {
     return cb(new ERR_INVALID_ARG_VALUE('fd', 'null'));
   }
+
   this[kFs].write(
     this.fd,
     data,

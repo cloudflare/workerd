@@ -463,6 +463,7 @@ export class ZlibBase extends Transform {
   override _flush(callback: () => void): void {
     // If there are writes in progress, wait for them to complete
     if (this._writesInProgress > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-confusing-void-expression
       queueMicrotask(() => this._flush(callback));
       return;
     }
@@ -572,7 +573,7 @@ export class ZlibBase extends Transform {
     }
     this._writesInProgress++;
     const originalCb = cb;
-    const wrappedCb = () => {
+    const wrappedCb = (): void => {
       this._writesInProgress--;
       originalCb();
     };
