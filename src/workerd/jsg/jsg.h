@@ -415,34 +415,6 @@ namespace workerd::jsg {
     registry.template registerInspectProperty<NAME, decltype(&Self::getter), &Self::getter>();     \
   } while (false)
 
-// Use inside a JSG_RESOURCE_TYPE to expose a static property on the JavaScript constructor.
-// The property will be read-only and will call the specified static function when accessed.
-// The function should take no parameters or take jsg::Lock& as the first parameter.
-// Example:
-//   static int getVersion() { return 42; }
-//   JSG_RESOURCE_TYPE(MyClass) {
-//     JSG_STATIC_READONLY_PROPERTY(getVersion);  // Exposes as MyClass.getVersion
-//   }
-#define JSG_STATIC_READONLY_PROPERTY(name)                                                         \
-  do {                                                                                             \
-    static const char NAME[] = #name;                                                              \
-    registry.template registerStaticProperty<NAME, decltype(Self::name), &Self::name>();           \
-  } while (false)
-
-// Use inside a JSG_RESOURCE_TYPE to expose a static property with a different name than the
-// underlying C++ function. The property will be read-only and will call the specified static
-// getter function when accessed. The getter can optionally take jsg::Lock& as the first parameter.
-// Example:
-//   static kj::Array<kj::String> getSupportedTypes() { ... }
-//   JSG_RESOURCE_TYPE(MyClass) {
-//     JSG_STATIC_READONLY_PROPERTY_NAMED(supportedTypes, getSupportedTypes);  // MyClass.supportedTypes
-//   }
-#define JSG_STATIC_READONLY_PROPERTY_NAMED(name, getter)                                           \
-  do {                                                                                             \
-    static const char NAME[] = #name;                                                              \
-    registry.template registerStaticProperty<NAME, decltype(Self::getter), &Self::getter>();       \
-  } while (false)
-
 // Use inside a JSG_RESOURCE_TYPE to create a static constant member on the constructor and
 // prototype of this object. Only primitive data types (booleans, strings, numbers) are allowed.
 // Unlike the JSG_INSTANCE_PROPERTY and JSG_READONLY_PROPERTY macros, this does not use a getter

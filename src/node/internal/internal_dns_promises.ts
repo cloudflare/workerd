@@ -40,7 +40,7 @@ import type {
   SOA,
   SRV,
   TTLResponse,
-} from 'node-internal:internal_dns_client';
+} from 'node:internal/internal_dns_client';
 
 export * from 'node-internal:internal_dns_constants';
 export {
