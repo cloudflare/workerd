@@ -950,6 +950,12 @@ jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   }
 }
 
+double Performance::now() {
+  // We define performance.now() for compatibility purposes, but due to Spectre concerns it
+  // returns exactly what Date.now() returns.
+  return dateNow();
+}
+
 jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
   return js.alloc<StorageManager>();
 }

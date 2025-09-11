@@ -24,7 +24,6 @@
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
-#include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/pyodide/requirements.h>
 #include <workerd/api/pyodide/setup-emscripten.h>
@@ -135,7 +134,6 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_MESSAGECHANNEL_ISOLATE_TYPES,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
     EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
-    EW_PERFORMANCE_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
