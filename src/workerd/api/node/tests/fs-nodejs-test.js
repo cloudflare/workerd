@@ -9,7 +9,10 @@ import {
   strictEqual,
   notStrictEqual,
   throws,
+  doesNotThrow,
 } from 'node:assert';
+import zlib from 'node:zlib';
+import { Readable } from 'node:stream';
 
 import {
   existsSync,
@@ -54,6 +57,7 @@ import {
   mkdtempSync,
   constants,
   promises,
+  createWriteStream,
 } from 'node:fs';
 
 import { join } from 'node:path';
@@ -1250,5 +1254,25 @@ export const fileNamesWithSurrogatePairsTest = {
     writeFileSync(join(tempdir, filename), content);
     const readContent = readFileSync(join(tempdir, filename), 'utf8');
     strictEqual(readContent, content);
+  },
+};
+
+export const testFsWithZlib = {
+  async test() {
+    const imgBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII';
+
+    const imageStream = Readable.from(Buffer.from(imgBase64, 'base64'));
+    await new Promise((resolve, reject) => {
+      const outStream = createWriteStream(`/tmp/image-stream.png.gz`);
+      outStream.on('close', resolve).on('error', reject);
+      imageStream.pipe(zlib.createGzip()).pipe(outStream);
+    });
+
+    doesNotThrow(() => {
+      zlib
+        .gunzipSync(readFileSync('/tmp/image-stream.png.gz'))
+        .toString('base64');
+    });
   },
 };
