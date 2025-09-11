@@ -35,7 +35,7 @@ namespace workerd::api {
 
 class PerformanceEntry: public jsg::Object {
  public:
-  PerformanceEntry(kj::String name, kj::String entryType, uint32_t startTime, uint32_t duration)
+  PerformanceEntry(kj::String name, kj::String entryType, double startTime, uint32_t duration)
       : name(kj::mv(name)),
         entryType(kj::mv(entryType)),
         startTime(startTime),
@@ -47,7 +47,7 @@ class PerformanceEntry: public jsg::Object {
   kj::StringPtr getEntryType() {
     return entryType;
   };
-  uint32_t getStartTime() {
+  double getStartTime() {
     return startTime;
   };
   uint32_t getDuration() {
@@ -67,47 +67,56 @@ class PerformanceEntry: public jsg::Object {
  protected:
   kj::String name;
   kj::String entryType;
-  uint32_t startTime;
+  double startTime;
   uint32_t duration;
 };
 
 class PerformanceMark: public PerformanceEntry {
  public:
-  PerformanceMark(kj::String name, uint32_t startTime)
-      : PerformanceEntry(kj::mv(name), kj::str("mark"), startTime, 0) {}
+  friend class Performance;
 
   struct Options {
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
-    jsg::Optional<uint32_t> startTime;
+    jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
+    jsg::Optional<double> startTime;
 
     JSG_STRUCT(detail, startTime);
   };
 
-  jsg::JsValue getDetail(jsg::Lock& js) {
-    KJ_IF_SOME(value, detail) {
-      return value.getHandle(js);
-    }
-    return js.null();
+  PerformanceMark(
+      kj::String name, jsg::Optional<jsg::JsRef<jsg::JsObject>> detail, double startTime)
+      : PerformanceEntry(kj::mv(name), kj::str("mark"), startTime, 0),
+        detail(kj::mv(detail)) {}
+
+  static jsg::Ref<PerformanceMark> constructor(
+      jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions);
+
+  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
+    return detail.map([&js](auto& val) { return val.getHandle(js); });
   }
+
+  jsg::JsObject toJSON(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(PerformanceMark) {
     JSG_INHERIT(PerformanceEntry);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+    JSG_METHOD(toJSON);
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 };
 
 class PerformanceMeasure: public PerformanceEntry {
  public:
-  PerformanceMeasure(kj::String name, uint32_t startTime, uint32_t duration)
+  PerformanceMeasure(kj::String name, double startTime, uint32_t duration)
       : PerformanceEntry(kj::mv(name), kj::str("measure"), startTime, duration) {}
+
+  friend class Performance;
 
   struct Entry {
     kj::String entryType;
     kj::String name;
-    kj::OneOf<kj::Date, uint32_t> startTime;
+    kj::OneOf<kj::Date, double> startTime;
     uint32_t duration;
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 
@@ -116,32 +125,32 @@ class PerformanceMeasure: public PerformanceEntry {
 
   struct Options {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
-    jsg::Optional<uint32_t> start;
+    jsg::Optional<double> start;
     jsg::Optional<uint32_t> duration;
-    jsg::Optional<uint32_t> end;
+    jsg::Optional<double> end;
 
     JSG_STRUCT(detail, start, duration, end);
   };
 
-  jsg::JsValue getDetail(jsg::Lock& js) {
-    KJ_IF_SOME(value, detail) {
-      return value.getHandle(js);
-    }
-    return js.null();
+  jsg::Optional<jsg::JsObject> getDetail(jsg::Lock& js) {
+    return detail.map([&js](auto& val) { return val.getHandle(js); });
   }
+
+  jsg::JsObject toJSON(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(PerformanceMeasure) {
     JSG_INHERIT(PerformanceEntry);
     JSG_READONLY_PROTOTYPE_PROPERTY(detail, getDetail);
+    JSG_METHOD(toJSON);
   }
 
  private:
-  jsg::Optional<jsg::JsRef<jsg::JsValue>> detail;
+  jsg::Optional<jsg::JsRef<jsg::JsObject>> detail;
 };
 
 class PerformanceResourceTiming: public PerformanceEntry {
  public:
-  PerformanceResourceTiming(kj::String name, uint32_t startTime, uint32_t duration)
+  PerformanceResourceTiming(kj::String name, double startTime, uint32_t duration)
       : PerformanceEntry(kj::mv(name), kj::str("resource"), startTime, duration) {}
 
   uint32_t getConnectEnd() {
@@ -265,21 +274,18 @@ class PerformanceObserver: public jsg::Object {
   PerformanceObserver(jsg::Lock& js, Callback callback): callback(callback.addRef(js)) {}
 
   struct ObserveOptions {
-    bool buffered;
-    uint32_t durationThreshold = 104;
-    kj::Array<kj::String> entryTypes;
+    jsg::Optional<bool> buffered;
+    jsg::Optional<uint32_t> durationThreshold = 104;
+    jsg::Optional<kj::Array<kj::String>> entryTypes;
     jsg::Optional<kj::String> type;
-    jsg::Optional<kj::String> name;
 
-    JSG_STRUCT(buffered, durationThreshold, entryTypes, type, name);
+    JSG_STRUCT(buffered, durationThreshold, entryTypes, type);
   };
   void disconnect();
   void observe(jsg::Optional<ObserveOptions> options);
   kj::Array<jsg::Ref<PerformanceEntry>> takeRecords();
-  // Returns the list of supported entry types. Currently returns an empty array
-  // as we don't actively support performance entry collection in workers.
   // Spec: https://w3c.github.io/performance-timeline/#supportedentrytypes-attribute
-  static kj::Array<kj::String> getSupportedEntryTypes();
+  static kj::ArrayPtr<const kj::StringPtr> getSupportedEntryTypes();
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(callback);
@@ -294,6 +300,14 @@ class PerformanceObserver: public jsg::Object {
 
  private:
   jsg::JsRef<jsg::JsValue> callback;
+
+  static constexpr kj::FixedArray<kj::StringPtr, 2> supportedEntryTypes = []() consteval {
+    // We have mark and measure as supported because we implement relevant methods.
+    kj::FixedArray<kj::StringPtr, 2> out;
+    out[0] = "measure"_kj;
+    out[1] = "mark"_kj;
+    return kj::mv(out);
+  }();
 };
 
 // EventCounts provides a read-only map of event counts per event type.
@@ -414,8 +428,9 @@ class Performance: public EventTarget {
   void clearMeasures(jsg::Optional<kj::String> name);
   void clearResourceTimings();
   kj::ArrayPtr<jsg::Ref<PerformanceEntry>> getEntries();
-  kj::ArrayPtr<jsg::Ref<PerformanceEntry>> getEntriesByName(kj::String name, kj::String type);
-  kj::ArrayPtr<jsg::Ref<PerformanceEntry>> getEntriesByType(kj::String type);
+  kj::Array<jsg::Ref<PerformanceEntry>> getEntriesByName(
+      kj::String name, jsg::Optional<kj::String> type);
+  kj::Array<jsg::Ref<PerformanceEntry>> getEntriesByType(kj::String type);
   jsg::Ref<PerformanceMark> mark(
       jsg::Lock& js, kj::String name, jsg::Optional<PerformanceMark::Options> options);
 
@@ -439,7 +454,6 @@ class Performance: public EventTarget {
   jsg::Function<void()> timerify(jsg::Lock& js, jsg::Function<void()> fn);
 
   JSG_RESOURCE_TYPE(Performance, CompatibilityFlags::Reader flags) {
-    JSG_INHERIT(EventTarget);
     JSG_READONLY_PROTOTYPE_PROPERTY(timeOrigin, getTimeOrigin);
     JSG_METHOD(now);
 
@@ -447,23 +461,29 @@ class Performance: public EventTarget {
     // of the APIS but we are currently not planning to provide
     // performance timing feedback within a worker using these
     // apis.
-    JSG_READONLY_PROTOTYPE_PROPERTY(eventCounts, getEventCounts);
-    JSG_METHOD(clearMarks);
-    JSG_METHOD(clearMeasures);
-    JSG_METHOD(clearResourceTimings);
-    JSG_METHOD(getEntries);
-    JSG_METHOD(getEntriesByName);
-    JSG_METHOD(getEntriesByType);
-    JSG_METHOD(mark);
-    JSG_METHOD(measure);
-    JSG_METHOD(setResourceTimingBufferSize);
+    if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_INHERIT(EventTarget);
+      JSG_READONLY_PROTOTYPE_PROPERTY(eventCounts, getEventCounts);
+      JSG_METHOD(clearMarks);
+      JSG_METHOD(clearMeasures);
+      JSG_METHOD(clearResourceTimings);
+      JSG_METHOD(getEntries);
+      JSG_METHOD(getEntriesByName);
+      JSG_METHOD(getEntriesByType);
+      JSG_METHOD(mark);
+      JSG_METHOD(measure);
+      JSG_METHOD(setResourceTimingBufferSize);
+    }
 
-    if (flags.getNodeJsCompatV2()) {
+    if (flags.getEnableNodeJsPerfHooksModule()) {
       JSG_METHOD(eventLoopUtilization);
       JSG_METHOD(markResourceTiming);
       JSG_METHOD(timerify);
     }
   }
+
+ private:
+  kj::Vector<jsg::Ref<PerformanceEntry>> entries;
 };
 
 #define EW_PERFORMANCE_ISOLATE_TYPES                                                               \

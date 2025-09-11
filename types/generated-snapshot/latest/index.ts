@@ -296,6 +296,13 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Performance: typeof Performance;
+  PerformanceEntry: typeof PerformanceEntry;
+  PerformanceMark: typeof PerformanceMark;
+  PerformanceMeasure: typeof PerformanceMeasure;
+  PerformanceResourceTiming: typeof PerformanceResourceTiming;
+  PerformanceObserver: typeof PerformanceObserver;
+  PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
 }
 export declare function addEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
@@ -474,18 +481,6 @@ export declare abstract class Navigator {
   readonly hardwareConcurrency: number;
   readonly language: string;
   readonly languages: string[];
-}
-/**
- * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
- * as well as timing of subrequests and other operations.
- *
- * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
- */
-export interface Performance {
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
-  readonly timeOrigin: number;
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
-  now(): number;
 }
 export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
@@ -3205,6 +3200,171 @@ export interface WorkerLoaderWorkerCode {
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
   streamingTails?: Fetcher[];
+}
+/**
+ * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
+ * as well as timing of subrequests and other operations.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
+ */
+export declare abstract class Performance extends EventTarget {
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
+  get timeOrigin(): number;
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
+  now(): number;
+  get eventCounts(): EventCounts;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMarks) */
+  clearMarks(name?: string): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMeasures) */
+  clearMeasures(name?: string): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearResourceTimings) */
+  clearResourceTimings(): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntries) */
+  getEntries(): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByName) */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByType) */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/mark) */
+  mark(name: string, options?: PerformanceMarkOptions): PerformanceMark;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/measure) */
+  measure(
+    measureName: string,
+    measureOptionsOrStartMark: PerformanceMeasureOptions | string,
+    maybeEndMark?: string,
+  ): PerformanceMeasure;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize) */
+  setResourceTimingBufferSize(size: number): void;
+}
+/**
+ * PerformanceMark is an abstract interface for PerformanceEntry objects with an entryType of "mark". Entries of this type are created by calling performance.mark() to add a named DOMHighResTimeStamp (the mark) to the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark)
+ */
+export declare class PerformanceMark extends PerformanceEntry {
+  constructor(name: string, maybeOptions?: PerformanceMarkOptions);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail) */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+/**
+ * PerformanceMeasure is an abstract interface for PerformanceEntry objects with an entryType of "measure". Entries of this type are created by calling performance.measure() to add a named DOMHighResTimeStamp (the measure) between two marks to the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure)
+ */
+export declare abstract class PerformanceMeasure extends PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail) */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+export interface PerformanceMarkOptions {
+  detail?: any;
+  startTime?: number;
+}
+export interface PerformanceMeasureOptions {
+  detail?: any;
+  start?: number;
+  duration?: number;
+  end?: number;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList) */
+export declare abstract class PerformanceObserverEntryList {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntries) */
+  getEntries(): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByType) */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByName) */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+}
+/**
+ * Encapsulates a single performance metric that is part of the performance timeline. A performance entry can be directly created by making a performance mark or measure (for example by calling the mark() method) at an explicit point in an application. Performance entries are also created in indirect ways such as loading a resource (such as an image).
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry)
+ */
+export declare abstract class PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/name) */
+  get name(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/entryType) */
+  get entryType(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/startTime) */
+  get startTime(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/duration) */
+  get duration(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/toJSON) */
+  toJSON(): any;
+}
+/**
+ * Enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources. An application can use the timing metrics to determine, for example, the length of time it takes to fetch a specific resource, such as an XMLHttpRequest, <SVG>, image, or script.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming)
+ */
+export declare abstract class PerformanceResourceTiming extends PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectEnd) */
+  get connectEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectStart) */
+  get connectStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/decodedBodySize) */
+  get decodedBodySize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupEnd) */
+  get domainLookupEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupStart) */
+  get domainLookupStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/encodedBodySize) */
+  get encodedBodySize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/fetchStart) */
+  get fetchStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/initiatorType) */
+  get initiatorType(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/nextHopProtocol) */
+  get nextHopProtocol(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectEnd) */
+  get redirectEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectStart) */
+  get redirectStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/requestStart) */
+  get requestStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseEnd) */
+  get responseEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStart) */
+  get responseStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStatus) */
+  get responseStatus(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/secureConnectionStart) */
+  get secureConnectionStart(): number | undefined;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/transferSize) */
+  get transferSize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/workerStart) */
+  get workerStart(): number;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver) */
+export declare class PerformanceObserver {
+  constructor(callback: any);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/disconnect) */
+  disconnect(): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/observe) */
+  observe(options?: PerformanceObserverObserveOptions): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/takeRecords) */
+  takeRecords(): PerformanceEntry[];
+  readonly supportedEntryTypes: string[];
+}
+export interface PerformanceObserverObserveOptions {
+  buffered?: boolean;
+  durationThreshold?: number;
+  entryTypes?: string[];
+  type?: string;
+}
+export interface EventCounts {
+  get size(): number;
+  get(eventType: string): number | undefined;
+  has(eventType: string): boolean;
+  entries(): IterableIterator<string[]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<number>;
+  forEach(
+    param1: (param0: number, param1: string, param2: EventCounts) => void,
+    param2?: any,
+  ): void;
+  [Symbol.iterator](): IterableIterator<string[]>;
 }
 export type AiImageClassificationInput = {
   image: number[];
