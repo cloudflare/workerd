@@ -256,8 +256,6 @@ class ExecutionContext: public jsg::Object {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
     if (flags.getWorkerdExperimental()) {
-      // TODO(soon): Remove experimental gate as soon as we've wired up the control plane so that
-      // this works in production.
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
     JSG_LAZY_INSTANCE_PROPERTY(props, getProps);
@@ -274,6 +272,17 @@ class ExecutionContext: public jsg::Object {
       // * Enable the Durable Object version at the same time -- and make sure they're suitably
       //   consistent with each other.
       JSG_METHOD(abort);
+    }
+
+    if (flags.getWorkerdExperimental()) {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+        readonly exports: Cloudflare.Exports;
+      });
+    } else {
+      JSG_TS_OVERRIDE(<Props = unknown> {
+        readonly props: Props;
+      });
     }
   }
 

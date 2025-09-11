@@ -38,6 +38,7 @@
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
@@ -89,7 +90,8 @@
   F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \
   F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)                                             \
   F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
-  F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)
+  F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
+  F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)
 
 namespace workerd::api {
 
