@@ -153,6 +153,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsWorkerThreadsModule();
     }
 
+    if (module.getName() == "node:_stream_wrap"_kj) {
+      return featureFlags.getEnableNodeJsWorkerStreamWrapModule();
+    }
+
     return true;
   });
 
