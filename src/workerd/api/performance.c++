@@ -16,30 +16,137 @@ double Performance::now() {
   return dateNow();
 }
 
+jsg::Ref<PerformanceMark> PerformanceMark::constructor(
+    jsg::Lock& js, kj::String name, jsg::Optional<Options> maybeOptions) {
+  auto options = kj::mv(maybeOptions).orDefault({});
+  return js.alloc<PerformanceMark>(
+      kj::mv(name), kj::mv(options.detail), options.startTime.orDefault(dateNow()));
+}
+
+jsg::JsObject PerformanceMark::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  KJ_IF_SOME(d, getDetail(js)) {
+    obj.set(js, "detail"_kj, d);
+  }
+  return kj::mv(obj);
+}
+
+jsg::JsObject PerformanceMeasure::toJSON(jsg::Lock& js) {
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  KJ_IF_SOME(d, getDetail(js)) {
+    obj.set(js, "detail"_kj, d);
+  }
+  return kj::mv(obj);
+}
+
 jsg::JsObject PerformanceEntry::toJSON(jsg::Lock& js) {
-  JSG_FAIL_REQUIRE(Error, "PerformanceEntry.toJSON is not implemented"_kj);
+  auto obj = js.objNoProto();
+  obj.set(js, "name"_kj, js.str(name));
+  obj.set(js, "entryType"_kj, js.str(entryType));
+  obj.set(js, "startTime"_kj, js.num(startTime));
+  obj.set(js, "duration"_kj, js.num(duration));
+  return kj::mv(obj);
 }
 
 jsg::JsObject PerformanceResourceTiming::toJSON(jsg::Lock& js) {
   JSG_FAIL_REQUIRE(Error, "PerformanceResourceTiming.toJSON is not implemented"_kj);
 }
 
-void Performance::clearMarks(jsg::Optional<kj::String> name) { /* Intentionally left as no-op */ }
-void Performance::clearMeasures(jsg::Optional<kj::String> name) { /* Intentionally left as no-op */
+void Performance::clearMarks(jsg::Optional<kj::String> name) {
+  kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
+
+  KJ_IF_SOME(n, name) {
+    for (auto& entry: entries) {
+      if (entry->getName() != n) {
+        filtered.add(kj::mv(entry));
+      }
+    }
+  } else {
+    for (auto& entry: entries) {
+      if (entry->getEntryType() != "mark") {
+        filtered.add(kj::mv(entry));
+      }
+    }
+  }
+
+  entries = filtered.releaseAsArray();
 }
-void Performance::clearResourceTimings() { /* Intentionally left as no-op */ }
+
+void Performance::clearMeasures(jsg::Optional<kj::String> name) {
+  kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
+
+  KJ_IF_SOME(n, name) {
+    for (auto& entry: entries) {
+      if (entry->getName() != n) {
+        filtered.add(kj::mv(entry));
+      }
+    }
+  } else {
+    for (auto& entry: entries) {
+      if (entry->getEntryType() != "measure") {
+        filtered.add(kj::mv(entry));
+      }
+    }
+  }
+
+  entries = filtered.releaseAsArray();
+}
+
+void Performance::clearResourceTimings() {
+  kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
+
+  // Remove entries where entryType is "resource" or "navigation"
+  for (auto& entry: entries) {
+    auto entryType = entry->getEntryType();
+    if (entryType != "resource"_kj && entryType != "navigation"_kj) {
+      filtered.add(kj::mv(entry));
+    }
+  }
+
+  entries = filtered.releaseAsArray();
+}
 
 kj::ArrayPtr<jsg::Ref<PerformanceEntry>> Performance::getEntries() {
-  return {};
+  return entries;
 }
 
-kj::ArrayPtr<jsg::Ref<PerformanceEntry>> Performance::getEntriesByName(
-    kj::String name, kj::String type) {
-  return {};
+kj::Array<jsg::Ref<PerformanceEntry>> Performance::getEntriesByName(
+    kj::String name, jsg::Optional<kj::String> type) {
+  kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
+
+  for (auto& entry: entries) {
+    if (entry->getName() == name) {
+      KJ_IF_SOME(t, type) {
+        if (entry->getEntryType() == t) {
+          filtered.add(entry.addRef());
+        }
+      } else {
+        filtered.add(entry.addRef());
+      }
+    }
+  }
+
+  return filtered.releaseAsArray();
 }
 
-kj::ArrayPtr<jsg::Ref<PerformanceEntry>> Performance::getEntriesByType(kj::String type) {
-  return {};
+kj::Array<jsg::Ref<PerformanceEntry>> Performance::getEntriesByType(kj::String type) {
+  kj::Vector<jsg::Ref<PerformanceEntry>> filtered;
+
+  for (auto& entry: entries) {
+    if (entry->getEntryType() == type) {
+      filtered.add(entry.addRef());
+    }
+  }
+
+  return filtered.releaseAsArray();
 }
 
 kj::ArrayPtr<jsg::Ref<PerformanceEntry>> PerformanceObserverEntryList::getEntries() {
@@ -58,14 +165,83 @@ kj::ArrayPtr<jsg::Ref<PerformanceEntry>> PerformanceObserverEntryList::getEntrie
 
 jsg::Ref<PerformanceMark> Performance::mark(
     jsg::Lock& js, kj::String name, jsg::Optional<PerformanceMark::Options> options) {
-  JSG_FAIL_REQUIRE(Error, "Performance.mark is not implemented");
+  double startTime = now();
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(time, opts.startTime) {
+      startTime = time;
+    }
+  }
+
+  auto mark = js.alloc<PerformanceMark>(kj::mv(name), kj::none, startTime);
+
+  KJ_IF_SOME(opts, options) {
+    KJ_IF_SOME(d, opts.detail) {
+      mark->detail = kj::mv(d);
+    }
+  }
+
+  entries.add(mark.addRef());
+  return mark;
 }
 
 jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
     jsg::Optional<kj::String> maybeEndMark) {
-  JSG_FAIL_REQUIRE(Error, "Performance.measure is not implemented");
+  double startTime = now();
+  double endTime = startTime;
+
+  KJ_SWITCH_ONEOF(measureOptionsOrStartMark) {
+    KJ_CASE_ONEOF(startMark, kj::String) {
+      auto startMarks = getEntriesByName(kj::str(startMark), kj::str("mark"));
+      if (startMarks.size() > 0) {
+        startTime = startMarks[0]->getStartTime();
+      }
+
+      KJ_IF_SOME(endMark, maybeEndMark) {
+        auto endMarks = getEntriesByName(kj::str(endMark), kj::str("mark"));
+        if (endMarks.size() > 0) {
+          endTime = endMarks[0]->getStartTime();
+        }
+      }
+    }
+    KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+      KJ_IF_SOME(start, options.start) {
+        startTime = start;
+      }
+
+      KJ_IF_SOME(end, options.end) {
+        endTime = end;
+      } else KJ_IF_SOME(duration, options.duration) {
+        endTime = startTime + duration;
+      }
+    }
+  }
+
+  uint32_t duration = endTime >= startTime ? endTime - startTime : 0;
+  auto measure = js.alloc<PerformanceMeasure>(kj::mv(measureName), startTime, duration);
+
+  KJ_SWITCH_ONEOF(measureOptionsOrStartMark) {
+    KJ_CASE_ONEOF(startMark, kj::String) {
+      auto detailObj = js.objNoProto();
+      detailObj.set(js, "start", js.num(startTime));
+      detailObj.set(js, "end", js.num(endTime));
+      measure->detail = jsg::JsRef<jsg::JsObject>(js, detailObj);
+    }
+    KJ_CASE_ONEOF(options, PerformanceMeasure::Options) {
+      KJ_IF_SOME(d, options.detail) {
+        measure->detail = jsg::JsRef<jsg::JsObject>(js, d.getHandle(js));
+      } else {
+        auto detailObj = js.objNoProto();
+        detailObj.set(js, "start", js.num(startTime));
+        detailObj.set(js, "end", js.num(endTime));
+        measure->detail = jsg::JsRef<jsg::JsObject>(js, detailObj);
+      }
+    }
+  }
+
+  entries.add(measure.addRef());
+  return measure;
 }
 
 void Performance::setResourceTimingBufferSize(uint32_t size) {
@@ -77,20 +253,18 @@ jsg::Ref<PerformanceObserver> PerformanceObserver::constructor(jsg::Lock& js, Ca
 }
 
 void PerformanceObserver::disconnect() {
-  JSG_FAIL_REQUIRE(Error, "PerformanceObserver.disconnect is not implemented");
+  // Leaving it as a no-op for now.
 }
 
 void PerformanceObserver::observe(jsg::Optional<ObserveOptions> options) {
-  JSG_FAIL_REQUIRE(Error, "PerformanceObserver.observe is not implemented");
+  // Leaving it as a no-op for now.
 }
 
 kj::Array<jsg::Ref<PerformanceEntry>> PerformanceObserver::takeRecords() {
   return {};
 }
-kj::Array<kj::String> PerformanceObserver::getSupportedEntryTypes() {
-  // We return empty string because we don't support any of these entry types.
-  // Because we return empty string, two of the web-platform tests fail. This is intentional.
-  return kj::heapArray<kj::String>(0);
+kj::ArrayPtr<const kj::StringPtr> PerformanceObserver::getSupportedEntryTypes() {
+  return supportedEntryTypes.asPtr();
 }
 
 void Performance::eventLoopUtilization() {
