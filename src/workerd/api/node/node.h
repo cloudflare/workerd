@@ -161,6 +161,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsStreamWrapModule();
     }
 
+    if (module.getName() == "node:wasi"_kj) {
+      return featureFlags.getEnableNodeJsWasiModule();
+    }
+
     return true;
   });
 
