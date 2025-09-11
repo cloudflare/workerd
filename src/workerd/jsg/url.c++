@@ -104,6 +104,38 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
   return kj::mv(ret);
 }
 
+class StringTreeHolder final {
+ public:
+  StringTreeHolder(): tree(kj::strTree()) {}
+  StringTreeHolder(kj::StringTree&& tree): tree(kj::mv(tree)) {}
+  StringTreeHolder(kj::StringPtr ptr): tree(kj::strTree(ptr)) {}
+  StringTreeHolder(kj::String str): tree(kj::strTree(kj::mv(str))) {}
+
+  template <typename... Params>
+  StringTreeHolder& append(Params&&... params) {
+    // Keep the tree from getting too deeply nested by flattening it out
+    // once the depth gets to a certain point.
+    if (++depth % 2048 == 0) {
+      tree = kj::strTree(tree.flatten(), kj::fwd<Params>(params)...);
+    } else {
+      tree = kj::strTree(kj::mv(tree), kj::fwd<Params>(params)...);
+    }
+    return *this;
+  }
+
+  operator kj::String() && {
+    return kj::mv(tree).flatten();
+  }
+
+  operator kj::StringTree() && {
+    return kj::mv(tree);
+  }
+
+ private:
+  kj::StringTree tree;
+  size_t depth = 0;
+};
+
 }  // namespace
 
 Url::Url(kj::Own<void> inner): inner(kj::mv(inner)) {}
@@ -1168,7 +1200,7 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
   // There should be at least one token in the list (the end token)
   KJ_DASSERT(tokens.size() > 0);
   kj::Vector<Part> partList(tokens.size());
-  kj::Maybe<kj::StringTree> pendingFixedValue;
+  kj::Maybe<StringTreeHolder> pendingFixedValue;
   size_t index = 0;
   size_t nextNumericName = 0;
 
@@ -1176,15 +1208,15 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
 
   auto appendToPendingFixedValue = [&](kj::StringPtr value) mutable {
     KJ_IF_SOME(pending, pendingFixedValue) {
-      pendingFixedValue = kj::strTree(kj::mv(pending), value);
+      pending.append(value);
     } else {
-      pendingFixedValue = kj::strTree(kj::mv(value));
+      pendingFixedValue.emplace(kj::strTree(value));
     }
   };
 
   auto maybeAddPartFromPendingFixedValue = [&]() mutable -> bool {
     KJ_IF_SOME(fixedValue, pendingFixedValue) {
-      auto value = fixedValue.flatten();
+      kj::String value = kj::mv(fixedValue);
       pendingFixedValue = kj::none;
       if (value.size() == 0) return true;
       KJ_IF_SOME(canonical, canonicalizer(value, kj::none)) {
@@ -1226,17 +1258,17 @@ UrlPattern::Result<kj::Array<Part>> parsePattern(
   };
 
   auto consumeText = [&]() mutable -> kj::String {
-    kj::StringTree result = kj::strTree();
+    StringTreeHolder result;
     while (true) {
       KJ_IF_SOME(token, tryConsumeToken(Token::Type::CHAR)) {
-        result = kj::strTree(kj::mv(result), kj::String(token));
+        result.append(kj::String(token));
       } else KJ_IF_SOME(token, tryConsumeToken(Token::Type::ESCAPED_CHAR)) {
-        result = kj::strTree(kj::mv(result), kj::String(token));
+        result.append(kj::String(token));
       } else {
         break;
       }
     }
-    return result.flatten();
+    return kj::mv(result);
   };
 
   auto isDuplicateName = [&](kj::StringPtr name) -> bool {
@@ -1419,17 +1451,17 @@ RegexAndNameList generateRegexAndNameList(
   // Worst case is that the nameList is equal to partList, although that will almost never
   // be the case, so let's be more conservative in what we reserve.
   kj::Vector<kj::String> nameList(partList.size() / 2);
-  auto regex = kj::strTree("^");
+  StringTreeHolder regex("^"_kj);
 
   for (auto& part: partList) {
     if (part.type == Part::Type::FIXED_TEXT) {
       auto escaped = escapeRegexString(part.value);
       if (part.modifier == Part::Modifier::NONE) {
-        regex = kj::strTree(kj::mv(regex), kj::mv(escaped));
+        regex.append(kj::mv(escaped));
       } else {
-        regex = kj::strTree(kj::mv(regex), "(?:", kj::mv(escaped), ")");
+        regex.append("(?:", kj::mv(escaped), ")");
         KJ_IF_SOME(c, modifierToString(part.modifier)) {
-          regex = kj::strTree(kj::mv(regex), c);
+          regex.append(c);
         }
       }
       continue;
@@ -1443,16 +1475,16 @@ RegexAndNameList generateRegexAndNameList(
 
     if (part.prefix == kj::none && part.suffix == kj::none) {
       if (part.modifier == Part::Modifier::NONE || part.modifier == Part::Modifier::OPTIONAL) {
-        regex = kj::strTree(kj::mv(regex), "(", value, ")");
+        regex.append("(", value, ")");
         KJ_IF_SOME(c, modifierToString(part.modifier)) {
-          regex = kj::strTree(kj::mv(regex), c);
+          regex.append(c);
         }
       } else {
-        regex = kj::strTree(kj::mv(regex), "((?:", value, ")");
+        regex.append("((?:", value, ")");
         KJ_IF_SOME(c, modifierToString(part.modifier)) {
-          regex = kj::strTree(kj::mv(regex), c, ")");
+          regex.append(c, ")");
         } else {
-          regex = kj::strTree(kj::mv(regex), ")");
+          regex.append(")");
         }
       }
       continue;
@@ -1466,31 +1498,31 @@ RegexAndNameList generateRegexAndNameList(
     }).orDefault(kj::String());
 
     if (part.modifier == Part::Modifier::NONE || part.modifier == Part::Modifier::OPTIONAL) {
-      regex = kj::strTree(kj::mv(regex), "(?:", escapedPrefix, "(", value, ")", escapedSuffix, ")");
+      regex.append("(?:", escapedPrefix, "(", value, ")", escapedSuffix, ")");
       KJ_IF_SOME(c, modifierToString(part.modifier)) {
-        regex = kj::strTree(kj::mv(regex), c);
+        regex.append(c);
       }
       continue;
     }
 
-    regex = kj::strTree(kj::mv(regex), "(?:", escapedPrefix, "((?:", value, ")(?:", escapedSuffix,
-        escapedPrefix, "(?:", value, "))*)", escapedSuffix, ")");
+    regex.append("(?:", escapedPrefix, "((?:", value, ")(?:", escapedSuffix, escapedPrefix,
+        "(?:", value, "))*)", escapedSuffix, ")");
     if (part.modifier == Part::Modifier::ZERO_OR_MORE) {
-      regex = kj::strTree(kj::mv(regex), MODIFIER_ZERO_OR_MORE);
+      regex.append(MODIFIER_ZERO_OR_MORE);
     }
   }
 
-  regex = kj::strTree(kj::mv(regex), "$");
+  regex.append("$");
 
   return RegexAndNameList{
-    .regex = regex.flatten(),
+    .regex = kj::mv(regex),
     .names = nameList.releaseAsArray(),
   };
 }
 
 kj::String generatePatternString(
     kj::ArrayPtr<Part> partList, const CompileComponentOptions& options) {
-  auto pattern = kj::strTree();
+  StringTreeHolder pattern;
   Part* previousPart = nullptr;
   Part* nextPart = nullptr;
   bool customName = false;
@@ -1551,12 +1583,12 @@ kj::String generatePatternString(
 
     if (part.type == Part::Type::FIXED_TEXT) {
       if (part.modifier == Part::Modifier::NONE) {
-        pattern = kj::strTree(kj::mv(pattern), escapePatternString(part.value));
+        pattern.append(escapePatternString(part.value));
         continue;
       }
-      pattern = kj::strTree(kj::mv(pattern), "{", escapePatternString(part.value), "}");
+      pattern.append("{", escapePatternString(part.value), "}");
       KJ_IF_SOME(c, modifierToString(part.modifier)) {
-        pattern = kj::strTree(kj::mv(pattern), c);
+        pattern.append(c);
       }
       continue;
     }
@@ -1577,46 +1609,48 @@ kj::String generatePatternString(
       }
     }
 
-    auto subPattern = kj::strTree();
+    StringTreeHolder subPattern;
     KJ_IF_SOME(prefix, part.prefix) {
-      subPattern = kj::strTree(kj::mv(subPattern), escapePatternString(prefix));
+      subPattern.append(escapePatternString(prefix));
     }
     if (customName) {
-      subPattern = kj::strTree(kj::mv(subPattern), ":", part.name);
+      subPattern.append(":", part.name);
     }
 
     if (part.type == Part::Type::REGEXP) {
-      subPattern = kj::strTree(kj::mv(subPattern), "(", part.value, ")");
+      subPattern.append("(", part.value, ")");
     } else if (part.type == Part::Type::SEGMENT_WILDCARD && !customName) {
-      subPattern = kj::strTree(kj::mv(subPattern), "(", options.segmentWildcardRegexp, ")");
+      subPattern.append("(", options.segmentWildcardRegexp, ")");
     } else if (part.type == Part::Type::FULL_WILDCARD) {
       if (!customName &&
           (previousPart == nullptr || previousPart->type == Part::Type::FIXED_TEXT ||
               previousPart->modifier != Part::Modifier::NONE || needsGrouping || !prefixIsEmpty)) {
-        subPattern = kj::strTree(kj::mv(subPattern), MODIFIER_ZERO_OR_MORE);
+        subPattern.append(MODIFIER_ZERO_OR_MORE);
       } else {
-        subPattern = kj::strTree(kj::mv(subPattern), "(.*)");
+        subPattern.append("(.*)");
       }
     }
     if (part.type == Part::Type::SEGMENT_WILDCARD && customName && partSuffixIsValid(&part)) {
-      subPattern = kj::strTree(kj::mv(subPattern), "\\");
+      subPattern.append("\\");
     }
 
     KJ_IF_SOME(suffix, part.suffix) {
-      subPattern = kj::strTree(kj::mv(subPattern), escapePatternString(suffix));
+      subPattern.append(escapePatternString(suffix));
     }
 
     if (needsGrouping) {
-      subPattern = kj::strTree("{", kj::mv(subPattern), "}");
+      kj::String sub = kj::mv(subPattern);
+      subPattern = kj::strTree("{", kj::mv(sub), "}");
     }
 
     KJ_IF_SOME(c, modifierToString(part.modifier)) {
-      subPattern = kj::strTree(kj::mv(subPattern), c);
+      subPattern.append(c);
     }
 
-    pattern = kj::strTree(kj::mv(pattern), kj::mv(subPattern));
+    kj::String sub = kj::mv(subPattern);
+    pattern.append(kj::mv(sub));
   }
-  return pattern.flatten();
+  return kj::mv(pattern);
 }
 
 UrlPattern::Result<UrlPattern::Component> tryCompileComponent(kj::Maybe<kj::String>& input,
