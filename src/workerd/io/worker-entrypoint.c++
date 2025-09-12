@@ -783,9 +783,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   // Set event info BEFORE calling run() to ensure onset event is reported before
   // any user code executes (particularly important for actors whose constructors may run
   // during delivered()).
-  KJ_IF_SOME(eventInfo, event->getEventInfo()) {
-    KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-      t.setEventInfo(context.getInvocationSpanContext(), context.now(), kj::mv(eventInfo));
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    KJ_IF_SOME(eventInfo, event->getEventInfo()) {
+      t.setEventInfo(
+          incomingRequest->getInvocationSpanContext(), incomingRequest->now(), kj::mv(eventInfo));
     }
   }
 
