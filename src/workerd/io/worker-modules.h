@@ -139,7 +139,77 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-          KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
+          auto& schemaLoader = builder.getSchemaLoader();
+          auto schema = schemaLoader.get(content.typeId);
+          kj::Vector<kj::String> exports;
+          for (auto nested: schema.getProto().getNestedNodes()) {
+            auto child = schemaLoader.get(nested.getId());
+            switch (child.getProto().which()) {
+              case capnp::schema::Node::FILE:
+              case capnp::schema::Node::STRUCT:
+              case capnp::schema::Node::INTERFACE: {
+                exports.add(kj::str(nested.getName()));
+                break;
+              }
+              case capnp::schema::Node::ENUM:
+              case capnp::schema::Node::CONST:
+              case capnp::schema::Node::ANNOTATION:
+                // These kinds are not implemented and cannot contain further nested scopes, so
+                // don't generate anything at all for now.
+                break;
+            }
+          }
+
+          bundleBuilder.addSyntheticModule(def.name,
+              [typeId = content.typeId](jsg::Lock& js, const jsg::Url&,
+                  const jsg::modules::Module::ModuleNamespace& ns,
+                  const jsg::CompilationObserver& observer) {
+            const capnp::SchemaLoader& schemaLoader =
+                js.getCapnpSchemaLoader<api::ServiceWorkerGlobalScope>();
+            KJ_IF_SOME(schema, schemaLoader.tryGet(typeId)) {
+              return js.tryCatch([&] {
+                auto& typeWrapper = TypeWrapper::from(js.v8Isolate);
+                ns.setDefault(js,
+                    jsg::JsValue(typeWrapper.wrap(js, js.v8Context(), kj::none, schema)
+                                     .template As<v8::Value>()));
+                for (auto nested: schema.getProto().getNestedNodes()) {
+                  KJ_IF_SOME(child, schemaLoader.tryGet(nested.getId())) {
+                    switch (child.getProto().which()) {
+                      case capnp::schema::Node::FILE:
+                      case capnp::schema::Node::STRUCT:
+                      case capnp::schema::Node::INTERFACE: {
+                        ns.set(js, nested.getName(),
+                            jsg::JsValue(typeWrapper.wrap(js, js.v8Context(), kj::none, child)
+                                             .template As<v8::Value>()));
+                        break;
+                      }
+                      case capnp::schema::Node::ENUM:
+                      case capnp::schema::Node::CONST:
+                      case capnp::schema::Node::ANNOTATION:
+                        // These kinds are not implemented and cannot contain further nested scopes, so
+                        // don't generate anything at all for now.
+                        break;
+                    }
+                  } else {
+                    js.v8Isolate->ThrowException(
+                        js.typeError("Invalid or unknown capnp module type identifier"));
+                    return false;
+                  }
+                }
+                return true;
+              }, [&](jsg::Value exception) {
+                js.v8Isolate->ThrowException(exception.getHandle(js));
+                return false;
+              });
+            } else {
+              // The schema should have been loaded when the Worker::Script was created.
+              // This likely indicates an internal error of some kind.
+              js.v8Isolate->ThrowException(
+                  js.typeError("Invalid or unknown capnp module type identifier"));
+              return false;
+            }
+          },
+              exports.releaseAsArray());
         }
       }
     }
