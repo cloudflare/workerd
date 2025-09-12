@@ -64,6 +64,7 @@ function checkDiagnostics(sources: SourcesMap): void {
       noEmit: true,
       lib: ["lib.esnext.d.ts"],
       types: [],
+      noUnusedParameters: true,
     },
     loadLibFiles()
   );

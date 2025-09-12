@@ -556,7 +556,7 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
 export interface DurableObjectClass<
-  T extends Rpc.DurableObjectBranded | undefined = undefined,
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
