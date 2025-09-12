@@ -661,3 +661,9 @@ wd_test(
     args = ["--experimental"],
     data = ["dgram-nodejs-test.js"],
 )
+
+wd_test(
+    src = "trace-events-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["trace-events-nodejs-test.js"],
+)

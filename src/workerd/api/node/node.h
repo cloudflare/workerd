@@ -174,6 +174,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsInspectorModule();
     }
 
+    if (module.getName() == "node:trace_events"_kj) {
+      return featureFlags.getEnableNodeJsTraceEventsModule();
+    }
+
     return true;
   });
 
