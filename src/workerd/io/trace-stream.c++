@@ -641,13 +641,16 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         return kj::mv(result);
       }
     }).catch_([](kj::Exception&& e) {
+      // TODO: Not rethrowing exceptions here allows previously swallowed exceptions to show up in
+      // logs as uncaught exceptions?
       if (jsg::isTunneledException(e.getDescription())) {
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
         if (!description.startsWith("remote.")) {
           e.setDescription(kj::str("remote.", description));
         }
+      } else {
+        kj::throwFatalException(kj::mv(e));
       }
-      kj::throwFatalException(kj::mv(e));
     });
 
     auto paf = kj::newPromiseAndFulfiller<void>();
@@ -918,12 +921,12 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
 
   auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
     return ioContext.waitUntilStatus();
-  }, [](kj::Exception&& e) {
+  }, [&incomingRequest](kj::Exception&& e) {
     if (e.getDetail(TAIL_STREAM_JS_FAILURE) != kj::none) {
       return EventOutcome::EXCEPTION;
     }
-    kj::throwRecoverableException(kj::mv(e));
-    KJ_UNREACHABLE;
+    incomingRequest->getMetrics().reportFailure(e);
+    return EventOutcome::EXCEPTION;
   });
   KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
     t.setReturn(ioContext.now());
