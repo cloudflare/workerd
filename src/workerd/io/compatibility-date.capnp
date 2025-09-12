@@ -1156,4 +1156,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub inspector module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsTraceEventsModule @135 :Bool
+    $compatEnableFlag("enable_nodejs_trace_events_module")
+    $compatDisableFlag("disable_nodejs_trace_events_module")
+    $experimental;
+  # Enables the Node.js non-functional stub trace_events module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
 }
