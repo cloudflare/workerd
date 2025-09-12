@@ -210,8 +210,13 @@ jobs:
           EOF
           pnpm add /tmp/test-types -w
 
-      - name: Run Wrangler, Miniflare, Vitest, Vite tests
+      - name: Run Wrangler, Miniflare, Vitest, Vite unit tests
         run: pnpm test:ci --concurrency 1 --filter miniflare --filter wrangler --filter @cloudflare/vite-plugin --filter="./fixtures/vitest-pool-workers-examples"
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+
+      - name: Run Wrangler Node.js e2e tests
+        run: pnpm test:e2e --filter wrangler -- unenv-preset
         env:
           MINIFLARE_WORKERD_PATH: /tmp/workerd
 
