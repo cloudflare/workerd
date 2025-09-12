@@ -101,7 +101,7 @@ git_repository(
 git_repository(
     name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
-    commit = "0a92994d729ff76a58f692d3028ca1b64b145d91",
+    commit = "b3720617faf1a4581ed7e6787cc51722ec7751f0",
     remote = "https://github.com/Maratyszcza/FP16.git",
 )
 
