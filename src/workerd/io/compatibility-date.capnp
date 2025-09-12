@@ -1163,4 +1163,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub trace_events module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableWorkerdDebugModule @136 :Bool
+    $compatEnableFlag("enable_workerd_debug_module")
+    $experimental;
+  # Enables the workerd debug module.
+  # **NEVER ENABLE THIS FLAG IN PRODUCTION**
+  # **NEVER SET A DEFAULT ON DATE**
 }

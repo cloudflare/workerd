@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/base64.h>
+#include <workerd/api/debug.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/pyodide/pyodide.h>
@@ -48,6 +49,14 @@ void registerModules(Registry& registry, auto featureFlags) {
   if (featureFlags.getUnsafeModule()) {
     registerUnsafeModule(registry);
   }
+
+  // Debug module is only to be made available in non-production deployments.
+  // It is enabled with an experimental compat flag that must be explicitly set.
+  if (featureFlags.getEnableWorkerdDebugModule()) {
+    registry.template addBuiltinModule<InternalDebugModule>(
+        "workerd:debug", workerd::jsg::ModuleRegistry::Type::BUILTIN);
+  }
+
   registerSocketsModule(registry, featureFlags);
   registerBase64Module(registry, featureFlags);
   registry.addBuiltinBundle(CLOUDFLARE_BUNDLE);
