@@ -79,30 +79,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
 
   auto eventParameters = consumeParams();
 
-  auto getType = [&]() -> tracing::HibernatableWebSocketEventInfo::Type {
-    KJ_SWITCH_ONEOF(eventParameters.eventType) {
-      KJ_CASE_ONEOF(_, HibernatableSocketParams::Text) {
-        return tracing::HibernatableWebSocketEventInfo::Message{};
-      }
-      KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-        return tracing::HibernatableWebSocketEventInfo::Message{};
-      }
-      KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-        return tracing::HibernatableWebSocketEventInfo::Close{
-          .code = close.code, .wasClean = close.wasClean};
-      }
-      KJ_CASE_ONEOF(_, HibernatableSocketParams::Error) {
-        return tracing::HibernatableWebSocketEventInfo::Error{};
-      }
-    }
-    KJ_UNREACHABLE;
-  };
-
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(incomingRequest->getContext().getInvocationSpanContext(), context.now(),
-        tracing::HibernatableWebSocketEventInfo(getType()));
-  }
-
   try {
     co_await context.run(
         [entrypointName = entrypointName, &context, eventParameters = kj::mv(eventParameters),
@@ -205,6 +181,39 @@ HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
     : typeId(typeId),
       params(kj::mv(params)),
       manager(manager) {}
+
+kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEventImpl::getEventInfo() const {
+  // Try to extract event type from params if available
+  KJ_SWITCH_ONEOF(params) {
+    KJ_CASE_ONEOF(socketParams, HibernatableSocketParams) {
+      KJ_SWITCH_ONEOF(socketParams.eventType) {
+        KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message()));
+        }
+        KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message()));
+        }
+        KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Close{close.code, close.wasClean}));
+        }
+        KJ_CASE_ONEOF(error, HibernatableSocketParams::Error) {
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Error()));
+        }
+      }
+    }
+    KJ_CASE_ONEOF(reader, kj::Own<HibernationReader>) {
+      // For HibernationReader case, we can't easily determine the type without parsing.
+      // Return a generic Message type for now.
+      return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+          tracing::HibernatableWebSocketEventInfo::Message()));
+    }
+  }
+  KJ_UNREACHABLE;
+}
 
 HibernatableSocketParams HibernatableWebSocketCustomEventImpl::consumeParams() {
   KJ_IF_SOME(p, params.tryGet<kj::Own<HibernationReader>>()) {
