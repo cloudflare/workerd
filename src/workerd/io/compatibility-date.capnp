@@ -1142,4 +1142,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub wasi module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsDgramModule @133 :Bool
+    $compatEnableFlag("enable_nodejs_dgram_module")
+    $compatDisableFlag("disable_nodejs_dgram_module")
+    $experimental;
+  # Enables the Node.js non-functional stub dgram module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
 }
