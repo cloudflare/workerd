@@ -336,7 +336,7 @@ class DurableObjectClass: public jsg::Object {
 
     JSG_TS_OVERRIDE(
       interface DurableObjectClass<
-        T extends Rpc.DurableObjectBranded | undefined = undefined
+        _T extends Rpc.DurableObjectBranded | undefined = undefined
       > {}
     );
   }
