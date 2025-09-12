@@ -1840,7 +1840,6 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
   kj::Maybe<kj::Own<BaseTracer>> tracer;
-  bool addedTracer = false;
 
   bool isReservedName(kj::StringPtr name) override {
     if (  // "fetch" and "connect" are treated specially on entrypoints.
