@@ -987,9 +987,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
 
-  // Hook for recording trace information.
-  virtual void addTrace(IoContext& ioctx, kj::StringPtr methodName) = 0;
-
   kj::Promise<void> callImpl(Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
     jsg::Lock& js = lock;
     auto params = callContext.getParams();
@@ -1016,7 +1013,6 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         break;
       }
     }
-    addTrace(ctx, methodNameForTrace);
 
     auto targetInfo = getTargetInfo(lock, ctx);
 
@@ -1552,12 +1548,6 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     }
     return false;
   }
-
-  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
-    // TODO(someday): Trace non-top-level calls? Note that this would have to be done differently
-    // than with EntrypointJsRpcTarget since we will already have an onset event set here – creating
-    // a span might be the right approach, but we'd have to end it at the right time too.
-  }
 };
 
 // See comment at call site for explanation.
@@ -1870,20 +1860,6 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       return true;
     }
     return false;
-  }
-
-  void addTrace(IoContext& ioctx, kj::StringPtr methodName) override {
-    KJ_IF_SOME(t, tracer) {
-      // TODO(felix): This should not be necessary, still check since we now add traces in a
-      // different place. Remove after a few days if it proves stable.
-      if (addedTracer) {
-        LOG_WARNING_PERIODICALLY("NOSENTRY tried to add JsRpc trace onset twice"_kj);
-        return;
-      }
-      addedTracer = true;
-      t->setEventInfo(ioctx.getInvocationSpanContext(), ioctx.now(),
-          tracing::JsRpcEventInfo(kj::str(methodName)));
-    }
   }
 };
 
