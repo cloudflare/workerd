@@ -5,6 +5,7 @@
 #pragma once
 
 #include <workerd/api/basics.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
@@ -352,6 +353,8 @@ class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj
   uint16_t getType() override {
     return EVENT_TYPE;
   }
+
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
 
   QueueRetryBatch getRetryBatch() const {
     return {.retry = result.retryBatch.retry, .delaySeconds = result.retryBatch.delaySeconds};
