@@ -38,6 +38,8 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
     return typeId;
   }
 
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override;
+
   // Specify same type as with TraceCustomEventImpl here by default.
   static constexpr uint16_t TYPE = 2;
 
