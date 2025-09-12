@@ -659,11 +659,6 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(
-        context.getInvocationSpanContext(), context.now(), tracing::TraceEventInfo(traces));
-  }
-
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
     if (trace->eventInfo != kj::none) {
@@ -702,6 +697,10 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   co_await incomingRequest->drain();
 }
 }  // namespace
+
+kj::Maybe<tracing::EventInfo> TraceCustomEventImpl::getEventInfo() const {
+  return tracing::EventInfo(tracing::TraceEventInfo(traces));
+}
 
 auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
