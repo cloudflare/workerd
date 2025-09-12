@@ -178,6 +178,14 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsTraceEventsModule();
     }
 
+    if (module.getName() == "node:readline"_kj || module.getName() == "node:readline/promises"_kj) {
+      return featureFlags.getEnableNodeJsReadlineModule();
+    }
+
+    if (module.getName() == "node:repl"_kj) {
+      return featureFlags.getEnableNodeJsReplModule();
+    }
+
     return true;
   });
 
