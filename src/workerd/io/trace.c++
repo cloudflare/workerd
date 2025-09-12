@@ -478,6 +478,13 @@ kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
   };
 }
 
+kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
+    const kj::Array<kj::Own<Trace>>& traces) {
+  return KJ_MAP(t, traces) -> tracing::TraceEventInfo::TraceItem {
+    return tracing::TraceEventInfo::TraceItem(mapCopyString(t->scriptName));
+  };
+}
+
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromReader(
     rpc::Trace::TraceEventInfo::Reader reader) {
   return KJ_MAP(r, reader.getTraces()) -> tracing::TraceEventInfo::TraceItem {
@@ -487,6 +494,9 @@ kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromReader(
 }  // namespace
 
 tracing::TraceEventInfo::TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces)
+    : traces(getTraceItemsFromTraces(traces)) {}
+
+tracing::TraceEventInfo::TraceEventInfo(const kj::Array<kj::Own<Trace>>& traces)
     : traces(getTraceItemsFromTraces(traces)) {}
 
 tracing::TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)
