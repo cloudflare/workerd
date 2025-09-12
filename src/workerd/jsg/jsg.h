@@ -1736,12 +1736,12 @@ class ContextGlobal {
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
-  kj::Maybe<kj::Own<const capnp::SchemaLoader>> maybeSchemaLoader;
+  kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
     moduleRegistryBackingOwner = kj::mv(registry);
   }
-  void setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader);
+  void setSchemaLoader(const capnp::SchemaLoader& schemaLoader);
 
   template <typename, typename>
   friend class ResourceWrapper;

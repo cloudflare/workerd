@@ -807,6 +807,11 @@ static void stopProfiling(jsg::Lock& js, v8::CpuProfiler& profiler, cdp::Command
 struct Worker::Script::Impl {
   kj::Own<workerd::VirtualFileSystem> vfs;
   kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry;
+  // When using the new module registry, the module registry itself holds the
+  // SchemaLoader, so we don't need to hold it here. When using the original
+  // module registry, however, we need a schema loader to instantiate capnp
+  // modules and bindings.
+  kj::Maybe<kj::Own<capnp::SchemaLoader>> maybeSchemaLoader;
 
   kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
 
@@ -820,7 +825,11 @@ struct Worker::Script::Impl {
   Impl(kj::Own<workerd::VirtualFileSystem> vfs,
       kj::Maybe<kj::Arc<workerd::jsg::modules::ModuleRegistry>> maybeNewModuleRegistry)
       : vfs(kj::mv(vfs)),
-        maybeNewModuleRegistry(kj::mv(maybeNewModuleRegistry)) {}
+        maybeNewModuleRegistry(kj::mv(maybeNewModuleRegistry)) {
+    if (this->maybeNewModuleRegistry == kj::none) {
+      maybeSchemaLoader = kj::heap<capnp::SchemaLoader>();
+    }
+  }
 
   struct DynamicImportResult {
     jsg::Value value;
@@ -1307,6 +1316,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         auto& mContext = impl->moduleContext.emplace(isolate->getApi().newContext(lock,
             {
               .newModuleRegistry = impl->getNewModuleRegistry(),
+              .schemaLoader = getSchemaLoader(),
             }));
         mContext->enableWarningOnSpecialEvents();
         context = mContext.getHandle(lock);
@@ -1369,6 +1379,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
               KJ_CASE_ONEOF(script, ScriptSource) {
                 // This path is used for the older, service worker syntax workers.
 
+                if (script.capnpSchemas.size() > 0) {
+                  // const_cast OK because we hold the isolate lock.
+                  auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
+                  for (auto node: script.capnpSchemas) {
+                    schemaLoader.load(node);
+                  }
+                }
+
                 impl->globals =
                     isolate->getApi().compileServiceWorkerGlobals(lock, script, *isolate);
 
@@ -1386,6 +1404,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 
               KJ_CASE_ONEOF(modulesSource, ModulesSource) {
                 // This path is used for the new ESM worker syntax.
+
+                if (modulesSource.capnpSchemas.size() > 0) {
+                  // const_cast OK because we hold the isolate lock.
+                  auto& schemaLoader = const_cast<capnp::SchemaLoader&>(getSchemaLoader());
+                  for (auto node: modulesSource.capnpSchemas) {
+                    schemaLoader.load(node);
+                  }
+                }
 
                 if (!isolate->getApi().getFeatureFlags().getNewModuleRegistry()) {
                   kj::Own<void> limitScope;
@@ -1421,6 +1447,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
 void Worker::Script::installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const {
   jsg::setAlignedPointerInEmbedderData(context, jsg::ContextPointerSlot::VIRTUAL_FILE_SYSTEM,
       const_cast<VirtualFileSystem*>(impl->vfs.get()));
+}
+
+const capnp::SchemaLoader& Worker::Script::getSchemaLoader() const {
+  KJ_IF_SOME(moduleRegistry, impl->maybeNewModuleRegistry) {
+    return moduleRegistry->getSchemaLoader();
+  } else {
+    return *KJ_ASSERT_NONNULL(impl->maybeSchemaLoader);
+  }
 }
 
 kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() const {
@@ -1618,6 +1652,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         jsContext = &this->impl->context.emplace(script->isolate->getApi().newContext(lock,
             {
               .newModuleRegistry = script->impl->getNewModuleRegistry(),
+              .schemaLoader = script->getSchemaLoader(),
             }));
       }
 

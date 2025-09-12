@@ -578,16 +578,11 @@ std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOpti
 }
 
 const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
-  KJ_IF_SOME(loader, maybeSchemaLoader) {
-    return *loader;
-  }
-  auto loader = kj::heap<capnp::SchemaLoader>();
-  auto& ret = *loader;
-  setSchemaLoader(kj::mv(loader));
-  return ret;
+  return KJ_ASSERT_NONNULL(schemaLoader);
 }
 
-void ContextGlobal::setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader) {
-  maybeSchemaLoader = kj::mv(schemaLoader);
+void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
+  this->schemaLoader = schemaLoader;
 }
+
 }  // namespace workerd::jsg

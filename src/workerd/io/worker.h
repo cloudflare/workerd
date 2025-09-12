@@ -279,6 +279,8 @@ class Worker::Script: public kj::AtomicRefcounted {
 
   void installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const;
 
+  const capnp::SchemaLoader& getSchemaLoader() const;
+
   struct CompiledGlobal {
     jsg::V8Ref<v8::String> name;
     jsg::V8Ref<v8::Value> value;
@@ -593,6 +595,7 @@ class Worker::Api {
     // If the worker is using the new module registry system, this is the registry to
     // install on the newly created context. If null, the old system is assumed.
     kj::Maybe<const workerd::jsg::modules::ModuleRegistry&> newModuleRegistry;
+    kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
   };
 
   // Create the context (global scope) object.
