@@ -111,6 +111,7 @@ class EsModule final: public Module {
           // The cached data is not compatible with the current isolate. Let's
           // not try using it.
           delete data;
+          data = nullptr;
         } else {
           observer.onCompileCacheFound(js.v8Isolate);
         }
