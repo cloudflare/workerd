@@ -140,6 +140,10 @@ class BaseTracer: public kj::Refcounted {
 
   // Indicates that we're reporting from a JsRpc customEvent.
   bool isJsRpc = false;
+
+  virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) = 0;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
@@ -184,6 +188,10 @@ class WorkerTracer: public BaseTracer {
 
   void setReturn(
       kj::Date time, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
+
+  void setJsRpcInfo(const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      const kj::ConstString& methodName) override;
 
  private:
   PipelineLogLevel pipelineLogLevel;

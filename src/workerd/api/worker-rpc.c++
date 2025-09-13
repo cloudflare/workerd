@@ -1014,6 +1014,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
+    KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
+      tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
+    }
+
     auto targetInfo = getTargetInfo(lock, ctx);
 
     // We will try to get the function, if we can't we'll throw an error to the client.
