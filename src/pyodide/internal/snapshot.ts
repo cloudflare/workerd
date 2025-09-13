@@ -105,6 +105,7 @@ const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
 };
+export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
 
 /**
  * Preload a dynamic library.
