@@ -621,9 +621,12 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
               lock, Impl::compileDataGlobal(lock, content.body).As<v8::ArrayBuffer>()));
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
-          jsg::ModuleRegistry::WasmModuleInfo(
-              lock, Impl::compileWasmGlobal(lock, content.body, observer)));
+      auto wasmModule = Impl::compileWasmGlobal(lock, content.body, observer);
+      auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
+          lock, module.name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+      // Set the compiled WebAssembly module as the source object for source phase imports
+      moduleInfo.setModuleSourceObject(lock, wasmModule);
+      return moduleInfo;
     }
     KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
       return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,

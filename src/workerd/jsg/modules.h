@@ -145,6 +145,9 @@ class ModuleRegistry {
     kj::Maybe<SyntheticModuleInfo> maybeSynthetic;
     kj::Maybe<kj::Array<kj::String>> maybeNamedExports;
 
+    // For source phase imports - stores the module source object (e.g., WebAssembly.Module)
+    kj::Maybe<V8Ref<v8::Object>> maybeModuleSourceObject;
+
     ModuleInfo(jsg::Lock& js,
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
@@ -166,6 +169,19 @@ class ModuleRegistry {
 
     uint hashCode() const {
       return module.hashCode();
+    }
+
+    // Set the module source object for source phase imports
+    void setModuleSourceObject(jsg::Lock& js, v8::Local<v8::Object> sourceObject) {
+      maybeModuleSourceObject = V8Ref<v8::Object>(js.v8Isolate, sourceObject);
+    }
+
+    // Get the module source object for source phase imports
+    kj::Maybe<v8::Local<v8::Object>> getModuleSourceObject(jsg::Lock& js) const {
+      KJ_IF_SOME(sourceObject, maybeModuleSourceObject) {
+        return sourceObject.getHandle(js);
+      }
+      return kj::none;
     }
   };
 
@@ -282,8 +298,11 @@ class ModuleRegistryImpl final: public ModuleRegistry {
             AllowV8BackgroundThreadsScope scope;
             auto wasmModule =
                 jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-            return jsg::ModuleRegistry::ModuleInfo(
+            auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
                 lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+            // Uncomment iff we want to permit source phase imports for builtin Wasm modules
+            // moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
+            return moduleInfo;
           }, module.getType());
           return;
         case Module::DATA:

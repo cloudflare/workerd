@@ -216,6 +216,31 @@ export const wasmModuleTest = {
   },
 };
 
+import source wasmSource from 'wasm';
+export const wasmSourcePhaseTest = {
+  async test() {
+    ok(wasmSource instanceof WebAssembly.Module);
+    await WebAssembly.instantiate(wasmSource, {});
+  },
+};
+
+export const wasmDynamicSourcePhaseTest = {
+  async test() {
+    const wasmSource = await import.source('wasm');
+    ok(wasmSource instanceof WebAssembly.Module);
+    await WebAssembly.instantiate(wasmSource, {});
+  },
+};
+
+export const wasmDynamicSourcePhaseFailureTest = {
+  async test() {
+    await rejects(import.source('foo'), {
+      message:
+        'Source phase import not available for module: file:///bundle/foo',
+    });
+  },
+};
+
 // TODO(now): Tests
 // * [x] Include tests for all known module types
 //   * [x] ESM
