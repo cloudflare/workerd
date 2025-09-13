@@ -1731,8 +1731,7 @@ class SpanSubmitter final: public kj::Refcounted {
   kj::Own<WorkerTracer> workerTracer;
 };
 
-class WorkerTracerSpanObserver: public SpanObserver,
-                                public kj::EnableAddRefToThis<WorkerTracerSpanObserver> {
+class WorkerTracerSpanObserver: public SpanObserver {
  public:
   WorkerTracerSpanObserver(
       kj::Own<SpanSubmitter> spanSubmitter, tracing::SpanId parentSpanId = tracing::SpanId::nullId)
@@ -3899,9 +3898,7 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted {
     }
   };
 
-  class WorkerStubImpl final: public WorkerStubChannel,
-                              public kj::Refcounted,
-                              public kj::EnableAddRefToThis<WorkerStubImpl> {
+  class WorkerStubImpl final: public WorkerStubChannel, public kj::Refcounted {
    public:
     WorkerStubImpl(Server& server,
         kj::String isolateName,
