@@ -255,14 +255,8 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     writer->report(spanComponentContext, tracing::SpanClose(), span.endTime);
   }
 
-  // Note: spans will not be shipped to the production version of the legacy tail worker, so we
-  // don't need an exceededSpanLimit variable for it.
-  if (trace->bytesUsed + messageSize > MAX_TRACE_BYTES) {
-    trace->truncated = true;
-  } else {
-    trace->bytesUsed += messageSize;
-    trace->spans.add(kj::mv(span));
-  }
+  // Note: spans are not available in the legacy tail worker, so we don't need an exceededSpanLimit
+  // variable for it and it can't cause truncation.
 }
 
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
