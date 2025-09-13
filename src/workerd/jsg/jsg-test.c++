@@ -534,16 +534,6 @@ KJ_TEST("Memory Allocation Error Propagation") {
   });
 }
 
-KJ_TEST("JS Lock has a capnp::SchemaLoader") {
-  IsolateUuidIsolate isolate(v8System, kj::heap<IsolateObserver>());
-  isolate.runInLockScope([&](IsolateUuidIsolate::Lock& lock) {
-    JSG_WITHIN_CONTEXT_SCOPE(
-        lock, lock.newContext<IsolateUuidContext>().getHandle(lock), [&](jsg::Lock& js) {
-      KJ_ASSERT(js.getCapnpSchemaLoader<IsolateUuidContext>().getAllLoaded().size() == 0);
-    });
-  });
-}
-
 }  // namespace
 
 }  // namespace workerd::jsg::test
