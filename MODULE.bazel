@@ -1,16 +1,14 @@
+"Bazel dependencies, see https://registry.bazel.build"
+bazel_dep(name = "abseil-cpp", version = "20250814.0") # abseil is used by protobuf and tcmalloc.
+bazel_dep(name = "aspect_bazel_lib", version = "2.21.1")
+bazel_dep(name = "aspect_rules_esbuild", version = "0.22.1")
+bazel_dep(name = "aspect_rules_js", version = "2.5.0")
+bazel_dep(name = "aspect_rules_ts", version = "3.7.0")
 bazel_dep(name = "bazel_features", version = "1.35.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.1")
-
-# needed by perfetto, but not actually used.
-bazel_dep(name = "rules_android", version = "0.6.4")
-
-# protobuf for use with perfetto
-# Updated protobuf can't be imported reliably under WORKSPACE logic in Bazel 8, so we need to use
-# bzlmod.
-bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
-
-# abseil is used by protobuf and tcmalloc.
-bazel_dep(name = "abseil-cpp", version = "20250814.0")
+bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")  # protobuf for use with perfetto
+bazel_dep(name = "rules_android", version = "0.6.4")  # needed by perfetto, but not actually used.
+bazel_dep(name = "rules_nodejs", version = "6.5.0")
 
 # Not pulling in platforms via bzlmod causes issues with the Windows clang-cl toolchain
 bazel_dep(name = "platforms", version = "1.0.0")
@@ -38,3 +36,36 @@ git_override(
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
+
+NODE_VERSION = "22.18.0"
+
+# ========================================================================================
+# Node.js bootstrap
+#
+# workerd uses Node.js scripts for generating TypeScript types.
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node")
+node.toolchain(
+    node_urls = [
+        # github workflows may substitute a mirror URL here to avoid fetch failures.
+        # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
+        "https://nodejs.org/dist/v{version}/{filename}",
+    ],
+    node_version = NODE_VERSION,
+)
+
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    data = ["//:package.json"],
+    npmrc = "//:.npmrc",
+    pnpm_lock = "//:pnpm-lock.yaml",
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+use_repo(npm, "npm")
+
+rules_ts_ext = use_extension("@aspect_rules_ts//ts:extensions.bzl", "ext")
+rules_ts_ext.deps(
+    # This keeps the TypeScript version in-sync with the editor, which is typically best.
+    ts_version_from = "//:package.json",
+)
+use_repo(rules_ts_ext, "npm_typescript")
