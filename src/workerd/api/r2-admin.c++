@@ -32,9 +32,9 @@ jsg::Promise<jsg::Ref<R2Bucket>> R2Admin::create(
   TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
-  traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-  traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("CreateBucket"_kjc));
-  traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(name));
+  traceContext.userSpan->setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+  traceContext.userSpan->setTag("rpc.method"_kjc, kj::str("CreateBucket"_kjc));
+  traceContext.userSpan->setTag("cloudflare.r2.bucket"_kjc, kj::str(name));
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -73,8 +73,8 @@ jsg::Promise<R2Admin::ListResult> R2Admin::list(jsg::Lock& js,
   TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
-  traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-  traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("ListObjects"_kjc));
+  traceContext.userSpan->setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+  traceContext.userSpan->setTag("rpc.method"_kjc, kj::str("ListObjects"_kjc));
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();
@@ -137,9 +137,9 @@ jsg::Promise<void> R2Admin::delete_(
   TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
   auto client = context.getHttpClient(subrequestChannel, true, kj::none, traceContext);
 
-  traceContext.userSpan.setTag("rpc.service"_kjc, kj::str("r2"_kjc));
-  traceContext.userSpan.setTag("rpc.method"_kjc, kj::str("DeleteBucket"_kjc));
-  traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(name));
+  traceContext.userSpan->setTag("rpc.service"_kjc, kj::str("r2"_kjc));
+  traceContext.userSpan->setTag("rpc.method"_kjc, kj::str("DeleteBucket"_kjc));
+  traceContext.userSpan->setTag("cloudflare.r2.bucket"_kjc, kj::str(name));
 
   capnp::JsonCodec json;
   json.handleByAnnotation<R2BindingRequest>();

@@ -1120,34 +1120,11 @@ inline SpanBuilder SpanBuilder::newChild(kj::ConstString operationName, kj::Date
       kj::mv(operationName), startTime);
 }
 
-// TraceContext to keep track of user tracing/existing tracing better
-// TODO(o11y): When creating user child spans, verify that operationName is within a set of
-// supported operations. This is important to avoid adding spans to the wrong tracing system.
-
-// Interface to track trace context including both Jaeger and User spans.
-// TODO(o11y): Consider fleshing this out to make it a proper class, support adding tags/child spans
-// to both,... We expect that tracking user spans will not be needed in all places where we have the
-// existing spans, so synergies will be limited.
-struct TraceContext {
-  TraceContext(SpanBuilder span, SpanBuilder userSpan)
-      : span(kj::mv(span)),
-        userSpan(kj::mv(userSpan)) {}
-  TraceContext(TraceContext&& other) = default;
-  TraceContext& operator=(TraceContext&& other) = default;
-  KJ_DISALLOW_COPY(TraceContext);
-
-  SpanBuilder span;
-  SpanBuilder userSpan;
-};
-
 // TraceContext variant tracking span parents instead. This is useful for code interacting with
 // IoChannelFactory::SubrequestMetadata, which often needs to pass through both spans together
 // without modifying them. In particular, add functions like newUserChild() here to make it easier
 // to add a span for the right parent.
 struct TraceParentContext {
-  TraceParentContext(TraceContext& tracing)
-      : parentSpan(tracing.span),
-        userParentSpan(tracing.userSpan) {}
   TraceParentContext(SpanParent span, SpanParent userSpan)
       : parentSpan(kj::mv(span)),
         userParentSpan(kj::mv(userSpan)) {}

@@ -857,7 +857,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
     kj::FunctionParam<kj::Own<WorkerInterface>(TraceContext&, IoChannelFactory&)> func,
     SubrequestOptions options) {
   SpanBuilder span = nullptr;
-  SpanBuilder userSpan = nullptr;
+  IoOwn<SpanBuilder> userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
     // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
@@ -884,7 +884,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   if (tracing.span.isObserved()) {
     ret = ret.attach(kj::mv(tracing.span));
   }
-  if (tracing.userSpan.isObserved()) {
+  if (tracing.userSpan->isObserved()) {
     ret = ret.attach(kj::mv(tracing.userSpan));
   }
 
@@ -934,7 +934,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelWithSpans(uint channel,
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     for (Span::Tag& tag: tags) {
-      tracing.userSpan.setTag(kj::mv(tag.key), kj::mv(tag.value));
+      tracing.userSpan->setTag(kj::mv(tag.key), kj::mv(tag.value));
     }
     return getSubrequestChannelImpl(
         channel, isInHouse, kj::mv(cfBlobJson), tracing, channelFactory);
@@ -969,7 +969,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     IoChannelFactory& channelFactory) {
   IoChannelFactory::SubrequestMetadata metadata{
     .cfBlobJson = kj::mv(cfBlobJson),
-    .tracing = tracing,
+    .tracing = TraceParentContext(tracing.span, *tracing.userSpan),
     .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl(),
   };
 
@@ -1061,8 +1061,9 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
   return getCurrentTraceSpan().newChild(kj::mv(operationName));
 }
 
-SpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  return getCurrentUserTraceSpan().newChild(kj::mv(operationName));
+UserSpanBuilder IoContext::makeUserTraceSpan(kj::ConstString operationName) {
+  auto span = kj::heap(getCurrentUserTraceSpan().newChild(kj::mv(operationName)));
+  return IoContext::current().addObject(kj::mv(span));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

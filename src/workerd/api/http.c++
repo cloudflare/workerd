@@ -1925,29 +1925,29 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   }
 
   KJ_IF_SOME(ctx, traceContext) {
-    ctx.userSpan.setTag("network.protocol.name"_kjc, kj::str("http"));
-    ctx.userSpan.setTag("network.protocol.version"_kjc, kj::str("HTTP/1.1"));
-    ctx.userSpan.setTag("http.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
-    ctx.userSpan.setTag("url.full"_kjc, kj::str(jsRequest->getUrl()));
+    ctx.userSpan->setTag("network.protocol.name"_kjc, kj::str("http"));
+    ctx.userSpan->setTag("network.protocol.version"_kjc, kj::str("HTTP/1.1"));
+    ctx.userSpan->setTag("http.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
+    ctx.userSpan->setTag("url.full"_kjc, kj::str(jsRequest->getUrl()));
 
     KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
-      ctx.userSpan.setTag("user_agent.original"_kjc, kj::str(userAgent));
+      ctx.userSpan->setTag("user_agent.original"_kjc, kj::str(userAgent));
     }
 
     KJ_IF_SOME(contentType, headers.get(headerIds.contentType)) {
-      ctx.userSpan.setTag("http.request.header.content-type"_kjc, kj::str(contentType));
+      ctx.userSpan->setTag("http.request.header.content-type"_kjc, kj::str(contentType));
     }
 
     KJ_IF_SOME(contentLength, headers.get(headerIds.contentLength)) {
-      ctx.userSpan.setTag("http.request.header.content-length"_kjc, kj::str(contentLength));
+      ctx.userSpan->setTag("http.request.header.content-length"_kjc, kj::str(contentLength));
     }
 
     KJ_IF_SOME(accept, headers.get(headerIds.accept)) {
-      ctx.userSpan.setTag("http.request.header.accept"_kjc, kj::str(accept));
+      ctx.userSpan->setTag("http.request.header.accept"_kjc, kj::str(accept));
     }
 
     KJ_IF_SOME(acceptEncoding, headers.get(headerIds.acceptEncoding)) {
-      ctx.userSpan.setTag("http.request.header.accept-encoding"_kjc, kj::str(acceptEncoding));
+      ctx.userSpan->setTag("http.request.header.accept-encoding"_kjc, kj::str(acceptEncoding));
     }
   }
 
@@ -2000,7 +2000,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       auto maybeLength = jsBody->tryGetLength(StreamEncoding::IDENTITY);
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(length, maybeLength) {
-          ctx.userSpan.setTag("http.request.body.size"_kjc, int64_t(length));
+          ctx.userSpan->setTag("http.request.body.size"_kjc, int64_t(length));
         }
       }
 
@@ -2063,9 +2063,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
       KJ_IF_SOME(ctx, traceContext) {
-        ctx.userSpan.setTag("http.response.status_code"_kjc, int64_t(response.statusCode));
+        ctx.userSpan->setTag("http.response.status_code"_kjc, int64_t(response.statusCode));
         KJ_IF_SOME(length, response.body->tryGetLength()) {
-          ctx.userSpan.setTag("http.response.body.size"_kjc, int64_t(length));
+          ctx.userSpan->setTag("http.response.body.size"_kjc, int64_t(length));
         }
       }
       return handleHttpResponse(
@@ -2718,7 +2718,7 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(
       auto traceContext = TraceContext(kj::mv(traceSpan), kj::mv(userSpan));
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
-        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = tracing});
+        return channel->startRequest({.cfBlobJson = kj::mv(cfStr), .tracing = TraceParentContext(tracing.span, *tracing.userSpan)});
       }, {
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
