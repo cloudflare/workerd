@@ -290,6 +290,7 @@ class JsRegExp final: public JsBase<v8::RegExp, JsRegExp> {
 class JsDate final: public JsBase<v8::Date, JsDate> {
  public:
   jsg::ByteString toUTCString(Lock& js) const;
+  jsg::ByteString toISOString(Lock& js) const;
   operator kj::Date() const;
   using JsBase<v8::Date, JsDate>::JsBase;
 };
