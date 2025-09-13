@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "wasm_bindgen_shared",
+    name = "zerocopy",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,6 +29,9 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "simd",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -36,15 +39,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=wasm-bindgen-shared",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.100",
+    version = "0.8.27",
     deps = [
-        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
-        "@crates_vendor__wasm-bindgen-shared-0.2.100//:build_script_build",
+        "@crates_vendor__zerocopy-0.8.27//:build_script_build",
     ],
 )
 
@@ -67,6 +69,9 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "simd",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -82,19 +87,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    links = "wasm_bindgen",
-    pkg_name = "wasm-bindgen-shared",
+    pkg_name = "zerocopy",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=wasm-bindgen-shared",
+        "crate-name=zerocopy",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.100",
+    version = "0.8.27",
     visibility = ["//visibility:private"],
 )
 

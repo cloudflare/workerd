@@ -6,16 +6,13 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "capnpc",
+    name = "wasm_bindgen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -34,29 +31,50 @@ rust_library(
     ),
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__wasm-bindgen-macro-0.2.101//:wasm_bindgen_macro",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnpc",
+        "crate-name=wasm-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.21.3",
+    version = "0.2.101",
     deps = [
-        "@crates_vendor__capnp-0.21.4//:capnp",
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__wasm-bindgen-0.2.101//:build_script_build",
+        "@crates_vendor__wasm-bindgen-shared-0.2.101//:wasm_bindgen_shared",
     ],
 )
 
-rust_binary(
-    name = "capnpc-rust__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -68,58 +86,27 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_root = "src/capnpc-rust.rs",
     edition = "2021",
+    link_deps = [
+        "@crates_vendor__wasm-bindgen-shared-0.2.101//:wasm_bindgen_shared",
+    ],
+    pkg_name = "wasm-bindgen",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=capnpc",
+        "crate-name=wasm-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.21.3",
-    deps = [
-        ":capnpc",
-        "@crates_vendor__capnp-0.21.4//:capnp",
-    ],
+    version = "0.2.101",
+    visibility = ["//visibility:private"],
 )
 
-rust_binary(
-    name = "capnpc-rust-bootstrap__bin",
-    srcs = glob(
-        include = ["**/*.rs"],
-        allow_empty = True,
-    ),
-    compile_data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    crate_root = "src/capnpc-rust-bootstrap.rs",
-    edition = "2021",
-    rustc_flags = [
-        "--cap-lints=allow",
-    ],
-    tags = [
-        "cargo-bazel",
-        "crate-name=capnpc",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "0.21.3",
-    deps = [
-        ":capnpc",
-        "@crates_vendor__capnp-0.21.4//:capnp",
-    ],
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )
