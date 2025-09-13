@@ -9,18 +9,21 @@
 
 #include <kj/mutex.h>
 
-#include <set>
-
 namespace workerd::jsg {
+
 namespace {
 
-// Implementation of `v8::Module::ResolveCallback`.
-v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
+// Generalized module resolution callback that handles both evaluation and source phase imports
+template <bool IsSourcePhase>
+v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolveModuleCallback(
+    v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
+  using ReturnType = std::conditional_t<IsSourcePhase, v8::Object, v8::Module>;
+
   auto& js = Lock::current();
-  v8::MaybeLocal<v8::Module> result;
+  v8::MaybeLocal<ReturnType> result;
 
   // The specification for import attributes strongly recommends that embedders
   // reject import attributes and types they do not understand/implement. This
@@ -51,15 +54,17 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     }
 
     // Handle process module redirection based on enable_nodejs_process_v2 flag
-    if (spec == "node:process") {
-      auto specifierPath =
-          kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
-                                                       : "node-internal:legacy_process"_kj);
-      KJ_IF_SOME(info,
-          registry->resolve(
-              js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
-        result = info.module.getHandle(js.v8Isolate);
-        return;
+    if constexpr (!IsSourcePhase) {
+      if (spec == "node:process") {
+        auto specifierPath =
+            kj::Path::parse(isNodeJsProcessV2Enabled(js) ? "node-internal:public_process"_kj
+                                                         : "node-internal:legacy_process"_kj);
+        KJ_IF_SOME(info,
+            registry->resolve(
+                js, specifierPath, kj::none, ModuleRegistry::ResolveOption::INTERNAL_ONLY)) {
+          result = info.module.getHandle(js.v8Isolate);
+          return;
+        }
       }
     }
 
@@ -84,7 +89,17 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             internalOnly ? ModuleRegistry::ResolveOption::INTERNAL_ONLY
                          : ModuleRegistry::ResolveOption::DEFAULT,
             ModuleRegistry::ResolveMethod::IMPORT, spec.asPtr())) {
-      result = resolved.module.getHandle(js);
+      if constexpr (!IsSourcePhase) {
+        result = resolved.module.getHandle(js);
+      } else {
+        KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
+          result = sourceObject;
+        } else {
+          JSG_FAIL_REQUIRE(Error,
+              "Source phase import not available for module: ", targetPath.toString(),
+              ".\n  imported from \"", ref.specifier.toString(), "\"");
+        }
+      }
     } else {
       // This is a bit annoying. If the module was not found, then
       // we need to check to see if it is a prefixed specifier. If it is,
@@ -97,7 +112,13 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
             registry->resolve(js, kj::Path::parse(spec), ref.specifier,
                 ModuleRegistry::ResolveOption::DEFAULT, ModuleRegistry::ResolveMethod::IMPORT,
                 spec.asPtr())) {
-          result = resolve.module.getHandle(js);
+          if constexpr (!IsSourcePhase) {
+            result = resolve.module.getHandle(js);
+          } else {
+            JSG_FAIL_REQUIRE(Error,
+                "Source phase import not available for module: ", targetPath.toString(),
+                ".\n  imported from \"", ref.specifier.toString(), "\"");
+          }
           return;
         }
       }
@@ -109,7 +130,7 @@ v8::MaybeLocal<v8::Module> resolveCallback(v8::Local<v8::Context> context,
     // which we do not want here. Instead, we'll schedule an exception on the isolate
     // directly and set the result to an empty v8::MaybeLocal.
     js.v8Isolate->ThrowException(value.getHandle(js));
-    result = v8::MaybeLocal<v8::Module>();
+    result = v8::MaybeLocal<ReturnType>();
   });
 
   return result;
@@ -271,7 +292,8 @@ void instantiateModule(
   if (status == v8::Module::Status::kEvaluated || status == v8::Module::Status::kEvaluating) return;
 
   if (status == v8::Module::Status::kUninstantiated) {
-    jsg::check(module->InstantiateModule(context, &resolveCallback));
+    jsg::check(module->InstantiateModule(
+        context, resolveModuleCallback<false>, resolveModuleCallback<true>));
   }
 
   auto prom = jsg::check(module->Evaluate(context)).As<v8::Promise>();
