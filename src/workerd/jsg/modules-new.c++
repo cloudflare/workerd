@@ -280,6 +280,8 @@ class SyntheticModule final: public Module {
   kj::Array<kj::String> namedExports;
 };
 
+WD_STRONG_BOOL(SourcePhase);
+
 // Binds a ModuleRegistry to an Isolate.
 class IsolateModuleRegistry final {
  public:
@@ -336,7 +338,7 @@ class IsolateModuleRegistry final {
       Url normalizedSpecifier,
       Url referrer,
       kj::StringPtr rawSpecifier,
-      bool sourcePhase) {
+      SourcePhase sourcePhase) {
     static constexpr auto evaluate = [](Lock& js, Entry& entry, const CompilationObserver& observer,
                                          const Module::Evaluator& maybeEvaluate) {
       auto module = entry.key.getHandle(js);
@@ -373,6 +375,14 @@ class IsolateModuleRegistry final {
           return evaluatePromise;
         } else {
           // We only support source phase imports for Wasm modules.
+          // Source phase imports provide uninstantiated and unlinked representations for modules, as distinct
+          // from module instances. They effectively represent the compiled module without state.
+          // WebAssembly.Module is this representation for WebAssembly.
+          // JS source module handles as an instance of `ModuleSource` will be supported in due course,
+          // but are specified in a different spec ESM Phase Imports (https://github.com/tc39/proposal-esm-phase-imports).
+          // For builtins and other synthetic modules, there are currently no plans to make a source phase
+          // representation available, so that these would remain with the specified syntax error as
+          // implemented below.
           if (isWasm) {
             return evaluatePromise.then(js,
                 [normalizedSpecifier = normalizedSpecifier.clone()](
@@ -700,7 +710,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
     v8::Local<v8::Data> host_defined_options,
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
-    bool isSourcePhase,
+    SourcePhase isSourcePhase,
     v8::Local<v8::FixedArray> import_attributes) {
   auto& js = Lock::current();
 
@@ -794,7 +804,7 @@ v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes) {
   return dynamicImportModuleCallback(
-      context, host_defined_options, resource_name, specifier, false, import_attributes);
+      context, host_defined_options, resource_name, specifier, SourcePhase::NO, import_attributes);
 }
 
 v8::MaybeLocal<v8::Promise> dynamicImportWithPhase(v8::Local<v8::Context> context,
@@ -803,14 +813,10 @@ v8::MaybeLocal<v8::Promise> dynamicImportWithPhase(v8::Local<v8::Context> contex
     v8::Local<v8::String> specifier,
     v8::ModuleImportPhase phase,
     v8::Local<v8::FixedArray> import_attributes) {
-  bool isSourcePhase = (phase == v8::ModuleImportPhase::kSource);
-  if (isSourcePhase) {
-    return dynamicImportModuleCallback(
-        context, host_defined_options, resource_name, specifier, true, import_attributes);
-  } else {
-    return dynamicImportModuleCallback(
-        context, host_defined_options, resource_name, specifier, false, import_attributes);
-  }
+  SourcePhase sourcePhase =
+      (phase == v8::ModuleImportPhase::kSource) ? SourcePhase::YES : SourcePhase::NO;
+  return dynamicImportModuleCallback(
+      context, host_defined_options, resource_name, specifier, sourcePhase, import_attributes);
 }
 
 IsolateModuleRegistry::IsolateModuleRegistry(

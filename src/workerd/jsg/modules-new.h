@@ -789,20 +789,6 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   friend class Module::Evaluator;
 };
 
-// Dynamic import callback functions
-v8::MaybeLocal<v8::Promise> dynamicImport(v8::Local<v8::Context> context,
-    v8::Local<v8::Data> host_defined_options,
-    v8::Local<v8::Value> resource_name,
-    v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_attributes);
-
-v8::MaybeLocal<v8::Promise> dynamicImportWithPhase(v8::Local<v8::Context> context,
-    v8::Local<v8::Data> host_defined_options,
-    v8::Local<v8::Value> resource_name,
-    v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_attributes,
-    v8::ModuleImportPhase phase);
-
 constexpr ModuleRegistry::Builder::Options operator|(
     const ModuleRegistry::Builder::Options& a, const ModuleRegistry::Builder::Options& b) {
   return static_cast<ModuleRegistry::Builder::Options>(

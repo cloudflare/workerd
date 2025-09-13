@@ -15,7 +15,6 @@ import source wasmSource from 'wasm';
 export const wasmSourcePhaseTest = {
   async test() {
     ok(wasmSource instanceof WebAssembly.Module);
-    // The source object should be a WebAssembly.Module that can be instantiated
     await WebAssembly.instantiate(wasmSource, {});
   },
 };
@@ -28,7 +27,6 @@ export const wasmModuleTest = {
   },
 };
 
-// Dynamic source phase only supported for new module registry
 export const dynamicWasmSourcePhaseTest = {
   async test() {
     await rejects(import.source('wasm'), {
@@ -37,7 +35,6 @@ export const dynamicWasmSourcePhaseTest = {
   },
 };
 
-// Dynamic source phase only supported for new module registry
 export const dynamicSourcePhaseErrorTest = {
   async test() {
     await rejects(import.source('worker'), {
