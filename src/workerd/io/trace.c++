@@ -1472,10 +1472,11 @@ tracing::TailEvent tracing::TailEvent::clone() const {
 
 // ======================================================================================
 
-SpanBuilder::SpanBuilder(
-    kj::Maybe<kj::Own<SpanObserver>> observer, kj::ConstString operationName, kj::Date startTime) {
+SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
+    kj::ConstString operationName,
+    kj::Maybe<kj::Date> startTime) {
   KJ_IF_SOME(obs, observer) {
-    span.emplace(kj::mv(operationName), startTime);
+    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
     this->observer = kj::mv(obs);
   }
 }
@@ -1494,7 +1495,8 @@ SpanBuilder::~SpanBuilder() noexcept(false) {
 void SpanBuilder::end() {
   KJ_IF_SOME(o, observer) {
     KJ_IF_SOME(s, span) {
-      s.endTime = kj::systemPreciseCalendarClock().now();
+      KJ_DBG("ending span ", s.operationName);
+      s.endTime = o->getTime();
       o->report(s);
       span = kj::none;
     }
