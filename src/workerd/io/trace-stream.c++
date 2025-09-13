@@ -891,6 +891,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
+kj::Maybe<tracing::EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
+  return tracing::EventInfo(
+      tracing::TraceEventInfo(kj::Array<tracing::TraceEventInfo::TraceItem>(nullptr)));
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -898,11 +903,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
-
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
-        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
-  }
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(kj::heap<TailStreamTarget>(

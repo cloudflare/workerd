@@ -526,18 +526,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
-    kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName,
-    Frankenvalue props,
-    kj::TaskSet& waitUntilTasks) {
-  // This method has three main chunks of logic:
-  // 1. Do all necessary setup work. This starts right below this comment.
-  // 2. Call into the worker's queue event handler.
-  // 3. Wait on the necessary portions of the worker's code to complete.
-  incomingRequest->delivered();
-  auto& context = incomingRequest->getContext();
-
+kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -551,10 +540,20 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     }
   }
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(context.getInvocationSpanContext(), context.now(),
-        tracing::QueueEventInfo(kj::str(queueName), batchSize));
-  }
+  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
+}
+
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks) {
+  // This method has three main chunks of logic:
+  // 1. Do all necessary setup work. This starts right below this comment.
+  // 2. Call into the worker's queue event handler.
+  // 3. Wait on the necessary portions of the worker's code to complete.
+  incomingRequest->delivered();
+  auto& context = incomingRequest->getContext();
 
   // Create a custom refcounted type for holding the queueEvent so that we can pass it to the
   // waitUntil'ed callback safely without worrying about whether this coroutine gets canceled.

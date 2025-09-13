@@ -106,7 +106,12 @@ const jsRpcWorker :Workerd.Worker = (
 
   bindings = [
     (name = "MyService", service = (name = "js-rpc-test", entrypoint = "MyService")),
+    (name = "MyActor", durableObjectNamespace = "MyActor"),
   ],
+  durableObjectNamespaces = [
+    (className = "MyActor", uniqueKey = "foo"),
+  ],
+  durableObjectStorage = (inMemory = void),
 
   streamingTails = ["log"],
 );
