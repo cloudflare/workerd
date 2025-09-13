@@ -389,8 +389,8 @@ class IsolateModuleRegistry final {
                   "Source phase import not available for module: ", normalizedSpecifier.getHref());
             });
           }
-          return js.rejectedPromise<Value>(js.typeError(kj::str(
-              "Source phase import not available for module: ", normalizedSpecifier.getHref())));
+          return js.rejectedPromise<Value>(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(kj::str(
+              "Source phase import not available for module: ", normalizedSpecifier.getHref())))));
         }
       };
 
@@ -934,8 +934,8 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
             }
           }
         }
-        js.throwException(
-            js.error(kj::str("Source phase import not available for module: "_kj, spec)));
+        js.throwException(js.v8Ref(v8::Exception::SyntaxError(
+            js.strIntern(kj::str("Source phase import not available for module: "_kj, spec)))));
         return v8::MaybeLocal<ReturnType>();
       }
     }

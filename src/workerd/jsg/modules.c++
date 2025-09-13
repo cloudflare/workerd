@@ -95,9 +95,10 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
         KJ_IF_SOME(sourceObject, resolved.getModuleSourceObject(js)) {
           result = sourceObject;
         } else {
-          JSG_FAIL_REQUIRE(Error,
-              "Source phase import not available for module: ", targetPath.toString(),
-              ".\n  imported from \"", ref.specifier.toString(), "\"");
+          js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+              kj::str("Source phase import not available for module: ", targetPath.toString(),
+                  ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+          return;
         }
       }
     } else {
@@ -115,9 +116,10 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
           if constexpr (!IsSourcePhase) {
             result = resolve.module.getHandle(js);
           } else {
-            JSG_FAIL_REQUIRE(Error,
-                "Source phase import not available for module: ", targetPath.toString(),
-                ".\n  imported from \"", ref.specifier.toString(), "\"");
+            js.throwException(js.v8Ref(v8::Exception::SyntaxError(js.strIntern(
+                kj::str("Source phase import not available for module: ", targetPath.toString(),
+                    ".\n  imported from \"", ref.specifier.toString(), "\"")))));
+            return;
           }
           return;
         }
