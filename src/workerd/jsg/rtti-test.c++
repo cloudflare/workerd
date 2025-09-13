@@ -7,6 +7,8 @@
 #include <workerd/jsg/rtti.h>
 #include <workerd/jsg/type-wrapper.h>
 
+#include <rust/cxx.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize-text.h>
 #include <kj/test.h>
@@ -92,6 +94,7 @@ KJ_TEST("string types") {
   KJ_EXPECT(tType<kj::StringPtr>() == "(string = (name = \"kj::StringPtr\"))");
   KJ_EXPECT(tType<v8::String>() == "(string = (name = \"v8::String\"))");
   KJ_EXPECT(tType<ByteString>() == "(string = (name = \"ByteString\"))");
+  KJ_EXPECT(tType<::rust::String>() == "(string = (name = \"::rust::String\"))");
 }
 
 KJ_TEST("object types") {
@@ -199,6 +202,10 @@ struct TestResource: public Base {
 
   static jsg::Ref<TestResource> constructor(jsg::Optional<kj::String> label);
 
+  ::rust::String getRustString(::rust::String value) {
+    return value;
+  }
+
   JSG_RESOURCE_TYPE(TestResource) {
     JSG_INHERIT(Base);
 
@@ -210,6 +217,8 @@ struct TestResource: public Base {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(lazyReadonlySize, getSize);
     JSG_PROTOTYPE_PROPERTY(protoSize, getSize, setSize);
     JSG_READONLY_PROTOTYPE_PROPERTY(protoReadonlySize, getSize);
+
+    JSG_METHOD(getRustString);
   }
 };
 
@@ -236,6 +245,7 @@ KJ_TEST("resource structure") {
       "(property = (name = \"lazyReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
       "(property = (name = \"protoSize\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = true, getterFastApiCompatible = true, setterFastApiCompatible = true)), "
       "(property = (name = \"protoReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = true, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
+      "(method = (name = \"getRustString\", returnType = (string = (name = \"::rust::String\")), args = [(string = (name = \"::rust::String\"))], static = false, fastApiCompatible = false)), "
       "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\")), name = \"jsg::Optional\"))]))], "
       "extends = (structure = (name = \"Base\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")), "
       "iterable = false, asyncIterable = false, "

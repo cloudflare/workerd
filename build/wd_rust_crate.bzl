@@ -97,7 +97,7 @@ def wd_rust_crate(
         name = name,
         crate_name = crate_name,
         srcs = srcs,
-        deps = deps,
+        deps = deps + ["//deps/rust:runtime"],
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
@@ -120,7 +120,7 @@ def wd_rust_crate(
         } | test_env,
         tags = test_tags,
         crate_features = crate_features,
-        deps = test_deps,
+        deps = test_deps + ["//deps/rust:runtime"],
         proc_macro_deps = test_proc_macro_deps,
         experimental_use_cc_common_link = select({
             "@platforms//os:windows": 0,
