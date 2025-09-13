@@ -454,7 +454,8 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
   }
 
   kj::Maybe<tracing::EventInfo> getEventInfo() const override {
-    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("jsrpc")));
+    // TODO(mar): Remove method name from jsrpc event info.
+    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("")));
   }
 
   rpc::JsRpcTarget::Client getCap() {

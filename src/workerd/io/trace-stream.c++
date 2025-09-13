@@ -207,7 +207,9 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
-  obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
+  if (info.methodName.size() > 0) {
+    obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
+  }
   return obj;
 }
 
