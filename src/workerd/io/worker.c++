@@ -4217,11 +4217,11 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface {
   KJ_DISALLOW_COPY_AND_MOVE(SubrequestClient);
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
@@ -4239,7 +4239,7 @@ class Worker::Isolate::SubrequestClient final: public WorkerInterface {
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
   throwIfInvalidHeaderValue(headers);
@@ -4434,19 +4434,19 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
   throwIfInvalidHeaderValue(headers);
   KJ_IF_SOME(rid, maybeRequestId) {
     ResponseWrapper wrapper(response, kj::mv(rid), kj::mv(signalResponse));
-    co_await inner->request(method, url, headers, requestBody, wrapper);
+    co_await inner->request(method, url, kj::mv(headers), requestBody, wrapper);
   } else {
-    co_await inner->request(method, url, headers, requestBody, response);
+    co_await inner->request(method, url, kj::mv(headers), requestBody, response);
   }
 }
 
 kj::Promise<void> Worker::Isolate::SubrequestClient::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {
   // TODO(someday): EW-7116 Figure out how to represent TCP connections in the devtools network tab.
-  return inner->connect(host, headers, connection, tunnel, kj::mv(settings));
+  return inner->connect(host, kj::mv(headers), connection, tunnel, kj::mv(settings));
 }
 
 // TODO(someday): Log other kinds of subrequests?

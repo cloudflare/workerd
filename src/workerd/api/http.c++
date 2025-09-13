@@ -1630,7 +1630,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
 kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     kj::HttpService::Response& outer,
     SendOptions options,
-    kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders) {
+    kj::Maybe<kj::HttpHeaders> maybeReqHeaders) {
   JSG_REQUIRE(!getBodyUsed(), TypeError,
       "Body has already been used. "
       "It can only be used once. Use tee() first if you need to read it twice.");

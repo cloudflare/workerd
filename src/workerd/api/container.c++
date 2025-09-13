@@ -118,7 +118,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
   // (as opposed to, say, speaking http-over-capnp to the container service).
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     // URLs should have been validated earlier in the stack, so parsing the URL should succeed.
@@ -136,8 +136,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // We need to convert the URL from proxy format (full URL in request line) to host format
     // (path in request line, hostname in Host header).
-    auto newHeaders = headers.cloneShallow();
-    newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
+    headers.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
     // Make a TCP connection...
@@ -153,12 +152,12 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // ... and now we can just forward our call to that.
     co_await connectionPromise.exclusiveJoin(
-        service->request(method, noHostUrl, newHeaders, requestBody, response));
+        service->request(method, noHostUrl, kj::mv(headers), requestBody, response));
   }
 
   // Implements connect(), i.e., forms a raw socket.
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
