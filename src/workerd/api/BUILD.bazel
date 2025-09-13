@@ -482,6 +482,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams/streamed-fetch-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/streamed-fetch-test.js"],
+)
+
+wd_test(
     src = "tests/abort-internal-streams-test.wd-test",
     args = ["--experimental"],
     data = ["tests/abort-internal-streams-test.js"],
