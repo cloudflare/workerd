@@ -487,7 +487,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   Promise<Value> resolveDynamicImport(jsg::Lock& js,
       const kj::Path& specifier,
       const kj::Path& referrer,
-      kj::StringPtr rawSpecifier) {
+      kj::StringPtr rawSpecifier) override {
     // Here, we first need to determine if the referrer is a built-in module
     // or not. If it is a built-in, then we are only permitted to resolve
     // internal modules. If the worker bundle provided an override for the
