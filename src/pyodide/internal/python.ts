@@ -17,7 +17,7 @@ import {
   getRandomValues,
   entropyBeforeRequest,
 } from 'pyodide-internal:topLevelEntropy/lib';
-import { legacyVendorPath } from 'pyodide-internal:metadata';
+import { LEGACY_VENDOR_PATH } from 'pyodide-internal:metadata';
 import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 /**
@@ -71,7 +71,7 @@ function setupPythonSearchPath(pyodide: Pyodide): void {
       import sys
       from pathlib import Path
 
-      LEGACY_VENDOR_PATH = "${legacyVendorPath}" == "true"
+      LEGACY_VENDOR_PATH = "${LEGACY_VENDOR_PATH}" == "true"
       VENDOR_PATH = "/session/metadata/vendor"
       PYTHON_MODULES_PATH = "/session/metadata/python_modules"
 
