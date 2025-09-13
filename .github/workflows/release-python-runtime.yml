@@ -27,7 +27,7 @@ jobs:
         run: |
           if [ ! -z "${{ secrets.WORKERS_MIRROR_URL }}" ] ; then
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
-            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak WORKSPACE
+            sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak MODULE.bazel
           fi
       - name: Build and upload Pyodide capnproto bundle
         env:
