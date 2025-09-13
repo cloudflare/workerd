@@ -1,6 +1,10 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
+load("@bazelrc-preset.bzl", "bazelrc_preset")
 
+bazelrc_preset(
+    name = "preset",
+)
 js_library(
     name = "base-eslint",
     srcs = ["base.eslint.config.mjs"],

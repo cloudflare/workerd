@@ -1,4 +1,7 @@
-common --enable_platform_specific_config
+# See https://github.com/bazel-contrib/bazelrc-preset.bzl
+
+import %workspace%/tools/preset.bazelrc
+
 build --verbose_failures
 build --build_tag_filters=-off-by-default
 test --test_tag_filters=-off-by-default
@@ -10,7 +13,8 @@ build --test_size_filters=-enormous
 # corresponds to small,medium,large,enormous tests (medium is default)
 build --test_timeout=1,15,60,240
 
-# We're only using bzlmod in a nominal capacity so far
+# This flag was deleted for Bazel 9 (Fall 2025)
+# TODO(alexeagle): remove after bzlmod migration complete
 common --enable_workspace
 
 # As part of starlarkification, Bazel 8 removes a number of rules which now need to be imported from
@@ -32,9 +36,6 @@ build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_
 import %workspace%/build/ci.bazelrc
 
 import %workspace%/build/rust_lint.bazelrc
-
-# Prevents bazel cache invalidation when switching terminals
-build --incompatible_strict_action_env
 
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not

@@ -16,10 +16,6 @@ build:ci --noexperimental_check_external_repository_files
 # binaries, but not needed otherwise. Building runfile trees is slow on systems with slow disk I/O,
 # so avoid doing so where we can. https://github.com/bazelbuild/bazel/commit/03246077f948f2790a83520e7dccc2625650e6df
 build:ci --nobuild_runfile_links
-# Rate limit progress updates for smaller logs, default is 0.2 which leads to very frequent updates.
-build:ci --show_progress_rate_limit=1
-# Enable color output
-build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
