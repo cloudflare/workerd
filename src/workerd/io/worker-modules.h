@@ -167,8 +167,7 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // module registry. We can safely pass a reference to the module handler.
           // It will not be copied into a JS string until the module is actually
           // evaluated.
-          bundleBuilder.addSyntheticModule(
-              def.name, jsg::modules::Module::newWasmModuleHandler(content.body));
+          bundleBuilder.addWasmModule(def.name, content.body);
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
