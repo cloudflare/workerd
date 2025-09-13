@@ -134,6 +134,9 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   bool isSent() const {
     return sent;
   }
+  uint getHttpResponseStatus() const {
+    return httpResponseStatus;
+  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -142,6 +145,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
     TRACE_EVENT(
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
+    httpResponseStatus = statusCode;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
@@ -152,6 +156,7 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   }
 
  private:
+  uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
   bool sent = false;
 };
@@ -255,6 +260,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
 
   bool isActor = context.getActor() != kj::none;
+  // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
+  // when we need it.
+  kj::Maybe<BaseTracer&> workerTracer;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     auto timestamp = context.now();
@@ -282,6 +290,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
 
     t.setEventInfo(context.getInvocationSpanContext(), timestamp,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
+    workerTracer = t;
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -314,10 +323,19 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
-      .then([this](api::DeferredProxy<void> deferredProxy) {
+      .then([this, &context, &wrappedResponse = *wrappedResponse, workerTracer](
+                api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
         PERFETTO_FLOW_FROM_POINTER(this));
     proxyTask = kj::mv(deferredProxy.proxyTask);
+    KJ_IF_SOME(t, workerTracer) {
+      auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
+      if (httpResponseStatus != 0) {
+        t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
+      } else {
+        t.setReturn(context.now());
+      }
+    }
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
@@ -502,6 +520,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
+  // Whenever we implement incoming connections over the `connect` handler we need to remember to
+  // add tracing `onset` and `return` events using setEventInfo()/setReturn(), as with the other
+  // event types here.
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
@@ -580,6 +601,9 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
       -> kj::Promise<WorkerInterface::ScheduledResult> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() waitForFinished()");
     auto result = co_await request->finishScheduled();
+    KJ_IF_SOME(t, context.getWorkerTracer()) {
+      t.setReturn(context.now());
+    }
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     co_return WorkerInterface::ScheduledResult{.retry = context.shouldRetryScheduled(),
       .outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU};
@@ -700,7 +724,11 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setReturn(context.now());
+  }
+  co_return result;
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -744,6 +772,10 @@ kj::Promise<bool> WorkerEntrypoint::test() {
         KJ_LOG(ERROR, exception);
       }
     }
+
+    // Not adding a return event here – we only provide rudimentary tracing support for test events
+    // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
+    // practice.
 
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;

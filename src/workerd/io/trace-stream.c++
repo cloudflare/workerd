@@ -925,6 +925,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     kj::throwRecoverableException(kj::mv(e));
     KJ_UNREACHABLE;
   });
+  KJ_IF_SOME(t, ioContext.getWorkerTracer()) {
+    t.setReturn(ioContext.now());
+  }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }

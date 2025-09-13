@@ -642,6 +642,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
 
     KJ_IF_SOME(status, context.getLimitEnforcer().getLimitsExceeded()) {
       outcome = status;
+    } else {
+      KJ_IF_SOME(t, context.getWorkerTracer()) {
+        t.setReturn(context.now());
+      }
     }
     co_return WorkerInterface::CustomEvent::Result{.outcome = outcome};
   } else {
@@ -695,6 +699,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
           abortError = kj::str("onAbort() promise has unexpectedly not yet been rejected");
         }));
         KJ_LOG(WARNING, "NOSENTRY queue event aborted", abortError, scriptId, status, tasks);
+      }
+    } else {
+      KJ_IF_SOME(t, context.getWorkerTracer()) {
+        t.setReturn(context.now());
       }
     }
 

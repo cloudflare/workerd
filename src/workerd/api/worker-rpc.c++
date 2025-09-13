@@ -1958,6 +1958,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     // and server as part of this session.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
 
+    KJ_IF_SOME(t, ioctx.getWorkerTracer()) {
+      t.setReturn(ioctx.now());
+    }
     co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};
   } catch (...) {
     // Make sure the top-level capability is revoked with the same exception that `run()` is
