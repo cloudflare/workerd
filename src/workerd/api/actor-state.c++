@@ -1018,7 +1018,9 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
       props(js, props),
       storage(kj::mv(storage)),
       container(container.map([&](rpc::Container::Client& cap) {
-        return js.alloc<Container>(kj::mv(cap), containerRunning);
+        auto container = js.alloc<Container>(kj::mv(cap), containerRunning);
+        container->monitorOnBackgroundIfNeeded();
+        return kj::mv(container);
       })),
       facetManager(facetManager.map(
           [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })) {}
