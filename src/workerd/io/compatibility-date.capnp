@@ -1163,4 +1163,18 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub trace_events module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsReadlineModule @136 :Bool
+    $compatEnableFlag("enable_nodejs_readline_module")
+    $compatDisableFlag("disable_nodejs_readline_module")
+    $experimental;
+  # Enables the Node.js non-functional stub readline module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsReplModule @137 :Bool
+    $compatEnableFlag("enable_nodejs_repl_module")
+    $compatDisableFlag("disable_nodejs_repl_module")
+    $experimental;
+  # Enables the Node.js non-functional stub repl module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
 }
