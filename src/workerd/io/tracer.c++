@@ -24,6 +24,15 @@ static constexpr size_t MAX_TRACE_BYTES = 256 * 1024;
 namespace tracing {
 TailStreamWriter::TailStreamWriter(Reporter reporter): state(State(kj::mv(reporter))) {}
 
+TailEvent TailStreamWriter::createTailEvent(const InvocationSpanContext& context,
+    TailEvent::Event&& event,
+    kj::Date timestamp,
+    uint32_t& sequence) {
+  return TailEvent(context.getTraceId(), context.getInvocationId(),
+      context.getSpanId() == tracing::SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()),
+      timestamp, sequence++, kj::mv(event));
+}
+
 void TailStreamWriter::report(
     const InvocationSpanContext& context, TailEvent::Event&& event, kj::Date timestamp) {
   // Becomes a no-op if a terminal event (close) has been reported, or if the stream closed due to
@@ -32,31 +41,50 @@ void TailStreamWriter::report(
   // caused by a user error and events being reported after the stream being closed are expected –
   // reject events following an outcome event, but otherwise just exit if the state has been closed.
   // This could be an assert, but just log an error in case this is prevalent in some edge case.
+
+  // Possibly concern w/ prebuffer
   if (outcomeSeen) {
     KJ_LOG(ERROR, "reported tail stream event after stream close ", event, kj::getStackTrace());
   }
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
+  auto deliverEvent = [&](TailEvent::Event&& eventToDeliver) {
+    // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
+    // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
+    // chance (see SpanId::fromEntropy()), so this should be safe.
+    auto tailEvent = createTailEvent(context, kj::mv(eventToDeliver), timestamp, s.sequence);
+
+    // If the reporter returns false, then we will treat it as a close signal.
+    if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
+  };
+
   // The onset event must be first and must only happen once.
   if (event.is<tracing::Onset>()) {
     KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
     onsetSeen = true;
+    // Deliver the onset event immediately before flushing buffered events
+    deliverEvent(kj::mv(event));
+    // Flush all buffered events that arrived before onset
+    for (auto& bufferedEvent: bufferedEvents) {
+      if (!s.reporter(kj::mv(bufferedEvent))) state = kj::none;
+    }
+    bufferedEvents.clear();
+    return;
   } else {
-    KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
+    if (!onsetSeen) {
+      // Buffer this event until onset arrives
+      bufferedEvents.add(createTailEvent(context, kj::mv(event), timestamp, s.sequence));
+      return;
+    }
     if (event.is<tracing::Outcome>()) {
+      if (!onsetSeen) {
+        KJ_LOG(ERROR, "Tail stream outcome received before onset");
+      }
       outcomeSeen = true;
     }
   }
 
-  // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
-  // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
-  // chance (see SpanId::fromEntropy()), so this should be safe.
-  tracing::TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == tracing::SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()),
-      timestamp, s.sequence++, kj::mv(event));
-
-  // If the reporter returns false, then we will treat it as a close signal.
-  if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
+  deliverEvent(kj::mv(event));
 }
 }  // namespace tracing
 
