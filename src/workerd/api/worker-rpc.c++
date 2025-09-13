@@ -936,6 +936,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
           return ctx.run([this, &ctx, callContext](Worker::Lock& lock) mutable {
+            // TODO(later): Create trace scope for STOR-4395. Is this the right place to do so, or
+            // should we try to do it earlier to capture any spans created in a constructor using
+            // Actor::ensureConstructed())?
+            jsg::AsyncContextFrame::StorageScope traceScope = ctx.makeAsyncTraceScope(lock);
             return callImpl(lock, ctx, callContext);
           });
         }) {}

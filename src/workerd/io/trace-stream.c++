@@ -612,6 +612,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         ioContext
             .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
                      Worker::Lock& lock) mutable -> kj::Promise<void> {
+      // TODO(later): STOR-4395 This method is generally called several times in a single
+      // customEvent. Should an async trace scope be created each time?
+
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
