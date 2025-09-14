@@ -195,11 +195,15 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 
 # fuzzilli (https://github.com/googleprojectzero/fuzzilli/)
-build:fuzzilli --config=sanitizer-common
-build:fuzzilli --copt="-DWORKERD_FUZZILLI" 
+build:fuzzilli --config=asan
+build:fuzzilli --copt="-DWORKERD_FUZZILLI"
 build:fuzzilli --linkopt="-DWORKERD_FUZZILLI"
 build:fuzzilli --copt="-fsanitize-coverage=trace-pc-guard"
 build:fuzzilli --linkopt="-fsanitize-coverage=trace-pc-guard"
+build:fuzzilli --linkopt="-static-libasan"
+# Set ASan/UBSan options globally to abort on error (raise SIGABRT) for proper Fuzzilli crash detection
+build:fuzzilli --action_env=ASAN_OPTIONS=abort_on_error=1:symbolize=false
+build:fuzzilli --action_env=UBSAN_OPTIONS=abort_on_error=1:symbolize=false
 
 #
 # Linux and macOS
