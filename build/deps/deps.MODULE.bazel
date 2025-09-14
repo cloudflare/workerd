@@ -54,7 +54,7 @@ http_archive(
         )""",
     integrity = "sha256-LxBEjWZTVbQfWZ6GmseIA/gvE7Bwzn71rntczrihePM=",
     strip_prefix = "dragonbox-6c7c925b571d54486b9ffae8d9d18a822801cbda",
-    url = "https://github.com/jk-jeon/dragonbox/archive/6c7c925b571d54486b9ffae8d9d18a822801cbda.zip",
+    url = "https://github.com/jk-jeon/dragonbox/archive/6c7c925b571d54486b9ffae8d9d18a822801cbda.tar.gz",
 )
 
 http_archive(
@@ -67,7 +67,7 @@ http_archive(
         )""",
     integrity = "sha256-LYRUr+pAEPbXBmAm6ejUg7CJ552QyUCtuPX/pYBxbik=",
     strip_prefix = "fast_float-cb1d42aaa1e14b09e1452cfdef373d051b8c02a4",
-    url = "https://github.com/fastfloat/fast_float/archive/cb1d42aaa1e14b09e1452cfdef373d051b8c02a4.zip",
+    url = "https://github.com/fastfloat/fast_float/archive/cb1d42aaa1e14b09e1452cfdef373d051b8c02a4.tar.gz",
 )
 
 http_archive(
@@ -75,7 +75,22 @@ http_archive(
     build_file_content = "exports_files(glob([\"**\"]))",
     integrity = "sha256-CuGkuLXdiVJ74rDxbmOMuZ2N2okbXDatsOLfJBQAK5Y=",
     strip_prefix = "FP16-b3720617faf1a4581ed7e6787cc51722ec7751f0",
-    url = "https://github.com/Maratyszcza/FP16/archive/b3720617faf1a4581ed7e6787cc51722ec7751f0.zip",
+    url = "https://github.com/Maratyszcza/FP16/archive/b3720617faf1a4581ed7e6787cc51722ec7751f0.tar.gz",
 )
 
-bazel_dep(name = "highway", version = "1.3.0")
+http_archive(
+    name = "rules_license",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz",
+        "https://github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz",
+    ],
+    sha256 = "26d4021f6898e23b82ef953078389dd49ac2b5618ac564ade4ef87cced147b38",
+)
+
+# NB: highway is available on the BCR, but we pin to the same commit as v8 to avoid version skew.
+http_archive(
+    name = "highway",
+    integrity = "sha256-fvP4kFP1D4jUYDZwu5qRXSUr2TMUztaR3fWRPtvE51s=",
+    strip_prefix = "highway-00fe003dac355b979f36157f9407c7c46448958e",
+    url = "https://github.com/google/highway/archive/00fe003dac355b979f36157f9407c7c46448958e.tar.gz",
+)
