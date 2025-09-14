@@ -81,8 +81,9 @@
 // and exits with 1 Fuzzilli doesn't realize that an application crashed.
 // therefore we install a handler before and just raise the signo
 #ifdef WORKERD_FUZZILLI
+
 void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
-  // inform reprl
+  // inform reprl - remove debug output for clean testing
   struct sigaction sa = {};
   sa.sa_handler = SIG_DFL;
   sigemptyset(&sa.sa_mask);
@@ -92,7 +93,6 @@ void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
 }
 
 void initSignalHandlers() {
-
   struct sigaction action {};
   action.sa_flags = SA_SIGINFO;
   action.sa_sigaction = &signalHandler;
