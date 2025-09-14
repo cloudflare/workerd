@@ -49,7 +49,7 @@ rust_library(
     version = "1.0.26",
     deps = [
         "@crates_vendor__semver-1.0.26//:build_script_build",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.220//:serde",
     ],
 )
 

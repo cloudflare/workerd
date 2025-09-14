@@ -49,7 +49,7 @@ rust_library(
     ],
     version = "0.9.5",
     deps = [
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.220//:serde",
         "@crates_vendor__serde_spanned-1.0.0//:serde_spanned",
         "@crates_vendor__toml_datetime-0.7.0//:toml_datetime",
         "@crates_vendor__toml_parser-1.0.2//:toml_parser",

@@ -44,6 +44,6 @@ rust_library(
     deps = [
         "@crates_vendor__hstr-2.0.1//:hstr",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.220//:serde",
     ],
 )
