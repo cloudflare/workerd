@@ -280,7 +280,10 @@ class SyntheticModule final: public Module {
   kj::Array<kj::String> namedExports;
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
 WD_STRONG_BOOL(SourcePhase);
+#pragma clang diagnostic pop
 
 // Binds a ModuleRegistry to an Isolate.
 class IsolateModuleRegistry final {
