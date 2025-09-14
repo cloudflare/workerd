@@ -22,26 +22,37 @@ export default {
 
     // Accumulate the span info for easier testing
     return (event) => {
-      // span ids are simple counters for tests, but invocation ID allows us to differentiate them
-      let spanKey = event.invocationId + event.spanContext.spanId;
+      // For spanOpen events, the new span ID is in event.event.spanId
+      // For other events, they reference an existing span via event.spanContext.spanId
+      let spanKey;
       switch (event.event.type) {
         case 'spanOpen':
-          spans.set(event.invocationId + event.event.spanId, {
+          // spanOpen creates a new span with ID in event.event.spanId
+          spanKey = event.invocationId + event.event.spanId;
+          spans.set(spanKey, {
             name: event.event.name,
           });
           break;
         case 'attributes': {
+          // attributes references an existing span via spanContext.spanId
+          spanKey = event.invocationId + event.spanContext.spanId;
           let span = spans.get(spanKey);
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
+          if (span) {
+            for (let { name, value } of event.event.info) {
+              span[name] = value;
+            }
+            spans.set(spanKey, span);
           }
-          spans.set(spanKey, span);
           break;
         }
         case 'spanClose': {
+          // spanClose references an existing span via spanContext.spanId
+          spanKey = event.invocationId + event.spanContext.spanId;
           let span = spans.get(spanKey);
-          span['closed'] = true;
-          spans.set(spanKey, span);
+          if (span) {
+            span['closed'] = true;
+            spans.set(spanKey, span);
+          }
           break;
         }
         case 'outcome':
