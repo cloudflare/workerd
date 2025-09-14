@@ -41,3 +41,4 @@ git_override(
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
 
 include("//build/deps:deps.MODULE.bazel")
+include("//build/deps:rust.MODULE.bazel")
