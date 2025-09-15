@@ -8,6 +8,7 @@ import * as assert from 'node:assert';
 // each
 let invocationPromises = [];
 let spans = new Map();
+let topLevelSpanIds = new Map(); // Track top-level span IDs per invocation
 
 export default {
   tailStream(event, env, ctx) {
@@ -19,6 +20,11 @@ export default {
         resolveFn = resolve;
       })
     );
+
+    // Store the top-level span ID from the onset event
+    if (event.event.type === 'onset' && event.event.spanId) {
+      topLevelSpanIds.set(event.invocationId, event.event.spanId);
+    }
 
     // Accumulate the span info for easier testing
     return (event) => {
@@ -34,25 +40,39 @@ export default {
           });
           break;
         case 'attributes': {
+          // Filter out top-level attributes events (jsRpcSession span)
+          const topLevelSpanId = topLevelSpanIds.get(event.invocationId);
+          if (topLevelSpanId && event.spanContext.spanId === topLevelSpanId) {
+            // Ignore attributes for the top-level span
+            break;
+          }
+
           // attributes references an existing span via spanContext.spanId
           spanKey = event.invocationId + event.spanContext.spanId;
           let span = spans.get(spanKey);
-          if (span) {
-            for (let { name, value } of event.event.info) {
-              span[name] = value;
-            }
-            spans.set(spanKey, span);
+          if (!span) {
+            throw new Error(`Attributes event for unknown span: ${spanKey}`);
+          }
+          for (let { name, value } of event.event.info) {
+            span[name] = value;
           }
           break;
         }
         case 'spanClose': {
+          // Filter out top-level spanClose events (jsRpcSession span)
+          const topLevelSpanId = topLevelSpanIds.get(event.invocationId);
+          if (topLevelSpanId && event.spanContext.spanId === topLevelSpanId) {
+            // Ignore spanClose for the top-level span
+            break;
+          }
+
           // spanClose references an existing span via spanContext.spanId
           spanKey = event.invocationId + event.spanContext.spanId;
           let span = spans.get(spanKey);
-          if (span) {
-            span['closed'] = true;
-            spans.set(spanKey, span);
+          if (!span) {
+            throw new Error(`SpanClose event for unknown span: ${spanKey}`);
           }
+          span['closed'] = true;
           break;
         }
         case 'outcome':
