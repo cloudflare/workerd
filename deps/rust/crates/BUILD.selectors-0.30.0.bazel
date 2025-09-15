@@ -43,11 +43,11 @@ rust_library(
     ],
     version = "0.30.0",
     deps = [
-        "@crates_vendor__bitflags-2.9.3//:bitflags",
+        "@crates_vendor__bitflags-2.9.4//:bitflags",
         "@crates_vendor__cssparser-0.35.0//:cssparser",
         "@crates_vendor__derive_more-2.0.1//:derive_more",
         "@crates_vendor__fxhash-0.2.1//:fxhash",
-        "@crates_vendor__log-0.4.27//:log",
+        "@crates_vendor__log-0.4.28//:log",
         "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
         "@crates_vendor__phf-0.11.3//:phf",
         "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",

@@ -52,10 +52,10 @@ rust_library(
     deps = [
         "@crates_vendor__base64-0.22.1//:base64",
         "@crates_vendor__bytes-str-0.2.7//:bytes_str",
-        "@crates_vendor__indexmap-2.11.0//:indexmap",
+        "@crates_vendor__indexmap-2.11.1//:indexmap",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.224//:serde",
         "@crates_vendor__sha1-0.10.6//:sha1",
         "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
         "@crates_vendor__swc_common-14.0.3//:swc_common",
