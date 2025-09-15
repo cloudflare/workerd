@@ -206,10 +206,24 @@ kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEventImpl::getEventInfo
       }
     }
     KJ_CASE_ONEOF(reader, kj::Own<HibernationReader>) {
-      // For HibernationReader case, we can't easily determine the type without parsing.
-      // Return a generic Message type for now.
-      return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
-          tracing::HibernatableWebSocketEventInfo::Message()));
+      // Parse the HibernationReader to determine the actual event type
+      auto payload = reader->getMessage().getPayload();
+      switch (payload.which()) {
+        case rpc::HibernatableWebSocketEventMessage::Payload::TEXT:
+        case rpc::HibernatableWebSocketEventMessage::Payload::DATA:
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Message()));
+        case rpc::HibernatableWebSocketEventMessage::Payload::CLOSE: {
+          auto close = payload.getClose();
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Close{
+                close.getCode(), close.getWasClean()}));
+        }
+        case rpc::HibernatableWebSocketEventMessage::Payload::ERROR:
+          return tracing::EventInfo(tracing::HibernatableWebSocketEventInfo(
+              tracing::HibernatableWebSocketEventInfo::Error()));
+      }
+      KJ_UNREACHABLE;
     }
   }
   KJ_UNREACHABLE;
