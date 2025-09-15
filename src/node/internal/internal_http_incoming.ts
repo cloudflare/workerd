@@ -31,9 +31,9 @@ export let setIncomingMessageSocket: (
   }
 ) => void;
 
-export let setIncomingMessageStream: (
+export let setIncomingRequestBody: (
   incoming: IncomingMessage,
-  stream: ReadableStream | null
+  body: ReadableStream | null
 ) => void;
 
 export class IncomingMessage extends Readable implements _IncomingMessage {
@@ -77,6 +77,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   // read by the user, so there's no point continuing to handle it.
   _dumped = false;
   _consuming = false;
+  _paused = false;
 
   static {
     setIncomingMessageFetchResponse = (
@@ -166,7 +167,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       incoming.#socket = socket;
     };
 
-    setIncomingMessageStream = (
+    setIncomingRequestBody = (
       incoming: IncomingMessage,
       stream: ReadableStream | null
     ): void => {
@@ -234,6 +235,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this.destroy(e as Error);
     } finally {
       this.#reading = false;
+      this.#reader?.releaseLock();
     }
   }
 
