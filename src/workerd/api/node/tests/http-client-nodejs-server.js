@@ -92,6 +92,17 @@ const helloWorldServer = http.createServer((req, res) => {
       ]);
       res.end();
       break;
+    case 'echo':
+      // Echo the request body back as the response
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(body);
+      });
+      break;
     default:
       res.end();
   }

@@ -45,6 +45,8 @@ import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
+type WriteCallback = (err?: Error) => void;
+
 function validateHost(host: unknown, name: string): string {
   if (host != null && typeof host !== 'string') {
     throw new ERR_INVALID_ARG_TYPE(
@@ -58,7 +60,7 @@ function validateHost(host: unknown, name: string): string {
 
 export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #abortController = new AbortController();
-  #body: Buffer[] = [];
+  #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
 
@@ -286,10 +288,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     let body: BodyInit | null = null;
     if (this.method !== 'GET' && this.method !== 'HEAD') {
-      const value = this.getHeader('content-type') ?? '';
-      body = new Blob(this.#body, {
-        type: Array.isArray(value) ? value.join(', ') : `${value}`,
-      });
+      if (this.#body.length > 0) {
+        const value = this.getHeader('content-type') ?? '';
+        body = new Blob(this.#body, {
+          type: Array.isArray(value) ? value.join(', ') : `${value}`,
+        });
+      }
     }
 
     const headers: [string, string][] = [];
@@ -445,6 +449,26 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     return this;
   }
 
+  override write(
+    chunk: string | Buffer | Uint8Array,
+    encoding?: BufferEncoding | WriteCallback | null,
+    callback?: WriteCallback
+  ): boolean {
+    // Capture the data for the request body
+    if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
+      if (typeof chunk === 'string') {
+        this.#body.push(
+          Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
+        );
+      } else {
+        this.#body.push(chunk);
+      }
+    }
+
+    // Call the parent write method
+    return super.write(chunk, encoding, callback);
+  }
+
   // @ts-expect-error TS2416 Type mismatch.
   override end(
     data?: Buffer | string | VoidFunction,
@@ -456,6 +480,20 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (typeof data === 'function') {
       callback = data as VoidFunction;
       data = undefined;
+    }
+
+    // Only capture any final data passed to end()
+    if (
+      this.method !== 'GET' &&
+      this.method !== 'HEAD' &&
+      data &&
+      typeof data !== 'function'
+    ) {
+      if (typeof data === 'string') {
+        this.#body.push(Buffer.from(data, encoding || 'utf8'));
+      } else {
+        this.#body.push(data);
+      }
     }
 
     Writable.prototype.end.call(
