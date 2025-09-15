@@ -62,11 +62,11 @@ class WorkerEntrypoint final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override;
@@ -240,7 +240,7 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
 
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
   throwIfInvalidHeaderValue(headers);
@@ -291,7 +291,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(this));
 
   return context
-      .run([this, &context, method, url, &headers, &requestBody,
+      .run([this, &context, method, url, headers = kj::mv(headers), &requestBody,
                &metrics = incomingRequest->getMetrics(), &wrappedResponse = *wrappedResponse,
                entrypointName = entrypointName](Worker::Lock& lock) mutable {
     TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
@@ -310,7 +310,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
                          ->getSignal());
     }
 
-    return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
+    return lock.getGlobalScope().request(method, url, kj::mv(headers), requestBody, wrappedResponse,
         cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
@@ -446,7 +446,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       metrics->reportFailure(exception);
 
       auto promise = kj::evalNow([&] {
-        auto promise = service.get()->request(method, url, headers, requestBody, *wrappedResponse);
+        auto promise =
+            service.get()->request(method, url, kj::mv(headers), requestBody, *wrappedResponse);
         metrics->setFailedOpen(true);
         return promise.attach(kj::mv(service));
       });
@@ -494,7 +495,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
 }
 
 kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
@@ -520,7 +521,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
     // Note: Intentionally return without co_await so that the `incomingRequest` is destroyed,
     //   because we don't have any need to keep the context around.
-    return next->connect(host, headers, connection, response, settings);
+    return next->connect(host, kj::mv(headers), connection, response, settings);
   }
 
   JSG_FAIL_REQUIRE(TypeError, "Incoming CONNECT on a worker not supported");

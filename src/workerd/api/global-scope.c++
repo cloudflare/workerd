@@ -138,7 +138,7 @@ void ServiceWorkerGlobalScope::clear() {
 
 kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response,
     kj::Maybe<kj::StringPtr> cfBlobJson,
@@ -277,7 +277,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       auto client = ioContext.getHttpClient(IoContext::NEXT_CLIENT_CHANNEL, false,
           cfBlobJson.map([](kj::StringPtr s) { return kj::str(s); }), "fetch_default"_kjc);
       auto adapter = kj::newHttpService(*client);
-      auto promise = adapter->request(method, url, headers, requestBody, response);
+      auto promise = adapter->request(method, url, kj::mv(headers), requestBody, response);
       // Default handling doesn't rely on the IoContext at all so we can return it as a
       // deferred proxy task.
       return DeferredProxy<void>{promise.attach(kj::mv(adapter), kj::mv(client))};
@@ -298,10 +298,10 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
-                ioContext.addFunctor(
-                    [&response, allowWebSocket = headers.isWebSocket(),
-                        canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
-                        jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
+                ioContext.addFunctor([&response, allowWebSocket = headers.isWebSocket(),
+                                         canceled = kj::addRef(*canceled),
+                                         headers = kj::mv(headers), span = kj::mv(span)](
+                                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
@@ -314,8 +314,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
         // a dangling reference, let's not use it.
         return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
       } else {
-        return context.addObject(kj::heap(
-            innerResponse->send(js, response, {.allowWebSocket = allowWebSocket}, headers)));
+        return context.addObject(kj::heap(innerResponse->send(
+            js, response, {.allowWebSocket = allowWebSocket}, kj::mv(headers))));
       }
     })))
         .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))

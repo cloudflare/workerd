@@ -550,7 +550,7 @@ class StreamWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     // Parse the URL to extract the path
@@ -560,19 +560,18 @@ class StreamWorkerInterface final: public WorkerInterface {
 
     // We need to convert the URL from proxy format (full URL in request line) to host format
     // (path in request line, hostname in Host header).
-    auto newHeaders = headers.cloneShallow();
-    newHeaders.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
+    headers.setPtr(kj::HttpHeaderId::HOST, parsedUrl.host);
     auto noHostUrl = parsedUrl.toString(kj::Url::Context::HTTP_REQUEST);
 
     // Create a new HTTP service from the client
     auto service = kj::newHttpService(*factory->httpClient);
 
     // Forward the request to the service
-    co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+    co_await service->request(method, noHostUrl, kj::mv(headers), requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {

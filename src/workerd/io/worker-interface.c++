@@ -24,30 +24,31 @@ class PromisedWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     throwIfInvalidHeaderValue(headers);
     KJ_IF_SOME(w, worker) {
-      co_await w->request(method, url, headers, requestBody, response);
+      co_await w->request(method, url, kj::mv(headers), requestBody, response);
     } else {
       co_await promise;
       throwIfInvalidHeaderValue(headers);
-      co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
+      co_await KJ_ASSERT_NONNULL(worker)->request(
+          method, url, kj::mv(headers), requestBody, response);
     }
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     KJ_IF_SOME(w, worker) {
-      co_await w->connect(host, headers, connection, response, kj::mv(settings));
+      co_await w->connect(host, kj::mv(headers), connection, response, kj::mv(settings));
     } else {
       co_await promise;
       co_await KJ_ASSERT_NONNULL(worker)->connect(
-          host, headers, connection, response, kj::mv(settings));
+          host, kj::mv(headers), connection, response, kj::mv(settings));
     }
   }
 
@@ -233,11 +234,11 @@ class RevocableWebSocketWorkerInterface final: public WorkerInterface {
   RevocableWebSocketWorkerInterface(WorkerInterface& worker, kj::Promise<void> revokeProm);
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override;
@@ -253,17 +254,17 @@ class RevocableWebSocketWorkerInterface final: public WorkerInterface {
 
 kj::Promise<void> RevocableWebSocketWorkerInterface::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
   auto wrappedResponse = kj::heap<RevocableWebSocketHttpResponse>(response, revokeProm.addBranch());
   throwIfInvalidHeaderValue(headers);
-  return worker.request(method, url, headers, requestBody, *wrappedResponse)
+  return worker.request(method, url, kj::mv(headers), requestBody, *wrappedResponse)
       .attach(kj::mv(wrappedResponse));
 }
 
 kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     ConnectResponse& response,
     kj::HttpConnectSettings settings) {
@@ -314,14 +315,14 @@ class ErrorWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     kj::throwFatalException(kj::mv(exception));
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
@@ -366,22 +367,22 @@ RpcWorkerInterface::RpcWorkerInterface(capnp::HttpOverCapnpFactory& httpOverCapn
 
 kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     kj::StringPtr url,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
   throwIfInvalidHeaderValue(headers);
   auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
-  auto promise = inner->request(method, url, headers, requestBody, response);
+  auto promise = inner->request(method, url, kj::mv(headers), requestBody, response);
   return promise.attach(kj::mv(inner));
 }
 
 kj::Promise<void> RpcWorkerInterface::connect(kj::StringPtr host,
-    const kj::HttpHeaders& headers,
+    kj::HttpHeaders headers,
     kj::AsyncIoStream& connection,
     ConnectResponse& tunnel,
     kj::HttpConnectSettings settings) {
   auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
-  auto promise = inner->connect(host, headers, connection, tunnel, kj::mv(settings));
+  auto promise = inner->connect(host, kj::mv(headers), connection, tunnel, kj::mv(settings));
   return promise.attach(kj::mv(inner));
 }
 

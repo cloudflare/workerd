@@ -28,7 +28,7 @@ class WorkerInterface: public kj::HttpService {
   // visibility.)
   virtual kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) = 0;
   // TODO(perf): Consider changing this to return Promise<DeferredProxy>. This would allow
@@ -39,7 +39,7 @@ class WorkerInterface: public kj::HttpService {
   // pure-virtual to force all subclasses of WorkerInterface to implement it explicitly rather
   // than get the default implementation which throws an unimplemented exception.
   virtual kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) = 0;
@@ -176,32 +176,33 @@ class LazyWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
     throwIfInvalidHeaderValue(headers);
     ensureResolve();
     KJ_IF_SOME(w, worker) {
-      co_await w->request(method, url, headers, requestBody, response);
+      co_await w->request(method, url, kj::mv(headers), requestBody, response);
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
       throwIfInvalidHeaderValue(headers);
-      co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
+      co_await KJ_ASSERT_NONNULL(worker)->request(
+          method, url, kj::mv(headers), requestBody, response);
     }
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
     ensureResolve();
     KJ_IF_SOME(w, worker) {
-      co_await w->connect(host, headers, connection, response, kj::mv(settings));
+      co_await w->connect(host, kj::mv(headers), connection, response, kj::mv(settings));
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
       co_await KJ_ASSERT_NONNULL(worker)->connect(
-          host, headers, connection, response, kj::mv(settings));
+          host, kj::mv(headers), connection, response, kj::mv(settings));
     }
   }
 
@@ -281,12 +282,12 @@ class RpcWorkerInterface final: public WorkerInterface {
 
   kj::Promise<void> request(kj::HttpMethod method,
       kj::StringPtr url,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override;
 
   kj::Promise<void> connect(kj::StringPtr host,
-      const kj::HttpHeaders& headers,
+      kj::HttpHeaders headers,
       kj::AsyncIoStream& connection,
       ConnectResponse& tunnel,
       kj::HttpConnectSettings settings) override;
