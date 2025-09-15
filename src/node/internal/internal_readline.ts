@@ -77,10 +77,12 @@ export class Interface extends EventEmitter implements Readline.Interface {
     this.close();
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [Symbol.asyncIterator](): NodeJS.AsyncIterator<string, undefined, any> {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Interface[Symbol.asyncIterator]');
   }

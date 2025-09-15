@@ -51,6 +51,7 @@ export class Interface extends EventEmitter implements ReadlineType.Interface {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.prompt');
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async question(_query: unknown, _options?: unknown): Promise<string> {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.question');
   }
@@ -79,10 +80,12 @@ export class Interface extends EventEmitter implements ReadlineType.Interface {
     this.close();
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [Symbol.asyncIterator](): NodeJS.AsyncIterator<string, undefined, any> {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Interface[Symbol.asyncIterator]');
   }
@@ -101,6 +104,7 @@ export class Readline implements ReadlineType.Readline {
     return this;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async commit(): Promise<void> {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Interface.commit');
   }
