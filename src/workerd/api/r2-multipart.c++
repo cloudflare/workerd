@@ -93,25 +93,25 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
       }
     }
 
+    kj::Maybe<int64_t> requestSize = kj::none;
     KJ_SWITCH_ONEOF(value) {
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
         KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
-          traceContext.userSpan.setTag(
-              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(size));
+          requestSize = size;
         }
       }
       KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
-        traceContext.userSpan.setTag(
-            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(text.value.size()));
+        requestSize = text.value.size();
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        traceContext.userSpan.setTag(
-            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(data.size()));
+        requestSize = data.size();
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        traceContext.userSpan.setTag(
-            "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(blob->getSize()));
+        requestSize = blob->getSize();
       }
+    }
+    KJ_IF_SOME(size, requestSize) {
+      traceContext.userSpan.setTag("cloudflare.r2.request.size"_kjc, size);
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -166,7 +166,7 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
     kj::String partIds =
         kj::strArray(KJ_MAP(part, uploadedParts) { return kj::str(part.partNumber); }, ", ");
-    traceContext.userSpan.setTag("cloudflare.r2.request.uploaded_parts"_kjc, kj::str(partIds));
+    traceContext.userSpan.setTag("cloudflare.r2.request.uploaded_parts"_kjc, kj::mv(partIds));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
