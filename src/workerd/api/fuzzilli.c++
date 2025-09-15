@@ -157,7 +157,7 @@ void fuzzilli_handler(workerd::jsg::Lock& js, workerd::jsg::Arguments<workerd::j
     if (!fzliout) {
       fzliout = fdopen(REPRL_DWFD, "w");
       if (!fzliout) {
-        KJ_LOG(ERROR,"Fuzzer output channel not available, printing to stdout instead\n");
+        KJ_LOG(ERROR, "Fuzzer output channel not available, printing to stdout instead\n");
         fzliout = stdout;
       }
     }

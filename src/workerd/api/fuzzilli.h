@@ -1,5 +1,6 @@
 #pragma once
 
+#ifdef __linux__
 #include <workerd/api/immediate-crash.h>
 #include <workerd/jsg/jsg.h>
 
@@ -60,3 +61,4 @@ void fuzzilli_handler(workerd::jsg::Lock& js, workerd::jsg::Arguments<workerd::j
 // void cov_update_builtins_basic_block_coverage(const std::vector<bool>& cov_map);
 // https://github.com/v8/v8/blob/a63b49495eac716c1a4ccbef57e2e1c7e98f27e4/src/d8/d8.cc#L7284-L7286
 //
+#endif
