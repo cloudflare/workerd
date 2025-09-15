@@ -1626,6 +1626,7 @@ class ModuleRegistryBase {
 
 struct NewContextOptions {
   kj::Maybe<const ModuleRegistryBase&> newModuleRegistry = kj::none;
+  kj::Maybe<const capnp::SchemaLoader&> schemaLoader = kj::none;
   bool enableWeakRef = false;
 };
 
@@ -1797,12 +1798,6 @@ class ResourceWrapper {
     ptr->setModuleRegistryBackingOwner(([&]() -> kj::Own<void> {
       KJ_IF_SOME(newModuleRegistry, options.newModuleRegistry) {
         return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
-          // The new module registry actually owns the schema loader here and
-          // will keep it alive for the necessay lifetime. We can pass a fake
-          // own here that does not actually own the loader in this case.
-          ptr->setSchemaLoader(kj::Own<const capnp::SchemaLoader>(
-              &newModuleRegistry.getSchemaLoader(), kj::NullDisposer::instance));
-
           // The context must be current for attachToIsolate to succeed.
           return newModuleRegistry.attachToIsolate(js, compilationObserver);
         });
@@ -1810,6 +1805,10 @@ class ResourceWrapper {
         return ModuleRegistryImpl<TypeWrapper>::install(isolate, context, compilationObserver);
       }
     })());
+
+    KJ_IF_SOME(loader, options.schemaLoader) {
+      ptr->setSchemaLoader(loader);
+    }
 
     return JSG_WITHIN_CONTEXT_SCOPE(js, context, [&](jsg::Lock& js) {
       setupJavascript(js);
