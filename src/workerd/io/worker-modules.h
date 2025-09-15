@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/api/commonjs.h>
 #include <workerd/api/modules.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
@@ -8,16 +9,17 @@
 
 #include <pyodide/python-entrypoint.embed.h>
 
+#include <capnp/blob.h>
 #include <capnp/schema-loader.h>
 #include <capnp/schema.h>
 
 // This header provides utilities for setting up the ModuleRegistry for a worker.
 // It is meant to be included in only two places; workerd-api.c++ and the equivalent
 // file in the internal repo. It is templated on the TypeWrapper and JsgIsolate types.
+
 namespace workerd {
 namespace api {
 class ServiceWorkerGlobalScope;
-class CommonJsModuleContext;
 }  // namespace api
 
 WD_STRONG_BOOL(IsPythonWorker);
@@ -259,5 +261,101 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
   // All done!
   return builder.finish();
 }
+
+// ======================================================================================
+// Legacy module registry support
+
+namespace modules::legacy {
+
+template <typename JsgIsolate>
+static v8::Local<v8::String> compileTextGlobal(
+    typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
+  return lock.wrapNoContext(reader);
+};
+
+template <typename JsgIsolate>
+static v8::Local<v8::ArrayBuffer> compileDataGlobal(
+    typename JsgIsolate::Lock& lock, ::capnp::Data::Reader reader) {
+  return lock.wrapNoContext(kj::heapArray(reader));
+};
+
+template <typename JsgIsolate>
+static v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
+    ::capnp::Data::Reader reader,
+    const jsg::CompilationObserver& observer) {
+  lock.setAllowEval(true);
+  KJ_DEFER(lock.setAllowEval(false));
+
+  // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
+  // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
+  // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
+  // compiles fast but runs slower.
+  AllowV8BackgroundThreadsScope scope;
+
+  return jsg::compileWasmModule(lock, reader, observer);
+};
+
+template <typename JsgIsolate>
+static v8::Local<v8::Value> compileJsonGlobal(
+    typename JsgIsolate::Lock& lock, ::capnp::Text::Reader reader) {
+  return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
+};
+
+// Compiles a module for the legacy module registry, returning kj::none if the module
+// is a Python module or Python requirement, which are handled elsewhere.
+template <typename JsgIsolate>
+kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
+    kj::StringPtr name,
+    const Worker::Script::ModuleContent& moduleContent,
+    const jsg::CompilationObserver& observer,
+    CompatibilityFlags::Reader featureFlags) {
+  auto& lock = kj::downcast<typename JsgIsolate::Lock>(js);
+  KJ_SWITCH_ONEOF(moduleContent) {
+    KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+      return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
+          jsg::ModuleRegistry::TextModuleInfo(
+              js, modules::legacy::compileTextGlobal<JsgIsolate>(lock, content.body)));
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+      return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
+          jsg::ModuleRegistry::DataModuleInfo(
+              js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, content.body)));
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+      return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
+          jsg::ModuleRegistry::WasmModuleInfo(
+              js, modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer)));
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+      return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
+          jsg::ModuleRegistry::JsonModuleInfo(
+              js, modules::legacy::compileJsonGlobal<JsgIsolate>(lock, content.body)));
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+      // TODO(soon): Make sure passing nullptr to compile cache is desired.
+      return jsg::ModuleRegistry::ModuleInfo(js, name, content.body, nullptr /* compile cache */,
+          jsg::ModuleInfoCompileOption::BUNDLE, observer);
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+      return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,
+          jsg::ModuleRegistry::CommonJsModuleInfo(lock, name, content.body,
+              kj::heap<api::CommonJsImpl<typename JsgIsolate::Lock>>(js, kj::Path::parse(name))));
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+      // Nothing to do. Handled elsewhere.
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+      // Nothing to do. Handled elsewhere.
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+      return workerd::modules::capnp::addCapnpModule<JsgIsolate>(lock, content.typeId, name);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+}  // namespace modules::legacy
 
 }  // namespace workerd
