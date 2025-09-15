@@ -1211,6 +1211,66 @@ export const testWebPushHeaderDuplication = {
   },
 };
 
+export const testHttpRequestFields = {
+  async test(_ctrl, env) {
+    await using server = http.createServer((req, res) => {
+      strictEqual(req._consuming, false, 'Consuming should be false');
+      strictEqual(req._dumped, false, 'Dumped should be false');
+      strictEqual(req._paused, false, 'Paused should be false');
+      res.end('OK');
+    });
+    server.listen(8080);
+    await env.SERVICE.fetch('https://cloudflare.com');
+  },
+};
+
+export const testBufferedDataEventEmission = {
+  async test(_ctrl, env) {
+    const dataFn = mock.fn((chunk) => {
+      strictEqual(chunk instanceof Buffer, true, 'Chunk should be a Buffer');
+      strictEqual(chunk.toString(), 'test data');
+    });
+    const errorFn = mock.fn();
+    const endFn = mock.fn();
+
+    await using server = http.createServer((req, res) => {
+      // Test that data events are emitted when listener is attached after data is buffered
+      dataFn.mock.resetCalls();
+      endFn.mock.resetCalls();
+
+      req.on('data', dataFn);
+      req.on('error', errorFn);
+      req.on('end', () => {
+        endFn();
+        res.end('OK');
+      });
+    });
+    server.listen(8080);
+
+    await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'POST',
+      body: 'test data',
+    });
+    strictEqual(
+      dataFn.mock.callCount(),
+      1,
+      '.on("data") should have been called'
+    );
+    strictEqual(
+      endFn.mock.callCount(),
+      1,
+      '.on("end") should have been called'
+    );
+
+    await env.SERVICE.fetch('https://cloudflare.com', {
+      method: 'GET',
+    });
+    strictEqual(errorFn.mock.callCount(), 0, 'Error should not be emitted');
+    strictEqual(dataFn.mock.callCount(), 0);
+    strictEqual(endFn.mock.callCount(), 1);
+  },
+};
+
 let scheduledCallCount = 0;
 
 export default {
