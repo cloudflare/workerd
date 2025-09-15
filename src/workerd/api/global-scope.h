@@ -9,7 +9,6 @@
 #include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
-#include "performance.h"
 #ifdef WORKERD_FUZZILLI
 #include "fuzzilli.h"
 #endif
