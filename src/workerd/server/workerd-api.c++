@@ -650,37 +650,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
       return kj::none;
     }
     KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-      const capnp::SchemaLoader& schemaLoader =
-          lock.getCapnpSchemaLoader<api::ServiceWorkerGlobalScope>();
-      auto schema = schemaLoader.get(content.typeId);
-
-      auto fileScope = lock.v8Ref(lock.wrap(lock.v8Context(), schema).As<v8::Value>());
-      kj::Vector<kj::StringPtr> exports;
-      kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls;
-
-      for (auto nested: schema.getProto().getNestedNodes()) {
-        auto child = schemaLoader.get(nested.getId());
-
-        switch (child.getProto().which()) {
-          case capnp::schema::Node::FILE:
-          case capnp::schema::Node::STRUCT:
-          case capnp::schema::Node::INTERFACE: {
-            exports.add(nested.getName());
-            topLevelDecls.insert(
-                nested.getName(), lock.v8Ref(lock.wrap(lock.v8Context(), child).As<v8::Value>()));
-            break;
-          }
-          case capnp::schema::Node::ENUM:
-          case capnp::schema::Node::CONST:
-          case capnp::schema::Node::ANNOTATION:
-            // These kinds are not implemented and cannot contain further nested scopes, so
-            // don't generate anything at all for now.
-            break;
-        }
-      }
-
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, exports.asPtr().asConst(),
-          jsg::ModuleRegistry::CapnpModuleInfo(kj::mv(fileScope), kj::mv(topLevelDecls)));
+      return workerd::modules::capnp::addCapnpModule<JsgWorkerdIsolate>(
+          lock, content.typeId, module.name);
     }
   }
   KJ_UNREACHABLE;

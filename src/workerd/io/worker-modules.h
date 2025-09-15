@@ -1,6 +1,5 @@
 #pragma once
 
-#include <workerd/api/commonjs.h>
 #include <workerd/api/modules.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/worker.h>
@@ -9,13 +8,78 @@
 
 #include <pyodide/python-entrypoint.embed.h>
 
+#include <capnp/schema-loader.h>
+#include <capnp/schema.h>
+
+// This header provides utilities for setting up the ModuleRegistry for a worker.
+// It is meant to be included in only two places; workerd-api.c++ and the equivalent
+// file in the internal repo. It is templated on the TypeWrapper and JsgIsolate types.
 namespace workerd {
+namespace api {
+class ServiceWorkerGlobalScope;
+class CommonJsModuleContext;
+}  // namespace api
 
 WD_STRONG_BOOL(IsPythonWorker);
+
+namespace modules::capnp {
+// Helper to iterate over the nested nodes of a schema for capnp modules, filtering
+// out the kinds we don't care about.
+void filterNestedNodes(const auto& schemaLoader, const auto& schema, auto fn) {
+  for (auto nested: schema.getProto().getNestedNodes()) {
+    auto child = schemaLoader.get(nested.getId());
+    switch (child.getProto().which()) {
+      case ::capnp::schema::Node::FILE:
+      case ::capnp::schema::Node::STRUCT:
+      case ::capnp::schema::Node::INTERFACE: {
+        fn(nested.getName(), child);
+        break;
+      }
+      case ::capnp::schema::Node::ENUM:
+      case ::capnp::schema::Node::CONST:
+      case ::capnp::schema::Node::ANNOTATION:
+        // These kinds are not implemented and cannot contain further nested scopes, so
+        // don't generate anything at all for now.
+        break;
+    }
+  }
+}
+
+// This is used only by the original module registry implementation in both workerd
+// and the internal project. It collects the exports and instantiates the exports of
+// a capnp module at the same time and returns a ModuleInfo for the original registry.
+// The new module registry variation uses a different approach where the exports are
+// collected up front by the exports are instantiated lazily when the module is actually
+// resolved.
+template <typename JsgIsolate>
+jsg::ModuleRegistry::ModuleInfo addCapnpModule(
+    typename JsgIsolate::Lock& lock, uint64_t typeId, kj::StringPtr name) {
+  const auto& schemaLoader = lock.template getCapnpSchemaLoader<api::ServiceWorkerGlobalScope>();
+  auto schema = schemaLoader.get(typeId);
+  auto fileScope = lock.v8Ref(lock.wrap(lock.v8Context(), schema).template As<v8::Value>());
+  kj::Vector<kj::StringPtr> exports;
+  kj::HashMap<kj::StringPtr, jsg::Value> topLevelDecls;
+
+  filterNestedNodes(schemaLoader, schema, [&](auto name, const auto& child) {
+    // topLevelDecls are the actual exported values...
+    topLevelDecls.insert(
+        name, lock.v8Ref(lock.wrap(lock.v8Context(), child).template As<v8::Value>()));
+    // ... while exports is just the list of names
+    exports.add(name);
+  });
+
+  return jsg::ModuleRegistry::ModuleInfo(lock, name, exports.asPtr().asConst(),
+      jsg::ModuleRegistry::CapnpModuleInfo(kj::mv(fileScope), kj::mv(topLevelDecls)));
+}
+}  // namespace modules::capnp
 
 // Creates an instance of the (new) ModuleRegistry. This method provides the
 // initialization logic that is agnostic to the Worker::Api implementation,
 // but accepts a callback parameter to handle the Worker::Api-specific details.
+//
+// Note: this is a big template but it will only be called from two places in
+// the codebase, one for workerd and one for the internal project. It depends
+// on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
 static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     const jsg::ResolveObserver& resolveObserver,
@@ -139,63 +203,35 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+          // For the new module registry, the implementation is a bit different than
+          // the original. Up front we collect only the names of the exports since we
+          // need to know those when we create the synthetic module. The actual exports
+          // themselves, however, are instantiated lazily when the module is actually
+          // resolved and evaluated.
           auto& schemaLoader = builder.getSchemaLoader();
           auto schema = schemaLoader.get(content.typeId);
           kj::Vector<kj::String> exports;
-          for (auto nested: schema.getProto().getNestedNodes()) {
-            auto child = schemaLoader.get(nested.getId());
-            switch (child.getProto().which()) {
-              case capnp::schema::Node::FILE:
-              case capnp::schema::Node::STRUCT:
-              case capnp::schema::Node::INTERFACE: {
-                exports.add(kj::str(nested.getName()));
-                break;
-              }
-              case capnp::schema::Node::ENUM:
-              case capnp::schema::Node::CONST:
-              case capnp::schema::Node::ANNOTATION:
-                // These kinds are not implemented and cannot contain further nested scopes, so
-                // don't generate anything at all for now.
-                break;
-            }
-          }
+          modules::capnp::filterNestedNodes(schemaLoader, schema,
+              [&](auto name, const capnp::Schema& child) { exports.add(kj::str(name)); });
 
           bundleBuilder.addSyntheticModule(def.name,
-              [typeId = content.typeId](jsg::Lock& js, const jsg::Url&,
+              [typeId = content.typeId, &schemaLoader](jsg::Lock& js, const jsg::Url&,
                   const jsg::modules::Module::ModuleNamespace& ns,
                   const jsg::CompilationObserver& observer) {
-            const capnp::SchemaLoader& schemaLoader =
-                js.getCapnpSchemaLoader<api::ServiceWorkerGlobalScope>();
+            auto& typeWrapper = TypeWrapper::from(js.v8Isolate);
             KJ_IF_SOME(schema, schemaLoader.tryGet(typeId)) {
               return js.tryCatch([&] {
-                auto& typeWrapper = TypeWrapper::from(js.v8Isolate);
+                // Set the default export...
                 ns.setDefault(js,
                     jsg::JsValue(typeWrapper.wrap(js, js.v8Context(), kj::none, schema)
                                      .template As<v8::Value>()));
-                for (auto nested: schema.getProto().getNestedNodes()) {
-                  KJ_IF_SOME(child, schemaLoader.tryGet(nested.getId())) {
-                    switch (child.getProto().which()) {
-                      case capnp::schema::Node::FILE:
-                      case capnp::schema::Node::STRUCT:
-                      case capnp::schema::Node::INTERFACE: {
-                        ns.set(js, nested.getName(),
-                            jsg::JsValue(typeWrapper.wrap(js, js.v8Context(), kj::none, child)
-                                             .template As<v8::Value>()));
-                        break;
-                      }
-                      case capnp::schema::Node::ENUM:
-                      case capnp::schema::Node::CONST:
-                      case capnp::schema::Node::ANNOTATION:
-                        // These kinds are not implemented and cannot contain further nested scopes, so
-                        // don't generate anything at all for now.
-                        break;
-                    }
-                  } else {
-                    js.v8Isolate->ThrowException(
-                        js.typeError("Invalid or unknown capnp module type identifier"));
-                    return false;
-                  }
-                }
+                // Set each of the named exports...
+                // The names must match what we collected when the bundle was built.
+                modules::capnp::filterNestedNodes(
+                    schemaLoader, schema, [&](auto name, const auto& child) {
+                  ns.set(js, name,
+                      jsg::JsValue(typeWrapper.wrap(js, js.v8Context(), kj::none, child)));
+                });
                 return true;
               }, [&](jsg::Value exception) {
                 js.v8Isolate->ThrowException(exception.getHandle(js));
