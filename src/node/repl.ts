@@ -57,8 +57,8 @@ export class REPLServer extends Interface implements ReplType.REPLServer {
   editorMode: boolean;
   underscoreAssigned: boolean;
   underscoreErrAssigned: boolean;
-  last: any;
-  lastError: any;
+  last: unknown;
+  lastError: unknown;
   eval: ReplType.REPLEval;
   useColors: boolean;
   useGlobal: boolean;
