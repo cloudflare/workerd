@@ -448,7 +448,7 @@ class SimplePythonLimiter: public jsg::Object {
     }
   }
 
-  void finishStartup() {
+  void finishStartup(kj::Maybe<kj::String> snapshotType) {
     KJ_IF_SOME(cb, getTimeCb) {
       JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
       auto endTime = cb();
@@ -456,7 +456,7 @@ class SimplePythonLimiter: public jsg::Object {
       auto diffMs = diff / kj::MILLISECONDS;
 
       JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit ",
-          diffMs, "<=", startupLimitMs);
+          diffMs, "<=", startupLimitMs, " with snapshot ", snapshotType.orDefault(kj::str("none")));
     }
   }
 

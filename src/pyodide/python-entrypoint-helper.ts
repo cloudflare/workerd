@@ -21,6 +21,7 @@ import {
   PythonUserError,
   reportError,
 } from 'pyodide-internal:util';
+import { LOADED_SNAPSHOT_TYPE } from 'pyodide-internal:snapshot';
 
 type PyFuture<T> = Promise<T> & { copy(): PyFuture<T>; destroy(): void };
 
@@ -239,7 +240,7 @@ function getMainModule(): Promise<PyModule> {
           pyimportMainModule(pyodide)
         );
       } finally {
-        Limiter.finishStartup();
+        Limiter.finishStartup(LOADED_SNAPSHOT_TYPE);
       }
     })();
     return mainModulePromise;
