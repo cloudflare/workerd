@@ -40,30 +40,16 @@ export const TRANSITIVE_REQUIREMENTS =
 // Entrypoints
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 
-export interface CompatibilityFlags {
-  python_workflows?: boolean;
-  python_no_global_handlers?: boolean;
-  python_workers_force_new_vendor_path?: boolean;
-  python_dedicated_snapshot?: boolean;
-}
-
-export interface CloudflareGlobal {
-  Cloudflare?: {
-    compatibilityFlags?: CompatibilityFlags;
-  };
-}
-
-// WARNING: unless experimental mode is enabled this will not include experimental flags.
-// So even if you enable an experimental flag in a test, it may not show up here.
-// The code responsible for populating this is Cloudflare::getCompatibilityFlags in global-scope.c++.
-//
-// If you're looking to test experimental flags here, then enable the flag and experimental mode.
-export const compatibilityFlags: CompatibilityFlags =
-  (globalThis as CloudflareGlobal)?.Cloudflare?.compatibilityFlags ?? {};
-export const workflowsEnabled: boolean = !!compatibilityFlags.python_workflows;
-export const legacyGlobalHandlers: boolean =
-  !compatibilityFlags.python_no_global_handlers;
-export const legacyVendorPath: boolean =
-  !compatibilityFlags.python_workers_force_new_vendor_path;
-export const IS_DEDICATED_SNAPSHOT_ENABLED =
-  compatibilityFlags.python_dedicated_snapshot;
+export type CompatibilityFlags = MetadataReader.CompatibilityFlags;
+export const COMPATIBILITY_FLAGS: MetadataReader.CompatibilityFlags =
+  MetadataReader.getCompatibilityFlags();
+export const WORKFLOWS_ENABLED: boolean =
+  COMPATIBILITY_FLAGS.python_workflows ?? false;
+export const LEGACY_GLOBAL_HANDLERS: boolean = !(
+  COMPATIBILITY_FLAGS.python_no_global_handlers ?? false
+);
+export const LEGACY_VENDOR_PATH: boolean = !(
+  COMPATIBILITY_FLAGS.python_workers_force_new_vendor_path ?? false
+);
+export const IS_DEDICATED_SNAPSHOT_ENABLED: boolean =
+  COMPATIBILITY_FLAGS.python_dedicated_snapshot ?? false;
