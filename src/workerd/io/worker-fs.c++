@@ -385,7 +385,7 @@ class DirectoryBase final: public Directory {
       jsg::Lock& js, kj::PathPtr path, OpenOptions opts = {}) override {
     if (path.size() == 0) {
       // An empty path ends up just returning this directory.
-      return kj::Maybe<FsNodeWithError>(addRefToThis());
+      return kj::Maybe<FsNodeWithError>(kj::Rc<Directory>(addRefToThis()));
     }
 
     KJ_IF_SOME(found, entries.find(path[0])) {
@@ -1449,7 +1449,7 @@ namespace {
 
 // /dev/null is a special file that discards all data written to it and returns
 // EOF on reads.
-class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile> {
+class DevNullFile final: public File {
  public:
   DevNullFile() = default;
 
@@ -1522,7 +1522,7 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
 
 // /dev/zero is a special file that returns zeroes when read from and
 // ignores writes.
-class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile> {
+class DevZeroFile final: public File {
  public:
   DevZeroFile() = default;
 
@@ -1596,7 +1596,7 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
 
 // /dev/full is a special file that returns zeroes when read from and
 // returns an error when written to.
-class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile> {
+class DevFullFile final: public File {
  public:
   DevFullFile() = default;
 
@@ -1668,7 +1668,7 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
-class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomFile> {
+class DevRandomFile final: public File {
  public:
   DevRandomFile() = default;
 
@@ -1783,7 +1783,7 @@ void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const
 // An StdioFile is a special file implementation used to represent stdin,
 // stdout, and stderr outputs. Writes are always forwarded to the underlying
 // logging mechanisms. Reads always return EOF (0-byte reads).
-class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
+class StdioFile final: public File {
  public:
   StdioFile(VirtualFileSystem::Stdio type)
       : type(type),

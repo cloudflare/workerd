@@ -2235,8 +2235,7 @@ class ExternalMemoryAdjustment;
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted,
-                            public kj::EnableAddRefToThis<ExternalMemoryTarget> {
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
   ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
