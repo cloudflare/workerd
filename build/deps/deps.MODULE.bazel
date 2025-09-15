@@ -77,18 +77,10 @@ http_archive(
     url = "https://github.com/Maratyszcza/FP16/archive/b3720617faf1a4581ed7e6787cc51722ec7751f0.tar.gz",
 )
 
-http_archive(
-    name = "rules_license",
-    urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz",
-        "https://github.com/bazelbuild/rules_license/releases/download/1.0.0/rules_license-1.0.0.tar.gz",
-    ],
-    sha256 = "26d4021f6898e23b82ef953078389dd49ac2b5618ac564ade4ef87cced147b38",
-)
-
-# NB: highway is available on the BCR, but we pin to the same commit as v8 to avoid version skew.
-http_archive(
-    name = "highway",
+bazel_dep(name = "highway", version = "1.3.0")
+# Ensure we don't have version skew with v8 highway dependency
+archive_override(
+    module_name = "highway",
     integrity = "sha256-fvP4kFP1D4jUYDZwu5qRXSUr2TMUztaR3fWRPtvE51s=",
     strip_prefix = "highway-00fe003dac355b979f36157f9407c7c46448958e",
     url = "https://github.com/google/highway/archive/00fe003dac355b979f36157f9407c7c46448958e.tar.gz",
