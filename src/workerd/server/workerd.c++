@@ -76,10 +76,9 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
-// needed for fuzzing FUZZILLI
 // since kj installs their global signal handlers
-// and exits with 1 Fuzzilli doesn't realize that an application crashed.
-// therefore we install a handler before and just raise the signo
+// and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
+// Therefore, we install a handler before and just raise the signo
 #ifdef WORKERD_FUZZILLI
 
 void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
@@ -1472,17 +1471,6 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
       });
     });
   }
-
-  struct TestContext: public jsg::Object {
-    // Inherit from jsg::Object to ensure proper GC and memory tracking
-
-    JSG_RESOURCE_TYPE(TestContext) {
-      // Declare any methods or properties of TestContext, if necessary
-    }
-  };
-
-  // Define the isolate type with the TestContext
-  JSG_DECLARE_ISOLATE_TYPE(TestIsolate, TestContext);
 
 #if _WIN32
   void reloadFromConfigChange() {
