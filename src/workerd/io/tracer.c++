@@ -488,6 +488,16 @@ void BaseTracer::setIsJsRpc() {
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     const kj::ConstString& methodName) {
+  // Update the method name in the already-set JsRpcEventInfo for LTW compatibility
+  KJ_IF_SOME(info, trace->eventInfo) {
+    KJ_SWITCH_ONEOF(info) {
+      KJ_CASE_ONEOF(jsRpcInfo, tracing::JsRpcEventInfo) {
+        jsRpcInfo.methodName = kj::str(methodName);
+      }
+      KJ_CASE_ONEOF_DEFAULT {}
+    }
+  }
+
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     Span::TagMap::Entry entry = {"jsrpc.method"_kjc, kj::str(methodName)};
     kj::Array<Span::TagMap::Entry> entries = kj::heapArray<Span::TagMap::Entry>(1);
