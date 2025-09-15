@@ -55,6 +55,10 @@ static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toUTCString(js);
 }
 
+static jsg::ByteString toISOString(jsg::Lock& js, kj::Date date) {
+  return js.date(date).toISOString(js);
+}
+
 enum class OptionalMetadata : uint16_t {
   Http = static_cast<uint8_t>(R2ListRequest::IncludeField::HTTP),
   Custom = static_cast<uint8_t>(R2ListRequest::IncludeField::CUSTOM),
@@ -221,8 +225,25 @@ void addEtagsToBuilder(
 
 }  // namespace
 
+kj::String buildEtagsString(kj::ArrayPtr<R2Bucket::Etag> etagArray) {
+  return kj::strArray(KJ_MAP(etag, etagArray) {
+    KJ_SWITCH_ONEOF(etag) {
+      KJ_CASE_ONEOF(e, R2Bucket::WildcardEtag) {
+        return kj::str("*");
+      }
+      KJ_CASE_ONEOF(e, R2Bucket::StrongEtag) {
+        return kj::str(e.value);
+      }
+      KJ_CASE_ONEOF(e, R2Bucket::WeakEtag) {
+        return kj::str(e.value);
+      }
+    }
+    KJ_UNREACHABLE;
+  }, ", ");
+}
+
 template <typename Builder, typename Options>
-void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
+void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(i, o.onlyIf) {
     R2Bucket::UnwrappedConditional c = [&] {
       KJ_SWITCH_ONEOF(i) {
@@ -241,23 +262,31 @@ void initOnlyIf(jsg::Lock& js, Builder& builder, Options& o) {
       capnp::List<R2Etag>::Builder etagMatchList = onlyIfBuilder.initEtagMatches(etagArray.size());
       addEtagsToBuilder(
           etagMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.request.only_if.etag_matches"_kjc, buildEtagsString(etagArray));
     }
     KJ_IF_SOME(etagArray, c.etagDoesNotMatch) {
       auto etagDoesNotMatchList = onlyIfBuilder.initEtagDoesNotMatch(etagArray.size());
       addEtagsToBuilder(
           etagDoesNotMatchList, kj::arrayPtr<R2Bucket::Etag>(etagArray.begin(), etagArray.size()));
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.request.only_if.etag_does_not_match"_kjc, buildEtagsString(etagArray));
     }
     KJ_IF_SOME(d, c.uploadedBefore) {
       onlyIfBuilder.setUploadedBefore((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
       if (c.secondsGranularity) {
         onlyIfBuilder.setSecondsGranularity(true);
       }
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.request.only_if.uploaded_before"_kjc, kj::str(toISOString(js, d).asPtr()));
     }
     KJ_IF_SOME(d, c.uploadedAfter) {
       onlyIfBuilder.setUploadedAfter((d - kj::UNIX_EPOCH) / kj::MILLISECONDS);
       if (c.secondsGranularity) {
         onlyIfBuilder.setSecondsGranularity(true);
       }
+      traceContext.userSpan.setTag(
+          "cloudflare.r2.request.only_if.uploaded_after"_kjc, kj::str(toISOString(js, d).asPtr()));
     }
   }
 }
@@ -297,7 +326,7 @@ static void addHeadResultSpanTags(
   traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, headResult.getEtag());
   traceContext.userSpan.setTag("cloudflare.r2.response.size"_kjc, headResult.getSize());
   traceContext.userSpan.setTag("cloudflare.r2.response.uploaded"_kjc,
-      kj::str(toUTCString(js, headResult.getUploaded()).asPtr()));
+      kj::str(toISOString(js, headResult.getUploaded()).asPtr()));
   auto checksums = headResult.getChecksums();
   KJ_IF_SOME(md5, checksums.get()->md5) {
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(md5));
@@ -324,8 +353,6 @@ static void addHeadResultSpanTags(
       "cloudflare.r2.response.storage_class"_kjc, kj::str(headResult.getStorageClass()));
   KJ_IF_SOME(_, headResult.getSSECKeyMd5()) {
     traceContext.userSpan.setTag("cloudflare.r2.response.ssec_key"_kjc, true);
-  } else {
-    traceContext.userSpan.setTag("cloudflare.r2.response.ssec_key"_kjc, false);
   }
   KJ_IF_SOME(httpMetadata, headResult.getHttpMetadata()) {
     KJ_IF_SOME(ct, httpMetadata.contentType) {
@@ -345,19 +372,17 @@ static void addHeadResultSpanTags(
     }
     KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
       traceContext.userSpan.setTag(
-          "cloudflare.r2.response.cache_expiry"_kjc, kj::str(toUTCString(js, ce).asPtr()));
+          "cloudflare.r2.response.cache_expiry"_kjc, kj::str(toISOString(js, ce).asPtr()));
     }
   }
   KJ_IF_SOME(_, headResult.getCustomMetadata()) {
     traceContext.userSpan.setTag("cloudflare.r2.response.custom_metadata"_kjc, true);
-  } else {
-    traceContext.userSpan.setTag("cloudflare.r2.response.custom_metadata"_kjc, false);
   }
 }
 
 template <typename Builder, typename Options>
-void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
-  initOnlyIf(js, builder, o);
+void initGetOptions(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Options& o) {
+  initOnlyIf(traceContext, js, builder, o);
   KJ_IF_SOME(range, o.range) {
     KJ_SWITCH_ONEOF(range) {
       KJ_CASE_ONEOF(r, R2Bucket::Range) {
@@ -368,6 +393,8 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
           JSG_REQUIRE(isWholeNumber(offset), RangeError, "Invalid range. Starting offset (", offset,
               ") must be an integer, not floating point.");
           rangeBuilder.setOffset(static_cast<uint64_t>(offset));
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.range.offset"_kjc, static_cast<int64_t>(offset));
         }
 
         KJ_IF_SOME(length, r.length) {
@@ -377,6 +404,8 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
               ") must be an integer, not floating point.");
 
           rangeBuilder.setLength(static_cast<uint64_t>(length));
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.range.length"_kjc, static_cast<int64_t>(length));
         }
         KJ_IF_SOME(suffix, r.suffix) {
           JSG_REQUIRE(r.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
@@ -388,12 +417,15 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
               ") must be an integer, not floating point.");
 
           rangeBuilder.setSuffix(static_cast<uint64_t>(suffix));
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.range.suffix"_kjc, static_cast<int64_t>(suffix));
         }
       }
 
       KJ_CASE_ONEOF(h, jsg::Ref<Headers>) {
         KJ_IF_SOME(e, h->getNoChecks(js, "range"_kj)) {
           builder.setRangeHeader(kj::str(e));
+          traceContext.userSpan.setTag("cloudflare.r2.request.range"_kjc, kj::str(e));
         }
       }
     }
@@ -402,6 +434,7 @@ void initGetOptions(jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(ssecKey, maybeSsecKey) {
     auto ssecBuilder = builder.initSsec();
     ssecBuilder.setKey(ssecKey);
+    traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
   }
 }
 
@@ -500,7 +533,7 @@ R2Bucket::get(jsg::Lock& js,
     getBuilder.setObject(key);
 
     KJ_IF_SOME(o, options) {
-      initGetOptions(js, getBuilder, o);
+      initGetOptions(traceContext, js, getBuilder, o);
     }
     auto requestJson = json.encode(requestBuilder);
     kj::StringPtr components[1];
@@ -601,7 +634,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     };
 
     KJ_IF_SOME(o, options) {
-      initOnlyIf(js, putBuilder, o);
+      initOnlyIf(traceContext, js, putBuilder, o);
       KJ_IF_SOME(m, o.customMetadata) {
         auto fields = putBuilder.initCustomFields(m.fields.size());
         for (size_t i = 0; i < m.fields.size(); i++) {
@@ -609,6 +642,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           fields[i].setV(m.fields[i].value);
         }
         sentCustomMetadata = kj::mv(m);
+        traceContext.userSpan.setTag("cloudflare.r2.request.custom_metadata"_kjc, true);
       }
       KJ_IF_SOME(m, o.httpMetadata) {
         auto fields = putBuilder.initHttpFields();
@@ -626,21 +660,33 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
         KJ_IF_SOME(ct, sentHttpMetadata.contentType) {
           fields.setContentType(ct);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_type"_kjc, kj::str(ct));
         }
         KJ_IF_SOME(ce, sentHttpMetadata.contentEncoding) {
           fields.setContentEncoding(ce);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_encoding"_kjc, kj::str(ce));
         }
         KJ_IF_SOME(cd, sentHttpMetadata.contentDisposition) {
           fields.setContentDisposition(cd);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_disposition"_kjc, kj::str(cd));
         }
         KJ_IF_SOME(cl, sentHttpMetadata.contentLanguage) {
           fields.setContentLanguage(cl);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_language"_kjc, kj::str(cl));
         }
         KJ_IF_SOME(cc, sentHttpMetadata.cacheControl) {
           fields.setCacheControl(cc);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.cache_control"_kjc, kj::str(cc));
         }
         KJ_IF_SOME(ce, sentHttpMetadata.cacheExpiry) {
           fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+          traceContext.userSpan.setTag("cloudflare.r2.request.http_metadata.cache_expiry"_kjc,
+              (ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
         }
       }
       KJ_IF_SOME(md5, o.md5) {
@@ -649,6 +695,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 16, TypeError, "MD5 is 16 bytes, not ", bin.size());
             putBuilder.setMd5(bin.asArrayPtr());
+            traceContext.userSpan.setTag("cloudflare.r2.request.checksum.type"_kjc, kj::str("md5"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 32, TypeError, "MD5 is 32 hex characters, not ",
@@ -656,6 +705,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             const auto decoded = kj::decodeHex(hex.value);
             JSG_REQUIRE(!decoded.hadErrors, TypeError, "Provided MD5 wasn't a valid hex string");
             putBuilder.setMd5(decoded);
+            traceContext.userSpan.setTag("cloudflare.r2.request.checksum.type"_kjc, kj::str("md5"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(hex.value));
           }
         }
       }
@@ -665,6 +717,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 20, TypeError, "SHA-1 is 20 bytes, not ", bin.size());
             putBuilder.setSha1(bin.asArrayPtr());
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha1"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 40, TypeError, "SHA-1 is 40 hex characters, not ",
@@ -672,6 +728,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             const auto decoded = kj::decodeHex(hex.value);
             JSG_REQUIRE(!decoded.hadErrors, TypeError, "Provided SHA-1 wasn't a valid hex string");
             putBuilder.setSha1(decoded);
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha1"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(hex.value));
           }
         }
       }
@@ -681,6 +741,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 32, TypeError, "SHA-256 is 32 bytes, not ", bin.size());
             putBuilder.setSha256(bin.asArrayPtr());
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha256"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 64, TypeError, "SHA-256 is 64 hex characters, not ",
@@ -689,6 +753,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             JSG_REQUIRE(
                 !decoded.hadErrors, TypeError, "Provided SHA-256 wasn't a valid hex string");
             putBuilder.setSha256(decoded);
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha256"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(hex.value));
           }
         }
       }
@@ -698,6 +766,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 48, TypeError, "SHA-384 is 48 bytes, not ", bin.size());
             putBuilder.setSha384(bin.asArrayPtr());
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha384"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 96, TypeError, "SHA-384 is 96 hex characters, not ",
@@ -706,6 +778,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             JSG_REQUIRE(
                 !decoded.hadErrors, TypeError, "Provided SHA-384 wasn't a valid hex string");
             putBuilder.setSha384(decoded);
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha384"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(hex.value));
           }
         }
       }
@@ -715,6 +791,10 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
           KJ_CASE_ONEOF(bin, jsg::BufferSource) {
             JSG_REQUIRE(bin.size() == 64, TypeError, "SHA-512 is 64 bytes, not ", bin.size());
             putBuilder.setSha512(bin.asArrayPtr());
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha512"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 128, TypeError, "SHA-512 is 128 hex characters, not ",
@@ -723,16 +803,45 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             JSG_REQUIRE(
                 !decoded.hadErrors, TypeError, "Provided SHA-512 wasn't a valid hex string");
             putBuilder.setSha512(decoded);
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha512"));
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.checksum.value"_kjc, kj::str(hex.value));
           }
         }
       }
       KJ_IF_SOME(s, o.storageClass) {
         putBuilder.setStorageClass(s);
+        traceContext.userSpan.setTag("cloudflare.r2.request.storage_class"_kjc, kj::str(s));
       }
       kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
       KJ_IF_SOME(ssecKey, maybeSsecKey) {
         auto ssecBuilder = putBuilder.initSsec();
         ssecBuilder.setKey(ssecKey);
+        traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
+      }
+    }
+
+    KJ_IF_SOME(v, value) {
+      KJ_SWITCH_ONEOF(v) {
+        KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+          KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+            traceContext.userSpan.setTag(
+                "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(size));
+          }
+        }
+        KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(text.value.size()));
+        }
+        KJ_CASE_ONEOF(data, kj::Array<byte>) {
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(data.size()));
+        }
+        KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.size"_kjc, static_cast<int64_t>(blob->getSize()));
+        }
       }
     }
 
@@ -807,6 +916,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
           fields[i].setK(m.fields[i].name);
           fields[i].setV(m.fields[i].value);
         }
+        traceContext.userSpan.setTag("cloudflare.r2.request.custom_metadata"_kjc, true);
       }
       KJ_IF_SOME(m, o.httpMetadata) {
         auto fields = createMultipartUploadBuilder.initHttpFields();
@@ -824,30 +934,44 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
 
         KJ_IF_SOME(ct, httpMetadata.contentType) {
           fields.setContentType(ct);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_type"_kjc, kj::str(ct));
         }
         KJ_IF_SOME(ce, httpMetadata.contentEncoding) {
           fields.setContentEncoding(ce);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_encoding"_kjc, kj::str(ce));
         }
         KJ_IF_SOME(cd, httpMetadata.contentDisposition) {
           fields.setContentDisposition(cd);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_disposition"_kjc, kj::str(cd));
         }
         KJ_IF_SOME(cl, httpMetadata.contentLanguage) {
           fields.setContentLanguage(cl);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.content_language"_kjc, kj::str(cl));
         }
         KJ_IF_SOME(cc, httpMetadata.cacheControl) {
           fields.setCacheControl(cc);
+          traceContext.userSpan.setTag(
+              "cloudflare.r2.request.http_metadata.cache_control"_kjc, kj::str(cc));
         }
         KJ_IF_SOME(ce, httpMetadata.cacheExpiry) {
           fields.setCacheExpiry((ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
+          traceContext.userSpan.setTag("cloudflare.r2.request.http_metadata.cache_expiry"_kjc,
+              (ce - kj::UNIX_EPOCH) / kj::MILLISECONDS);
         }
       }
       KJ_IF_SOME(s, o.storageClass) {
         createMultipartUploadBuilder.setStorageClass(s);
+        traceContext.userSpan.setTag("cloudflare.r2.request.storage_class"_kjc, kj::str(s));
       }
       kj::Maybe<kj::String> maybeSsecKey = buildSsecKey(kj::mv(o.ssecKey));
       KJ_IF_SOME(ssecKey, maybeSsecKey) {
         auto ssecBuilder = createMultipartUploadBuilder.initSsec();
         ssecBuilder.setKey(ssecKey);
+        traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
       }
     }
 
@@ -929,9 +1053,11 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
         for (unsigned int i = 0; i < ks.size(); i++) {
           keys.set(i, ks[i]);
         }
+        traceContext.userSpan.setTag("cloudflare.r2.request.keys"_kjc, kj::str(ks));
       }
       KJ_CASE_ONEOF(k, kj::String) {
         deleteBuilder.setObject(k);
+        traceContext.userSpan.setTag("cloudflare.r2.request.keys"_kjc, kj::str(k));
       }
     }
 
@@ -990,18 +1116,23 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(l, o.limit) {
         listBuilder.setLimit(l);
+        traceContext.userSpan.setTag("cloudflare.r2.request.limit"_kjc, static_cast<int64_t>(l));
       }
       KJ_IF_SOME(p, o.prefix) {
         listBuilder.setPrefix(p.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.prefix"_kjc, kj::str(p.value));
       }
       KJ_IF_SOME(c, o.cursor) {
         listBuilder.setCursor(c.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.cursor"_kjc, kj::str(c.value));
       }
       KJ_IF_SOME(d, o.delimiter) {
         listBuilder.setDelimiter(d.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.delimiter"_kjc, kj::str(d.value));
       }
       KJ_IF_SOME(d, o.startAfter) {
         listBuilder.setStartAfter(d.value);
+        traceContext.userSpan.setTag("cloudflare.r2.request.start_after"_kjc, kj::str(d.value));
       }
       KJ_IF_SOME(i, o.include) {
         using Field = typename jsg::Dict<uint16_t>::Field;
@@ -1017,6 +1148,14 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
         };
 
         expectedOptionalFields.clear();
+
+        for (const auto& reqField: i) {
+          if (reqField.value == "httpMetadata") {
+            traceContext.userSpan.setTag("cloudflare.r2.request.include.http_metadata"_kjc, true);
+          } else if (reqField.value == "customMetadata") {
+            traceContext.userSpan.setTag("cloudflare.r2.request.include.custom_metadata"_kjc, true);
+          }
+        }
 
         listBuilder.setInclude(KJ_MAP(reqField, i) {
           for (const auto& field: fields) {
@@ -1090,12 +1229,9 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
           int64_t(result.delimitedPrefixes.size()));
       traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
-      KJ_IF_SOME(_, result.cursor) {
-        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, true);
-      } else {
-        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, false);
+      KJ_IF_SOME(cursor, result.cursor) {
+        traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, kj::str(cursor));
       }
-
       return kj::mv(result);
     });
   });
