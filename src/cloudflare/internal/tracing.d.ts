@@ -5,3 +5,7 @@ export class JsSpanBuilder {
 }
 
 function startSpan(name: string): JsSpanBuilder;
+function startSpanWithCallback<T>(
+  name: string,
+  callback: (span: JsSpanBuilder) => T
+): T;
