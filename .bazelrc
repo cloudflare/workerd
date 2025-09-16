@@ -331,6 +331,13 @@ build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 # a shared library.
 build:windows --copt='/Zc:dllexportInlines-'
 
+# Configuration for header parsing. Requires bazel toolchain support (available for macOS, Linux).
+build:parse_headers --features=parse_headers --process_headers_in_dependencies
+# Silence some capnproto warnings/errors that are not relevant for header parsing
+build:parse_headers --per_file_copt='.*\.h@-Wno-unused-function,-Wno-pragma-system-header-outside-header'
+build:parse_headers --per_file_copt=external/capnp-cpp/src/kj/common.h@-Wno-unreachable-code
+build:parse_headers --per_file_copt=external/capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
+
 # optimized configuration
 build:opt -c opt
 build:opt --@capnp-cpp//src/kj:debug_memory=False
