@@ -21,6 +21,7 @@ wd_cc_embed(
 alias(
     name = "v8_icu",
     actual = "@v8//:v8_icu",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -106,4 +107,11 @@ selects.config_setting_group(
         ":set_dead_strip",
         ":not_dbg_build",
     ],
+)
+
+# Clang-tidy config to use
+label_flag(
+    name = "clang_tidy_config",
+    build_setting_default = ":.clang-tidy",
+    visibility = ["//visibility:public"],
 )

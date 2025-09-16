@@ -3005,6 +3005,8 @@ inline Value SelfRef::asValue(Lock& js) const {
 // These includes are needed for the JSG type glue macros to work.
 #include "modules.h"
 #include "resource.h"
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include "jsvalue.h"
 // clang-format on
 

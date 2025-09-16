@@ -112,6 +112,7 @@ wd_cc_library(
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
     local_defines = ["JSG_IMPLEMENTATION"],
+    tags = ["no-clang-tidy"],
     deps = [
         ":exception",
         ":macro-meta",
