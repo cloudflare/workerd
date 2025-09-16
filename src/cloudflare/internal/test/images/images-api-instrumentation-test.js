@@ -9,12 +9,8 @@ import * as assert from 'node:assert';
 let invocationPromises = [];
 let spans = new Map();
 
-let resolved = 0;
-
 export default {
   tailStream(event, env, ctx) {
-    console.log(event);
-
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
     let resolveFn;
@@ -24,33 +20,29 @@ export default {
       })
     );
 
-    console.log('START');
-
     // Accumulate the span info for easier testing
     return (event) => {
       switch (event.event.type) {
         case 'spanOpen':
           // The span ids will change between tests, but Map preserves insertion order
-          spans.set(event.spanId, { name: event.event.name });
+          spans.set(event.spanContext.traceId, { name: event.event.name });
           break;
         case 'attributes': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(event.spanContext.traceId);
           for (let { name, value } of event.event.info) {
             span[name] = value;
           }
-          spans.set(event.spanId, span);
+          spans.set(event.spanContext.traceId, span);
           break;
         }
         case 'spanClose': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(event.spanContext.traceId);
           span['closed'] = true;
-          spans.set(event.spanId, span);
+          spans.set(event.spanContext.traceId, span);
           break;
         }
         case 'outcome':
-          console.log('RESOLVE');
           resolveFn();
-          resolved++;
           break;
       }
     };
@@ -59,12 +51,8 @@ export default {
 
 export const test = {
   async test() {
-    console.log(invocationPromises);
-
     // Wait for all the tailStream executions to finish
     await Promise.allSettled(invocationPromises);
-
-    console.log('RESOLVED');
 
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with KV
@@ -72,147 +60,172 @@ export const test = {
       (span) => span.name !== 'jsRpcSession'
     );
 
-    console.log(received);
-
     // spans emitted by kv-test.js in execution order
     let expected = [
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------583079568443922091480339',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 63n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------917895793710282367115997',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 57n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------274020163342001891217006',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 491605n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------016965139147113097012573',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 655465n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.cacheTtl': 100n,
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------800533565867149828727514',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 60n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------788884220072645140944057',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 63n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
+        name: 'images_info',
+        'cloudflare.images.info.format': 'image/png',
+        'cloudflare.images.info.file_size': 123,
+        'cloudflare.images.info.width': 123,
+        'cloudflare.images.info.height': 123,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
+        name: 'images_info',
+        'cloudflare.images.info.encoding': 'base64',
+        'cloudflare.images.info.format': 'image/png',
+        'cloudflare.images.info.file_size': 123,
+        'cloudflare.images.info.width': 123,
+        'cloudflare.images.info.height': 123,
+        closed: true,
+      },
+      { name: 'images_info', closed: true },
+      {
+        name: 'images_info',
+        'cloudflare.images.info.format': 'image/svg+xml',
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'arrayBuffer',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------076772162047566398596413',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 359n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'banana',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------683302700719873337688257',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 102n,
         closed: true,
       },
       {
-        name: 'kv_getWithMetadata',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'getWithMetadata',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------638268216708834840270438',
+        'http.response.status_code': 409n,
+        'http.response.body.size': 22n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------467138828766648388569910',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 88n,
         closed: true,
       },
       {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
-      },
-      {
-        name: 'kv_get_bulk',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get_bulk',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'json',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'stream',
-        closed: true,
-      },
-      {
-        name: 'kv_get',
-        'db.system': 'cloudflare-kv',
-        'cloudflare.kv.operation.name': 'get',
-        'cloudflare.kv.query.parameter.type': 'arrayBuffer',
+        name: 'fetch',
+        'network.protocol.name': 'http',
+        'network.protocol.version': 'HTTP/1.1',
+        'http.request.method': 'POST',
+        'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=--------------------------165527776325986498384287',
+        'http.response.status_code': 200n,
+        'http.response.body.size': 60n,
         closed: true,
       },
     ];
+
+    for (const each of received) {
+      delete each['http.request.header.content-type'];
+    }
+
+    for (const each of expected) {
+      delete each['http.request.header.content-type'];
+    }
 
     assert.deepStrictEqual(received, expected);
   },

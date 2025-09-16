@@ -7,42 +7,73 @@
 #include "http.h"
 #include "worker-rpc.h"
 
+#include <workerd/io/io-context.h>
+
 namespace workerd::api {
 
-class JsSpanBuilder: public jsg::Object {
- private:
-  SpanBuilder span;
+// Forward declaration for InternalSpanImpl
+class InternalSpanImpl;
 
+// Wrapper class that manages span ownership through IoContext
+class InternalSpan: public jsg::Object {
  public:
-  JsSpanBuilder(SpanBuilder span): span(kj::mv(span)) {}
+  InternalSpan(kj::Maybe<IoOwn<InternalSpanImpl>> impl);
 
-  void end() {
-    span.end();
-  }
+  void end();
+  void setTag(jsg::Lock& js, kj::String key, kj::Maybe<kj::OneOf<bool, double, kj::String>> value);
+  bool getIsRecording();
+  SpanParent makeSpanParent();
 
-  void setTag(jsg::Lock& js, const kj::String key, const jsg::Value& value);
-
-  JSG_RESOURCE_TYPE(JsSpanBuilder) {
+  JSG_RESOURCE_TYPE(InternalSpan) {
     JSG_METHOD(end);
     JSG_METHOD(setTag);
+    JSG_METHOD(getIsRecording);
   }
+
+  friend class InternalSpanImpl;
+
+ private:
+  kj::Maybe<IoOwn<InternalSpanImpl>> impl;
 };
+
+// Implementation class that actually manages the SpanBuilder
+class InternalSpanImpl {
+ public:
+  InternalSpanImpl(SpanBuilder span);
+  ~InternalSpanImpl() noexcept(false);
+
+  void end();
+  void setTag(kj::ConstString key, kj::OneOf<bool, double, kj::String> value);
+  bool getIsRecording();
+  SpanParent makeSpanParent();
+
+ private:
+  kj::Maybe<SpanBuilder> span;
+};
+
+// Keep JsSpanBuilder as alias for backward compatibility
+using JsSpanBuilder = InternalSpan;
 
 class TracingModule: public jsg::Object {
  public:
   TracingModule() = default;
   TracingModule(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::Ref<JsSpanBuilder> startSpan(jsg::Lock& js, const kj::String name);
+  jsg::Ref<InternalSpan> startSpan(jsg::Lock& js, const kj::String name);
+  jsg::JsValue startSpanWithCallback(jsg::Lock& js,
+      kj::String operationName,
+      jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback,
+      jsg::Arguments<jsg::Value> args,
+      const jsg::TypeHandler<jsg::Ref<InternalSpan>>& jsSpanHandler,
+      const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
   JSG_RESOURCE_TYPE(TracingModule) {
     JSG_METHOD(startSpan);
+    JSG_METHOD(startSpanWithCallback);
 
-    JSG_NESTED_TYPE(JsSpanBuilder);
+    JSG_NESTED_TYPE(InternalSpan);
   }
 };
-
-#define EW_TRACING_MODULE_ISOLATE_TYPES api::TracingModule, api::JsSpanBuilder
 
 template <class Registry>
 void registerTracingModule(Registry& registry, CompatibilityFlags::Reader flags) {
@@ -59,3 +90,5 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
   return builder.finish();
 }
 };  // namespace workerd::api
+
+#define EW_TRACING_MODULE_ISOLATE_TYPES api::TracingModule, api::InternalSpan
