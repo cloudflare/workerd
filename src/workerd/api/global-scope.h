@@ -203,7 +203,7 @@ class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
     // existing user code that is feature-sniffing or monkeypatching the global.
     // *Always* add new exports behind a new compatibility flag! And when in
     // doubt, don't add the new export on globalThis at all. The only things
-    // that should be exported on globalThis should be standardized web APIs
+    // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
     JSG_NESTED_TYPE(EventTarget);
@@ -647,7 +647,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     // existing user code that is feature-sniffing or monkeypatching the global.
     // *Always* add new exports behind a new compatibility flag! And when in
     // doubt, don't add the new export on globalThis at all. The only things
-    // that should be exported on globalThis should be standardized web APIs
+    // that should be exported on globalThis should be standardized web APIs or
     // Node.js compat mode globals.
 
     JSG_NESTED_TYPE(DOMException);
