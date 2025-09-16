@@ -786,6 +786,12 @@ export class ERR_INVALID_IP_ADDRESS extends NodeTypeError {
   }
 }
 
+export class ERR_INVALID_ADDRESS extends NodeTypeError {
+  constructor() {
+    super('ERR_INVALID_ADDRESS', 'Invalid socket address');
+  }
+}
+
 export class ERR_STREAM_WRAP extends NodeError {
   constructor() {
     super(
