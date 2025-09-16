@@ -111,7 +111,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -377,7 +377,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -507,7 +507,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -624,7 +624,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -713,7 +713,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -788,7 +788,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -864,7 +864,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -958,7 +958,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
@@ -1054,7 +1054,7 @@ export const test = {
         closed: true,
       },
       {
-        name: 'r2_get',
+        name: 'r2_head',
         'cloudflare.binding.type': 'r2',
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'HeadObject',
