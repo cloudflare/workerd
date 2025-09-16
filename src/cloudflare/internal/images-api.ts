@@ -234,8 +234,7 @@ class ImagesBindingImpl implements ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
-    const span = tracing.startSpan('images_info');
-    try {
+    return await tracing.startSpanWithCallback('images_info', async (span) => {
       const body = new StreamableFormData();
 
       const decodedStream =
@@ -278,9 +277,7 @@ class ImagesBindingImpl implements ImagesBinding {
       }
 
       return r;
-    } finally {
-      span.end();
-    }
+    });
   }
 
   input(
