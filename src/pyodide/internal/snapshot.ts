@@ -14,6 +14,7 @@ import {
   IS_DEDICATED_SNAPSHOT_ENABLED,
   COMPATIBILITY_FLAGS,
   type CompatibilityFlags,
+  IS_SECOND_VALIDATION_PHASE,
 } from 'pyodide-internal:metadata';
 import {
   PythonRuntimeError,
@@ -641,15 +642,33 @@ export function maybeRestoreSnapshot(Module: Module): void {
   const { snapshotSize, snapshotOffset, snapshotReader, settings } =
     LOADED_SNAPSHOT_META;
 
-  if (settings.snapshotType === 'dedicated' && !IS_DEDICATED_SNAPSHOT_ENABLED) {
+  if (
+    !IS_EW_VALIDATING &&
+    settings.snapshotType === 'dedicated' &&
+    !IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
     throw new PythonRuntimeError(
       'Received dedicated snapshot but compat flag for dedicated snapshots is not enabled'
     );
   }
 
-  if (settings.snapshotType !== 'dedicated' && IS_DEDICATED_SNAPSHOT_ENABLED) {
+  if (
+    !IS_EW_VALIDATING &&
+    settings.snapshotType !== 'dedicated' &&
+    IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
     throw new PythonRuntimeError(
       'Received non-dedicated snapshot but compat flag for dedicated snapshots is enabled'
+    );
+  }
+
+  // If we have a snapshot in the bundle and the dedicated snapshot flag is enabled, then we
+  // should verify that the snapshot in the bundle is a dedicated snapshot. If it is not
+  // we should fail with an error.
+  if (settings.snapshotType !== 'dedicated' && IS_SECOND_VALIDATION_PHASE) {
+    throw new PythonRuntimeError(
+      'The second validation phase should receive a dedicated snapshot, got ' +
+        settings.snapshotType
     );
   }
 

@@ -11,6 +11,12 @@ export const IS_CREATING_BASELINE_SNAPSHOT =
 export const IS_EW_VALIDATING = ArtifactBundler.isEwValidating();
 export const IS_CREATING_SNAPSHOT = IS_EW_VALIDATING || SHOULD_SNAPSHOT_TO_DISK;
 
+// There are two validations that we perform. The first one runs without a _bundled_ memory snapshot
+// (but may use a baseline snapshot, though this is stored in the ArtfactBundler). The second one
+// runs with a _bundled_ memory snapshot, which is expected to be a dedicated snapshot. When this
+// bool is true, we verify that the bundled memory snapshot we receive is a dedicated snapshot.
+export const IS_SECOND_VALIDATION_PHASE =
+  MetadataReader.hasMemorySnapshot() && IS_EW_VALIDATING;
 export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
   ? MetadataReader
   : ArtifactBundler.hasMemorySnapshot()
