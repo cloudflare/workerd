@@ -1065,8 +1065,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableNodeJsPerfHooksModule @122 :Bool
      $compatEnableFlag("enable_nodejs_perf_hooks_module")
      $compatDisableFlag("disable_nodejs_perf_hooks_module")
-     $experimental;
-     # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
+     $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
    # Enables the Node.js perf_hooks module. It is required to use this flag with
    # nodejs_compat (or nodejs_compat_v2).
 
