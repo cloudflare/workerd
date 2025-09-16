@@ -52,25 +52,18 @@ build --per_file_copt=external/simdutf@-Wno-unused-const-variable
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
-# Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
-# GitHub Actions. This is an optional performance hack intended for CI, although it might also be
-# useful for local development.
-build:v8-codegen-opt --per_file_copt=v8/src/api@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/builtins@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/codegen@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/common@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/compiler@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/execution@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/heap@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/parsing@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/roots@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/runtime@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/snapshot@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
+# Increasing the optimization level of V8 significantly speeds up Python tests in GitHub Actions.
+# This is an optional performance hack intended for CI, although it might also be useful for local
+# development.
+build:v8-codegen-opt --per_file_copt=v8/src@-O2
 # V8 is heavily using absl for hashing now, optimize it too.
 build:v8-codegen-opt --per_file_copt=external/abseil-cpp@-O2
+# zlib and tcmalloc (for Linux) are also CPU-intensive, optimize them too.
+build:v8-codegen-opt --per_file_copt=external/tcmalloc@-O2
+build:v8-codegen-opt --per_file_copt=external/zlib@-O2
+build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
 
 # In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
 # canonical V8 build and improves code size.
@@ -399,16 +392,11 @@ build:coverage --action_env=GCOV=llvm-profdata-19
 build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 build:coverage --copt=-DNDEBUG
 build:coverage --combined_report=lcov
-build:coverage --strategy=TestRunner=remote,sandboxed,local
-build:coverage --strategy=CoverageReport=sandboxed,local
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
 build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --collect_code_coverage
 build:coverage --instrumentation_filter="^//,-//external"
-build:coverage --remote_download_minimal
-build:coverage --define=tcmalloc=gperftools
-build:coverage --test_timeout=120,120,120,120
 build:coverage --instrument_test_targets
 
 # This config is defined internally and enabled on many machines.
