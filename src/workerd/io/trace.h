@@ -426,8 +426,7 @@ struct EmailEventInfo final {
 struct TraceEventInfo final {
   struct TraceItem;
 
-  explicit TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces);
-  explicit TraceEventInfo(const kj::Array<kj::Own<Trace>>& traces);
+  explicit TraceEventInfo(kj::ArrayPtr<const kj::Own<Trace>> traces);
   TraceEventInfo(kj::Array<TraceItem> traces): traces(kj::mv(traces)) {}
   TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader);
   TraceEventInfo(TraceEventInfo&&) = default;
