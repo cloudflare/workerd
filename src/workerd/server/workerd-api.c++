@@ -9,6 +9,7 @@
 #include <workerd/api/analytics-engine.h>
 #include <workerd/api/base64.h>
 #include <workerd/api/cache.h>
+#include <workerd/api/capnp.h>
 #include <workerd/api/commonjs.h>
 #include <workerd/api/container.h>
 #include <workerd/api/crypto/impl.h>
@@ -97,6 +98,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_BASICS_ISOLATE_TYPES,
     EW_BLOB_ISOLATE_TYPES,
     EW_CACHE_ISOLATE_TYPES,
+    EW_CAPNP_TYPES,
     EW_CONTAINER_ISOLATE_TYPES,
     EW_CJS_ISOLATE_TYPES,
     EW_CRYPTO_ISOLATE_TYPES,
@@ -648,7 +650,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Loc
       return kj::none;
     }
     KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-      KJ_FAIL_REQUIRE("capnp modules are not yet supported in workerd");
+      return workerd::modules::capnp::addCapnpModule<JsgWorkerdIsolate>(
+          lock, content.typeId, module.name);
     }
   }
   KJ_UNREACHABLE;
