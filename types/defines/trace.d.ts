@@ -15,7 +15,6 @@ interface FetchEventInfo {
 
 interface JsRpcEventInfo {
   readonly type: "jsrpc";
-  readonly methodName: string;
 }
 
 interface ScheduledEventInfo {
