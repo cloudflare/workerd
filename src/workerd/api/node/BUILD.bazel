@@ -58,6 +58,7 @@ wd_cc_library(
         "buffer.c++",
         "dns.c++",
         "i18n.c++",
+        "sqlite.c++",
         "url.c++",
     ],
     hdrs = [
@@ -67,6 +68,7 @@ wd_cc_library(
         "dns.h",
         "i18n.h",
         "node-version.h",
+        "sqlite.h",
         "url.h",
     ],
     implementation_deps = [

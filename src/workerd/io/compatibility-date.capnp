@@ -1176,4 +1176,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub repl module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsSqliteModule @138 :Bool
+    $compatEnableFlag("enable_nodejs_sqlite_module")
+    $compatDisableFlag("disable_nodejs_sqlite_module")
+    $experimental;
+  # Enables the Node.js non-functional stub sqlite module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
 }
