@@ -756,9 +756,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(HTMLRewriter);
 
     // Performance API
-    JSG_NESTED_TYPE(Performance);
-
     if (flags.getEnableGlobalPerformanceClasses() || flags.getEnableNodeJsPerfHooksModule()) {
+      JSG_NESTED_TYPE(Performance);
       JSG_NESTED_TYPE(PerformanceEntry);
       JSG_NESTED_TYPE(PerformanceMark);
       JSG_NESTED_TYPE(PerformanceMeasure);
