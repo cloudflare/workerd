@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     request.signal.addEventListener('abort', () => {
       console.log('Request was aborted');
     });
@@ -11,6 +11,7 @@ export default {
     console.log('Starting long-running task');
     // Simulate a long-running task so we can test aborting
     await new Promise((resolve) => setTimeout(resolve, 3000));
+    ctx.waitUntil(new Promise((resolve) => setTimeout(resolve, 4000)));
 
     return new Response("Request was not aborted");
   }
