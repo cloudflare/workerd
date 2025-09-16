@@ -80,14 +80,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.38",
-    actual = "@crates_vendor__cc-1.2.38//:cc",
+    name = "cc-1.2.39",
+    actual = "@crates_vendor__cc-1.2.39//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.38//:cc",
+    actual = "@crates_vendor__cc-1.2.39//:cc",
     tags = ["manual"],
 )
 
@@ -272,14 +272,14 @@ alias(
 )
 
 alias(
-    name = "serde-1.0.226",
-    actual = "@crates_vendor__serde-1.0.226//:serde",
+    name = "serde-1.0.227",
+    actual = "@crates_vendor__serde-1.0.227//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.226//:serde",
+    actual = "@crates_vendor__serde-1.0.227//:serde",
     tags = ["manual"],
 )
 
@@ -394,7 +394,7 @@ alias(
 # Binaries
 alias(
     name = "addr2line__addr2line",
-    actual = "@crates_vendor__addr2line-0.24.2//:addr2line__bin",
+    actual = "@crates_vendor__addr2line-0.25.1//:addr2line__bin",
     tags = ["manual"],
 )
 
