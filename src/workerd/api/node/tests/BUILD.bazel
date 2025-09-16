@@ -303,6 +303,12 @@ wd_test(
     data = ["repl-nodejs-test.js"],
 )
 
+wd_test(
+    src = "sqlite-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sqlite-nodejs-test.js"],
+)
+
 config_setting(
     name = "debug_build",
     values = {"compilation_mode": "dbg"},
