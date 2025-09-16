@@ -561,57 +561,6 @@ struct StaticMethodCallback<TypeWrapper,
   }
 };
 
-// Implements the V8 callback function for static property getters.
-template <typename TypeWrapper,
-    const char* propertyName,
-    typename T,
-    typename Getter,
-    Getter* getter>
-struct StaticPropertyCallback;
-
-template <typename TypeWrapper, const char* propertyName, typename T, typename Ret, Ret (*getter)()>
-struct StaticPropertyCallback<TypeWrapper, propertyName, T, Ret(), getter> {
-
-  static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& args) {
-    liftKj(args, [&]() {
-      auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
-      auto& wrapper = TypeWrapper::from(isolate);
-      auto& lock = Lock::from(isolate);
-
-      if constexpr (isVoid<Ret>()) {
-        (*getter)();
-      } else {
-        return wrapper.wrap(lock, context, kj::none, (*getter)());
-      }
-    });
-  }
-};
-
-// Specialization for static property getter that takes Lock& as first parameter
-template <typename TypeWrapper,
-    const char* propertyName,
-    typename T,
-    typename Ret,
-    Ret (*getter)(Lock&)>
-struct StaticPropertyCallback<TypeWrapper, propertyName, T, Ret(Lock&), getter> {
-
-  static void callback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& args) {
-    liftKj(args, [&]() {
-      auto isolate = args.GetIsolate();
-      auto context = isolate->GetCurrentContext();
-      auto& wrapper = TypeWrapper::from(isolate);
-      auto& lock = Lock::from(isolate);
-
-      if constexpr (isVoid<Ret>()) {
-        (*getter)(lock);
-      } else {
-        return wrapper.wrap(lock, context, kj::none, (*getter)(lock));
-      }
-    });
-  }
-};
-
 // Implements the V8 callback function for calling a property getter method of a C++ class.
 template <typename TypeWrapper,
     const char* methodName,
@@ -1315,7 +1264,6 @@ struct ResourceTypeBuilder {
     functionTemplate->RemovePrototype();
     constructor->Set(v8StrIntern(isolate, name), functionTemplate);
   }
-
   template <const char* name, typename Getter, Getter getter, typename Setter, Setter setter>
   inline void registerInstanceProperty() {
     auto v8Name = v8StrIntern(isolate, name);
@@ -1457,13 +1405,6 @@ struct ResourceTypeBuilder {
     constructor->PrototypeTemplate()->Set(v8Name, v8Value, v8::PropertyAttribute::ReadOnly);
   }
 
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {
-    constructor->SetNativeDataProperty(v8StrIntern(isolate, name),
-        &StaticPropertyCallback<TypeWrapper, name, Self, Getter, getter>::callback, nullptr,
-        v8::Local<v8::Value>(), v8::PropertyAttribute::ReadOnly);
-  }
-
   template <const char* name, typename Method, Method method>
   inline void registerIterable() {
     prototype->Set(v8::Symbol::GetIterator(isolate),
@@ -1589,9 +1530,6 @@ struct JsSetup {
 
   template <const char* name, typename T>
   inline void registerStaticConstant(T value) {}
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {}
 
   template <const char* name, typename Method, Method method>
   inline void registerIterable() {}

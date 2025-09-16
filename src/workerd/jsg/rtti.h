@@ -651,11 +651,6 @@ struct MemberCounter {
     ++members;
   }
 
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {
-    ++members;
-  }
-
   template <const char* name, typename Method, Method method>
   inline void registerStaticMethod() {
     ++members;
@@ -780,16 +775,6 @@ struct MembersBuilder {
     constant.setName(name);
     constant.setValue(value);
     // BuildRtti<Configuration, T>::build(constant.initType());
-  }
-
-  template <const char* name, typename Getter, Getter getter>
-  inline void registerStaticProperty() {
-    auto prop = members[memberIndex++].initProperty();
-    prop.setName(name);
-    prop.setReadonly(true);
-    prop.setGetterFastApiCompatible(isFastApiCompatible<Getter>);
-    using GetterTraits = FunctionTraits<Getter>;
-    BuildRtti<Configuration, typename GetterTraits::ReturnType>::build(prop.initType(), rtti);
   }
 
   template <typename Property, Property Self::*property>
