@@ -38,3 +38,5 @@ git_override(
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
+
+include("//:build/rust.MODULE.bazel")
