@@ -112,6 +112,7 @@ wd_cc_library(
     features = ["-parse_headers"],
     implementation_deps = ["@simdutf"],
     local_defines = ["JSG_IMPLEMENTATION"],
+    tags = ["no-clang-tidy"],
     deps = [
         ":exception",
         ":macro-meta",

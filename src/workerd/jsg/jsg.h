@@ -3006,6 +3006,8 @@ inline Value SelfRef::asValue(Lock& js) const {
 #include "promise.h"
 #include "modules.h"
 #include "resource.h"
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include "jsvalue.h"
 // clang-format on
 

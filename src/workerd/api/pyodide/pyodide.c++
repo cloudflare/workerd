@@ -21,6 +21,8 @@
 #include <kj/string.h>
 
 // for std::sort
+#include <capnp/schema.h>
+
 #include <algorithm>
 
 namespace workerd::api::pyodide {
@@ -572,11 +574,6 @@ void SetupEmscripten::visitForGc(jsg::GcVisitor& visitor) {
 }
 
 }  // namespace workerd::api::pyodide
-
-#include "workerd/io/compatibility-date.h"
-
-#include <capnp/dynamic.h>
-#include <capnp/schema.h>
 
 namespace workerd {
 
