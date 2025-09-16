@@ -59,7 +59,7 @@ rust_library(
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.224//:serde",
         "@crates_vendor__siphasher-0.3.11//:siphasher",
         "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
         "@crates_vendor__swc_sourcemap-9.3.4//:swc_sourcemap",

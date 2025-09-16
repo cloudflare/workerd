@@ -48,7 +48,7 @@ rust_library(
     deps = [
         "@crates_vendor__either-1.15.0//:either",
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
-        "@crates_vendor__serde-1.0.219//:serde",
+        "@crates_vendor__serde-1.0.224//:serde",
         "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
         "@crates_vendor__swc_common-14.0.3//:swc_common",
         "@crates_vendor__swc_ecma_ast-14.0.0//:swc_ecma_ast",

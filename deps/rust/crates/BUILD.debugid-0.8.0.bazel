@@ -45,7 +45,7 @@ rust_library(
     ],
     version = "0.8.0",
     deps = [
-        "@crates_vendor__serde-1.0.219//:serde",
-        "@crates_vendor__uuid-1.18.0//:uuid",
+        "@crates_vendor__serde-1.0.224//:serde",
+        "@crates_vendor__uuid-1.18.1//:uuid",
     ],
 )

@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "0.0.0",
     deps = [
-        "@crates_vendor__bitflags-2.9.3//:bitflags",
+        "@crates_vendor__bitflags-2.9.4//:bitflags",
         "@crates_vendor__bstr-1.12.0//:bstr",
         "@crates_vendor__compact_str-0.9.0//:compact_str",
         "@crates_vendor__memchr-2.7.5//:memchr",
@@ -51,7 +51,7 @@ rust_library(
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
         "@crates_vendor__static_assertions-1.1.0//:static_assertions",
-        "@crates_vendor__unicode-ident-1.0.18//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.19//:unicode_ident",
         "@crates_vendor__unicode-normalization-0.1.24//:unicode_normalization",
         "@crates_vendor__unicode_names2-1.3.0//:unicode_names2",
     ],
