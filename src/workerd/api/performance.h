@@ -422,7 +422,7 @@ class Performance: public EventTarget {
 
   jsg::Ref<EventCounts> getEventCounts(jsg::Lock& js);
 
-  double now();
+  double now(jsg::Lock& js);
 
   void clearMarks(jsg::Optional<kj::String> name);
   void clearMeasures(jsg::Optional<kj::String> name);
