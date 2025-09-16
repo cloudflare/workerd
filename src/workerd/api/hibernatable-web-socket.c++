@@ -182,6 +182,7 @@ HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
       params(kj::mv(params)),
       manager(manager) {}
 
+// TODO(cleanup): Try to reduce duplication with consumeParams()
 kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEventImpl::getEventInfo() const {
   // Try to extract event type from params if available
   KJ_SWITCH_ONEOF(params) {
