@@ -1745,3 +1745,129 @@ export const testNetWriteConnectWrite = {
     await promise;
   },
 };
+
+export const testSocketAddress = {
+  test() {
+    // Test constructor with default options
+    const addr1 = new net.SocketAddress();
+    strictEqual(addr1.address, '127.0.0.1');
+    strictEqual(addr1.port, 0);
+    strictEqual(addr1.family, 'ipv4');
+    strictEqual(addr1.flowlabel, 0);
+
+    // Test constructor with IPv4 options
+    const addr2 = new net.SocketAddress({
+      address: '192.168.1.1',
+      port: 8080,
+      family: 'ipv4',
+    });
+    strictEqual(addr2.address, '192.168.1.1');
+    strictEqual(addr2.port, 8080);
+    strictEqual(addr2.family, 'ipv4');
+    strictEqual(addr2.flowlabel, 0);
+
+    // Test constructor with IPv6 options
+    const addr3 = new net.SocketAddress({
+      address: '::1',
+      port: 3000,
+      family: 'ipv6',
+      flowlabel: 123,
+    });
+    strictEqual(addr3.address, '::1');
+    strictEqual(addr3.port, 3000);
+    strictEqual(addr3.family, 'ipv6');
+    strictEqual(addr3.flowlabel, 123);
+
+    // Test default IPv6 address
+    const addr4 = new net.SocketAddress({ family: 'ipv6' });
+    strictEqual(addr4.address, '::');
+    strictEqual(addr4.family, 'ipv6');
+
+    // Test toJSON method
+    const addr5 = new net.SocketAddress({
+      address: '10.0.0.1',
+      port: 9000,
+      family: 'ipv4',
+    });
+    const json = addr5.toJSON();
+    strictEqual(json.address, '10.0.0.1');
+    strictEqual(json.port, 9000);
+    strictEqual(json.family, 'ipv4');
+    strictEqual(json.flowlabel, 0);
+
+    // Test isSocketAddress static method
+    ok(net.SocketAddress.isSocketAddress(addr1));
+    ok(net.SocketAddress.isSocketAddress(addr2));
+    ok(!net.SocketAddress.isSocketAddress({}));
+    ok(!net.SocketAddress.isSocketAddress(null));
+    ok(!net.SocketAddress.isSocketAddress('string'));
+
+    // Test parse static method with IPv4
+    const parsed1 = net.SocketAddress.parse('192.168.1.100:8080');
+    ok(parsed1);
+    strictEqual(parsed1.address, '192.168.1.100');
+    strictEqual(parsed1.port, 8080);
+    strictEqual(parsed1.family, 'ipv4');
+
+    // Test parse static method with IPv6
+    const parsed2 = net.SocketAddress.parse('[::1]:3000');
+    ok(parsed2);
+    strictEqual(parsed2.address, '::1');
+    strictEqual(parsed2.port, 3000);
+    strictEqual(parsed2.family, 'ipv6');
+
+    // Test parse with invalid input
+    strictEqual(net.SocketAddress.parse('invalid'), undefined);
+    strictEqual(net.SocketAddress.parse(''), undefined);
+
+    // Test constructor validation - invalid family
+    throws(() => new net.SocketAddress({ family: 'invalid' }), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+
+    // Test constructor validation - invalid IPv4 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: '300.300.300.300',
+          family: 'ipv4',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid IPv6 address
+    throws(
+      () =>
+        new net.SocketAddress({
+          address: 'invalid::ipv6',
+          family: 'ipv6',
+        }),
+      {
+        code: 'ERR_INVALID_ADDRESS',
+      }
+    );
+
+    // Test constructor validation - invalid port
+    throws(() => new net.SocketAddress({ port: -1 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    throws(() => new net.SocketAddress({ port: 65536 }), {
+      code: 'ERR_SOCKET_BAD_PORT',
+    });
+
+    // Test family case insensitive
+    const addr6 = new net.SocketAddress({ family: 'IPv4' });
+    strictEqual(addr6.family, 'ipv4');
+
+    const addr7 = new net.SocketAddress({ family: 'IPv6' });
+    strictEqual(addr7.family, 'ipv6');
+
+    // Test port type coercion
+    const addr8 = new net.SocketAddress({ port: '8080' });
+    console.log(typeof addr8.port);
+    strictEqual(addr8.port, 8080);
+  },
+};

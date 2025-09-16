@@ -38,6 +38,7 @@ import {
   ERR_SOCKET_CLOSED_BEFORE_CONNECTION,
   ERR_SOCKET_CONNECTING,
   ERR_INVALID_IP_ADDRESS,
+  ERR_INVALID_ADDRESS,
   EPIPE,
 } from 'node-internal:internal_errors';
 
@@ -48,7 +49,10 @@ import {
   validateNumber,
   validatePort,
   validateObject,
+  validateOneOf,
   validateBoolean,
+  validateString,
+  validateUint32,
 } from 'node-internal:validators';
 
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
@@ -60,10 +64,17 @@ import type {
   TcpSocketConnectOpts,
   AddressInfo,
   Socket as _Socket,
+  SocketAddress as _SocketAddress,
+  SocketAddressInitOptions,
+  IPVersion,
   OnReadOpts,
 } from 'node:net';
+import type { InspectOptions } from 'node:util';
 import type { Writable } from 'node:stream';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
+
+import { inspect } from 'node-internal:internal_inspect';
+const kInspect = inspect.custom;
 
 const kLastWriteQueueSize = Symbol('kLastWriteQueueSize');
 const kTimeout = Symbol('kTimeout');
@@ -129,10 +140,6 @@ export type SocketOptions = {
 
 export function BlockList(): void {
   throw new Error('BlockList is not implemented');
-}
-
-export function SocketAddress(): void {
-  throw new Error('SocketAddress is not implemented');
 }
 
 export function Server(): void {
@@ -1624,4 +1631,125 @@ export function isIPv4(input: unknown): boolean {
 export function isIPv6(input: unknown): boolean {
   input = typeof input !== 'string' ? `${input}` : input;
   return IPv6Reg.test(input as string);
+}
+
+// ======================================================================================
+
+export class SocketAddress implements _SocketAddress {
+  #address: string;
+  #port: number;
+  #family: IPVersion;
+  #flowlabel: number;
+
+  static isSocketAddress(value: unknown): boolean {
+    return value instanceof SocketAddress;
+  }
+
+  constructor(options: SocketAddressInitOptions = {}) {
+    validateObject(options, 'options');
+    const { family } = options;
+    this.#family = (family as IPVersion | undefined) || 'ipv4';
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (typeof this.#family?.toLowerCase === 'function')
+      this.#family = this.#family.toLowerCase() as IPVersion;
+    validateOneOf(this.#family, 'options.family', ['ipv4', 'ipv6']);
+
+    const {
+      address = this.#family === 'ipv4' ? '127.0.0.1' : '::',
+      port = 0,
+      flowlabel = 0,
+    } = options;
+
+    validateString(address, 'options.address');
+    const _port = validatePort(port, 'options.port');
+    validateUint32(flowlabel, 'options.flowlabel', false);
+
+    switch (this.#family) {
+      case 'ipv4':
+        if (!isIPv4(address)) {
+          throw new ERR_INVALID_ADDRESS();
+        }
+        break;
+      case 'ipv6':
+        if (!isIPv6(address)) {
+          throw new ERR_INVALID_ADDRESS();
+        }
+        break;
+    }
+
+    // Node.js' implementation is a bit more complicated since it is backed
+    // by a C++ class wrapping an actual socket address structure. We don't
+    // need that here, so we keep things simple.
+
+    this.#address = address;
+    this.#port = _port;
+    this.#flowlabel = flowlabel;
+  }
+
+  get address(): string {
+    return this.#address;
+  }
+
+  get port(): number {
+    return this.#port;
+  }
+
+  get family(): IPVersion {
+    return this.#family;
+  }
+
+  get flowlabel(): number {
+    return this.#flowlabel;
+  }
+
+  [kInspect](depth: number, options: InspectOptions): string | this {
+    if (depth < 0) return this;
+
+    const opts: InspectOptions = {
+      ...options,
+      depth: options.depth == null ? null : options.depth - 1,
+    };
+
+    // @ts-expect-error TS2769 not all the overloads are compatible
+    return `SocketAddress ${inspect(this.toJSON(), opts)}`;
+  }
+
+  toJSON(): {
+    address: string;
+    port: number;
+    family: IPVersion;
+    flowlabel: number;
+  } {
+    return {
+      address: this.address,
+      port: this.port,
+      family: this.family,
+      flowlabel: this.flowlabel,
+    };
+  }
+
+  static parse(input: string): SocketAddress | undefined {
+    validateString(input, 'input');
+    try {
+      const parsed = URL.parse(`http://${input}`);
+      if (parsed == null) {
+        return undefined;
+      }
+      const { hostname: address, port } = parsed;
+      if (address.startsWith('[') && address.endsWith(']')) {
+        return new SocketAddress({
+          address: address.slice(1, -1),
+          // @ts-expect-error TS2362 port will be a string, this converts it
+          port: port | 0,
+          family: 'ipv6',
+        });
+      }
+      // @ts-expect-error TS2362 port will be a string, this converts it
+      return new SocketAddress({ address, port: port | 0 });
+    } catch {
+      // Ignore errors here. Return undefined if the input cannot
+      // be successfully parsed or is not a proper socket address.
+    }
+    return undefined;
+  }
 }
