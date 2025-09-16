@@ -22,6 +22,8 @@ class SqliteUtil final: public jsg::Object {
     DatabaseSync() = default;
     DatabaseSync(jsg::Lock&, const jsg::Url&) {}
 
+    // We intentionally do not implement the full API surface yet.
+    // TODO(soon): Add the full implementation of DatabaseSync.
     static jsg::Ref<DatabaseSync> constructor(jsg::Lock& js) = delete;
 
     JSG_RESOURCE_TYPE(DatabaseSync) {}
@@ -32,6 +34,8 @@ class SqliteUtil final: public jsg::Object {
     StatementSync() = default;
     StatementSync(jsg::Lock&, const jsg::Url&) {}
 
+    // We intentionally do not implement the full API surface yet.
+    // TODO(soon): Add the full implementation of StatementSync.
     static jsg::Ref<StatementSync> constructor(jsg::Lock& js) = delete;
 
     JSG_RESOURCE_TYPE(StatementSync) {}
