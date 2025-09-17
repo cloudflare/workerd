@@ -11,7 +11,7 @@ import type {
   IncomingHttpHeaders,
 } from 'node:http';
 import { Readable } from 'node-internal:streams_readable';
-import { isIPv4 } from 'node-internal:internal_net';
+import { isIPv4, Socket } from 'node-internal:internal_net';
 
 const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
@@ -31,11 +31,17 @@ export let setIncomingMessageSocket: (
   }
 ) => void;
 
+export let setIncomingMessageStream: (
+  incoming: IncomingMessage,
+  stream: ReadableStream | null
+) => void;
+
 export class IncomingMessage extends Readable implements _IncomingMessage {
   #response?: Response;
   #reader?: ReadableStreamDefaultReader<Uint8Array>;
   #reading = false;
   #socket: unknown;
+  #stream: ReadableStream | null = null;
 
   aborted = false;
   url: string = '';
@@ -67,8 +73,6 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   [kHeadersDistinct]: Record<string, string[]> | null = null;
   [kHeadersCount]: number = 0;
 
-  // The underlying ReadableStream
-  _stream: ReadableStream | null = null;
   // Flag for when we decide that this message cannot possibly be
   // read by the user, so there's no point continuing to handle it.
   _dumped = false;
@@ -127,6 +131,13 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           incoming.destroy(err),
       };
     };
+
+    setIncomingMessageStream = (
+      incoming: IncomingMessage,
+      stream: ReadableStream | null
+    ): void => {
+      incoming.#stream = stream;
+    };
   }
 
   constructor() {
@@ -161,16 +172,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       this._consuming = false;
     });
 
-    this._stream = this.#response.body;
+    this.#stream = this.#response.body;
   }
 
   async #tryRead(): Promise<void> {
-    if (this._stream == null || this.#reading) return;
+    if (this.#stream == null || this.#reading) return;
 
     this.#reading = true;
 
     try {
-      this.#reader ??= this._stream.getReader();
+      this.#reader ??= this.#stream.getReader();
 
       while (!this.destroyed) {
         const data = await this.#reader.read();
@@ -204,7 +215,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     // The Node.js implementation will already have its internal buffer
     // filled by the parserOnBody function.
     // For our implementation, we use the ReadableStream instance.
-    if (this._stream == null) {
+    if (this.#stream == null) {
       // For GET and HEAD requests, the stream would be empty.
       // Simply signal that we're done.
       this.complete = true;
@@ -420,19 +431,16 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
     return destination;
   }
 
-  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
   set connection(value: unknown) {
     this.#socket = value;
   }
 
-  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
-  get connection(): unknown {
-    return this.#socket;
+  get connection(): Socket {
+    return this.#socket as Socket;
   }
 
-  // @ts-expect-error TS2416 Types insist value is a Socket, but it's actually unknown
-  get socket(): unknown {
-    return this.#socket;
+  get socket(): Socket {
+    return this.#socket as Socket;
   }
 }
 
