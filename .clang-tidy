@@ -9,6 +9,7 @@ Checks: >
   bugprone-return-const-ref-from-parameter,
   bugprone-use-after-move,
   misc-header-include-cycle,
+  modernize-use-override,
   readability-duplicate-include,
 WarningsAsErrors: '*'
 

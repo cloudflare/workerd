@@ -1,0 +1,7 @@
+# fail on lint violations
+build:lint --@aspect_rules_lint//lint:fail_on_violation
+
+# enable clang-tidy
+build:lint --aspects=//:build/linters.bzl%clang_tidy
+
+import %workspace%/build/rust_lint.bazelrc

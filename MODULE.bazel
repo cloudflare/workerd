@@ -38,3 +38,14 @@ git_override(
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
+
+bazel_dep(name = "aspect_rules_lint", version = "1.7.0")
+
+bazel_dep(name = "toolchains_llvm", version = "1.5.0")
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+   # stable version
+   llvm_version = "20.1.8",
+)
+use_repo(llvm, "llvm_toolchain")
+# register_toolchains("@llvm_toolchain//:all")

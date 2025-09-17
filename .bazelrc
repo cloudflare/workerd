@@ -30,8 +30,7 @@ build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_
 # Import CI-specific configuration. As the amount of custom configuration settings we use grows,
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
-
-import %workspace%/build/rust_lint.bazelrc
+import %workspace%/build/lint.bazelrc
 
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
