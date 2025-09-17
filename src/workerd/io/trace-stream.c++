@@ -52,7 +52,6 @@ constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xcde53d65a46183f
   V(MAILFROM, "mailFrom")                                                                          \
   V(MESSAGE, "message")                                                                            \
   V(METHOD, "method")                                                                              \
-  V(METHODNAME, "methodName")                                                                      \
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
@@ -207,9 +206,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
-  if (info.methodName.size() > 0) {
-    obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
-  }
   return obj;
 }
 
