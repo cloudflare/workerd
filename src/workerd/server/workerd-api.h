@@ -320,11 +320,7 @@ class WorkerdApi final: public Worker::Api {
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
       config::Worker::Module::Reader conf,
-      jsg::CompilationObserver& observer,
-      CompatibilityFlags::Reader featureFlags);
-  static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
-      const Worker::Script::Module& module,
-      jsg::CompilationObserver& observer,
+      const jsg::CompilationObserver& observer,
       CompatibilityFlags::Reader featureFlags);
 
   // Convert a module definition from workerd config to a Worker::Script::Module (which may contain

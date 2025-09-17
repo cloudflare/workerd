@@ -405,36 +405,6 @@ struct WorkerdApi::Impl final {
       }
     });
   }
-
-  static v8::Local<v8::String> compileTextGlobal(
-      JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
-    return lock.wrapNoContext(reader);
-  };
-
-  static v8::Local<v8::ArrayBuffer> compileDataGlobal(
-      JsgWorkerdIsolate::Lock& lock, capnp::Data::Reader reader) {
-    return lock.wrapNoContext(kj::heapArray(reader));
-  };
-
-  static v8::Local<v8::WasmModuleObject> compileWasmGlobal(JsgWorkerdIsolate::Lock& lock,
-      capnp::Data::Reader reader,
-      const jsg::CompilationObserver& observer) {
-    lock.setAllowEval(true);
-    KJ_DEFER(lock.setAllowEval(false));
-
-    // Allow Wasm compilation to spawn a background thread for tier-up, i.e. recompiling
-    // Wasm with optimizations in the background. Otherwise Wasm startup is way too slow.
-    // Until tier-up finishes, requests will be handled using Liftoff-generated code, which
-    // compiles fast but runs slower.
-    AllowV8BackgroundThreadsScope scope;
-
-    return jsg::compileWasmModule(lock, reader, observer);
-  };
-
-  static v8::Local<v8::Value> compileJsonGlobal(
-      JsgWorkerdIsolate::Lock& lock, capnp::Text::Reader reader) {
-    return jsg::check(v8::JSON::Parse(lock.v8Context(), lock.wrapNoContext(reader)));
-  };
 };
 
 WorkerdApi::WorkerdApi(jsg::V8System& v8System,
@@ -583,7 +553,8 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobal
   for (auto& global: source.globals) {
     KJ_IF_SOME(wasm, global.content.tryGet<Worker::Script::WasmModule>()) {
       auto name = lock.str(global.name);
-      auto value = Impl::compileWasmGlobal(lock, wasm.body, *impl->observer);
+      auto value =
+          modules::legacy::compileWasmGlobal<JsgWorkerdIsolate>(lock, wasm.body, *impl->observer);
 
       compiledGlobals.add(Worker::Script::CompiledGlobal{
         {lock.v8Isolate, name},
@@ -597,64 +568,24 @@ kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobal
   return compiledGlobals.finish();
 }
 
+namespace {
+kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
+    kj::StringPtr name,
+    const Worker::Script::ModuleContent& content,
+    const jsg::CompilationObserver& observer,
+    CompatibilityFlags::Reader featureFlags) {
+  return modules::legacy::tryCompileLegacyModule<JsgWorkerdIsolate>(
+      js, name, content, observer, featureFlags);
+}
+}  // namespace
+
 // Part of the original module registry implementation.
 kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
     config::Worker::Module::Reader conf,
-    jsg::CompilationObserver& observer,
+    const jsg::CompilationObserver& observer,
     CompatibilityFlags::Reader featureFlags) {
-  return tryCompileModule(js, readModuleConf(conf, featureFlags), observer, featureFlags);
-}
-
-kj::Maybe<jsg::ModuleRegistry::ModuleInfo> WorkerdApi::tryCompileModule(jsg::Lock& js,
-    const Worker::Script::Module& module,
-    jsg::CompilationObserver& observer,
-    CompatibilityFlags::Reader featureFlags) {
-  TRACE_EVENT("workerd", "WorkerdApi::tryCompileModule()", "name", module.name);
-  auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(js);
-  KJ_SWITCH_ONEOF(module.content) {
-    KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
-          jsg::ModuleRegistry::TextModuleInfo(lock, Impl::compileTextGlobal(lock, content.body)));
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
-          jsg::ModuleRegistry::DataModuleInfo(
-              lock, Impl::compileDataGlobal(lock, content.body).As<v8::ArrayBuffer>()));
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
-          jsg::ModuleRegistry::WasmModuleInfo(
-              lock, Impl::compileWasmGlobal(lock, content.body, observer)));
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, kj::none,
-          jsg::ModuleRegistry::JsonModuleInfo(lock, Impl::compileJsonGlobal(lock, content.body)));
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
-      // TODO(soon): Make sure passing nullptr to compile cache is desired.
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, content.body,
-          nullptr /* compile cache */, jsg::ModuleInfoCompileOption::BUNDLE, observer);
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-      return jsg::ModuleRegistry::ModuleInfo(lock, module.name, content.namedExports,
-          jsg::ModuleRegistry::CommonJsModuleInfo(lock, module.name, content.body,
-              kj::heap<api::CommonJsImpl<JsgWorkerdIsolate::Lock>>(
-                  lock, kj::Path::parse(module.name))));
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-      // Nothing to do. Handled in compileModules.
-      return kj::none;
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-      // Nothing to do. Handled in compileModules.
-      return kj::none;
-    }
-    KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-      return workerd::modules::capnp::addCapnpModule<JsgWorkerdIsolate>(
-          lock, content.typeId, module.name);
-    }
-  }
-  KJ_UNREACHABLE;
+  auto module = readModuleConf(conf, featureFlags);
+  return tryCompileLegacyModule(js, module.name, module.content, observer, featureFlags);
 }
 
 Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader conf,
@@ -756,7 +687,9 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
         Worker::Script::Module module{
           .name = source.mainModule, .content = Worker::Script::EsModule{PYTHON_ENTRYPOINT}};
 
-        auto info = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
+        auto info = tryCompileLegacyModule(
+            lockParam, module.name, module.content, modules->getObserver(), featureFlags);
+
         auto path = kj::Path::parse(source.mainModule);
         modules->add(path, kj::mv(KJ_REQUIRE_NONNULL(info)));
       }
@@ -792,7 +725,8 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 
     for (auto& module: source.modules) {
       auto path = kj::Path::parse(module.name);
-      auto maybeInfo = tryCompileModule(lockParam, module, modules->getObserver(), featureFlags);
+      auto maybeInfo = tryCompileLegacyModule(
+          lockParam, module.name, module.content, modules->getObserver(), featureFlags);
       KJ_IF_SOME(info, maybeInfo) {
         modules->add(path, kj::mv(info));
       }
