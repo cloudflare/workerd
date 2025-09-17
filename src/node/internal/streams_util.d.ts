@@ -200,7 +200,7 @@ export class BufferList {
   [Symbol.iterator](): IterableIterator<Buffer | string>;
 }
 
-interface BufferListNode {
+export interface BufferListNode {
   data: Buffer | string;
   next: BufferListNode | null;
 }

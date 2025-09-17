@@ -42,6 +42,7 @@ import { portMapper } from 'cloudflare-internal:http';
 import {
   IncomingMessage,
   setIncomingMessageSocket,
+  setIncomingMessageStream,
 } from 'node-internal:internal_http_incoming';
 import { STATUS_CODES } from 'node-internal:internal_http_constants';
 import {
@@ -259,7 +260,7 @@ export class Server
     incoming._addHeaderLines(headers, headers.length);
 
     incoming.method = request.method;
-    incoming._stream = request.body;
+    setIncomingMessageStream(incoming, request.body);
 
     // We provide a way for users to access to the Cloudflare-specific
     // request properties, such as `cf` for accessing Cloudflare-specific request metadata.

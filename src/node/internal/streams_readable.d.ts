@@ -3,10 +3,15 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Readable as _Readable } from 'node:stream';
+import type { BufferList } from 'node-internal:streams_util';
 
 export declare class Readable extends _Readable {
   _readableState: {
     readingMore: boolean;
     autoDestroy: boolean;
+    buffer: BufferList;
+    dataEmitted: boolean;
+    ended: boolean;
+    endEmitted: boolean;
   };
 }
