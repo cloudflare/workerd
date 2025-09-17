@@ -27,7 +27,9 @@ test:ci --test_output=errors
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
-build:ci-test --remote_download_outputs=minimal
+# build:ci-test --remote_download_minimal
+# TODO
+build:windows --remote_download_all
 # Enable v8-codegen-opt for test so that python tests run in an acceptable time frame but not for
 # release builds – this sets -O2 and release should keep -O3.
 build:ci-test --config=v8-codegen-opt

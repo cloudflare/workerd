@@ -19,7 +19,8 @@ bazel_dep(name = "platforms", version = "1.0.0")
 # apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
 # needs to be pulled in before rules_cc for this toolchain to actually be used.
 bazel_dep(name = "apple_support", version = "1.23.1")
-bazel_dep(name = "rules_cc", version = "0.2.3")
+bazel_dep(name = "rules_cc", version = "0.2.8")
+
 bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
 git_override(
     module_name = "zlib",

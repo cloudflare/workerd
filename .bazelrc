@@ -36,6 +36,10 @@ import %workspace%/build/rust_lint.bazelrc
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
+# Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
+# and conserving space
+build --incompatible_compact_repo_mapping_manifest
+
 # Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
