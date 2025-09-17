@@ -5,9 +5,24 @@ import * as fs from 'node:fs';
 import { Buffer } from 'node:buffer';
 import { ok, match, rejects, strictEqual, throws, deepStrictEqual, notStrictEqual } from 'node:assert';
 import { mock } from 'node:test';
-import { Writable } from 'node:stream';
+import { Writable, Readable, Transform } from 'node:stream';
+import { text } from "node:stream/consumers";
+import { pipeline } from "node:stream/promises";
+import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from 'node:events';
 import { env } from "node:process";
+import zlib from "node:zlib";
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  channel,
+  hasSubscribers,
+  subscribe,
+  unsubscribe,
+  tracingChannel,
+} from "node:diagnostics_channel";
+import dns from "node:dns";
+import path from "node:path";
+
 
 // Expose all APIs to the global scope for fuzzing
 export default {
@@ -25,9 +40,27 @@ export default {
     
     // used for scheduler.await
     globalThis.scheduler = scheduler;
+    
+    // zlib
+    globalThis.zlib = zlib;
 
     // Expose Web Crypto API
     globalThis.crypto = crypto;
+
+    globalThis.AsyncLocalStorage = AsyncLocalStorage;
+    
+    //path 
+    globalThis.path = path;
+
+    // dns
+    globalThis.dns = dns;
+
+    // diagnostics
+    globalThis.channel = channel;
+    globalThis.hasSubscribers = hasSubscribers;
+    globalThis.subscribe = subscribe;
+    globalThis.unsubscribe = unsubscribe;
+    globalThis.tracingChannel = tracingChannel;
 
     // Expose Web Standards
     globalThis.Response = Response;
@@ -77,7 +110,10 @@ export default {
     globalThis.fs = fs;
     globalThis.Buffer = Buffer;
     globalThis.Writable = Writable;
+    globalThis.Readable = Readable;
+    globalThis.Transform = Transform;
     globalThis.EventEmitter = EventEmitter;
+    globalThis.StringDecoder = StringDecoder;
 
     // Expose testing APIs
     globalThis.ok = ok;
