@@ -69,7 +69,7 @@ build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
 # canonical V8 build and improves code size.
 build:unix --per_file_copt=external/abseil-cpp@-fno-exceptions
 build:unix --per_file_copt=external/protobuf@-fno-exceptions
-build:unix --per_file_copt=external/tcmalloc@-fno-exceptions
+build:unix --per_file_copt=external/com_google_tcmalloc@-fno-exceptions
 build:unix --per_file_copt=external/com_googlesource_chromium_icu@-fno-exceptions
 build:unix --per_file_copt=external/perfetto@-fno-exceptions
 build:unix --per_file_copt=external/ssl@-fno-exceptions
@@ -78,7 +78,7 @@ build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/simdutf@-fno-exceptions
 build:windows --per_file_copt=external/abseil-cpp@/GX-
 build:windows --per_file_copt=external/protobuf@/GX-
-build:windows --per_file_copt=external/tcmalloc@/GX-
+build:windows --per_file_copt=external/com_google_tcmalloc@/GX-
 build:windows --per_file_copt=external/com_googlesource_chromium_icu@/GX-
 build:windows --per_file_copt=external/perfetto@/GX-
 build:windows --per_file_copt=external/ssl@/GX-
