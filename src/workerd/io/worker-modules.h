@@ -321,9 +321,12 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
               js, modules::legacy::compileDataGlobal<JsgIsolate>(lock, content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-      return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
-          jsg::ModuleRegistry::WasmModuleInfo(
-              js, modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer)));
+      auto wasmModule =
+          modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+      auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
+          js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));
+      moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
+      return moduleInfo;
     }
     KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, kj::none,
