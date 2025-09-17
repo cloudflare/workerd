@@ -4,7 +4,7 @@ bazel_dep(name = "fast_float", version = "8.0.2")
 bazel_dep(name = "fp16", version = "0.0.0-20210320-0a92994")
 bazel_dep(name = "highway", version = "1.3.0")
 bazel_dep(name = "sqlite3", version = "3.47.0")
-bazel_dep(name = "tcmalloc", version = "0.0.0-20250331-43fcf6e")
+bazel_dep(name = "tcmalloc", version = "0.0.0-20250331-43fcf6e", repo_name = "com_google_tcmalloc")
 
 # We have some patches that aren't included in BCR:
 # https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/sqlite3/3.47.0/patches
