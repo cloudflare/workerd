@@ -4643,7 +4643,7 @@ KJ_TEST("Server: Catch websocket server errors") {
 
   class NotVeryGoodEntropySource: public kj::EntropySource {
    public:
-    void generate(kj::ArrayPtr<byte> buffer) {
+    void generate(kj::ArrayPtr<byte> buffer) override {
       buffer.fill('4');
     }
   };

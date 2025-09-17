@@ -39,13 +39,13 @@ class MockCacheClient final: public CacheClient {
 };
 
 class MockTimer final: public kj::Timer {
-  kj::TimePoint now() const {
+  kj::TimePoint now() const override {
     return kj::systemCoarseMonotonicClock().now();
   }
-  kj::Promise<void> atTime(kj::TimePoint time) {
+  kj::Promise<void> atTime(kj::TimePoint time) override {
     return kj::NEVER_DONE;
   }
-  kj::Promise<void> afterDelay(kj::Duration delay) {
+  kj::Promise<void> afterDelay(kj::Duration delay) override {
     return kj::NEVER_DONE;
   }
 };
@@ -293,11 +293,11 @@ struct MockResponse final: public kj::HttpService::Response {
 
 class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
  public:
-  virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::Own<WorkerInterface>();
   };
 
-  virtual kj::Own<Worker::Actor::Loopback> addRef() {
+  kj::Own<Worker::Actor::Loopback> addRef() override {
     return kj::addRef(*this);
   };
 };

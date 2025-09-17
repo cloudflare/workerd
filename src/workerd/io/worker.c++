@@ -3070,7 +3070,7 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
       InspectorChannelImpl& channel;
       Activity(InspectorChannelImpl& channel): channel(channel) {}
 
-      ControlOption ReportProgressValue(uint32_t done, uint32_t total) {
+      ControlOption ReportProgressValue(uint32_t done, uint32_t total) override {
         capnp::MallocMessageBuilder message;
         auto event = message.initRoot<cdp::Event>();
         auto progressParams = event.initReportHeapSnapshotProgress();

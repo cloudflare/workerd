@@ -40,6 +40,7 @@ build --incompatible_strict_action_env
 # on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
 # have that option, so disable -Wunknown-warning-option there too.
 build --per_file_copt='external@-Wno-error'
+build --per_file_copt='external@-Wno-suggest-override'
 build --per_file_copt='external/v8@-Wno-unused-function'
 build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
 build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
@@ -219,6 +220,7 @@ build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
 build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
+build:unix --cxxopt='-Wsuggest-override'
 
 build:linux --config=unix
 build:macos --config=unix
