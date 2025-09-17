@@ -135,6 +135,7 @@ wd_cc_library(
 
 wd_cc_library(
     name = "worker-modules",
+    srcs = ["worker-modules.c++"],
     hdrs = ["worker-modules.h"],
     visibility = ["//visibility:public"],
     deps = [

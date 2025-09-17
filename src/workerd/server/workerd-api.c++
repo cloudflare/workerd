@@ -151,86 +151,8 @@ static const PythonConfig defaultConfig{
   .createBaselineSnapshot = false,
 };
 
-kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
-    const Worker::Script::ModulesSource& source,
-    const PythonConfig& pythonConfig,
-    PythonSnapshotRelease::Reader pythonRelease) {
-  auto modules = source.modules.asPtr();
-  auto mainModule = kj::str(source.mainModule);
-  int numFiles = 0;
-  int numRequirements = 0;
-  for (auto& module: modules) {
-    KJ_SWITCH_ONEOF(module.content) {
-      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-        numFiles++;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-        numFiles++;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-        numFiles++;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-        numFiles++;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        numRequirements++;
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-        // Not exposeud to Python.
-      }
-    }
-  }
-
-  auto names = kj::heapArrayBuilder<kj::String>(numFiles);
-  auto contents = kj::heapArrayBuilder<kj::Array<kj::byte>>(numFiles);
-  auto requirements = kj::heapArrayBuilder<kj::String>(numRequirements);
-  for (auto& module: modules) {
-    KJ_SWITCH_ONEOF(module.content) {
-      KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
-        names.add(kj::str(module.name));
-        contents.add(kj::heapArray(content.body.asBytes()));
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
-        names.add(kj::str(module.name));
-        contents.add(kj::heapArray(content.body));
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
-        names.add(kj::str(module.name));
-        contents.add(kj::heapArray(content.body.asBytes()));
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
-        // Not exposeud to Python.
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-        KJ_REQUIRE(module.name.endsWith(".py"));
-        names.add(kj::str(module.name));
-        contents.add(kj::heapArray(content.body.asBytes()));
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
-        requirements.add(kj::str(module.name));
-      }
-      KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
-        // Not exposeud to Python.
-      }
-    }
-  }
-  bool snapshotToDisk = pythonConfig.createSnapshot || pythonConfig.createBaselineSnapshot;
+kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
+    const PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
   if (pythonConfig.loadSnapshotFromDisk && snapshotToDisk) {
     KJ_FAIL_ASSERT(
         "Doesn't make sense to pass both --python-save-snapshot and --python-load-snapshot");
@@ -245,25 +167,7 @@ kj::Own<api::pyodide::PyodideMetadataReader::State> makePyodideMetadataReader(
     }
     memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
   }
-  auto lock = KJ_ASSERT_NONNULL(api::pyodide::getPyodideLock(pythonRelease),
-      kj::str("No lock file defined for Python packages release ", pythonRelease.getPackages()));
-
-  // clang-format off
-  return kj::heap<api::pyodide::PyodideMetadataReader::State>(
-    kj::mv(mainModule),
-    names.finish(),
-    contents.finish(),
-    requirements.finish(),
-    kj::str(pythonRelease.getPyodide()),
-    kj::str(pythonRelease.getPackages()),
-    kj::mv(lock),
-    true      /* isWorkerd */,
-    false     /* isTracing */,
-    snapshotToDisk,
-    pythonConfig.createBaselineSnapshot,
-    kj::mv(memorySnapshot)
-  );
-  // clang-format on
+  return kj::mv(memorySnapshot);
 }
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,
@@ -697,9 +601,16 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
       }
 
       // Inject metadata that the entrypoint module will read.
+      api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
+          impl->pythonConfig.createBaselineSnapshot);
+      api::pyodide::SnapshotToDisk snapshotToDisk(
+          impl->pythonConfig.createSnapshot || createBaselineSnapshot);
+      auto snapshot = tryGetMetadataSnapshot(impl->pythonConfig, snapshotToDisk);
       modules->addBuiltinModule("pyodide-internal:runtime-generated/metadata",
           lockParam.alloc<PyodideMetadataReader>(
-              makePyodideMetadataReader(source, impl->pythonConfig, pythonRelease)),
+              workerd::modules::python::createPyodideMetadataState(source,
+                  api::pyodide::IsWorkerd::YES, api::pyodide::IsTracing::NO, snapshotToDisk,
+                  createBaselineSnapshot, pythonRelease, kj::mv(snapshot), featureFlags)),
           jsg::ModuleRegistry::Type::INTERNAL);
 
       // Inject packages tar file
@@ -1124,10 +1035,19 @@ kj::Arc<jsg::modules::ModuleRegistry> WorkerdApi::newWorkerdModuleRegistry(
 
       pyodideBundleBuilder.addEsm(tarReaderSpecifier, PYTHON_TAR_READER);
 
+      api::pyodide::CreateBaselineSnapshot createBaselineSnapshot(
+          pythonConfig.createBaselineSnapshot);
+      api::pyodide::SnapshotToDisk snapshotToDisk(
+          pythonConfig.createSnapshot || createBaselineSnapshot);
+      auto maybeSnapshot = tryGetMetadataSnapshot(pythonConfig, snapshotToDisk);
+      auto state = workerd::modules::python::createPyodideMetadataState(source,
+          api::pyodide::IsWorkerd::YES, api::pyodide::IsTracing::NO, snapshotToDisk,
+          createBaselineSnapshot, pythonRelease, kj::mv(maybeSnapshot), featureFlags);
+
       pyodideBundleBuilder.addSynthetic(metadataSpecifier,
           jsg::modules::Module::newJsgObjectModuleHandler<api::pyodide::PyodideMetadataReader,
               JsgWorkerdIsolate_TypeWrapper>(
-              [state = makePyodideMetadataReader(source, pythonConfig, pythonRelease)](
+              [state = kj::mv(state)](
                   jsg::Lock& js) mutable -> jsg::Ref<api::pyodide::PyodideMetadataReader> {
         // The ModuleRegistry may be shared across multiple isolates and workers.
         // We need to clone the PyodideMetadataReader::State for each instance
