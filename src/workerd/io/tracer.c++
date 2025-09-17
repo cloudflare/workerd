@@ -499,13 +499,9 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    Span::TagMap::Entry entry = {"jsrpc.method"_kjc, kj::str(methodName)};
-    kj::Array<Span::TagMap::Entry> entries = kj::heapArray<Span::TagMap::Entry>(1);
-    entries[0] = kj::mv(entry);
-    tracing::CustomInfo attr = KJ_MAP(tag, entries) {
-      return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
-    };
-    writer->report(context, kj::mv(attr), timestamp);
+    auto attr = kj::heapArrayBuilder<tracing::Attribute>(1);
+    attr.add(tracing::Attribute("jsrpc.method"_kjc, kj::str(methodName)));
+    writer->report(context, attr.finish(), timestamp);
   }
 }
 
