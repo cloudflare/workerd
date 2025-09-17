@@ -943,3 +943,18 @@ export class ERR_SERVER_ALREADY_LISTEN extends NodeError {
     );
   }
 }
+
+export class ERR_ILLEGAL_CONSTRUCTOR extends NodeTypeError {
+  constructor() {
+    super('ERR_ILLEGAL_CONSTRUCTOR', 'Illegal constructor');
+  }
+}
+
+export class ERR_PERFORMANCE_INVALID_TIMESTAMP extends NodeTypeError {
+  constructor(value: unknown) {
+    super(
+      'ERR_PERFORMANCE_INVALID_TIMESTAMP',
+      `${value} is not a valid timestamp`
+    );
+  }
+}

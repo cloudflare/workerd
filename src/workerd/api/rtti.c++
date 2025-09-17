@@ -23,6 +23,7 @@
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
@@ -91,7 +92,8 @@
   F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)                                             \
   F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
   F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
-  F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)
+  F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)                                               \
+  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)
 
 namespace workerd::api {
 

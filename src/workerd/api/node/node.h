@@ -127,6 +127,10 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       return featureFlags.getEnableNodeJsVmModule();
     }
 
+    if (module.getName() == "node:perf_hooks"_kj) {
+      return featureFlags.getEnableNodeJsPerfHooksModule();
+    }
+
     if (module.getName() == "node:domain"_kj) {
       return featureFlags.getEnableNodeJsDomainModule();
     }

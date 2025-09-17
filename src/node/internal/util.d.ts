@@ -2,7 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
+import perfHooks from 'node:perf_hooks';
+
+export const Performance = perfHooks.Performance;
+export const PerformanceEntry = perfHooks.PerformanceEntry;
+export const PerformanceMeasure = perfHooks.PerformanceMeasure;
+export const PerformanceMark = perfHooks.PerformanceMark;
+export const PerformanceObserver = perfHooks.PerformanceObserver;
+export const PerformanceObserverEntryList =
+  perfHooks.PerformanceObserverEntryList;
+export const PerformanceResourceTiming = perfHooks.PerformanceResourceTiming;
 
 export abstract class MIMEType {
   constructor(input: string);
@@ -99,8 +110,8 @@ export function isUint8Array(value: unknown): value is Uint8Array;
 export function isUint8ClampedArray(value: unknown): value is Uint8ClampedArray;
 export function isUint16Array(value: unknown): value is Uint16Array;
 export function isUint32Array(value: unknown): value is Uint32Array;
-export function isWeakMap(value: unknown): value is WeakMap<any, unknown>;
-export function isWeakSet(value: unknown): value is WeakSet<any>;
+export function isWeakMap(value: unknown): value is WeakMap<unknown, unknown>;
+export function isWeakSet(value: unknown): value is WeakSet<unknown>;
 export function isAnyArrayBuffer(
   value: unknown
 ): value is ArrayBuffer | SharedArrayBuffer;
