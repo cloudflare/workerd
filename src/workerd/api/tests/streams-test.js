@@ -36,6 +36,7 @@ export const ts = {
   },
 };
 
+// Regression test for https://github.com/cloudflare/workerd/issues/5113
 export const rsRequest = {
   async test(ctrl, env) {
     const resp = await env.subrequest.fetch(
@@ -55,6 +56,7 @@ export const rsRequest = {
   },
 };
 
+// Regression test for https://github.com/cloudflare/workerd/issues/5113
 export const tsRequest = {
   async test(ctrl, env) {
     const { readable, writable } = new TransformStream({
