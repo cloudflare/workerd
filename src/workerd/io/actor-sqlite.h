@@ -105,7 +105,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // into application errors as appropriate when committing an implicit transaction.
   class TxnCommitRegulator: public SqliteDatabase::Regulator {
    public:
-    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const;
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
   };
   static constexpr TxnCommitRegulator TRUSTED_TXN_COMMIT;
 
@@ -192,7 +192,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
     // `ActorSqlite` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.
-    void disposeImpl(void* pointer) const {
+    void disposeImpl(void* pointer) const override {
       reinterpret_cast<ActorSqlite*>(pointer)->maybeDeleteDeferredAlarm();
     }
   };

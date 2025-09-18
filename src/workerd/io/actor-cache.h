@@ -362,7 +362,7 @@ class ActorCache final: public ActorCacheInterface {
     // The `Own<void>` returned by `armAlarmHandler()` is actually set up to point to the
     // `ActorCache` itself, but with an alternate disposer that deletes the alarm rather than
     // the whole object.
-    void disposeImpl(void* pointer) const {
+    void disposeImpl(void* pointer) const override {
       auto p = reinterpret_cast<ActorCache*>(pointer);
       KJ_IF_SOME(d, p->currentAlarmTime.tryGet<DeferredAlarmDelete>()) {
         d.status = DeferredAlarmDelete::Status::READY;

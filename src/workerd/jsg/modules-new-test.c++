@@ -1588,7 +1588,7 @@ KJ_TEST("Using a registry from multiple threads works") {
       ModuleRegistry::Builder(resolveObserver, BASE).add(bundleBuilder.finish()).finish();
 
   struct NonOpErrorHandler final: public kj::TaskSet::ErrorHandler {
-    void taskFailed(kj::Exception&& exception) {}
+    void taskFailed(kj::Exception&& exception) override {}
   };
   NonOpErrorHandler errorHandler;
 

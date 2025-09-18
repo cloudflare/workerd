@@ -34,7 +34,7 @@ class AdaOwnedStringDisposer: public kj::ArrayDisposer {
       size_t elementSize,
       size_t elementCount,
       size_t capacity,
-      void (*destroyElement)(void*)) const {
+      void (*destroyElement)(void*)) const override {
     ada_owned_string data = {static_cast<const char*>(firstElement), elementCount};
     ada_free_owned_string(data);
   }

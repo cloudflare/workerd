@@ -2934,11 +2934,11 @@ class Server::WorkerService final: public Service,
      public:
       Loopback(ActorContainer& actorContainer): actorContainer(actorContainer) {}
 
-      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+      kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
         return newPromisedWorkerInterface(actorContainer.startRequest(kj::mv(metadata)));
       }
 
-      kj::Own<Worker::Actor::Loopback> addRef() {
+      kj::Own<Worker::Actor::Loopback> addRef() override {
         return kj::addRef(*this);
       }
 
@@ -4870,7 +4870,7 @@ class Server::HttpListener final: public kj::Refcounted {
    public:
     WorkerdBootstrapImpl(HttpListener& parent): parent(parent) {}
 
-    kj::Promise<void> startEvent(StartEventContext context) {
+    kj::Promise<void> startEvent(StartEventContext context) override {
       // TODO(someday): Use cfBlobJson from the connection if there is one, or from RPC params
       //   if we add that? (Note that if a connection-level cf blob exists, it should take
       //   priority; we should only accept a cf blob from the client if we have a cfBlobHeader
