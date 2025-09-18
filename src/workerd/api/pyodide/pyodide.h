@@ -7,6 +7,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/util/strong-bool.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide_static.capnp.h>
@@ -22,6 +23,12 @@
 #include <kj/timer.h>
 
 namespace workerd::api::pyodide {
+
+WD_STRONG_BOOL(CreateBaselineSnapshot);
+WD_STRONG_BOOL(IsTracing);
+WD_STRONG_BOOL(IsValidating);
+WD_STRONG_BOOL(IsWorkerd);
+WD_STRONG_BOOL(SnapshotToDisk);
 
 const auto PYTHON_PACKAGES_URL =
     "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
@@ -139,10 +146,10 @@ class PyodideMetadataReader: public jsg::Object {
         kj::String pyodideVersion,
         kj::String packagesVersion,
         kj::String packagesLock,
-        bool isWorkerd,
-        bool isTracing,
-        bool snapshotToDisk,
-        bool createBaselineSnapshot,
+        IsWorkerd isWorkerd,
+        IsTracing isTracing,
+        SnapshotToDisk snapshotToDisk,
+        CreateBaselineSnapshot createBaselineSnapshot,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),

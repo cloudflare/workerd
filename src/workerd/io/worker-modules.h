@@ -75,6 +75,21 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 }
 }  // namespace modules::capnp
 
+// ===========================================================================================
+// Python module support
+
+namespace modules::python {
+kj::Own<api::pyodide::PyodideMetadataReader::State> createPyodideMetadataState(
+    const Worker::Script::ModulesSource& source,
+    api::pyodide::IsWorkerd isWorkerd,
+    api::pyodide::IsTracing isTracing,
+    api::pyodide::SnapshotToDisk snapshotToDisk,
+    api::pyodide::CreateBaselineSnapshot createBaselineSnapshot,
+    PythonSnapshotRelease::Reader pythonRelease,
+    kj::Maybe<kj::Array<kj::byte>> maybeSnapshot,
+    CompatibilityFlags::Reader featureFlags);
+}  // namespace modules::python
+
 // Creates an instance of the (new) ModuleRegistry. This method provides the
 // initialization logic that is agnostic to the Worker::Api implementation,
 // but accepts a callback parameter to handle the Worker::Api-specific details.
