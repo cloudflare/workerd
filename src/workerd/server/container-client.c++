@@ -426,6 +426,11 @@ kj::Promise<void> ContainerClient::signal(SignalContext context) {
   co_await killContainer(params.getSigno());
 }
 
+kj::Promise<void> ContainerClient::setInactivityTimeout(SetInactivityTimeoutContext context) {
+  // empty implementation on purpose
+  co_return;
+}
+
 kj::Promise<void> ContainerClient::getTcpPort(GetTcpPortContext context) {
   const auto params = context.getParams();
   uint16_t port = params.getPort();
