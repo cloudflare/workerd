@@ -147,6 +147,8 @@ async function buildEntrypoint(
 
   const files: Array<{ fileName: string; content: string }> = [];
 
+  const filePromises: Promise<void>[] = [];
+
   for (const [fileName, definitions] of bundle) {
     assert(typeof definitions === "string");
     const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
@@ -157,8 +159,11 @@ async function buildEntrypoint(
     });
 
     files.push({ fileName, content: typings });
-    await fs.writeFile(path.join(entrypointPath, fileName), typings);
+    filePromises.push(fs.writeFile(path.join(entrypointPath, fileName), typings));
   }
+
+  // Write all files in parallel
+  await Promise.all(filePromises);
 
   return { name, files };
 }
