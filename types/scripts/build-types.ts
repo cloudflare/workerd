@@ -128,7 +128,7 @@ function spawnWorkerd(
 async function buildEntrypoint(
   entrypoint: (typeof ENTRYPOINTS)[number],
   workerUrl: URL
-): Promise<void> {
+): Promise<{ name: string; files: Array<{ fileName: string; content: string }> }> {
   const url = new URL(`/${entrypoint.compatDate}.bundle`, workerUrl);
   const response = await fetch(url);
   if (!response.ok) throw new Error(await response.text());
@@ -137,7 +137,10 @@ async function buildEntrypoint(
   const name = entrypoint.name ?? entrypoint.compatDate;
   const entrypointPath = path.join(OUTPUT_PATH, name);
   await fs.mkdir(entrypointPath, { recursive: true });
-  for (const [name, definitions] of bundle) {
+
+  const files: Array<{ fileName: string; content: string }> = [];
+
+  for (const [fileName, definitions] of bundle) {
     assert(typeof definitions === "string");
     const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
     let typings = definitions.replaceAll(prettierIgnoreRegexp, "");
@@ -146,15 +149,31 @@ async function buildEntrypoint(
       parser: "typescript",
     });
 
-    checkDiagnostics(new SourcesMap([["/$virtual/source.ts", typings]]));
-
-    await fs.writeFile(path.join(entrypointPath, name), typings);
+    files.push({ fileName, content: typings });
+    await fs.writeFile(path.join(entrypointPath, fileName), typings);
   }
+
+  return { name, files };
 }
 
 async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
-  for (const entrypoint of ENTRYPOINTS)
-    await buildEntrypoint(entrypoint, workerUrl);
+  const allEntrypoints: Array<{ name: string; files: Array<{ fileName: string; content: string }> }> = [];
+
+  for (const entrypoint of ENTRYPOINTS) {
+    const result = await buildEntrypoint(entrypoint, workerUrl);
+    allEntrypoints.push(result);
+  }
+
+  for (const { files } of allEntrypoints) {
+    const entrypointFiles = new SourcesMap();
+    for (const { fileName, content } of files) {
+      entrypointFiles.set(`/$virtual/${fileName}`, content);
+    }
+
+    if (entrypointFiles.size > 0) {
+      checkDiagnostics(entrypointFiles);
+    }
+  }
 }
 export async function main(): Promise<void> {
   const worker = await spawnWorkerd(getFilePath("types/scripts/config.capnp"));
