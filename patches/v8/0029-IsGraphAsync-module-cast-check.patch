@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Guy Bedford <gbedford@cloudflare.com>
+Date: Mon, 15 Sep 2025 10:04:06 -0900
+Subject: Checked cast for IsGraphAsync for source phase support
+
+diff --git a/src/objects/module.cc b/src/objects/module.cc
+index 6ce67230b41..dd17829760d 100644
+--- a/src/objects/module.cc
++++ b/src/objects/module.cc
+@@ -509,10 +509,13 @@ bool Module::IsGraphAsync(Isolate* isolate) const {
+     if (current->has_toplevel_await()) return true;
+     Tagged<FixedArray> requested_modules = current->requested_modules();
+     for (int i = 0, length = requested_modules->length(); i < length; ++i) {
+-      Tagged<Module> descendant = Cast<Module>(requested_modules->get(i));
+-      if (IsSourceTextModule(descendant)) {
+-        const bool cycle = !visited.insert(descendant).second;
+-        if (!cycle) worklist.push_back(Cast<SourceTextModule>(descendant));
++      Tagged<Object> obj = requested_modules->get(i);
++      if (IsModule(obj)) {
++        Tagged<Module> descendant = Cast<Module>(obj);
++        if (IsSourceTextModule(descendant)) {
++          const bool cycle = !visited.insert(descendant).second;
++          if (!cycle) worklist.push_back(Cast<SourceTextModule>(descendant));
++        }
+       }
+     }
+   } while (!worklist.empty());

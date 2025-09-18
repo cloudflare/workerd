@@ -34,6 +34,7 @@ PATCHES = [
     "0026-Workaround-for-builtin-can-allocate-issue.patch",
     "0027-Implement-additional-Exception-construction-methods.patch",
     "0028-Export-icudata-file-to-facilitate-embedding-it.patch",
+    "0029-IsGraphAsync-module-cast-check.patch",
 ]
 
 # V8 and its dependencies
