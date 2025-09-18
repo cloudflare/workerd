@@ -19,6 +19,91 @@ inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def)
 }
 }  // namespace
 
+#ifdef WORKERD_FUZZILLI
+void Stdin::reprl(jsg::Lock& js) {
+  js.setAllowEval(true);
+  /*
+  cov_init_builtins_edges(static_cast<uint32_t>(
+      v8::internal::BasicBlockProfiler::Get()
+          ->GetCoverageBitmap(reinterpret_cast<v8::Isolate*>(js.v8Isolate))
+          .size()));
+  */
+
+  char helo[] = "HELO";
+  if (write(REPRL_CWFD, helo, 4) != 4 || read(REPRL_CRFD, helo, 4) != 4) {
+    printf("Invalid HELO response from parent\n");
+  }
+
+  if (memcmp(helo, "HELO", 4) != 0) {
+    printf("Invalid response from parent\n");
+  }
+
+  do {
+    v8::HandleScope handle_scope(js.v8Isolate);
+    v8::TryCatch try_catch(js.v8Isolate);
+    try_catch.SetVerbose(true);
+
+    size_t script_size = 0;
+    unsigned action = 0;
+    ssize_t nread = read(REPRL_CRFD, &action, 4);
+    fflush(0);
+    fflush(stderr);
+    if (nread != 4 || action != 0x63657865) {  // 'exec'
+      fprintf(stderr, "Unknown action: %x\n", action);
+      exit(-1);
+    }
+
+    CHECK(read(REPRL_CRFD, &script_size, 8) == 8);
+
+    char* script_ = (char*)malloc(script_size + 1);
+    CHECK(script_ != nullptr);
+
+    char* source_buffer_tail = script_;
+    ssize_t remaining = (ssize_t)script_size;
+
+    while (remaining > 0) {
+      ssize_t rv = read(REPRL_DRFD, source_buffer_tail, (size_t)remaining);
+      if (rv <= 0) {
+        fprintf(stderr, "Failed to load script\n");
+        exit(-1);
+      }
+      remaining -= rv;
+      source_buffer_tail += rv;
+    }
+
+    script_[script_size] = '\0';
+
+    int status = 0;
+    unsigned res_val = 0;
+    const kj::String script = kj::str(script_);
+    const kj::String wrapped = kj::str("{", script_, "}");
+    auto compiled = jsg::NonModuleScript::compile(js, wrapped, "reprl"_kj);
+    try {
+      auto result = compiled.runAndReturn(js);
+      res_val = jsg::check(v8::Local<v8::Value>(result)->Int32Value(js.v8Context()));
+      // if we reach that point execution was successful -> return 0
+      res_val = 0;
+    } catch (jsg::JsExceptionThrown&) {
+      res_val = 11;
+      if (try_catch.HasCaught()) {
+        auto str = workerd::jsg::check(try_catch.Message()->Get()->ToDetailString(js.v8Context()));
+        v8::String::Utf8Value utf8String(js.v8Isolate, str);
+        fflush(stdout);
+      }
+    }
+
+    fflush(stdout);
+    fflush(stderr);
+    status = (res_val & 0xFF) << 8;
+    CHECK(write(REPRL_CWFD, &status, 4) == 4);
+    __sanitizer_cov_reset_edgeguards();
+    free(script_);
+    //cleanup context
+
+  } while (true);
+}
+#endif
+
 jsg::JsValue UnsafeEval::eval(jsg::Lock& js, kj::String script, jsg::Optional<kj::String> name) {
   js.setAllowEval(true);
   KJ_DEFER(js.setAllowEval(false));

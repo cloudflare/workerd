@@ -1,8 +1,21 @@
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/script.h>
 #include <workerd/jsg/url.h>
+
+#include <csignal>
+#include <iostream>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
+#include "fuzzilli.h"
 
 namespace workerd::api {
 
@@ -60,6 +73,27 @@ class UnsafeEval: public jsg::Object {
   }
 };
 
+// A special binding that allows access to stdin. Used for REPL.
+class Stdin: public jsg::Object {
+ public:
+  Stdin() = default;
+
+  void reprl(jsg::Lock& js);
+
+  kj::String getline(jsg::Lock& js) {
+    std::string res;
+    std::getline(std::cin, res);
+    return kj::heapString(res.c_str());
+  }
+
+  JSG_RESOURCE_TYPE(Stdin) {
+    JSG_METHOD(getline);
+#ifdef WORKERD_FUZZILLI
+    JSG_METHOD(reprl);
+#endif
+  }
+};
+
 class UnsafeModule: public jsg::Object {
  public:
   UnsafeModule() = default;
@@ -79,12 +113,16 @@ void registerUnsafeModule(Registry& registry) {
       "workerd:unsafe-eval", workerd::jsg::ModuleRegistry::Type::BUILTIN);
 }
 
-#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule
+#define EW_UNSAFE_ISOLATE_TYPES api::UnsafeEval, api::UnsafeModule, api::Stdin
 
 template <class Registry>
 void registerUnsafeModules(Registry& registry, auto featureFlags) {
   registry.template addBuiltinModule<UnsafeEval>(
       "internal:unsafe-eval", workerd::jsg::ModuleRegistry::Type::INTERNAL);
+#ifdef WORKERD_FUZZILLI
+  registry.template addBuiltinModule<Stdin>(
+      "workerd:stdin", workerd::jsg::ModuleRegistry::Type::BUILTIN);
+#endif
 }
 
 template <typename TypeWrapper>

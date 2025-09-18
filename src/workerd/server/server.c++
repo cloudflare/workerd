@@ -5570,17 +5570,14 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     KJ_LOG(DBG, kj::str("[ TEST ] "_kj, name));
     auto req = service.startRequest({});
     auto start = kj::systemPreciseMonotonicClock().now();
-
     bool result = co_await req->test();
     if (result) {
       ++passCount;
     } else {
       ++failCount;
     }
-
     auto end = kj::systemPreciseMonotonicClock().now();
     auto duration = end - start;
-
     KJ_LOG(DBG, kj::str(result ? "[ PASS ] "_kj : "[ FAIL ] "_kj, name, " (", duration, ")"));
   };
 

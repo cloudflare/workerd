@@ -9,6 +9,9 @@
 #include "hibernation-event-params.h"
 #include "http.h"
 #include "messagechannel.h"
+#ifdef WORKERD_FUZZILLI
+#include "fuzzilli.h"
+#endif
 
 #include <workerd/io/io-timers.h>
 #include <workerd/jsg/jsg.h>
@@ -565,6 +568,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+  void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -665,6 +669,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_METHOD(reportError);
 
     JSG_METHOD(fetch);
+
+#ifdef WORKERD_FUZZILLI
+    JSG_METHOD(fuzzilli);
+#endif
 
     // Unlike regular interface attributes, which Web IDL requires us to
     // implement as prototype properties, the global scope is special --
