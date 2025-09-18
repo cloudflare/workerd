@@ -36,13 +36,6 @@ load("//:build/rust_toolchains.bzl", "rust_toolchains")
 
 rust_toolchains()
 
-# rules_shell
-load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_shell_toolchains")
-
-rules_shell_dependencies()
-
-rules_shell_toolchains()
-
 # ========================================================================================
 # Node.js bootstrap
 #

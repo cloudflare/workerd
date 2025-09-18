@@ -12,7 +12,6 @@ load("@//build/deps:gen/dep_codspeed.bzl", "dep_codspeed")
 load("@//build/deps:gen/dep_rules_nodejs.bzl", "dep_rules_nodejs")
 load("@//build/deps:gen/dep_rules_python.bzl", "dep_rules_python")
 load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
-load("@//build/deps:gen/dep_rules_shell.bzl", "dep_rules_shell")
 
 def deps_gen():
     dep_rules_python()
@@ -22,7 +21,6 @@ def deps_gen():
     dep_cargo_bazel_macos_x64()
     dep_cargo_bazel_macos_arm64()
     dep_cargo_bazel_win_x64()
-    dep_rules_shell()
     dep_aspect_rules_esbuild()
     dep_rules_nodejs()
     dep_aspect_rules_js()
