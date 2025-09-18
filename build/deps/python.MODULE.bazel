@@ -1,0 +1,70 @@
+bazel_dep(name = "rules_python", version = "1.6.1")
+
+# PYTHON_TOOLCHAIN = "python3_13"
+
+# PYTHON_INTERPRETER = "@" + PYTHON_TOOLCHAIN + "_host//:python"
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    configure_coverage_tool = True,
+    python_version = "3.13",
+)
+
+# python_register_toolchains(
+#     name = PYTHON_TOOLCHAIN,
+#     ignore_root_user_error = True,
+#     # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
+#     python_version = "3.13",
+#     register_coverage_tool = True,
+# )
+
+# load("@rules_python//python:pip.bzl", "pip_parse")
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+
+# pip_parse(
+#     name = "v8_python_deps",
+#     extra_pip_args = ["--require-hashes"],
+#     python_interpreter_target = PYTHON_INTERPRETER,
+#     requirements_lock = "@v8//:bazel/requirements.txt",
+# )
+pip.parse(
+    # We can use `envsubst in the above
+    envsubst = ["PIP_INDEX_URL"],
+    # Use the bazel downloader to query the simple API for downloading the sources
+    # Note, that we can use envsubst for this value.
+    experimental_index_url = "${PIP_INDEX_URL:-https://pypi.org/simple}",
+    # One can also select a particular index for a particular package.
+    # This ensures that the setup is resistant against confusion attacks.
+    # experimental_index_url_overrides = {
+    #    "my_package": "https://different-index-url.com",
+    # },
+    # Or you can specify extra indexes like with `pip`:
+    # experimental_extra_index_urls = [
+    #    "https://different-index-url.com",
+    # ],
+
+    hub_name = "v8_python_deps",
+    python_version = "3.13",
+    requirements_lock = "@v8//:bazel/requirements.txt",
+)
+
+
+pip.parse(
+  hub_name = "py_deps",
+  python_version = "3.13",
+  requirements_lock = "//build/deps:requirements.txt",
+)
+use_repo(pip, "v8_python_deps", "py_deps")
+# load("@v8_python_deps//:requirements.bzl", v8_python_deps_install = "install_deps")
+
+# v8_python_deps_install()
+
+# pip_parse(
+#     name = "py_deps",
+#     python_interpreter_target = PYTHON_INTERPRETER,
+#     requirements_lock = "//build/deps:requirements.txt",
+# )
+
+# load("@py_deps//:requirements.bzl", py_deps_install = "install_deps")
+
+# py_deps_install()

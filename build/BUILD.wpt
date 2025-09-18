@@ -12,7 +12,7 @@ load("@workerd//:build/wpt_test.bzl", "wpt_module", "wpt_server_entrypoint")
 wpt_server_entrypoint(
     name = "entrypoint",
     srcs = ["wpt"] + glob(["**/*.py"]),
-    python = "@python3_13_host//:python",
+    # python = "@python3_13_host//:python",
     visibility = ["//visibility:public"],
 )
 

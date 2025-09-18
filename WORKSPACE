@@ -13,18 +13,6 @@ load("@//build/deps:gen/deps.bzl", "deps_gen")
 deps_gen()
 
 # ========================================================================================
-# Simple dependencies
-
-load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
-
-py_repositories()
-
-# These are part of what's needed to get `bazel query 'deps(//...)'`, to work, but this is difficult to support
-# based on our dependencies – just use cquery instead.
-# load("@com_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
-# benchmark_deps()
-
-# ========================================================================================
 # Rust bootstrap
 
 load("//:build/rust_toolchains.bzl", "rust_toolchains")
@@ -34,41 +22,6 @@ rust_toolchains()
 load("@//build/deps:v8.bzl", "deps_v8")
 
 deps_v8()
-
-PYTHON_TOOLCHAIN = "python3_13"
-
-PYTHON_INTERPRETER = "@" + PYTHON_TOOLCHAIN + "_host//:python"
-
-python_register_toolchains(
-    name = PYTHON_TOOLCHAIN,
-    ignore_root_user_error = True,
-    # https://github.com/bazelbuild/rules_python/blob/main/python/versions.bzl
-    python_version = "3.13",
-    register_coverage_tool = True,
-)
-
-load("@rules_python//python:pip.bzl", "pip_parse")
-
-pip_parse(
-    name = "v8_python_deps",
-    extra_pip_args = ["--require-hashes"],
-    python_interpreter_target = PYTHON_INTERPRETER,
-    requirements_lock = "@v8//:bazel/requirements.txt",
-)
-
-load("@v8_python_deps//:requirements.bzl", v8_python_deps_install = "install_deps")
-
-v8_python_deps_install()
-
-pip_parse(
-    name = "py_deps",
-    python_interpreter_target = PYTHON_INTERPRETER,
-    requirements_lock = "//build/deps:requirements.txt",
-)
-
-load("@py_deps//:requirements.bzl", py_deps_install = "install_deps")
-
-py_deps_install()
 
 bind(
     name = "icu",
