@@ -13,11 +13,6 @@ load("@//build/deps:gen/deps.bzl", "deps_gen")
 deps_gen()
 
 # ========================================================================================
-# Bazel basics
-
-NODE_VERSION = "22.18.0"
-
-# ========================================================================================
 # Simple dependencies
 
 load("@rules_python//python:repositories.bzl", "py_repositories", "python_register_toolchains")
@@ -42,53 +37,6 @@ load("@rules_shell//shell:repositories.bzl", "rules_shell_dependencies", "rules_
 rules_shell_dependencies()
 
 rules_shell_toolchains()
-
-# ========================================================================================
-# Node.js bootstrap
-#
-# workerd uses Node.js scripts for generating TypeScript types.
-
-load("@aspect_rules_js//js:repositories.bzl", "rules_js_dependencies")
-
-rules_js_dependencies()
-
-load("@aspect_rules_js//js:toolchains.bzl", "rules_js_register_toolchains")
-
-rules_js_register_toolchains(
-    node_urls = [
-        # github workflows may substitute a mirror URL here to avoid fetch failures.
-        # "WORKERS_MIRROR_URL/https://nodejs.org/dist/v{version}/{filename}",
-        "https://nodejs.org/dist/v{version}/{filename}",
-    ],
-    node_version = NODE_VERSION,
-)
-
-load("@aspect_rules_ts//ts:repositories.bzl", "rules_ts_dependencies")
-
-rules_ts_dependencies(ts_version_from = "//:package.json")
-
-load("@aspect_rules_js//npm:repositories.bzl", "npm_translate_lock")
-
-npm_translate_lock(
-    name = "npm",
-    npmrc = "//:.npmrc",
-    pnpm_lock = "//:pnpm-lock.yaml",
-)
-
-load("@npm//:repositories.bzl", "npm_repositories")
-
-npm_repositories()
-
-load("@aspect_rules_esbuild//esbuild:dependencies.bzl", "rules_esbuild_dependencies")
-
-rules_esbuild_dependencies()
-
-load("@aspect_rules_esbuild//esbuild:repositories.bzl", "LATEST_ESBUILD_VERSION", "esbuild_register_toolchains")
-
-esbuild_register_toolchains(
-    name = "esbuild",
-    esbuild_version = LATEST_ESBUILD_VERSION,
-)
 
 load("@//build/deps:v8.bzl", "deps_v8")
 
