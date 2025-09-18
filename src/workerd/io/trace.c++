@@ -472,7 +472,7 @@ tracing::EmailEventInfo tracing::EmailEventInfo::clone() const {
 
 namespace {
 kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromTraces(
-    kj::ArrayPtr<kj::Own<Trace>> traces) {
+    kj::ArrayPtr<const kj::Own<Trace>> traces) {
   return KJ_MAP(t, traces) -> tracing::TraceEventInfo::TraceItem {
     return tracing::TraceEventInfo::TraceItem(mapCopyString(t->scriptName));
   };
@@ -486,7 +486,7 @@ kj::Vector<tracing::TraceEventInfo::TraceItem> getTraceItemsFromReader(
 }
 }  // namespace
 
-tracing::TraceEventInfo::TraceEventInfo(kj::ArrayPtr<kj::Own<Trace>> traces)
+tracing::TraceEventInfo::TraceEventInfo(kj::ArrayPtr<const kj::Own<Trace>> traces)
     : traces(getTraceItemsFromTraces(traces)) {}
 
 tracing::TraceEventInfo::TraceEventInfo(rpc::Trace::TraceEventInfo::Reader reader)

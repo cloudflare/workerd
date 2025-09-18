@@ -52,7 +52,6 @@ constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xcde53d65a46183f
   V(MAILFROM, "mailFrom")                                                                          \
   V(MESSAGE, "message")                                                                            \
   V(METHOD, "method")                                                                              \
-  V(METHODNAME, "methodName")                                                                      \
   V(NAME, "name")                                                                                  \
   V(OK, "ok")                                                                                      \
   V(ONSET, "onset")                                                                                \
@@ -207,7 +206,6 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
 jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, JSRPC_STR));
-  obj.set(js, METHODNAME_STR, cache.get(js, info.methodName));
   return obj;
 }
 
@@ -891,6 +889,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
+kj::Maybe<tracing::EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
+  return tracing::EventInfo(
+      tracing::TraceEventInfo(kj::Array<tracing::TraceEventInfo::TraceItem>(nullptr)));
+}
+
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
@@ -898,11 +901,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioContext = incomingRequest->getContext();
   incomingRequest->delivered();
-
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(ioContext.getInvocationSpanContext(), ioContext.now(),
-        TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
-  }
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(kj::heap<TailStreamTarget>(

@@ -9226,7 +9226,6 @@ export declare namespace TailStream {
   }
   interface JsRpcEventInfo {
     readonly type: "jsrpc";
-    readonly methodName: string;
   }
   interface ScheduledEventInfo {
     readonly type: "scheduled";

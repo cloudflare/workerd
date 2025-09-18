@@ -55,8 +55,12 @@ export default {
         event.event.type == 'attributes' ||
         event.event.type == 'spanClose'
       ) {
-        // Every SpanClose event must point to the spanId of a previously opened span.
-        assert.ok(spanIdSet.has(event.spanContext.spanId));
+        // Every SpanClose/attributes event must point to the spanId of a previously opened span
+        // OR the top-level span created by the onset event.
+        assert.ok(
+          spanIdSet.has(event.spanContext.spanId) ||
+            event.spanContext.spanId === topLevelSpanId
+        );
       }
 
       let cons = responseMap.get(event.spanContext.traceId);
@@ -121,8 +125,9 @@ export const test = {
 
       // tail-worker-test-jsrpc: Regression test for EW-9282 (missing onset event with
       // JsRpcSessionCustomEventImpl). This is derived from tests/js-rpc-test.js.
-      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
-      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc","methodName":"nonFunctionProperty"}}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"durable_object_subrequest","spanId":"0000000000000002"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"jsRpcSession","spanId":"0000000000000001"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"nonFunctionProperty"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["foo"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"functionProperty"}]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
     assert.deepStrictEqual(response, expected);
