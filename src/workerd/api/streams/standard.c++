@@ -3117,6 +3117,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
   KJ_ASSERT(!isDisturbed());
   KJ_ASSERT(!isReadPending(), "Unable to detach with read pending");
   auto controller = kj::heap<ReadableStreamJsController>();
+  controller->expectedLength = expectedLength;
   disturbed = true;
 
   // Clones this streams state into a new ReadableStreamController, leaving this stream
