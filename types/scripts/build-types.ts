@@ -41,7 +41,12 @@ const ENTRYPOINTS = [
  * easier to add them all and let TS figure out which ones it actually needs to load.
  * This function uses the current local installation of TS as a source for lib files
  */
+let cachedLibFiles: SourcesMap | null = null;
 function loadLibFiles(): SourcesMap {
+  if (cachedLibFiles != null) {
+    return cachedLibFiles;
+  }
+
   const libLocation = path.dirname(require.resolve("typescript"));
   const libFiles = readdirSync(libLocation).filter(
     (file) => file.startsWith("lib.") && file.endsWith(".d.ts")
@@ -53,6 +58,8 @@ function loadLibFiles(): SourcesMap {
       readFileSync(path.join(libLocation, file), "utf-8")
     );
   }
+
+  cachedLibFiles = lib;
   return lib;
 }
 
