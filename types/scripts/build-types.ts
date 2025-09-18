@@ -164,12 +164,9 @@ async function buildEntrypoint(
 }
 
 async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
-  const allEntrypoints: Array<{ name: string; files: Array<{ fileName: string; content: string }> }> = [];
-
-  for (const entrypoint of ENTRYPOINTS) {
-    const result = await buildEntrypoint(entrypoint, workerUrl);
-    allEntrypoints.push(result);
-  }
+  const allEntrypoints = await Promise.all(
+    ENTRYPOINTS.map(entrypoint => buildEntrypoint(entrypoint, workerUrl))
+  );
 
   for (const { files } of allEntrypoints) {
     const entrypointFiles = new SourcesMap();
