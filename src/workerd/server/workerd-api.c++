@@ -444,34 +444,13 @@ invalid:
   return Worker::Script::ScriptSource{""_kj, name, nullptr};
 }
 
-kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobals(
-    jsg::Lock& lockParam,
+kj::Array<Worker::Script::CompiledGlobal> WorkerdApi::compileServiceWorkerGlobals(jsg::Lock& js,
     const Worker::Script::ScriptSource& source,
     const Worker::Isolate& isolate) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileScriptGlobals()");
-  // For Service Worker scripts, we support Wasm modules as globals, but they need to be loaded
-  // at script load time.
-
-  auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
-
-  auto compiledGlobals =
-      kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(source.globals.size());
-  for (auto& global: source.globals) {
-    KJ_IF_SOME(wasm, global.content.tryGet<Worker::Script::WasmModule>()) {
-      auto name = lock.str(global.name);
-      auto value =
-          modules::legacy::compileWasmGlobal<JsgWorkerdIsolate>(lock, wasm.body, *impl->observer);
-
-      compiledGlobals.add(Worker::Script::CompiledGlobal{
-        {lock.v8Isolate, name},
-        {lock.v8Isolate, value},
-      });
-    } else {
-      JSG_FAIL_REQUIRE(Error, "Unsupported module type for Service Worker global: ", global.name);
-    }
-  }
-
-  return compiledGlobals.finish();
+  const jsg::CompilationObserver& observer = *impl->observer;
+  return workerd::modules::legacy::compileServiceWorkerGlobals<JsgWorkerdIsolate>(
+      js, source, isolate, observer);
 }
 
 namespace {
