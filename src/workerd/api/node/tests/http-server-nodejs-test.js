@@ -1164,6 +1164,7 @@ export const testIncomingMessageSocket = {
       ok(req.socket.remotePort >= Math.pow(2, 15));
       ok(req.socket.remotePort <= Math.pow(2, 16));
       strictEqual(req.socket.remoteFamily, 'IPv4');
+      ok('on' in req.socket);
 
       res.writeHead(200);
       res.end('Hello, World!');

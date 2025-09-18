@@ -6,13 +6,13 @@
 // this.aborted attribute is set as deprecated in @types/node package.
 /* eslint-disable @typescript-eslint/no-deprecated */
 
+import { EventEmitter } from 'node-internal:events';
+import { Readable } from 'node-internal:streams_readable';
+import { isIPv4, Socket } from 'node-internal:internal_net';
 import type {
   IncomingMessage as _IncomingMessage,
   IncomingHttpHeaders,
 } from 'node:http';
-import { Readable } from 'node-internal:streams_readable';
-import { isIPv4, Socket } from 'node-internal:internal_net';
-
 const kHeaders = Symbol('kHeaders');
 const kHeadersDistinct = Symbol('kHeadersDistinct');
 const kHeadersCount = Symbol('kHeadersCount');
@@ -99,37 +99,71 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
       // Return a port number between 2^15 and 2^16.
       const remotePort = (Math.random() * 0x8000) | 0x8000;
 
-      incoming.#socket = {
-        encrypted: headers.get('x-forwarded-proto') === 'https',
-        get remoteFamily(): string | undefined {
-          if (incoming.destroyed) {
-            return undefined;
-          }
-          return isConnectingIpIpv4 ? 'IPv4' : 'IPv6';
+      // Some libraries such as on-finished (which Express.js depends on)
+      // Ref: https://github.com/jshttp/on-finished/blob/d2974f5a18f468ea56f58acb2f6d402f4b5142f0/index.js
+      // calls EventEmitter events on socket attribute.
+      const socket = new EventEmitter();
+
+      Object.defineProperties(socket, {
+        encrypted: {
+          value: headers.get('x-forwarded-proto') === 'https',
+          writable: false,
+          configurable: true,
         },
-        get remoteAddress(): string | undefined {
-          // This is defined in production, and will fallback to localhost on local development
-          // where request headers does not contain cf-connecting-ip.
-          return incoming.destroyed ? undefined : (connectingIp ?? '127.0.0.1');
+        readable: {
+          get: () => {
+            return incoming.readable;
+          },
+          configurable: true,
         },
-        get remotePort(): number | undefined {
-          // Return a port in the ephemeral range (32768-65535) as clients would use,
-          // and undefined if the socket is destroyed.
-          return incoming.destroyed ? undefined : remotePort;
+        remoteFamily: {
+          get: () => {
+            if (incoming.destroyed) {
+              return undefined;
+            }
+            return isConnectingIpIpv4 ? 'IPv4' : 'IPv6';
+          },
+          configurable: true,
         },
-        get localAddress(): string {
+        remoteAddress: {
+          get: () => {
+            // This is defined in production, and will fallback to localhost on local development
+            // where request headers does not contain cf-connecting-ip.
+            return incoming.destroyed
+              ? undefined
+              : (connectingIp ?? '127.0.0.1');
+          },
+          configurable: true,
+        },
+        remotePort: {
+          get: () => {
+            // Return a port in the ephemeral range (32768-65535) as clients would use,
+            // and undefined if the socket is destroyed.
+            return incoming.destroyed ? undefined : remotePort;
+          },
+          configurable: true,
+        },
+        localAddress: {
           // Host will have a value like "my-worker.yagiz.workers.dev",
-          return headers.get('host') ?? '127.0.0.1';
+          value: headers.get('host') ?? '127.0.0.1',
+          writable: false,
+          configurable: true,
         },
-        get localPort(): number {
+        localPort: {
           // This is the port defined by the `server.listen(port)` call.
-          return localPort;
+          value: localPort,
+          writable: false,
+          configurable: true,
         },
-        // Since we don't implement net.Socket, we fallback to IncomingMessage.destroy here.
-        // We do not use .bind() in case user overwrites destroy method.
-        destroy: (err: Error | undefined): IncomingMessage =>
-          incoming.destroy(err),
-      };
+        destroy: {
+          value: (err: Error | undefined): IncomingMessage =>
+            incoming.destroy(err),
+          writable: false,
+          configurable: true,
+        },
+      });
+
+      incoming.#socket = socket;
     };
 
     setIncomingMessageStream = (
