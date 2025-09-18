@@ -19,10 +19,6 @@ load("//:build/rust_toolchains.bzl", "rust_toolchains")
 
 rust_toolchains()
 
-load("@//build/deps:v8.bzl", "deps_v8")
-
-deps_v8()
-
 bind(
     name = "icu",
     actual = "@com_googlesource_chromium_icu//:icu",

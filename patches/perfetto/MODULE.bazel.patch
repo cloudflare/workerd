@@ -1,0 +1,12 @@
+--- MODULE.bazel
++++ MODULE.bazel
+@@ -11,5 +11,9 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++module(name = "perfetto")
++bazel_dep(name = "perfetto_cfg", version = "0.0.0")
++bazel_dep(name = "platforms", version = "1.0.0")
++bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
+
+ bazel_dep(name = "rules_android", version = "0.6.0")
