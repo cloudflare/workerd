@@ -1,7 +1,7 @@
 import assert from "node:assert";
 import childProcess from "node:child_process";
 import events from "node:events";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import prettier from "prettier";
@@ -157,7 +157,7 @@ async function buildEntrypoint(
     });
 
     files.push({ fileName, content: typings });
-    writeFileSync(path.join(entrypointPath, fileName), typings);
+    await fs.writeFile(path.join(entrypointPath, fileName), typings);
   }
 
   return { name, files };
