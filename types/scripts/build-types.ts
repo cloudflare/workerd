@@ -4,7 +4,6 @@ import events from "node:events";
 import { readFileSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import prettier from "prettier";
 import ts from "typescript";
 import { SourcesMap, createMemoryProgram } from "../src/program";
 import { getFilePath } from "../src/utils";
@@ -152,17 +151,13 @@ async function buildEntrypoint(
   for (const [fileName, definitions] of bundle) {
     assert(typeof definitions === "string");
     const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
-    let typings = definitions.replaceAll(prettierIgnoreRegexp, "");
-
-    typings = await prettier.format(typings, {
-      parser: "typescript",
-    });
+    const typings = definitions.replaceAll(prettierIgnoreRegexp, "");
 
     files.push({ fileName, content: typings });
     filePromises.push(fs.writeFile(path.join(entrypointPath, fileName), typings));
   }
 
-  // Write all files in parallel
+  // Write all files in parallel (without prettier formatting)
   await Promise.all(filePromises);
 
   return { name, files };
@@ -172,6 +167,10 @@ async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
   const allEntrypoints = await Promise.all(
     ENTRYPOINTS.map(entrypoint => buildEntrypoint(entrypoint, workerUrl))
   );
+
+  // Format all TypeScript files with a single Prettier CLI call using exact same defaults as API
+  const prettierPath = require.resolve("prettier/bin/prettier.cjs");
+  childProcess.execSync(`${prettierPath} "${OUTPUT_PATH}/**/*.ts" --write --parser=typescript`);
 
   for (const { files } of allEntrypoints) {
     const entrypointFiles = new SourcesMap();
