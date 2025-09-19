@@ -373,6 +373,67 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
   KJ_UNREACHABLE;
 }
 
+template <typename JsgIsolate>
+kj::Array<Worker::Script::CompiledGlobal> compileServiceWorkerGlobals(jsg::Lock& js,
+    const Worker::Script::ScriptSource& source,
+    const Worker::Isolate& isolate,
+    const jsg::CompilationObserver& observer) {
+  auto& lock = kj::downcast<typename JsgIsolate::Lock>(js);
+
+  auto globals = source.globals.asPtr();
+  auto compiledGlobals = kj::heapArrayBuilder<Worker::Script::CompiledGlobal>(globals.size());
+
+  for (auto& global: globals) {
+    js.withinHandleScope([&] {
+      // Don't use String's usual TypeHandler here because we want to intern the string.
+      auto name = jsg::v8StrIntern(js.v8Isolate, global.name);
+
+      v8::Local<v8::Value> value;
+
+      KJ_SWITCH_ONEOF(global.content) {
+        KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
+          value =
+              workerd::modules::legacy::template compileTextGlobal<JsgIsolate>(lock, content.body);
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::DataModule) {
+          value =
+              workerd::modules::legacy::template compileDataGlobal<JsgIsolate>(lock, content.body);
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
+          value = workerd::modules::legacy::template compileWasmGlobal<JsgIsolate>(
+              lock, content.body, observer);
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
+          value =
+              workerd::modules::legacy::template compileJsonGlobal<JsgIsolate>(lock, content.body);
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
+          KJ_FAIL_REQUIRE("modules not supported with mainScript");
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
+          KJ_FAIL_REQUIRE("modules not supported with mainScript");
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
+          KJ_FAIL_REQUIRE("modules not supported with mainScript");
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
+          KJ_FAIL_REQUIRE("modules not supported with mainScript");
+        }
+        KJ_CASE_ONEOF(content, Worker::Script::CapnpModule) {
+          KJ_FAIL_REQUIRE("modules not supported with mainScript");
+        }
+      }
+
+      compiledGlobals.add(Worker::Script::CompiledGlobal{
+        {lock.v8Isolate, name},
+        {lock.v8Isolate, value},
+      });
+    });
+  }
+
+  return compiledGlobals.finish();
+}
+
 }  // namespace modules::legacy
 
 }  // namespace workerd
