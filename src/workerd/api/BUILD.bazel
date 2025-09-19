@@ -289,14 +289,6 @@ wd_cc_library(
     ]
 ]
 
-# TODO(cleanup): Reenable test when we reenable string accounting
-# kj_test(
-#     src = "headers-test.c++",
-#     deps = [
-#         "//src/workerd/io",
-#     ],
-# )
-
 kj_test(
     src = "data-url-test.c++",
     deps = [
