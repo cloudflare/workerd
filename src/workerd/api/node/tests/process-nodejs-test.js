@@ -2,6 +2,9 @@ import assert from 'node:assert';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as processMod from 'node:process';
 
+const processBuiltin = processMod.getBuiltinModule('process');
+const processBuiltinScheme = processMod.getBuiltinModule('node:process');
+
 // -------------------------------------------------------
 // Ensures the globalThis process and Buffer properties are handled correctly.
 // Placement of these at the top level scope before any thing else runs is
@@ -26,52 +29,76 @@ export const processPlatform = {
   },
 };
 
-// Verify process keys match default keys and features
-// EventEmitter properties appear on process via event inheritance but aren't on the named exports API
-const ignoreKeys = ['_events', '_eventsCount', '_maxListeners'];
+// undefined process properties
+const processUndefinedKeys = [
+  '_channel',
+  '_disconnect',
+  '_handleQueue',
+  '_maxListeners',
+  '_pendingMessage',
+  '_send',
+  'exitCode',
+];
 
-const keys = [
+// functions which just return
+const processNoopKeys = [
   '_debugEnd',
   '_debugProcess',
+  '_startProfilerIdleNotifier',
+  '_stopProfilerIdleNotifier',
+  '_tickCallback',
+  'ref',
+  'setSourceMapsEnabled',
+  'unref',
+];
+
+// functions which throw unsupported
+const processUnimplementedKeys = [
+  '_kill',
+  '_linkedBinding',
+  'binding',
+  'cpuUsage',
+  'dlopen',
+  'execve',
+  'getActiveResourcesInfo',
+  'hasUncaughtExceptionCaptureCallback',
+  'kill',
+  'setUncaughtExceptionCaptureCallback',
+  'threadCpuUsage',
+];
+
+// remaining keys
+const processImplementedOrStubbedKeys = [
+  '_events',
+  '_eventsCount',
   '_exiting',
   '_fatalException',
   '_getActiveHandles',
   '_getActiveRequests',
-  '_kill',
-  '_linkedBinding',
   '_preload_modules',
   '_rawDebug',
-  '_startProfilerIdleNotifier',
-  '_stopProfilerIdleNotifier',
-  '_tickCallback',
   'abort',
   'allowedNodeEnvironmentFlags',
   'arch',
   'argv',
   'argv0',
   'availableMemory',
-  'binding',
   'channel',
   'chdir',
   'config',
   'connected',
   'constrainedMemory',
-  'cpuUsage',
   'cwd',
   'debugPort',
   'default',
-  'dlopen',
   'domain',
   'emitWarning',
   'env',
   'execArgv',
   'execPath',
-  'execve',
   'exit',
-  'exitCode',
   'features',
   'finalization',
-  'getActiveResourcesInfo',
   'getBuiltinModule',
   'getSourceMapsSupport',
   'getegid',
@@ -79,10 +106,8 @@ const keys = [
   'getgid',
   'getgroups',
   'getuid',
-  'hasUncaughtExceptionCaptureCallback',
   'hrtime',
   'initgroups',
-  'kill',
   'loadEnvFile',
   'memoryUsage',
   'moduleLoadList',
@@ -94,13 +119,10 @@ const keys = [
   'platform',
   'ppid',
   'reallyExit',
-  'ref',
   'release',
   'report',
   'resourceUsage',
   'send',
-  'setSourceMapsEnabled',
-  'setUncaughtExceptionCaptureCallback',
   'setegid',
   'seteuid',
   'setgid',
@@ -110,46 +132,105 @@ const keys = [
   'stderr',
   'stdin',
   'stdout',
-  'threadCpuUsage',
   'throwDeprecation',
   'title',
   'traceDeprecation',
   'umask',
-  'unref',
   'uptime',
   'version',
   'versions',
 ];
+
+const allProcessKeys = [
+  ...processUndefinedKeys,
+  ...processUnimplementedKeys,
+  ...processNoopKeys,
+  ...processImplementedOrStubbedKeys,
+].sort();
+
 export const processKeys = {
   test() {
-    assert.deepStrictEqual(Object.keys(processMod), keys);
-    keys.splice(keys.indexOf('default'), 1);
+    assert.deepStrictEqual(Object.keys(processMod), allProcessKeys);
+    allProcessKeys.splice(allProcessKeys.indexOf('default'), 1);
+    assert.deepStrictEqual(Object.keys(process).sort(), allProcessKeys);
     assert.deepStrictEqual(
-      Object.keys(process)
-        .filter((key) => !ignoreKeys.includes(key))
-        .sort(),
-      keys
+      Object.keys(processMod.default).sort(),
+      allProcessKeys
     );
+    assert.deepStrictEqual(Object.keys(processBuiltin).sort(), allProcessKeys);
     assert.deepStrictEqual(
-      Object.keys(processMod.default)
-        .filter((key) => !ignoreKeys.includes(key))
-        .sort(),
-      keys
+      Object.keys(processBuiltinScheme).sort(),
+      allProcessKeys
     );
-    const processBuiltin = processMod.getBuiltinModule('process');
-    assert.deepStrictEqual(
-      Object.keys(processBuiltin)
-        .filter((key) => !ignoreKeys.includes(key))
-        .sort(),
-      keys
-    );
-    const processBuiltinScheme = processMod.getBuiltinModule('node:process');
-    assert.deepStrictEqual(
-      Object.keys(processBuiltinScheme)
-        .filter((key) => !ignoreKeys.includes(key))
-        .sort(),
-      keys
-    );
+  },
+};
+
+export const processUndefined = {
+  test() {
+    for (const key of processUndefinedKeys) {
+      const msg = `process.${key}`;
+      assert.strictEqual(processMod[key], undefined, msg);
+      assert.strictEqual(process[key], undefined, msg);
+      assert.strictEqual(processBuiltin[key], undefined, msg);
+      assert.strictEqual(processBuiltinScheme[key], undefined, msg);
+    }
+  },
+};
+
+export const processNoop = {
+  test() {
+    for (const key of processNoopKeys) {
+      const msg = `process.${key}`;
+
+      assert.strictEqual(typeof processMod[key], 'function', msg);
+      assert.strictEqual(typeof process[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltin[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltinScheme[key], 'function', msg);
+
+      assert.strictEqual(processMod[key](), undefined, msg);
+      assert.strictEqual(process[key](), undefined, msg);
+      assert.strictEqual(processBuiltin[key](), undefined, msg);
+      assert.strictEqual(processBuiltinScheme[key](), undefined, msg);
+    }
+  },
+};
+
+export const processUnimplemented = {
+  test() {
+    for (const key of processUnimplementedKeys) {
+      const msg = `process.${key}`;
+
+      assert.strictEqual(typeof processMod[key], 'function', msg);
+      assert.strictEqual(typeof process[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltin[key], 'function', msg);
+      assert.strictEqual(typeof processBuiltinScheme[key], 'function', msg);
+
+      try {
+        processMod[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+        assert.ok(e.message.includes(key), msg);
+      }
+      try {
+        process[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+      try {
+        processBuiltin[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+      try {
+        processBuiltinScheme[key]();
+        assert.fail(msg);
+      } catch (e) {
+        assert.strictEqual(e.code, 'ERR_METHOD_NOT_IMPLEMENTED', msg);
+      }
+    }
   },
 };
 
