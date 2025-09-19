@@ -1201,11 +1201,28 @@ ModuleBundle::BundleBuilder::BundleBuilder(const jsg::Url& bundleBase)
     : ModuleBundle::Builder(Type::BUNDLE),
       bundleBase(bundleBase) {}
 
+namespace {
+kj::StringPtr checkSpecifierName(kj::StringPtr name) {
+  if (name.startsWith("/")) {
+    name = name.slice(1);
+  }
+  if (name.size() == 0) {
+    KJ_FAIL_REQUIRE("Module name cannot be empty");
+  }
+  return name;
+}
+
+static constexpr auto BUNDLE_CLONE_OPTIONS = jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS |
+    jsg::Url::EquivalenceOption::IGNORE_SEARCH | jsg::Url::EquivalenceOption::NORMALIZE_PATH;
+}  // namespace
+
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
     kj::StringPtr name, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
+  name = checkSpecifierName(name);
   auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
+  // TODO(cleanup): Eliminate the double cloning here.
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  url = url.clone(BUNDLE_CLONE_OPTIONS);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), namedExports = kj::mv(namedExports),
           type = type()](const ResolveContext& context) mutable
@@ -1219,9 +1236,10 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
+  name = checkSpecifierName(name);
   auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  url = url.clone(BUNDLE_CLONE_OPTIONS);
   add(url,
       [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
@@ -1233,10 +1251,11 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
     kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
+  name = checkSpecifierName(name);
   auto callback = jsg::modules::Module::newWasmModuleHandler(data);
   auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
   // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(Url::EquivalenceOption::NORMALIZE_PATH);
+  url = url.clone(BUNDLE_CLONE_OPTIONS);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
@@ -1250,8 +1269,12 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::alias(
     kj::StringPtr alias, kj::StringPtr name) {
+  alias = checkSpecifierName(alias);
+  name = checkSpecifierName(name);
   auto aliasUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(alias));
   auto id = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
+  aliasUrl = aliasUrl.clone(BUNDLE_CLONE_OPTIONS);
+  id = id.clone(BUNDLE_CLONE_OPTIONS);
   Builder::alias(aliasUrl, id);
   return *this;
 }

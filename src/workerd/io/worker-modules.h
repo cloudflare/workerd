@@ -104,7 +104,8 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     const CompatibilityFlags::Reader& featureFlags,
     const jsg::Url& bundleBase,
     auto setupForApi,
-    jsg::modules::ModuleRegistry::Builder::Options options) {
+    jsg::modules::ModuleRegistry::Builder::Options options =
+        jsg::modules::ModuleRegistry::Builder::Options::NONE) {
   jsg::modules::ModuleRegistry::Builder builder(resolveObserver, bundleBase, options);
 
   // This callback is used when a module is being loaded to arrange evaluating the
@@ -206,13 +207,14 @@ static kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::PythonModule) {
-          KJ_REQUIRE(featureFlags.getPythonWorkers(),
-              "The python_workers compatibility flag is required to use Python.");
-          firstEsm = false;
-          hasPythonModules = true;
-          kj::StringPtr entry = PYTHON_ENTRYPOINT;
-          bundleBuilder.addEsmModule(def.name, entry);
-          break;
+          KJ_FAIL_ASSERT("Python modules are not currently supported with the new module registry");
+          // KJ_REQUIRE(featureFlags.getPythonWorkers(),
+          //     "The python_workers compatibility flag is required to use Python.");
+          // firstEsm = false;
+          // hasPythonModules = true;
+          // kj::StringPtr entry = PYTHON_ENTRYPOINT;
+          // bundleBuilder.addEsmModule(def.name, entry);
+          // break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::PythonRequirement) {
           // Handled separately
