@@ -91,6 +91,9 @@ export const Network: typeof _Network = {
   dataReceived(_params: _Network.DataReceivedEventDataType): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataReceived');
   },
+  dataSent(_params: unknown): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Network.dataSent');
+  },
   responseReceived(_params: _Network.ResponseReceivedEventDataType): void {
     throw new ERR_METHOD_NOT_IMPLEMENTED('Network.responseReceived');
   },
