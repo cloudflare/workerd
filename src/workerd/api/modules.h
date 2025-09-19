@@ -77,14 +77,14 @@ void registerBuiltinModules(jsg::modules::ModuleRegistry::Builder& builder, auto
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
     builder.add(builtinsBuilder.finish());
   }
 
   {
     jsg::modules::ModuleBundle::BuiltinBuilder builtinsBuilder(
-        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN);
+        jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
     builtinsBuilder.addObject<EnvModule, TypeWrapper>("cloudflare-internal:env"_url);
     builtinsBuilder.addObject<FileSystemModule, TypeWrapper>("cloudflare-internal:filesystem"_url);
     jsg::modules::ModuleBundle::getBuiltInBundleFromCapnp(builtinsBuilder, CLOUDFLARE_BUNDLE);
