@@ -7,19 +7,19 @@
     "typescript": "5.8.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.32.0",
-    "@types/node": "^24.2.0",
+    "@eslint/js": "^9.36.0",
+    "@types/node": "^24.5.2",
     "capnp-es": "0.0.11",
     "chrome-remote-interface": "^0.33.3",
-    "esbuild": "^0.25.8",
-    "eslint": "^9.32.0",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.36.0",
     "expect-type": "^1.2.2",
-    "typescript-eslint": "^8.39.0"
+    "typescript-eslint": "^8.44.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
     ]
   },
-  "packageManager": "pnpm@10.14.0"
+  "packageManager": "pnpm@10.17.0"
 }

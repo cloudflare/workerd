@@ -141,7 +141,7 @@ class RunnerState {
 
   async validate(): Promise<void> {
     // Exception handling is set up on every promise in the test function that created it.
-    await Promise.all(this.subtests.map((t) => t.promise));
+    await Promise.all(this.subtests.map((t) => t.promise ?? Promise.resolve()));
 
     for (const cleanFn of this.completionCallbacks) {
       cleanFn();
