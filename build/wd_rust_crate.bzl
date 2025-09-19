@@ -44,6 +44,7 @@ def rust_cxx_bridge(
 def wd_rust_crate(
         name,
         cxx_bridge_src = None,
+        cxx_bridge_srcs = [],
         deps = [],
         proc_macro_deps = [],
         data = [],
@@ -73,23 +74,34 @@ def wd_rust_crate(
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
-        hdrs = native.glob(["**/*.h"], allow_empty = True)
+        cxx_bridge_srcs = cxx_bridge_srcs + [cxx_bridge_src]
 
+    # Add cxx dependency if there are any cxx bridges
+    if len(cxx_bridge_srcs) > 0:
+        cxx_bridge_deps = cxx_bridge_deps + [
+            "@workerd-cxx//kj-rs",
+            "@workerd-cxx//:cxx",
+        ]
+        deps = deps + [
+            "@workerd-cxx//kj-rs",
+            "@workerd-cxx//:cxx",
+        ]
+
+    hdrs = native.glob(["**/*.h"], allow_empty = True)
+    for bridge_src in cxx_bridge_srcs:
         rust_cxx_bridge(
-            name = name + "@cxx",
-            src = cxx_bridge_src,
+            name = bridge_src + "@cxx",
+            src = bridge_src,
             hdrs = hdrs,
             include_prefix = "workerd/rust/" + name,
             strip_include_prefix = "",
             # Not applying visibility here – if you import the cxxbridge header, you will likely
             # also need the rust library itself to avoid linker errors.
-            deps = cxx_bridge_deps + [
-                "@workerd-cxx//:core",
-            ],
+            deps = cxx_bridge_deps,
         )
 
-        deps.append("@workerd-cxx//:cxx")
-        deps.append(name + "@cxx")
+    for bridge_src in cxx_bridge_srcs:
+        deps.append(bridge_src + "@cxx")
 
     crate_features = []
 
