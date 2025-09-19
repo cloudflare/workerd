@@ -77,13 +77,13 @@ URLPattern::URLPatternInit URLPattern::createURLPatternInit(
   URLPatternInit result{};
 #define V(_, name)                                                                                 \
   if (auto v = other.name) {                                                                       \
-    result.name = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));             \
+    result.name = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));                    \
   }
   URL_PATTERN_COMPONENTS(V)
 #undef V
 
   if (auto v = other.base_url) {
-    result.baseURL = js.accountedUSVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
+    result.baseURL = jsg::USVString(kj::str(kj::ArrayPtr(v->c_str(), v->size())));
   }
   return result;
 }

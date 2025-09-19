@@ -2369,15 +2369,6 @@ class Lock {
     return accountedDOMString(kj::str(str));
   }
 
-  // Returns a USVString with an external memory adjustment attached.
-  USVString accountedUSVString(kj::Array<char>&& str);
-  USVString accountedUSVString(kj::String&& str) {
-    return accountedUSVString(str.releaseArray());
-  }
-  USVString accountedUSVString(kj::StringPtr str) {
-    return accountedUSVString(kj::str(str));
-  }
-
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");

@@ -2336,13 +2336,13 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
     KJ_SWITCH_ONEOF(entry.value) {
       KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
         auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
-        entries.add(
-            js.alloc<FileSystemFileHandle>(vfs, kj::mv(locator), js.accountedUSVString(entry.key)));
+        entries.add(js.alloc<FileSystemFileHandle>(
+            vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
       }
       KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
         auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
         entries.add(js.alloc<FileSystemDirectoryHandle>(
-            vfs, kj::mv(locator), js.accountedUSVString(entry.key)));
+            vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
       }
       KJ_CASE_ONEOF(link, kj::Rc<workerd::SymbolicLink>) {
         SymbolicLinkRecursionGuardScope guardScope;
@@ -2355,12 +2355,12 @@ kj::Array<jsg::Ref<FileSystemHandle>> collectEntries(const workerd::VirtualFileS
             KJ_CASE_ONEOF(file, kj::Rc<workerd::File>) {
               auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(entry.key));
               entries.add(js.alloc<FileSystemFileHandle>(
-                  vfs, kj::mv(locator), js.accountedUSVString(entry.key)));
+                  vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
             }
             KJ_CASE_ONEOF(dir, kj::Rc<workerd::Directory>) {
               auto locator = KJ_ASSERT_NONNULL(parentLocator.tryResolve(kj::str(entry.key, "/")));
               entries.add(js.alloc<FileSystemDirectoryHandle>(
-                  vfs, kj::mv(locator), js.accountedUSVString(entry.key)));
+                  vfs, kj::mv(locator), jsg::USVString(kj::str(entry.key))));
             }
             KJ_CASE_ONEOF(_, workerd::FsError) {
               JSG_FAIL_REQUIRE(DOMOperationError, "Symbolic link recursion detected"_kj);
@@ -2494,7 +2494,7 @@ void FileSystemDirectoryHandle::forEach(jsg::Lock& js,
         callback.setReceiver(js.v8Ref(receiver));
 
         for (auto& entry: collectEntries(getVfs(), js, dir, getLocator())) {
-          callback(js, js.accountedUSVString(entry->getName(js)), entry.addRef(), JSG_THIS);
+          callback(js, jsg::USVString(kj::str(entry->getName(js))), entry.addRef(), JSG_THIS);
         }
         return;
       }
@@ -2534,8 +2534,8 @@ jsg::Promise<jsg::Ref<File>> FileSystemFileHandle::getFile(
         KJ_SWITCH_ONEOF(file->readAllBytes(js)) {
           KJ_CASE_ONEOF(bytes, jsg::BufferSource) {
             return js.resolvedPromise(
-                js.alloc<File>(js, kj::mv(bytes), js.accountedUSVString(getName(js)), kj::String(),
-                    (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
+                js.alloc<File>(js, kj::mv(bytes), jsg::USVString(kj::str(getName(js))),
+                    kj::String(), (stat.lastModified - kj::UNIX_EPOCH) / kj::MILLISECONDS));
           }
           KJ_CASE_ONEOF(err, workerd::FsError) {
             return js.rejectedPromise<jsg::Ref<File>>(
