@@ -2351,42 +2351,6 @@ class Lock {
                       .attach(getExternalMemoryAdjustment(accountedSize)));
   }
 
-  // Returns a kj::String with an external memory adjustment attached.
-  kj::String accountedKjString(kj::Array<char>&& str);
-  kj::String accountedKjString(kj::String&& str) {
-    return accountedKjString(str.releaseArray());
-  }
-  kj::String accountedKjString(kj::StringPtr str) {
-    return accountedKjString(kj::str(str));
-  }
-
-  // Returns a ByteString with an external memory adjustment attached.
-  ByteString accountedByteString(kj::Array<char>&& str);
-  ByteString accountedByteString(kj::String&& str) {
-    return accountedByteString(str.releaseArray());
-  }
-  ByteString accountedByteString(kj::StringPtr str) {
-    return accountedByteString(kj::str(str));
-  }
-
-  // Returns a DOMString with an external memory adjustment attached.
-  DOMString accountedDOMString(kj::Array<char>&& str);
-  DOMString accountedDOMString(kj::String&& str) {
-    return accountedDOMString(str.releaseArray());
-  }
-  DOMString accountedDOMString(kj::StringPtr str) {
-    return accountedDOMString(kj::str(str));
-  }
-
-  // Returns a USVString with an external memory adjustment attached.
-  USVString accountedUSVString(kj::Array<char>&& str);
-  USVString accountedUSVString(kj::String&& str) {
-    return accountedUSVString(str.releaseArray());
-  }
-  USVString accountedUSVString(kj::StringPtr str) {
-    return accountedUSVString(kj::str(str));
-  }
-
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
