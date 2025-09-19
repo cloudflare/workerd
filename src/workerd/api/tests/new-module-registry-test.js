@@ -12,6 +12,25 @@ import { Buffer } from 'buffer'; // Intentionally omit the 'node:' prefix
 import { foo as foo2, default as def2 } from 'bar';
 import { createRequire } from 'module'; // Intentionally omit the 'node:' prefix
 
+import * as workers from 'cloudflare:workers';
+strictEqual(typeof workers, 'object');
+strictEqual(typeof workers.DurableObject, 'function');
+strictEqual(typeof workers.RpcPromise, 'function');
+strictEqual(typeof workers.RpcProperty, 'function');
+strictEqual(typeof workers.RpcStub, 'function');
+strictEqual(typeof workers.RpcTarget, 'function');
+strictEqual(typeof workers.ServiceStub, 'function');
+strictEqual(typeof workers.WorkerEntrypoint, 'function');
+strictEqual(typeof workers.WorkflowEntrypoint, 'function');
+strictEqual(typeof workers.waitUntil, 'function');
+strictEqual(typeof workers.withEnv, 'function');
+strictEqual(typeof workers.env, 'object');
+
+await rejects(import('cloudflare-internal:env'), {
+  message: /Module not found/,
+});
+await rejects(import('cloudflare-internal:filesystem'));
+
 // Verify that import.meta.url is correct here.
 strictEqual(import.meta.url, 'file:///bundle/worker');
 
