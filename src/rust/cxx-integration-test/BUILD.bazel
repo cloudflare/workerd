@@ -15,7 +15,6 @@ wd_rust_crate(
         "//src/rust/cxx-integration",
         "@crates_vendor//:tokio",
         "@crates_vendor//:tracing",
-        "@workerd-cxx//kj-rs",
     ],
 )
 
