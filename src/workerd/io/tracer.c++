@@ -232,6 +232,13 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
     }
   }
 
+  // TODO(cleanup): Set fixed timestamps for predictable mode. Drop this once we have removed the
+  // code path for spans in LTW.
+  if (isPredictableModeForTest()) {
+    span.startTime = kj::UNIX_EPOCH;
+    span.endTime = kj::UNIX_EPOCH;
+  }
+
   // 48B for traceID, spanID, parentSpanID, start & end time.
   const int fixedSpanOverhead = 48;
   size_t messageSize = fixedSpanOverhead + span.operationName.size();
@@ -372,14 +379,13 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
   }
 }
 
-void WorkerTracer::setEventInfo(IoContext& ioContext,
-    const tracing::InvocationSpanContext& context,
-    kj::Date timestamp,
-    tracing::EventInfo&& info) {
+void WorkerTracer::setEventInfo(
+    IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) {
   // IoContext is available at this time, capture weakRef.
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
-  weakIoContext = ioContext.getWeakRef();
-  setEventInfoInternal(context, timestamp, kj::mv(info));
+  weakIoContext = incomingRequest.getContext().getWeakRef();
+  setEventInfoInternal(
+      incomingRequest.getInvocationSpanContext(), incomingRequest.now(), kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(
