@@ -85,22 +85,24 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
             props = kj::mv(props)](Worker::Lock& lock) mutable {
       KJ_SWITCH_ONEOF(eventParameters.eventType) {
         KJ_CASE_ONEOF(text, HibernatableSocketParams::Text) {
-          return lock.getGlobalScope().sendHibernatableWebSocketMessage(kj::mv(text.message),
-              eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
+          return lock.getGlobalScope().sendHibernatableWebSocketMessage(context,
+              kj::mv(text.message), eventParameters.eventTimeoutMs,
+              kj::mv(eventParameters.websocketId), lock,
               lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(data, HibernatableSocketParams::Data) {
-          return lock.getGlobalScope().sendHibernatableWebSocketMessage(kj::mv(data.message),
-              eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
+          return lock.getGlobalScope().sendHibernatableWebSocketMessage(context,
+              kj::mv(data.message), eventParameters.eventTimeoutMs,
+              kj::mv(eventParameters.websocketId), lock,
               lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(close, HibernatableSocketParams::Close) {
-          return lock.getGlobalScope().sendHibernatableWebSocketClose(kj::mv(close),
+          return lock.getGlobalScope().sendHibernatableWebSocketClose(context, kj::mv(close),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
               lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }
         KJ_CASE_ONEOF(e, HibernatableSocketParams::Error) {
-          return lock.getGlobalScope().sendHibernatableWebSocketError(kj::mv(e.error),
+          return lock.getGlobalScope().sendHibernatableWebSocketError(context, kj::mv(e.error),
               eventParameters.eventTimeoutMs, kj::mv(eventParameters.websocketId), lock,
               lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()));
         }

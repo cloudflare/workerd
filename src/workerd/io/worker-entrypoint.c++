@@ -520,6 +520,9 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto incomingRequest =
       kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "connect() can only be called once"));
   this->incomingRequest = kj::none;
+  // Whenever we implement incoming connections over the `connect` handler we need to remember to
+  // add tracing `onset` and `return` events using setEventInfo()/setReturn(), as with the other
+  // event types here.
   incomingRequest->delivered();
   auto& context = incomingRequest->getContext();
 
@@ -718,7 +721,11 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarm(
 
   auto& context = incomingRequest->getContext();
   auto promise = runAlarmImpl(kj::mv(incomingRequest), scheduledTime, retryCount);
-  return maybeAddGcPassForTest(context, kj::mv(promise));
+  auto result = co_await maybeAddGcPassForTest(context, kj::mv(promise));
+  KJ_IF_SOME(t, context.getWorkerTracer()) {
+    t.setReturn(context.now());
+  }
+  co_return result;
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {
@@ -762,6 +769,10 @@ kj::Promise<bool> WorkerEntrypoint::test() {
         KJ_LOG(ERROR, exception);
       }
     }
+
+    // Not adding a return event here – we only provide rudimentary tracing support for test events
+    // (enough so that we can get logs/spans from them in wd-tests), so this is not needed in
+    // practice.
 
     bool completed = result == IoContext_IncomingRequest::FinishScheduledResult::COMPLETED;
     auto outcome = completed ? context.waitUntilStatus() : EventOutcome::EXCEEDED_CPU;

@@ -711,8 +711,8 @@ auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingReque
   waitUntilTasks.add(sendTracesToExportedHandler(
       kj::mv(incomingRequest), entrypointNamePtr, kj::mv(props), traces));
 
-  // Reporting a proper return code here would be nice, but for that we'd need to await running the
-  // tail handler...
+  // Reporting a proper outcome and return event here would be nice, but for that we'd need to await
+  // running the tail handler...
   return Result{
     .outcome = EventOutcome::OK,
   };
