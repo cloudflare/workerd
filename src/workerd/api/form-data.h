@@ -203,9 +203,9 @@ private:
     }
     auto& [key, value] = state.parent->data[state.index++];
     if constexpr (kj::isSameType<Type, EntryIteratorType>()) {
-      return kj::arr<EntryType>(js.accountedKjString(key), clone(js, value));
+      return kj::arr<EntryType>(kj::str(key), clone(js, value));
     } else if constexpr (kj::isSameType<Type, KeyIteratorType>()) {
-      return js.accountedKjString(key);
+      return kj::str(key);
     } else if constexpr (kj::isSameType<Type, ValueIteratorType>()) {
       return clone(js, value);
     } else {
