@@ -354,7 +354,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
 
   auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
   return context.awaitIo(js, kj::mv(request.response),
-      [type = kj::mv(type), &context, client = kj::mv(client), traceContext = kj::mv(traceContext)](
+      [type = kj::mv(type), &context, client = kj::mv(client), &traceContext](
           jsg::Lock& js, kj::HttpClient::Response&& response) mutable
       -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
@@ -481,7 +481,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.attachSpans(js,
         context.awaitIo(js, kj::mv(request.response),
-            [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](
+            [&context, client = kj::mv(client), &traceContext](
                 jsg::Lock& js, kj::HttpClient::Response&& response) mutable
             -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
@@ -502,7 +502,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [cacheStatus = kj::mv(cacheStatus), traceContext = kj::mv(traceContext)](
+          [cacheStatus = kj::mv(cacheStatus), &traceContext](
               jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
         parseListMetadata(traceContext, js, result,
