@@ -94,14 +94,14 @@ interface Container @0x9aaceefc06523bca {
     # attempting to connect.
   }
 
-  setInactivityTimeout @7 (scheduledTimeMs :Int64);
-  # Configures the timestamp where the runtime should shutdown the container if there is
-  # no connections to the Container.
+  setInactivityTimeout @7 (durationMs  :Int64);
+  # Configures the duration where the runtime should shutdown the container after there is
+  # no connections or activity to the Container.
   #
   # After a capability disconnect, the runtime should signal the container
-  # at the configured timestamp.
+  # at the configured duration.
   #
   # Note that if there is an open connection to the container, the runtime must not shutdown the container.
-  # If there is no activity timeout configured and no container connection, it's up to the runtime
+  # If there is no activity timeout duration configured and no container connection, it's up to the runtime
   # to decide when to signal the container to exit.
 }

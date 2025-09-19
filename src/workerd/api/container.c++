@@ -52,10 +52,14 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   running = true;
 }
 
-jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, kj::Date scheduledTime) {
+jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
+  JSG_REQUIRE(
+      durationMs < 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
 
-  auto err = js.error("setInactivityTimeout is unimplemented");
-  js.throwException(kj::mv(err));
+  auto req = rpcClient->setInactivityTimeoutRequest();
+
+  req.setDurationMs(durationMs);
+  return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
