@@ -505,6 +505,19 @@ class IsolateModuleRegistry final {
     };
 
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Object> {
+      if (context.normalizedSpecifier == "node:process"_url) {
+        static const auto publicProcess = "node-internal:public_process"_url;
+        static const auto legacyProcess = "node-internal:legacy_process"_url;
+        ResolveContext newContext{
+          .type = ResolveContext::Type::BUILTIN_ONLY,
+          .source = context.source,
+          .normalizedSpecifier = isNodeJsProcessV2Enabled(js) ? publicProcess : legacyProcess,
+          .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
+          .rawSpecifier = context.rawSpecifier,
+        };
+        return require(js, newContext, option);
+      }
+
       // Do we already have a cached module for this context?
       KJ_IF_SOME(found, lookupCache.find<kj::HashIndex<ContextCallbacks>>(context)) {
         return evaluate(
@@ -597,6 +610,7 @@ class IsolateModuleRegistry final {
       // The referrer is passed along for informational purposes only.
       .referrerNormalizedSpecifier = context.referrerNormalizedSpecifier,
     };
+
     KJ_IF_SOME(found, inner.lookup(innerContext)) {
       return kj::Maybe<Entry&>(lookupCache.upsert(
           Entry{

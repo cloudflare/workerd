@@ -1591,6 +1591,25 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
       throw jsg::JsExceptionThrown();
     }
   });
+
+  // Before resolving the main module, if both nodejs_compat_v2 and the new
+  // module registry are enabled, let's pre-resolve the process and buffer modules.
+  // Why? Great question! Resolving these modules synchronously causes the microtask
+  // queue to be pumped, which we don't actually want to do while resolving the main
+  // module until we are ready. Both process and buffer are exposed via globalThis
+  // when the nodejs_compat_v2 flag is used, and if the top-level scope is accessing
+  // either globalThis.process or globalThis.buffer, then we need to make sure that
+  // the modules are already resolved so we don't pump the microtask queue while
+  // synchronously accessing those globals. Resolving them here ensures that they are
+  // ready to go before we begin evaluating the main module.
+  auto featureFlags = FeatureFlags::get(js);
+  if (featureFlags.getNodeJsCompatV2() && featureFlags.getNewModuleRegistry()) {
+    JSG_REQUIRE_NONNULL(js.resolveModule("node:process", jsg::RequireEsm::YES), Error,
+        "Failed to initialize node:process module");
+    JSG_REQUIRE_NONNULL(js.resolveModule("node:buffer", jsg::RequireEsm::YES), Error,
+        "Failed to initialize node:buffer module");
+  }
+
   return js.resolveModule(mainModule.toString(false), jsg::RequireEsm::YES);
 }
 }  // anonymous namespace
