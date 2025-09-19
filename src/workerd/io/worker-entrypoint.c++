@@ -402,8 +402,8 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     proxyTask = kj::none;
   }))
       .catch_([this, wrappedResponse = kj::mv(wrappedResponse), isActor, method, url, &headers,
-                  &requestBody, metrics = kj::mv(metricsForCatch)](
-                  kj::Exception&& exception) mutable -> kj::Promise<void> {
+                  &requestBody, metrics = kj::mv(metricsForCatch),
+                  workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Don't return errors to end user.
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() exception",
         PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
@@ -468,7 +468,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         metrics->setFailedOpen(true);
         return promise.attach(kj::mv(service));
       });
-      return promise.catch_([this, wrappedResponse = kj::mv(wrappedResponse),
+      return promise.catch_([this, wrappedResponse = kj::mv(wrappedResponse), workerTracer,
                                 metrics = kj::mv(metrics)](kj::Exception&& e) mutable {
         metrics->setFailedOpen(false);
         if (e.getType() != kj::Exception::Type::DISCONNECTED &&
@@ -481,6 +481,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         if (!wrappedResponse->isSent()) {
           kj::HttpHeaders headers(threadContext.getHeaderTable());
           wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+          KJ_IF_SOME(t, workerTracer) {
+            t.setReturn(kj::UNIX_EPOCH, tracing::FetchResponseInfo(500));
+          }
         }
       });
     } else if (tunnelExceptions) {
@@ -503,6 +506,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
           wrappedResponse->send(503, "Service Unavailable", headers, uint64_t(0));
         } else {
           wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+        }
+        KJ_IF_SOME(t, workerTracer) {
+          t.setReturn(
+              kj::UNIX_EPOCH, tracing::FetchResponseInfo(wrappedResponse->getHttpResponseStatus()));
         }
       }
 
