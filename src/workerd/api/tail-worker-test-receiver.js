@@ -32,7 +32,7 @@ export const test = {
 
     // The shared tail worker we configured only produces onset and outcome events, so every trace is identical here.
     // Number of traces based on how often main tail worker is invoked from previous tests
-    let numTraces = 27;
+    let numTraces = 28;
     let basicTrace =
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}';
     assert.deepStrictEqual(

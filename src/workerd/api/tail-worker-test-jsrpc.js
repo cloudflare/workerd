@@ -12,6 +12,23 @@ export class MyService extends WorkerEntrypoint {
     return { foo: 123 };
   }
 
+  // Test method that returns a transient object with methods.
+  // This tests that setJsRpcInfo is only called once for the entrypoint method,
+  // not again for transient object methods.
+  getCounter() {
+    console.log('getCounter called');
+    return {
+      increment() {
+        console.log('increment called on transient');
+        return 1;
+      },
+      getValue() {
+        console.log('getValue called on transient');
+        return 42;
+      },
+    };
+  }
+
   constructor(ctx, env) {
     // As a regression test for EW-9282, check that logging in the constructor does not result in
     // missing onset errors. This requires setting the onset event early on, before getting a
@@ -51,5 +68,14 @@ export default {
     let id = env.MyActor.idFromName('foo');
     let stub = env.MyActor.get(id);
     await stub.functionProperty();
+
+    // Test transient object methods - this should only report jsrpc.method for the initial
+    // getCounter() call, not for the subsequent increment() and getValue() calls on the
+    // returned transient object.
+    let counter = await env.MyService.getCounter();
+    let result1 = await counter.increment();
+    let result2 = await counter.getValue();
+    assert.strictEqual(result1, 1);
+    assert.strictEqual(result2, 42);
   },
 };

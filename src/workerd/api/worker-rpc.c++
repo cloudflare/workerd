@@ -980,6 +980,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
  private:
+  virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
+
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
   // using IoContext::makeReentryCallback().
   kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
@@ -1014,9 +1016,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
-      tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
-    }
+    maybeSetJsRpcInfo(ctx, methodNameForTrace);
 
     auto targetInfo = getTargetInfo(lock, ctx);
 
@@ -1552,6 +1552,8 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
     }
     return false;
   }
+
+  void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 };
 
 // See comment at call site for explanation.
@@ -1863,6 +1865,12 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       return true;
     }
     return false;
+  }
+
+  void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {
+    KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
+      tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
+    }
   }
 };
 
