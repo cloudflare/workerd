@@ -1584,5 +1584,118 @@ KJ_TEST("database write operations check for brokenness") {
   test.pollAndExpectCalls({});
 }
 
+KJ_TEST("allowUnconfirmed put does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed put
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("confirmed put blocks output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do a confirmed put (default behavior)
+  test.put("foo", "bar", {.allowUnconfirmed = false});
+
+  // Now it should be blocked.
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify data was written
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed put followed by a confirmed put in the same transaction batch
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+  test.put("baz", "qux", {.allowUnconfirmed = false});
+
+  // Since any write in the batch needs confirmation, the entire batch should use output gate
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Both writes should be committed
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed delete does not block output gate") {
+  ActorSqliteTest test;
+
+  // First set up some data
+  test.put("foo", "bar");
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Perform an unconfirmed delete - need to add delete helper method or use actor directly
+  expectSync(test.actor.delete_(kj::str("foo"), {.allowUnconfirmed = true}));
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Data should be deleted
+  KJ_ASSERT(expectSync(test.get("foo")) == kj::none);
+}
+
+KJ_TEST("unconfirmed write failure still breaks output gate") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Do an unconfirmed put
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // The output gate is not applied initially.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  // Reject the commit to simulate failure
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "flush failed hard"));
+
+  // Gate should be broken due to commit failure
+  KJ_EXPECT_THROW_MESSAGE("flush failed hard", promise.wait(test.ws));
+}
+
 }  // namespace
 }  // namespace workerd
