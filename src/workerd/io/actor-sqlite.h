@@ -125,10 +125,23 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     void commit();
     void rollback();
 
+    void updateOutputGateRequirement(bool allowUnconfirmed);
+    bool isAllUnconfirmed() const;
+
    private:
     ActorSqlite& parent;
 
     bool committed = false;
+
+    // This is a newly-made transaction that we don't know anything about.
+    struct NewTxn {};
+    // All of the writes in this transaction are unconfirmed, so we don't need the output gate.
+    struct AllUnconfirmed {};
+    // At least one of the writes in this transaction are confirmed, so we DO need the output gate.
+    struct SomeConfirmed {};
+    // Track if the current transaction requires the output gate.  The only allowed transitions are
+    // from NewTxn to AllUnconfirmed or SomeConfirmed, and from AllUnconfirmed to SomeConfirmed.
+    kj::OneOf<NewTxn, AllUnconfirmed, SomeConfirmed> requiresOutputGate = NewTxn{};
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
@@ -185,6 +198,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   // If true, then a commit is scheduled as a result of deleteAll() having been called.
   bool deleteAllCommitScheduled = false;
+
+  // Promise for tracking completion of all commits (both confirmed and unconfirmed).
+  // Used by onNoPendingFlush() to implement sync() correctly.
+  kj::ForkedPromise<void> lastCommit = kj::Promise<void>(kj::READY_NOW).fork();
 
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {

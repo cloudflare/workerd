@@ -5,6 +5,7 @@
 #include "actor-sqlite.h"
 
 #include "io-gate.h"
+#include "kj/exception.h"
 #include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
@@ -96,6 +97,30 @@ void ActorSqlite::ImplicitTxn::rollback() {
     parent.db->run("ROLLBACK TRANSACTION");
     committed = true;
   }
+}
+
+void ActorSqlite::ImplicitTxn::updateOutputGateRequirement(bool allowUnconfirmed) {
+  KJ_SWITCH_ONEOF(requiresOutputGate) {
+    KJ_CASE_ONEOF(_, NewTxn) {
+      if (allowUnconfirmed) {
+        requiresOutputGate = AllUnconfirmed{};
+      } else {
+        requiresOutputGate = SomeConfirmed{};
+      }
+    }
+    KJ_CASE_ONEOF(_, AllUnconfirmed) {
+      if (!allowUnconfirmed) {
+        requiresOutputGate = SomeConfirmed{};
+      }
+    }
+    KJ_CASE_ONEOF(_, SomeConfirmed) {
+      // We cannot downgrade confirmation.
+    }
+  }
+}
+
+bool ActorSqlite::ImplicitTxn::isAllUnconfirmed() const {
+  return requiresOutputGate.is<AllUnconfirmed>();
 }
 
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
@@ -233,8 +258,23 @@ void ActorSqlite::onWrite(bool allowUnconfirmed) {
   if (currentTxn.is<NoTxn>()) {
     auto txn = kj::heap<ImplicitTxn>(*this);
 
-    commitTasks.add(outputGate.lockWhile(
-        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    // In order to support unconfirmed writes, we'll unconditionally lock the outputGate in this
+    // function and use a promise-and-fulfiller pair to determine when we should release the
+    // outputGate.  We lock the outputGate synchronously so that the gate stays locked across
+    // whatever turns of the event loop happen in case we actually need the gate to stay locked.  We
+    // use the promise-and-fulfiller pair to unlock the outputGate early if none of the writes
+    // require confirmation.
+    auto outputGatePaf = kj::newPromiseAndFulfiller<void>();
+    // Convenience pointer to the fulfiller so that can pass the pointer into the lambdas by copy,
+    // avoiding lifetime problems with references.
+    auto outputGateFulfiller = outputGatePaf.fulfiller.get();
+
+    // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+    // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
+    // function on the next turn of the event loop
+    auto commitPromise =
+        kj::evalLater(
+            [this, txn = kj::mv(txn), outputGateFulfiller]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
@@ -256,10 +296,46 @@ void ActorSqlite::onWrite(bool allowUnconfirmed) {
       // occur while the callback is in progress are NOT included, therefore require a new commit
       // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
       // rather than after the callback.
+      //
+      // We do need to extract any information we need about the txn before dropping it though.
+      bool allUnconfirmed = txn->isAllUnconfirmed();
       { auto drop = kj::mv(txn); }
 
+      if (allUnconfirmed) {
+        outputGateFulfiller->fulfill();
+      }
+
       return commitImpl(kj::mv(precommitAlarmState));
-    })));
+    })
+            .then(
+                // Release this block on the outputGate if we haven't released the gate early.
+                [outputGateFulfiller]() { outputGateFulfiller->fulfill(); },
+                // Break this promise in the outputGate if we haven't already release the gate early.
+
+                [outputGateFulfiller](kj::Exception&& e) {
+      outputGateFulfiller->reject(kj::cp(e));
+      return e;
+    })
+            // Unconditionally break the output gate if commit threw an error, no matter whether the
+            // commit was confirmed or unconfirmed.
+            .catch_([this](kj::Exception&& e) {
+      return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
+    })
+            // Maintain the lifetime of the fulfiller for the duration of the promise
+            .attach(kj::mv(outputGatePaf.fulfiller))
+            // We need to wait for this in commitTasks and in lastCommit.
+            .fork();
+
+    commitTasks.add(commitPromise.addBranch());
+    commitTasks.add(outputGate.lockWhile(kj::mv(outputGatePaf.promise)));
+
+    // Commits must be executed in order, so we only have to track the most recent commit promise.
+    lastCommit = kj::mv(commitPromise);
+  }
+
+  // Update the status of the current transaction.
+  KJ_IF_SOME(implicitTxn, currentTxn.tryGet<ImplicitTxn*>()) {
+    implicitTxn->updateOutputGateRequirement(allowUnconfirmed);
   }
 }
 
@@ -764,11 +840,13 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   // This implements sync().
   //
-  // TODO(sqlite): When we implement `allowUnconfirmed`, this implementation becomes incorrect
-  //   because sync() should wait on all writes, even ones with that flag, whereas the output
-  //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
-  //   implemented `allowUnconfirmed` yet.
-  return outputGate.wait();
+  // sync() should wait for ALL writes (both confirmed and unconfirmed) that are outstanding at the
+  // time sync() is called. We use lastCommit which keeps track of the most recent commit to be
+  // formed.
+  if (currentTxn.is<NoTxn>()) {
+    return kj::none;
+  }
+  return lastCommit.addBranch();
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark() {
