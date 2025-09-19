@@ -110,12 +110,12 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
           writable: false,
           configurable: true,
         },
-        readable: {
-          get: () => {
-            return incoming.readable;
-          },
-          configurable: true,
-        },
+        // readable: {
+        //   get: () => {
+        //     return incoming.readable;
+        //   },
+        //   configurable: true,
+        // },
         remoteFamily: {
           get: () => {
             if (incoming.destroyed) {

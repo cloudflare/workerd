@@ -466,6 +466,27 @@ export const testPostRequestBodyEcho = {
   },
 };
 
+export const testHttpGetTestSearchParams = {
+  async test(_ctrl, env) {
+    const { promise, resolve } = Promise.withResolvers();
+    http.get(
+      {
+        hostname: env.SIDECAR_HOSTNAME,
+        port: env.HELLO_WORLD_SERVER_PORT,
+        method: 'POST',
+        path: '/search-path',
+        search: '?hello=world',
+      },
+      (res) => {
+        strictEqual(res.statusCode, 200);
+        strictEqual(res.headers.url, '/search-path?hello=world');
+        resolve();
+      }
+    );
+    await promise;
+  },
+};
+
 // Relevant Node.js tests
 // - [ ] test/parallel/test-http-client-abort-destroy.js
 // - [ ] test/parallel/test-http-client-abort-event.js

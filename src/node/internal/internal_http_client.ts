@@ -63,6 +63,11 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
+  // TODO(soon): Types/node is wrong. RequestOptions should contain search and hash fields.
+  #options: RequestOptions & {
+    search?: string | undefined;
+    hash?: string | undefined;
+  };
 
   _ended: boolean = false;
 
@@ -281,6 +286,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     });
 
     this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
+    this.#options = options;
   }
 
   #onFinish(): void {
@@ -348,6 +354,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     url.protocol = this.protocol;
     url.port = this.port;
     url.pathname = this.path;
+    if (this.#options.search != null) {
+      url.search = this.#options.search;
+    }
+    if (this.#options.hash != null) {
+      url.hash = this.#options.hash;
+    }
 
     // Our fetch implementation has the following limitations.
     //
