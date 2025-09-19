@@ -50,6 +50,6 @@ rust_library(
         "@crates_vendor__serde_json-1.0.145//:serde_json",
         "@crates_vendor__target-triple-0.1.4//:target_triple",
         "@crates_vendor__termcolor-1.4.1//:termcolor",
-        "@crates_vendor__toml-0.9.6//:toml",
+        "@crates_vendor__toml-0.9.7//:toml",
     ],
 )

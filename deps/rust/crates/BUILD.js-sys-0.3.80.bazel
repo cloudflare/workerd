@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde_spanned",
+    name = "js_sys",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,11 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "serde",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -40,13 +35,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde_spanned",
+        "crate-name=js-sys",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.1",
+    version = "0.3.80",
     deps = [
-        "@crates_vendor__serde_core-1.0.225//:serde_core",
+        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__wasm-bindgen-0.2.103//:wasm_bindgen",
     ],
 )

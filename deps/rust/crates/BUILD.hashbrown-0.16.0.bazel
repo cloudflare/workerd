@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "toml",
+    name = "hashbrown",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,13 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "display",
-        "parse",
-        "serde",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -42,18 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=toml",
+        "crate-name=hashbrown",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.9.6",
-    deps = [
-        "@crates_vendor__serde_core-1.0.225//:serde_core",
-        "@crates_vendor__serde_spanned-1.0.1//:serde_spanned",
-        "@crates_vendor__toml_datetime-0.7.1//:toml_datetime",
-        "@crates_vendor__toml_parser-1.0.2//:toml_parser",
-        "@crates_vendor__toml_writer-1.0.2//:toml_writer",
-        "@crates_vendor__winnow-0.7.13//:winnow",
-    ],
+    version = "0.16.0",
 )

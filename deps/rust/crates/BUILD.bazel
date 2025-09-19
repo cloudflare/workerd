@@ -32,14 +32,26 @@ filegroup(
 
 # Workspace Member Dependencies
 alias(
-    name = "anyhow-1.0.99",
-    actual = "@crates_vendor__anyhow-1.0.99//:anyhow",
+    name = "anyhow-1.0.100",
+    actual = "@crates_vendor__anyhow-1.0.100//:anyhow",
     tags = ["manual"],
 )
 
 alias(
     name = "anyhow",
-    actual = "@crates_vendor__anyhow-1.0.99//:anyhow",
+    actual = "@crates_vendor__anyhow-1.0.100//:anyhow",
+    tags = ["manual"],
+)
+
+alias(
+    name = "async-trait-0.1.89",
+    actual = "@crates_vendor__async-trait-0.1.89//:async_trait",
+    tags = ["manual"],
+)
+
+alias(
+    name = "async-trait",
+    actual = "@crates_vendor__async-trait-0.1.89//:async_trait",
     tags = ["manual"],
 )
 
@@ -68,14 +80,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.37",
-    actual = "@crates_vendor__cc-1.2.37//:cc",
+    name = "cc-1.2.38",
+    actual = "@crates_vendor__cc-1.2.38//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.37//:cc",
+    actual = "@crates_vendor__cc-1.2.38//:cc",
     tags = ["manual"],
 )
 
