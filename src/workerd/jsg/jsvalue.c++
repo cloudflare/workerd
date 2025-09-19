@@ -308,7 +308,7 @@ size_t JsString::utf8Length(jsg::Lock& js) const {
 kj::String JsString::toString(jsg::Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return js.accountedKjString(kj::mv(buf));
+  return kj::String(kj::mv(buf));
 }
 
 jsg::USVString JsString::toUSVString(Lock& js) const {

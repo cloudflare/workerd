@@ -2351,15 +2351,6 @@ class Lock {
                       .attach(getExternalMemoryAdjustment(accountedSize)));
   }
 
-  // Returns a kj::String with an external memory adjustment attached.
-  kj::String accountedKjString(kj::Array<char>&& str);
-  kj::String accountedKjString(kj::String&& str) {
-    return accountedKjString(str.releaseArray());
-  }
-  kj::String accountedKjString(kj::StringPtr str) {
-    return accountedKjString(kj::str(str));
-  }
-
   // Returns a ByteString with an external memory adjustment attached.
   ByteString accountedByteString(kj::Array<char>&& str);
   ByteString accountedByteString(kj::String&& str) {
