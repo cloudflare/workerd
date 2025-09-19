@@ -167,7 +167,9 @@ kj::ArrayPtr<jsg::Ref<PerformanceEntry>> PerformanceObserverEntryList::getEntrie
 
 jsg::Ref<PerformanceMark> Performance::mark(
     jsg::Lock& js, kj::String name, jsg::Optional<PerformanceMark::Options> options) {
-  double startTime = now(js);
+  // TODO(someday): Include `nmae` in the perf event name?
+  Worker::Isolate::from(js).getLimitEnforcer().markPerfEvent("performance_mark"_kjc);
+  double startTime = dateNow();
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(time, opts.startTime) {
       startTime = time;
@@ -190,7 +192,8 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
     jsg::Optional<kj::String> maybeEndMark) {
-  double startTime = now(js);
+  Worker::Isolate::from(js).getLimitEnforcer().markPerfEvent("performance_measure"_kjc);
+  double startTime = dateNow();
   double endTime = startTime;
 
   KJ_SWITCH_ONEOF(measureOptionsOrStartMark) {
