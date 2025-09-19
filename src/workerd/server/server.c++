@@ -4255,8 +4255,19 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
   // config. So for now this just uses the defaults.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
 
+  // TODO(soon): Either make python workers support the new module registry before
+  // NMR is defaulted on, or disable NMR by default when python workers are enabled.
+  // While NMR is experimental, we'll just throw an error if both are enabled.
+  if (def.featureFlags.getPythonWorkers()) {
+    KJ_REQUIRE(!def.featureFlags.getNewModuleRegistry(),
+        "Python workers do not currently support the new ModuleRegistry implementation. "
+        "Please disable the new ModuleRegistry feature flag to use Python workers.");
+  }
+
+  bool usingNewModuleRegistry = def.featureFlags.getNewModuleRegistry();
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
-  if (def.featureFlags.getNewModuleRegistry()) {
+  // TODO(soon): Python workers do not currently support the new module registry.
+  if (usingNewModuleRegistry) {
     KJ_REQUIRE(experimental,
         "The new ModuleRegistry implementation is an experimental feature. "
         "You must run workerd with `--experimental` to use this feature.");
@@ -4297,8 +4308,8 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
   Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
-  isolateLoggingOptions.consoleMode = def.source.variant.is<WorkerSource::ScriptSource>() &&
-          !def.featureFlags.getNewModuleRegistry()
+  isolateLoggingOptions.consoleMode =
+      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
       ? Worker::ConsoleMode::INSPECTOR_ONLY
       : loggingOptions.consoleMode;
   auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
@@ -4310,7 +4321,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     isolateRegistrar->registerIsolate(name, isolate.get());
   }
 
-  if (!def.featureFlags.getNewModuleRegistry()) {
+  if (!usingNewModuleRegistry) {
     KJ_IF_SOME(moduleFallback, def.moduleFallback) {
       KJ_REQUIRE(experimental,
           "The module fallback service is an experimental feature. "

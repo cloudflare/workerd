@@ -41,7 +41,16 @@ const unitTests :Workerd.Config = (
           (name = "json", json = "{ \"foo\": 1 }"),
           (name = "invalid-json", json = "1n"),
 
-          (name = "wasm", wasm = embed "test.wasm")
+          (name = "wasm", wasm = embed "test.wasm"),
+
+          (name = "complex", esModule = "import * as abc from '././././././complex/complex2'; export { abc };"),
+          (name = "complex/complex2", esModule = "import * as def from '/bundle/complex/complex3'; export { def }; export const foo = 1;"),
+          (name = "complex/complex3", esModule = "export const bar = 2;"),
+
+          # When the user bundle name begins with a slash, it is stripped before
+          # processing, ensuring that the module is still processed relative to
+          # the bundle base URL. Query strings and fragments are ignored.
+          (name = "/%61bc?abc#123", esModule = "export default import.meta.url"),
         ],
         compatibilityDate = "2025-05-01",
         compatibilityFlags = [
