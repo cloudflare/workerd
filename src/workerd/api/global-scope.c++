@@ -207,10 +207,10 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
       jsHeaders->setUnguarded(
-          js, js.accountedByteString("Content-Length"_kj), js.accountedByteString(kj::str(l)));
+          js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
     } else {
       jsHeaders->setUnguarded(
-          js, js.accountedByteString("Transfer-Encoding"_kj), js.accountedByteString("chunked"_kj));
+          js, jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
     }
   }
 

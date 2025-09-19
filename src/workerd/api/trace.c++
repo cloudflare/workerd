@@ -364,7 +364,8 @@ jsg::Dict<jsg::ByteString, jsg::ByteString> TraceItem::FetchEventInfo::Request::
   auto builder = kj::heapArrayBuilder<HeaderDict::Field>(detail->headers.size());
   for (const auto& header: detail->headers) {
     auto v = (redacted && shouldRedact(header.name)) ? "REDACTED"_kj : header.value;
-    builder.add(HeaderDict::Field{js.accountedByteString(header.name), js.accountedByteString(v)});
+    builder.add(
+        HeaderDict::Field{jsg::ByteString(kj::str(header.name)), jsg::ByteString(kj::str(v))});
   }
 
   // TODO(conform): Better to return a frozen JS Object?

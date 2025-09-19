@@ -415,14 +415,6 @@ kj::Arc<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
-ByteString Lock::accountedByteString(kj::Array<char>&& str) {
-  // TODO(Cleanup): The memory accounting that was attached to these strings
-  // has been removed because it was too expensive. We should rethink how
-  // to handle it. Making this non-ops for now and will remove the actual
-  // methods separately.
-  return ByteString(kj::mv(str));
-}
-
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");

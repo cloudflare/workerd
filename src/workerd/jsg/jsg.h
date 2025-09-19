@@ -2351,15 +2351,6 @@ class Lock {
                       .attach(getExternalMemoryAdjustment(accountedSize)));
   }
 
-  // Returns a ByteString with an external memory adjustment attached.
-  ByteString accountedByteString(kj::Array<char>&& str);
-  ByteString accountedByteString(kj::String&& str) {
-    return accountedByteString(str.releaseArray());
-  }
-  ByteString accountedByteString(kj::StringPtr str) {
-    return accountedByteString(kj::str(str));
-  }
-
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
