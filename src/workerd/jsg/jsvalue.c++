@@ -341,7 +341,7 @@ jsg::ByteString JsString::toByteString(Lock& js) const {
 jsg::DOMString JsString::toDOMString(Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return js.accountedDOMString(kj::mv(buf));
+  return jsg::DOMString(kj::mv(buf));
 }
 
 int JsString::hashCode() const {

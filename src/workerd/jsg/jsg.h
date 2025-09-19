@@ -2360,15 +2360,6 @@ class Lock {
     return accountedByteString(kj::str(str));
   }
 
-  // Returns a DOMString with an external memory adjustment attached.
-  DOMString accountedDOMString(kj::Array<char>&& str);
-  DOMString accountedDOMString(kj::String&& str) {
-    return accountedDOMString(str.releaseArray());
-  }
-  DOMString accountedDOMString(kj::StringPtr str) {
-    return accountedDOMString(kj::str(str));
-  }
-
   v8::Local<v8::Context> v8Context() {
     auto context = v8Isolate->GetCurrentContext();
     KJ_ASSERT(!context.IsEmpty(), "Isolate has no currently active v8::Context::Scope");
