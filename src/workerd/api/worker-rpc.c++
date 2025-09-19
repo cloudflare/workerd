@@ -980,6 +980,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   KJ_DISALLOW_COPY_AND_MOVE(JsRpcTargetBase);
 
  private:
+  // Report JS-RPC method name to tracer. Only entrypoints report, transients do not.
   virtual void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) = 0;
 
   // Function which enters the isolate lock and IoContext and then invokes callImpl(). Created
