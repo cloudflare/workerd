@@ -372,11 +372,14 @@ void WorkerTracer::addDiagnosticChannelEvent(const tracing::InvocationSpanContex
   }
 }
 
-void WorkerTracer::setEventInfo(IoContext& ioContext, tracing::EventInfo&& info) {
+void WorkerTracer::setEventInfo(IoContext& ioContext,
+    const tracing::InvocationSpanContext& context,
+    kj::Date timestamp,
+    tracing::EventInfo&& info) {
   // IoContext is available at this time, capture weakRef.
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = ioContext.getWeakRef();
-  setEventInfoInternal(ioContext.getInvocationSpanContext(), ioContext.now(), kj::mv(info));
+  setEventInfoInternal(context, timestamp, kj::mv(info));
 }
 
 void WorkerTracer::setEventInfoInternal(

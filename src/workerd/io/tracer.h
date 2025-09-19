@@ -115,7 +115,10 @@ class BaseTracer: public kj::Refcounted {
       kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(IoContext& context, tracing::EventInfo&& info) = 0;
+  virtual void setEventInfo(IoContext& ioContext,
+      const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      tracing::EventInfo&& info) = 0;
 
   // Sets the return event for Streaming Tail Worker, including fetchResponseInfo (HTTP status code)
   // if available. Must not be called more than once, and fetchResponseInfo should only be set for
@@ -171,7 +174,10 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
-  void setEventInfo(IoContext& context, tracing::EventInfo&& info) override;
+  void setEventInfo(IoContext& ioContext,
+      const tracing::InvocationSpanContext& context,
+      kj::Date timestamp,
+      tracing::EventInfo&& info) override;
   // Variant for when we don't have a proper IoContext but instead provide context and timestamp
   // directly, used internally for RPC-based tracing.
   virtual void setEventInfoInternal(
