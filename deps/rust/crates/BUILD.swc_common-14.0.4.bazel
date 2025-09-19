@@ -51,7 +51,7 @@ rust_library(
     ],
     version = "14.0.4",
     deps = [
-        "@crates_vendor__anyhow-1.0.99//:anyhow",
+        "@crates_vendor__anyhow-1.0.100//:anyhow",
         "@crates_vendor__better_scoped_tls-1.0.1//:better_scoped_tls",
         "@crates_vendor__bytes-str-0.2.7//:bytes_str",
         "@crates_vendor__either-1.15.0//:either",

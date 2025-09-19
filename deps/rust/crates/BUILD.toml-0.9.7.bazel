@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "swc_ts_fast_strip",
+    name = "toml",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,6 +30,10 @@ rust_library(
     ),
     crate_features = [
         "default",
+        "display",
+        "parse",
+        "serde",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -38,24 +42,18 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=swc_ts_fast_strip",
+        "crate-name=toml",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "29.0.0",
+    version = "0.9.7",
     deps = [
-        "@crates_vendor__anyhow-1.0.100//:anyhow",
-        "@crates_vendor__bytes-str-0.2.7//:bytes_str",
-        "@crates_vendor__serde-1.0.225//:serde",
-        "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
-        "@crates_vendor__swc_common-14.0.4//:swc_common",
-        "@crates_vendor__swc_ecma_ast-14.0.0//:swc_ecma_ast",
-        "@crates_vendor__swc_ecma_codegen-16.0.0//:swc_ecma_codegen",
-        "@crates_vendor__swc_ecma_parser-22.0.3//:swc_ecma_parser",
-        "@crates_vendor__swc_ecma_transforms_base-24.0.0//:swc_ecma_transforms_base",
-        "@crates_vendor__swc_ecma_transforms_react-26.0.0//:swc_ecma_transforms_react",
-        "@crates_vendor__swc_ecma_transforms_typescript-26.0.0//:swc_ecma_transforms_typescript",
-        "@crates_vendor__swc_ecma_visit-14.0.0//:swc_ecma_visit",
+        "@crates_vendor__serde_core-1.0.225//:serde_core",
+        "@crates_vendor__serde_spanned-1.0.2//:serde_spanned",
+        "@crates_vendor__toml_datetime-0.7.2//:toml_datetime",
+        "@crates_vendor__toml_parser-1.0.3//:toml_parser",
+        "@crates_vendor__toml_writer-1.0.3//:toml_writer",
+        "@crates_vendor__winnow-0.7.13//:winnow",
     ],
 )

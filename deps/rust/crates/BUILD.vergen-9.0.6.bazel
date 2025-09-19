@@ -48,7 +48,7 @@ rust_library(
     ],
     version = "9.0.6",
     deps = [
-        "@crates_vendor__anyhow-1.0.99//:anyhow",
+        "@crates_vendor__anyhow-1.0.100//:anyhow",
         "@crates_vendor__cargo_metadata-0.19.2//:cargo_metadata",
         "@crates_vendor__derive_builder-0.20.2//:derive_builder",
         "@crates_vendor__regex-1.11.2//:regex",

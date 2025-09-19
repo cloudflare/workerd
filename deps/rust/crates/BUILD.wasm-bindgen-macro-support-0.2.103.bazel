@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "swc_ts_fast_strip",
+    name = "wasm_bindgen_macro_support",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,9 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -38,24 +35,17 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=swc_ts_fast_strip",
+        "crate-name=wasm-bindgen-macro-support",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "29.0.0",
+    version = "0.2.103",
     deps = [
-        "@crates_vendor__anyhow-1.0.100//:anyhow",
-        "@crates_vendor__bytes-str-0.2.7//:bytes_str",
-        "@crates_vendor__serde-1.0.225//:serde",
-        "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
-        "@crates_vendor__swc_common-14.0.4//:swc_common",
-        "@crates_vendor__swc_ecma_ast-14.0.0//:swc_ecma_ast",
-        "@crates_vendor__swc_ecma_codegen-16.0.0//:swc_ecma_codegen",
-        "@crates_vendor__swc_ecma_parser-22.0.3//:swc_ecma_parser",
-        "@crates_vendor__swc_ecma_transforms_base-24.0.0//:swc_ecma_transforms_base",
-        "@crates_vendor__swc_ecma_transforms_react-26.0.0//:swc_ecma_transforms_react",
-        "@crates_vendor__swc_ecma_transforms_typescript-26.0.0//:swc_ecma_transforms_typescript",
-        "@crates_vendor__swc_ecma_visit-14.0.0//:swc_ecma_visit",
+        "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__syn-2.0.106//:syn",
+        "@crates_vendor__wasm-bindgen-backend-0.2.103//:wasm_bindgen_backend",
+        "@crates_vendor__wasm-bindgen-shared-0.2.103//:wasm_bindgen_shared",
     ],
 )
