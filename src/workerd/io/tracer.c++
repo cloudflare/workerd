@@ -437,6 +437,27 @@ void WorkerTracer::recordTimestamp(kj::Date timestamp) {
   }
 }
 
+kj::Date BaseTracer::getTime() {
+  auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
+  kj::Date timestamp = kj::UNIX_EPOCH;
+  weakIoCtx->runIfAlive([&timestamp](IoContext& context) { timestamp = context.now(); });
+  if (!weakIoCtx->isValid()) {
+    // This can happen if we the IoContext gets destroyed following an exception, but we still need
+    // to report a time for the return event.
+    if (completeTime != kj::UNIX_EPOCH) {
+      timestamp = completeTime;
+    } else {
+      // Otherwise, we can't actually get an end timestamp that makes sense.
+      if (isPredictableModeForTest()) {
+        KJ_FAIL_ASSERT("reported return event without valid IoContext or completeTime");
+      } else {
+        LOG_WARNING_PERIODICALLY("reported return event without valid IoContext or completeTime");
+      }
+    }
+  }
+  return timestamp;
+}
+
 void BaseTracer::adjustSpanTime(CompleteSpan& span) {
   // To report I/O time, we need the IOContext to still be alive.
   // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
@@ -460,8 +481,7 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
         if (isPredictableModeForTest()) {
           KJ_FAIL_ASSERT("reported span after IoContext was deallocated", span.operationName);
         } else {
-          LOG_WARNING_PERIODICALLY(
-              "reported span after IoContext was deallocated", span.operationName);
+          KJ_LOG(WARNING, "reported span after IoContext was deallocated", span.operationName);
         }
       }
     }
@@ -469,7 +489,7 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
 }
 
 void WorkerTracer::setReturn(
-    kj::Date timestamp, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo) {
+    kj::Maybe<kj::Date> timestamp, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo) {
   // Match the behavior of setEventInfo(). Any resolution of the TODO comments
   // in setEventInfo() that are related to this check while probably also affect
   // this function.
@@ -480,9 +500,10 @@ void WorkerTracer::setReturn(
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
     auto& spanContext = KJ_UNWRAP_OR_RETURN(topLevelInvocationSpanContext);
 
+    // Fall back to weak IoContext if no timestamp is available
     writer->report(spanContext,
         tracing::Return({fetchResponseInfo.map([](auto& info) { return info.clone(); })}),
-        timestamp);
+        timestamp.orDefault([&]() { return getTime(); }));
   }
 
   // Add fetch response info for legacy tail worker

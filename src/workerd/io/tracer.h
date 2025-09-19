@@ -124,8 +124,8 @@ class BaseTracer: public kj::Refcounted {
   // if available. Must not be called more than once, and fetchResponseInfo should only be set for
   // fetch events. For legacy tail worker, there is no distinct return event so we only add
   // fetchResponseInfo to the trace if present.
-  virtual void setReturn(
-      kj::Date time, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
+  virtual void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
@@ -146,6 +146,11 @@ class BaseTracer: public kj::Refcounted {
       const kj::ConstString& methodName) = 0;
 
  protected:
+  // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
+  // worker must have wrapped up and reported its outcome event, we report completeTime in that case
+  // acordingly.
+  kj::Date getTime();
+
   // helper method for addSpan() implementations
   void adjustSpanTime(CompleteSpan& span);
 
@@ -203,8 +208,8 @@ class WorkerTracer final: public BaseTracer {
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
 
-  void setReturn(
-      kj::Date time, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
+  void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
 
   void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
