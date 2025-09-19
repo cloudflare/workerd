@@ -44,7 +44,7 @@ class Container: public jsg::Object {
   jsg::Promise<void> destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error);
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
-  jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, kj::Date scheduledTime);
+  jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
 
   // TODO(containers): listenTcp()
 
