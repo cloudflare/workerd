@@ -260,6 +260,7 @@ struct Trace @0x8e8d911203762d34 {
     spanId @8: UInt64;
     # id for the span being opened by this Onset event.
     attributes @9 :List(Attribute);
+    durableObjectId @10 :Text;
   }
 
   struct Outcome {
