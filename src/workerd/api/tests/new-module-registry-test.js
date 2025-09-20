@@ -260,6 +260,17 @@ export const wasmDynamicSourcePhaseFailureTest = {
   },
 };
 
+export const complexModuleTest = {
+  async test() {
+    const { abc } = await import('complex');
+    strictEqual(abc.foo, 1);
+    strictEqual(abc.def.bar, 2);
+
+    const { default: abc2 } = await import('abc');
+    strictEqual(abc2, 'file:///bundle/abc');
+  },
+};
+
 // TODO(now): Tests
 // * [x] Include tests for all known module types
 //   * [x] ESM
