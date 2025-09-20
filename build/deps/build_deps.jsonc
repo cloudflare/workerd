@@ -1,13 +1,6 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
-    {
-      "name": "rules_python",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_python",
-      "file_regex": "^rules_python-.*\\.tar\\.gz$"
-    },
     // rust
     {
       "name": "rules_rust",

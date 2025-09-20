@@ -26,9 +26,9 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         cmd = """
         # Create a file with all the file paths to avoid Windows command line length limits
         echo "$(locations """ + vendored_srcs_target + """)" > paths.txt
-        $(execpath @python3_13_host//:python) $(location generate_modules.py) @paths.txt > $@
+        $(PYTHON3) $(location generate_modules.py) @paths.txt > $@
         """,
-        tools = ["@python3_13_host//:python"],
+        toolchains = ["@rules_python//python:current_py_toolchain"],
     )
 
     # Perform substitution to include the generated modules in template
@@ -41,7 +41,7 @@ def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_sr
         ],
         outs = [name + ".test.generated" + "_" + version],
         cmd = """
-        $(execpath @python3_13_host//:python) -c "
+        $(PYTHON3) -c "
 import sys
 with open('$(location :""" + module_list_name + """)', 'r') as f:
     modules = f.read()
@@ -53,7 +53,7 @@ with open('$@', 'w') as f:
     f.write(result)
         "
     """,
-        tools = ["@python3_13_host//:python"],
+        toolchains = ["@rules_python//python:current_py_toolchain"],
     )
 
     # Create the py_wd_test
