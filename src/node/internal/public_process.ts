@@ -365,8 +365,8 @@ export const finalization = {
 };
 
 // Additional undocumented APIs
-export function _rawDebug(_message: string): void {
-  // no-op
+export function _rawDebug(...args: unknown[]): void {
+  console.log(...args);
 }
 
 export const moduleLoadList: string[] = [];
@@ -387,9 +387,8 @@ export function _getActiveHandles(): unknown[] {
   return [];
 }
 
-export function reallyExit(code?: number): never {
+export function reallyExit(code?: number): void {
   processImpl.exitImpl(code || 0);
-  throw new Error('Process exit');
 }
 
 export function _kill(_pid: number, _signal: number): boolean {
@@ -617,6 +616,12 @@ interface Process extends EventEmitter {
   _preload_modules: typeof _preload_modules;
 }
 
+export const _disconnect = undefined,
+  _handleQueue = undefined,
+  _pendingMessage = undefined,
+  _channel = undefined,
+  _send = undefined;
+
 const _process = {
   version,
   versions,
@@ -705,6 +710,11 @@ const _process = {
   _startProfilerIdleNotifier,
   _stopProfilerIdleNotifier,
   _preload_modules,
+  _disconnect,
+  _handleQueue,
+  _pendingMessage,
+  _channel,
+  _send,
 };
 
 const process: Process = Object.setPrototypeOf(
@@ -739,5 +749,9 @@ process.on('newListener', (name) => {
 });
 
 _setEventsProcess(process);
+
+export const _events = process._events,
+  _eventsCount = process._eventsCount,
+  _maxListeners = process._maxListeners;
 
 export default process;
