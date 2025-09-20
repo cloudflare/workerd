@@ -663,14 +663,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
   }
 
   {
-    // Add spans to the builder.
-    auto list = builder.initSpans(spans.size());
-    for (auto i: kj::indices(spans)) {
-      spans[i].copyTo(list[i]);
-    }
-  }
-
-  {
     auto list = builder.initExceptions(exceptions.size());
     for (auto i: kj::indices(exceptions)) {
       exceptions[i].copyTo(list[i]);
@@ -796,7 +788,6 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   // "full", so we may need to filter out the extra data after receiving the traces back.
   if (pipelineLogLevel != PipelineLogLevel::NONE) {
     logs.addAll(reader.getLogs());
-    spans.addAll(reader.getSpans());
     exceptions.addAll(reader.getExceptions());
     diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
@@ -1608,36 +1599,6 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
       return kj::heapString(value.getString());
     default:
       KJ_UNREACHABLE;
-  }
-}
-
-void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
-  builder.setOperationName(operationName.asPtr());
-  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setSpanId(spanId);
-  builder.setParentSpanId(parentSpanId);
-
-  auto tagsParam = builder.initTags(tags.size());
-  auto i = 0;
-  for (auto& tag: tags) {
-    auto tagParam = tagsParam[i++];
-    tagParam.setKey(tag.key.asPtr());
-    serializeTagValue(tagParam.initValue(), tag.value);
-  }
-}
-
-CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
-    : spanId(reader.getSpanId()),
-      parentSpanId(reader.getParentSpanId()),
-      operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
-      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
-  auto tagsParam = reader.getTags();
-  tags.reserve(tagsParam.size());
-  for (auto tagParam: tagsParam) {
-    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
-        deserializeTagValue(tagParam.getValue()));
   }
 }
 

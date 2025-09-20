@@ -621,8 +621,6 @@ struct CompleteSpan {
   // Should be Span::TagMap, but we can't forward-declare that.
   kj::HashMap<kj::ConstString, tracing::Attribute::Value> tags;
 
-  CompleteSpan(rpc::UserSpanData::Reader reader);
-  void copyTo(rpc::UserSpanData::Builder builder) const;
   CompleteSpan clone() const;
   explicit CompleteSpan(tracing::SpanId spanId,
       tracing::SpanId parentSpanId,
@@ -864,7 +862,6 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
-  kj::Vector<CompleteSpan> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
   kj::Vector<tracing::Exception> exceptions;
 
