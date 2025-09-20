@@ -593,7 +593,8 @@ class WritableStreamController {
     //
     // The controller is guaranteed to either outlive the Writer or will detach the Writer so the
     // WritableStreamController& reference should always remain valid.
-    virtual void attach(WritableStreamController& controller,
+    virtual void attach(jsg::Lock& js,
+        WritableStreamController& controller,
         jsg::Promise<void> closedPromise,
         jsg::Promise<void> readyPromise) = 0;
 
@@ -603,7 +604,7 @@ class WritableStreamController {
 
     // The ready promise can be replaced whenever backpressure is signaled by the underlying
     // controller.
-    virtual void replaceReadyPromise(jsg::Promise<void> readyPromise) = 0;
+    virtual void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) = 0;
   };
 
   struct PendingAbort {
@@ -821,10 +822,10 @@ class WriterLocked {
     return readyFulfiller;
   }
 
-  void setReadyFulfiller(jsg::PromiseResolverPair<void>& pair) {
+  void setReadyFulfiller(jsg::Lock& js, jsg::PromiseResolverPair<void>& pair) {
     KJ_IF_SOME(w, writer) {
       readyFulfiller = kj::mv(pair.resolver);
-      w.replaceReadyPromise(kj::mv(pair.promise));
+      w.replaceReadyPromise(js, kj::mv(pair.promise));
     }
   }
 

@@ -1022,7 +1022,7 @@ void WritableStreamInternalController::updateBackpressure(jsg::Lock& js, bool ba
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
-      writerLock.setReadyFulfiller(prp);
+      writerLock.setReadyFulfiller(js, prp);
       return;
     }
 
@@ -1405,7 +1405,7 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, Writer& writer)
   }
 
   writeState = kj::mv(lock);
-  writer.attach(*this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer.attach(js, *this, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
