@@ -148,12 +148,15 @@ declare namespace Rpc {
   export type Provider<
     T extends object,
     Reserved extends string = never,
-  > = MaybeCallableProvider<T> & {
-    [K in Exclude<
+  > = MaybeCallableProvider<T> & Pick<
+    {
+      [K in keyof T]: MethodOrProperty<T[K]>;
+    },
+    Exclude<
       keyof T,
       Reserved | symbol | keyof StubBase<never>
-    >]: MethodOrProperty<T[K]>;
-  };
+    >
+  >
 }
 
 declare namespace Cloudflare {
