@@ -85,6 +85,16 @@ class IsolateLimitEnforcer: public kj::Refcounted {
   }
 
   virtual bool hasExcessivelyExceededHeapLimit() const = 0;
+
+  // Inserts a custom mark event named `name` into this isolate's perf event data stream. At
+  // present, this is only implemented internally. Call this function from various APIs to be able
+  // to correlate perf event data with usage of those APIs.
+  //
+  // TODO(cleanup): This isn't strictly related to limit enforcement, so it's a bit odd here. It's
+  //  observability-related. However, our internal perf event observability is fairly tightly
+  //  coupled with our CPU time limiting system, so adding this function here is a path of least
+  //  resistance.
+  virtual void markPerfEvent(kj::LiteralStringConst name) const {};
 };
 
 // Abstract interface that enforces resource limits on a IoContext.
