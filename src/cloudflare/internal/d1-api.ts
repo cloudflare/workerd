@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+import tracing from 'cloudflare-internal:tracing';
+
 interface Fetcher {
   fetch: typeof fetch;
 }
@@ -83,7 +85,12 @@ class D1Database {
   }
 
   prepare(query: string): D1PreparedStatement {
-    return new D1PreparedStatement(this.alwaysPrimarySession, query);
+    return tracing.startSpanWithCallback('prepare', (span) => {
+      span.setTag('query', query);
+      const result = new D1PreparedStatement(this.alwaysPrimarySession, query);
+      span.end();
+      return result;
+    });
   }
 
   async batch<T = unknown>(
@@ -93,7 +100,10 @@ class D1Database {
   }
 
   async exec(query: string): Promise<D1ExecResult> {
-    return this.alwaysPrimarySession.exec(query);
+    return tracing.startSpanWithCallback('exec', async (span) => {
+      span.setTag('query', query);
+      return this.alwaysPrimarySession.exec(query);
+    });
   }
 
   withSession(
@@ -155,7 +165,10 @@ class D1DatabaseSession {
   }
 
   prepare(sql: string): D1PreparedStatement {
-    return new D1PreparedStatement(this, sql);
+    return tracing.startSpanWithCallback('prepare', (span) => {
+      span.setTag('sql', sql);
+      return new D1PreparedStatement(this, sql);
+    });
   }
 
   async batch<T = unknown>(
