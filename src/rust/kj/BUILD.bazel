@@ -1,0 +1,40 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "kj",
+    cxx_bridge_deps = [
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+    cxx_bridge_srcs = [
+        "http.rs",
+        "io.rs",
+    ],
+    proc_macro_deps = [
+        "@crates_vendor//:async-trait",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ffi",
+    ],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = [
+        "ffi.c++",
+    ],
+    hdrs = [
+        "ffi.h",
+    ],
+    linkstatic = select({
+        "@platforms//os:windows": True,
+        "//conditions:default": False,
+    }),
+    deps = [
+        ":http.rs@cxx",
+        "//src/rust/cxx-integration",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
