@@ -268,7 +268,7 @@ jsg::JsValue deserializeRpcReturnValue(
 // A membrane which attaches some object until it is destroyed.
 //
 // TODO(cleanup): This is generally useful, should it be part of capnp?
-class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcounted {
+class AttachmentMembrane final: public capnp::MembranePolicy {
  public:
   explicit AttachmentMembrane(kj::Own<void> attachment): attachment(kj::mv(attachment)) {}
 
@@ -280,10 +280,6 @@ class AttachmentMembrane final: public capnp::MembranePolicy, public kj::Refcoun
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     return kj::none;
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
  private:
@@ -1881,8 +1877,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 // completes, since it is actually returned as the result of the top-level RPC call, but that
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
-class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::MembranePolicy,
-                                                                 public kj::Refcounted {
+class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::MembranePolicy {
  public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -1898,16 +1893,12 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
     auto f = kj::mv(JSG_REQUIRE_NONNULL(
         doneFulfiller, Error, "Only one RPC method call is allowed on this object."));
     doneFulfiller = kj::none;
-    return capnp::membrane(kj::mv(target), kj::refcounted<CompletionMembrane>(kj::mv(f)));
+    return capnp::membrane(kj::mv(target), kj::rc<CompletionMembrane>(kj::mv(f)));
   }
 
   kj::Maybe<capnp::Capability::Client> outboundCall(
       uint64_t interfaceId, uint16_t methodId, capnp::Capability::Client target) override {
     KJ_FAIL_ASSERT("ServerTopLevelMembrane shouldn't have outgoing capabilities");
-  }
-
-  kj::Own<MembranePolicy> addRef() override {
-    return kj::addRef(*this);
   }
 
  private:
@@ -1991,8 +1982,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::s
   // TODO(cleanup): It feels like there's something wrong with the design here. Can we make this
   //   less ugly?
   auto completionPaf = kj::newPromiseAndFulfiller<void>();
-  cap = capnp::membrane(
-      kj::mv(cap), kj::refcounted<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
+  cap = capnp::membrane(kj::mv(cap), kj::rc<CompletionMembrane>(kj::mv(completionPaf.fulfiller)));
 
   this->capFulfiller->fulfill(kj::mv(cap));
 
