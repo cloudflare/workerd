@@ -31,6 +31,10 @@ on:
         type: string
         required: false
         default: //...
+      parse_headers:
+        type: boolean
+        required: false
+        default: false
       extra_bazel_args:
         type: string
         required: false
@@ -119,6 +123,13 @@ jobs:
         if: inputs.run_tests
         run: |
           bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+      - name: Parse headers
+        # TODO(cleanup): Bazel does not allow for only parsing headers in non-recursive targets, so
+        # we can't widely enable header parsing for now (dependencies like V8 do not specify
+        # dependencies of header targets properly).
+        if: inputs.parse_headers
+        run: |
+          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util //src/workerd/io:actor //src/workerd/io:worker-interface
       - name: Upload test logs
         if: inputs.upload_test_logs
         uses: actions/upload-artifact@v4
