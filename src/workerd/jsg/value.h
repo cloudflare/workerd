@@ -8,13 +8,12 @@
 // Handling of various basic value types: numbers, booleans, strings, optionals, maybes, variants,
 // arrays, buffers, dicts.
 
-#include "simdutf.h"
-
 #include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
 
+#include <kj-rs/convert.h>
 #include <v8-container.h>
 #include <v8-date.h>
 
@@ -453,6 +452,14 @@ class StringWrapper {
   // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
   // points are always replaced with U+FFFD). Code should make an explict choice between the two.
 
+  static constexpr const char* getName(::rust::String*) {
+    return "string";
+  }
+
+  static constexpr const char* getName(::rust::Str*) {
+    return "string";
+  }
+
   static constexpr const char* getName(kj::ArrayPtr<const char>*) {
     return "string";
   }
@@ -475,7 +482,21 @@ class StringWrapper {
   v8::Local<v8::String> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
-      kj::ArrayPtr<const char> value) {
+      const ::rust::String& value) {
+    return v8Str(js.v8Isolate, kj_rs::from<kj_rs::Rust>(value));
+  }
+
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const ::rust::Str& value) {
+    return v8Str(js.v8Isolate, kj_rs::from<kj_rs::Rust>(value));
+  }
+
+  v8::Local<v8::String> wrap(Lock& js,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      const kj::ArrayPtr<const char>& value) {
     return v8Str(js.v8Isolate, value);
   }
 
@@ -496,21 +517,21 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> creator,
       const ByteString& value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const USVString& value) {
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   v8::Local<v8::String> wrap(Lock& js,
       v8::Local<v8::Context> context,
       kj::Maybe<v8::Local<v8::Object>> creator,
       const DOMString& value) {
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
   kj::Maybe<kj::String> tryUnwrap(Lock& js,
@@ -552,6 +573,18 @@ class StringWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     JsString str(check(handle->ToString(context)));
     return str.toDOMString(js);
+  }
+
+  kj::Maybe<::rust::String> tryUnwrap(Lock& js,
+      v8::Local<v8::Context> context,
+      v8::Local<v8::Value> handle,
+      ::rust::String*,
+      kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    v8::String::ValueView view(js.v8Isolate, check(handle->ToString(context)));
+    if (!view.is_one_byte()) {
+      return ::rust::String(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+    }
+    return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
   }
 };
 
@@ -1292,7 +1325,7 @@ class NonCoercibleWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto& wrapper = static_cast<TypeWrapper&>(*this);
     if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
-        kj::isSameType<jsg::DOMString, T>()) {
+        kj::isSameType<jsg::DOMString, T>() || kj::isSameType<::rust::String, T>()) {
       if (!handle->IsString()) return kj::none;
       KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
         return NonCoercible<T>{
