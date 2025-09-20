@@ -186,6 +186,15 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // If true, then a commit is scheduled as a result of deleteAll() having been called.
   bool deleteAllCommitScheduled = false;
 
+  // Track allowUnconfirmed state for current transaction batch being built.
+  // These are reset when onWrite() schedules a commit.
+  bool currentTxnHasUnconfirmed = false;
+  bool currentTxnNeedsOutputGate = false;
+
+  // Promise for tracking completion of all commits (both confirmed and unconfirmed).
+  // Used by onNoPendingFlush() to implement sync() correctly.
+  kj::ForkedPromise<void> lastCommit = kj::Promise<void>(kj::READY_NOW).fork();
+
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {
    public:

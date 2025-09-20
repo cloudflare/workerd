@@ -221,8 +221,11 @@ void ActorSqlite::onWrite() {
   if (currentTxn.is<NoTxn>()) {
     auto txn = kj::heap<ImplicitTxn>(*this);
 
-    commitTasks.add(outputGate.lockWhile(
-        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    // Capture the output gate decision for this specific transaction batch
+    // Rule: If ANY write needs confirmation, the ENTIRE batch uses output gate
+    bool shouldUseOutputGate = currentTxnNeedsOutputGate;
+
+    auto commitPromise = kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
       // Don't commit if shutdown() has been called.
       requireNotBroken();
 
@@ -246,8 +249,32 @@ void ActorSqlite::onWrite() {
       // rather than after the callback.
       { auto drop = kj::mv(txn); }
 
+      // Reset state for next transaction batch now that the transaction is completed
+      currentTxnHasUnconfirmed = false;
+      currentTxnNeedsOutputGate = false;
+
       return commitImpl(kj::mv(precommitAlarmState));
-    })));
+    });
+
+    // Chain this commit to the previous commits for sync() tracking
+    auto chainedCommit = lastCommit.addBranch().then([commitPromise = kj::mv(commitPromise)]() mutable {
+      return kj::mv(commitPromise);
+    }).fork();
+
+    if (shouldUseOutputGate) {
+      // Confirmed write: block output gate until commit completes
+      commitTasks.add(outputGate.lockWhile(chainedCommit.addBranch()));
+    } else {
+      // Unconfirmed write: don't block output gate, but still handle errors
+      commitTasks.add(chainedCommit.addBranch().catch_([this](kj::Exception&& e) {
+        // If commit fails, we still need to break the output gate
+        return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
+      }));
+    }
+
+    // Update lastCommit to point to this new commit so future commits and sync() calls
+    // can wait for it.
+    lastCommit = kj::mv(chainedCommit);
   }
 }
 
@@ -467,12 +494,29 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
+
+  // Track options for current transaction batch BEFORE calling kv.put()
+  // because kv.put() may trigger onWrite() immediately
+  if (options.allowUnconfirmed) {
+    currentTxnHasUnconfirmed = true;
+  } else {
+    currentTxnNeedsOutputGate = true;
+  }
+
   kv.put(key, value);
   return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
+
+  // Track options for current transaction batch BEFORE any kv operations
+  if (options.allowUnconfirmed) {
+    currentTxnHasUnconfirmed = true;
+  } else {
+    currentTxnNeedsOutputGate = true;
+  }
+
   // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
   if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
     if (currentTxn.is<NoTxn>()) {
@@ -502,11 +546,19 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
       kv.put(pair.key, pair.value);
     }
   }
+
   return kj::none;
 }
 
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions options) {
   requireNotBroken();
+
+  // Track options for current transaction batch BEFORE calling kv.delete_()
+  if (options.allowUnconfirmed) {
+    currentTxnHasUnconfirmed = true;
+  } else {
+    currentTxnNeedsOutputGate = true;
+  }
 
   return kv.delete_(key);
 }
@@ -514,16 +566,31 @@ kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions op
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, WriteOptions options) {
   requireNotBroken();
 
+  // Track options for current transaction batch BEFORE any kv operations
+  if (options.allowUnconfirmed) {
+    currentTxnHasUnconfirmed = true;
+  } else {
+    currentTxnNeedsOutputGate = true;
+  }
+
   uint count = 0;
   for (auto& key: keys) {
     count += kv.delete_(key);
   }
+
   return count;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
+
+  // Track options for current transaction batch BEFORE calling metadata.setAlarm()
+  if (options.allowUnconfirmed) {
+    currentTxnHasUnconfirmed = true;
+  } else {
+    currentTxnNeedsOutputGate = true;
+  }
 
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
@@ -724,11 +791,9 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   // This implements sync().
   //
-  // TODO(sqlite): When we implement `allowUnconfirmed`, this implementation becomes incorrect
-  //   because sync() should wait on all writes, even ones with that flag, whereas the output
-  //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
-  //   implemented `allowUnconfirmed` yet.
-  return outputGate.wait();
+  // sync() should wait for ALL writes (both confirmed and unconfirmed) that are outstanding
+  // at the time sync() is called. We use lastCommit which chains all commits together.
+  return lastCommit.addBranch();
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark() {
