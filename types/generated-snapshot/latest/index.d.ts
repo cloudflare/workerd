@@ -8881,12 +8881,8 @@ declare module "cloudflare:node" {
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
     test?(controller: TestController): void | Promise<void>;
   }
-  export function httpServerHandler(
-    options: {
-      port: number;
-    },
-    handlers?: Omit<DefaultHandler, "fetch">,
-  ): DefaultHandler;
+  export function httpServerHandler(options: { port: number }): DefaultHandler;
+  export function httpServerHandler(server: object): DefaultHandler;
 }
 declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
