@@ -21,7 +21,11 @@ def kj_test(
             "@platforms//os:linux": 0,
             "//conditions:default": 1,
         }),
+        # For test binaries, reduce thinLTO optimizations and inlining to speed up linking. This
+        # only has an effect if thinLTO is enabled. Also apply dead_strip on macOS to manage binary
+        # sizes.
         linkopts = select({
+            "@platforms//os:linux": ["-Wl,--lto-O1", "-Wl,-mllvm,-import-instr-limit=5"],
             "@//:use_dead_strip": ["-Wl,-dead_strip", "-Wl,-no_exported_symbols"],
             "//conditions:default": [""],
         }),
