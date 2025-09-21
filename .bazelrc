@@ -45,9 +45,6 @@ build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
 
-## simdutf
-build --per_file_copt=external/simdutf@-Wno-unused-const-variable
-
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
@@ -75,19 +72,19 @@ build:unix --per_file_copt=external/ssl@-fno-exceptions
 build:unix --per_file_copt=external/v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/simdutf@-fno-exceptions
-build:windows --per_file_copt=external/abseil-cpp@/GX-
-build:windows --per_file_copt=external/protobuf@/GX-
-build:windows --per_file_copt=external/com_google_tcmalloc@/GX-
-build:windows --per_file_copt=external/com_googlesource_chromium_icu@/GX-
-build:windows --per_file_copt=external/perfetto@/GX-
-build:windows --per_file_copt=external/ssl@/GX-
-build:windows --per_file_copt=external/v8@/GX-
-build:windows --per_file_copt=external/ada-url@/GX-
-build:windows --per_file_copt=external/simdutf@/GX-
+build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
+build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
+build:windows --per_file_copt=external/com_google_tcmalloc@/clang:-fno-exceptions
+build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
+build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
+build:windows --per_file_copt=external/ssl@/clang:-fno-exceptions
+build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
+build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
+build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
 
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
 build:unix --per_file_copt=external/v8/src/torque@-fexceptions
-build:windows --per_file_copt=external/v8/src/torque@/GX
+build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
 
 # Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
 # performance improvements but makes code size worse. This will be the default in LLVM19.
@@ -213,11 +210,9 @@ build:unix --cxxopt='-Wextra' --host_cxxopt='-Wextra'
 build:unix --cxxopt='-Wunused-function' --host_cxxopt='-Wunused-function'
 build:unix --cxxopt='-Wunused-lambda-capture' --host_cxxopt='-Wunused-lambda-capture'
 build:unix --cxxopt='-Wunused-variable' --host_cxxopt='-Wunused-variable'
-build:unix --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
 build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
-build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
 build:unix --cxxopt='-Wsuggest-override'
 
 build:linux --config=unix
@@ -275,9 +270,6 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
 
-# Disable LLVM 20 warning about unused cli argument "-c".
-build:linux --copt='-Wno-unused-command-line-argument' --copt='-Wno-unknown-warning-option' --host_copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unknown-warning-option'
-
 #
 # Windows
 #
@@ -306,7 +298,6 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 # workaround.
 
 build:windows_no_dbg -c opt
-build:windows_no_dbg --copt='-O0'
 build:windows_no_dbg --copt='/Od'
 build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
 build:windows_no_dbg --features=-smaller_binary
@@ -379,10 +370,9 @@ build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
 build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
-build:windows --copt='-Wno-microsoft-unqualified-friend' --host_copt='-Wno-microsoft-unqualified-friend'
 # The `/std:c++23preview` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
-build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
+build:windows --per_file_copt=external/ssl@-Wno-unused-command-line-argument --host_per_file_copt=external/ssl@-Wno-unused-command-line-argument
 
 # MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.

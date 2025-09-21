@@ -12,7 +12,7 @@
 -Iexternal/codspeed/google_benchmark/include/
 -Iexternal/perfetto/include/
 -Iexternal/perfetto/include/perfetto/base/build_configs/bazel/
--Iexternal/ssl/include
+-Iexternal/boringssl+/include
 -Iexternal/ncrypto/include
 -isystembazel-bin/external/sqlite3
 -Isrc
@@ -121,10 +121,8 @@
 -Wextra
 -Wno-builtin-macro-redefined
 -Wno-free-nonheap-object
--Wno-ignored-qualifiers
 -Wno-missing-field-initializers
 -Wno-sign-compare
--Wno-strict-aliasing
 -Wno-unused-parameter
 -Wself-assign
 -Wthread-safety

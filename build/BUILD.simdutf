@@ -7,7 +7,10 @@ cc_library(
         # CPUs is no longer needed.
         "@platforms//cpu:x86_64": ["-msse4.2"],
         "//conditions:default": [],
-    }) + ["-Wno-unused-function"],
+    }) + [
+        "-Wno-unused-function",
+        "-Wno-unused-const-variable",
+    ],
     defines = ["SIMDUTF_ATOMIC_REF"],
     visibility = ["//visibility:public"],
 )
