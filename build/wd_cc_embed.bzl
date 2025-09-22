@@ -81,7 +81,10 @@ extern size_t {embed_name}_size;
         additional_compiler_inputs = [src],
         conlyopts = select({
             "@platforms//os:windows": [
-                "/std:c26",
+                # Windows doesn't recognize C23 yet, and complains about C23 extensions even with clatest.
+                "/std:clatest",
+                "-Wno-c23-extensions",
+                "-Wno-unused-command-line-argument",
                 "/clang:--embed-dir=" + workspace_root + embed_package,
                 "/clang:--embed-dir=$(GENDIR)/" + workspace_root + embed_package,
             ],
