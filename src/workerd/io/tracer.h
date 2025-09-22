@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/io-context.h>
 #include <workerd/io/trace.h>
 
 #include <kj/refcount.h>
@@ -114,9 +115,8 @@ class BaseTracer: public kj::Refcounted {
       kj::Array<kj::byte> message) = 0;
 
   // Adds info about the event that triggered the trace.  Must not be called more than once.
-  virtual void setEventInfo(const tracing::InvocationSpanContext& context,
-      kj::Date timestamp,
-      tracing::EventInfo&& info) = 0;
+  virtual void setEventInfo(
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) = 0;
 
   // Adds info about the response. Must not be called more than once, and only
   // after passing a FetchEventInfo to setEventInfo().
@@ -169,9 +169,17 @@ class WorkerTracer: public BaseTracer {
       kj::Date timestamp,
       kj::String channel,
       kj::Array<kj::byte> message) override;
-  void setEventInfo(const tracing::InvocationSpanContext& context,
-      kj::Date timestamp,
-      tracing::EventInfo&& info) override;
+  // Set event info (equivalent to Onset event under streaming). We use the incomingRequest here
+  // since the IoContext may not have the IncomingRequest linked to it yet (depending on if
+  // delivered() has been set), so it might not be possible to acquire the required timestamp and
+  // span context from it.
+  void setEventInfo(
+      IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
+  // Variant for when we don't have a proper IoContext but instead provide context and timestamp
+  // directly, used internally for RPC-based tracing.
+  virtual void setEventInfoInternal(
+      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
+
   void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
   virtual void recordTimestamp(kj::Date timestamp) override;
@@ -195,6 +203,8 @@ class WorkerTracer: public BaseTracer {
   SpanParent userRequestSpan;
   // span attributes to be added to the onset event.
   kj::Vector<tracing::Attribute> attributes;
+  // Weak reference to the IoContext, used to report span end time if available.
+  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
