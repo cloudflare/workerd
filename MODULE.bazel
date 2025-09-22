@@ -40,4 +40,7 @@ git_override(
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
 
+# Transitive dependency of workerd
+bazel_dep(name = "rules_pkg", version = "1.1.0")
+
 include("//build/deps:deps.MODULE.bazel")
