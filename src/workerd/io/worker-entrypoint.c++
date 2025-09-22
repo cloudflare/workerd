@@ -134,9 +134,6 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   bool isSent() const {
     return sent;
   }
-  uint getHttpResponseStatus() const {
-    return httpResponseStatus;
-  }
 
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
@@ -145,7 +142,6 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
     TRACE_EVENT(
         "workerd", "WorkerEntrypoint::ResponseSentTracker::send()", "statusCode", statusCode);
     sent = true;
-    httpResponseStatus = statusCode;
     return inner.send(statusCode, statusText, headers, expectedBodySize);
   }
 
@@ -156,7 +152,6 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   }
 
  private:
-  uint httpResponseStatus = 0;
   kj::HttpService::Response& inner;
   bool sent = false;
 };
@@ -260,9 +255,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
   auto wrappedResponse = kj::heap<ResponseSentTracker>(response);
 
   bool isActor = context.getActor() != kj::none;
-  // HACK: Capture workerTracer directly, it's unclear how to acquire the right tracer from context
-  // when we need it.
-  kj::Maybe<BaseTracer&> workerTracer;
 
   KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
     auto timestamp = context.now();
@@ -290,7 +282,6 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
 
     t.setEventInfo(context.getInvocationSpanContext(), timestamp,
         tracing::FetchEventInfo(method, kj::str(url), kj::mv(cfJson), kj::mv(traceHeadersArray)));
-    workerTracer = t;
   }
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -323,19 +314,10 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         cfBlobJson, lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), kj::mv(signal));
   })
-      .then([this, &context, &wrappedResponse = *wrappedResponse, workerTracer](
-                api::DeferredProxy<void> deferredProxy) {
+      .then([this](api::DeferredProxy<void> deferredProxy) {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() deferred proxy step",
         PERFETTO_FLOW_FROM_POINTER(this));
     proxyTask = kj::mv(deferredProxy.proxyTask);
-    KJ_IF_SOME(t, workerTracer) {
-      auto httpResponseStatus = wrappedResponse.getHttpResponseStatus();
-      if (httpResponseStatus != 0) {
-        t.setReturn(context.now(), tracing::FetchResponseInfo(httpResponseStatus));
-      } else {
-        t.setReturn(context.now());
-      }
-    }
   })
       .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
