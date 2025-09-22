@@ -8527,6 +8527,17 @@ interface MediaError extends Error {
   readonly message: string;
   readonly stack?: string;
 }
+declare module "cloudflare:node" {
+  interface NodeStyleServer {
+    listen(...args: unknown[]): this;
+    address(): {
+      port?: number | null | undefined;
+    };
+  }
+  export function httpServerHandler(port: number): ExportedHandler;
+  export function httpServerHandler(options: { port: number }): ExportedHandler;
+  export function httpServerHandler(server: NodeStyleServer): ExportedHandler;
+}
 type Params<P extends string = any> = Record<P, string | string[]>;
 type EventContext<Env, P extends string, Data> = {
   request: Request<unknown, IncomingRequestCfProperties<unknown>>;
@@ -8871,18 +8882,6 @@ declare namespace Cloudflare {
           : DurableObjectNamespace<undefined>
         : {});
   };
-}
-declare module "cloudflare:node" {
-  export interface DefaultHandler {
-    fetch?(request: Request): Response | Promise<Response>;
-    tail?(events: TraceItem[]): void | Promise<void>;
-    trace?(traces: TraceItem[]): void | Promise<void>;
-    scheduled?(controller: ScheduledController): void | Promise<void>;
-    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
-    test?(controller: TestController): void | Promise<void>;
-  }
-  export function httpServerHandler(options: { port: number }): DefaultHandler;
-  export function httpServerHandler(server: object): DefaultHandler;
 }
 declare namespace CloudflareWorkersModule {
   export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
