@@ -491,17 +491,11 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
   }
 
   kj::Promise<void> timeoutPromise = nullptr;
-  auto timeoutLogPromise = [this]() -> kj::Promise<void> {
-    return context->run([this](Worker::Lock&) {
-      context->logWarning(
-          "IoContext timed out due to inactivity, waitUntil tasks were cancelled without completing.");
-    });
-  };
   KJ_IF_SOME(a, context->actor) {
     // For actors, all promises are canceled on actor shutdown, not on a fixed timeout,
     // because work doesn't necessarily happen on a per-request basis in actors and we don't want
     // work being unexpectedly canceled based on which request initiated it.
-    timeoutPromise = a.onShutdown().then(kj::mv(timeoutLogPromise));
+    timeoutPromise = a.onShutdown();
 
     // Also arrange to cancel the drain if a new request arrives, since it will take over
     // responsibility for background tasks.
@@ -510,7 +504,7 @@ kj::Promise<void> IoContext::IncomingRequest::drain() {
     timeoutPromise = timeoutPromise.exclusiveJoin(kj::mv(drainPaf.promise));
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
-    timeoutPromise = context->limitEnforcer->limitDrain().then(kj::mv(timeoutLogPromise));
+    timeoutPromise = context->limitEnforcer->limitDrain();
   }
   return context->waitUntilTasks.onEmpty()
       .exclusiveJoin(kj::mv(timeoutPromise))
