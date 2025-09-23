@@ -313,6 +313,7 @@ build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 # /INCREMENTAL:NO is required when using /OPT:REF
 build:windows --copt='/Gy' --copt='/Gw'
 build:windows --linkopt='/OPT:REF'
+build:windows --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 build:windows --linkopt='/INCREMENTAL:NO'
 
 # This hides inline symbols in classes that are marked to be exported, similar to
