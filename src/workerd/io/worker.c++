@@ -3305,6 +3305,19 @@ void Worker::Isolate::logWarning(kj::StringPtr description, Lock& lock) {
     fprintf(stderr, "%s\n", description.cStr());
     fflush(stderr);
   }
+
+  if (IoContext::hasCurrent()) {
+    auto& ioContext = IoContext::current();
+    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+      // json encoding is required over simply wrapping it in quotes to correctly escape the string.
+      capnp::JsonCodec json;
+      auto jsonDescription = kj::str("[", json.encode(capnp::Text::Reader(description)), "]");
+
+      auto timestamp = ioContext.now();
+      tracer.addLog(
+          ioContext.getInvocationSpanContext(), timestamp, LogLevel::WARN, kj::mv(jsonDescription));
+    }
+  }
 }
 
 void Worker::Isolate::logWarningOnce(kj::StringPtr description, Lock& lock) {
