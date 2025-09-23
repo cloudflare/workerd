@@ -10,6 +10,8 @@ python.toolchain(
     python_version = "3.13",
 )
 
+use_repo(python, "python_3_13")
+
 # python_register_toolchains(
 #     name = PYTHON_TOOLCHAIN,
 #     ignore_root_user_error = True,
