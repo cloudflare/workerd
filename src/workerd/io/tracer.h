@@ -138,12 +138,6 @@ class BaseTracer: public kj::Refcounted {
   // reference the tracer. This can only be set once.
   void setUserRequestSpan(SpanParent&& span);
 
-  // TODO(felix): Used for debug logging, remove after a few days.
-  void setIsJsRpc();
-
-  // Indicates that we're reporting from a JsRpc customEvent.
-  bool isJsRpc = false;
-
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;

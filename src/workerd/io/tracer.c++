@@ -171,10 +171,6 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the legacy trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // TODO(felix): Used for debug logging, remove after a few days.
-    if (topLevelInvocationSpanContext == kj::none) {
-      LOG_NOSENTRY(WARNING, "tried to send log before onset event", trace->entrypoint, isJsRpc);
-    }
     // If message is too big on its own, truncate it.
     writer->report(context,
         {(tracing::Log(timestamp, logLevel,
@@ -228,8 +224,7 @@ void WorkerTracer::addSpan(CompleteSpan&& span) {
   }
 
   // Span events are transmitted together for now.
-  auto& topLevelContext =
-      KJ_ASSERT_NONNULL(topLevelInvocationSpanContext, span, trace->entrypoint, isJsRpc);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
   // Compose span events. For SpanOpen, an all-zero spanId is interpreted as having no spans above
   // this one, thus we use the Onset spanId instead (taken from topLevelContext). We go to great
   // lengths to rule out getting an all-zero spanId by chance (see SpanId::fromEntropy()), so this
@@ -502,10 +497,6 @@ void WorkerTracer::setWorkerAttribute(kj::ConstString key, Span::TagValue value)
 
 SpanParent BaseTracer::getUserRequestSpan() {
   return userRequestSpan.addRef();
-}
-
-void BaseTracer::setIsJsRpc() {
-  isJsRpc = true;
 }
 
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
