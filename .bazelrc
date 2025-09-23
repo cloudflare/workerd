@@ -316,6 +316,9 @@ build:windows --linkopt='/OPT:REF'
 build:windows --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 build:windows --linkopt='/INCREMENTAL:NO'
 
+# Use LLD linker for faster linking, similar to Linux
+build:windows --linkopt="-fuse-ld=lld"
+
 # This hides inline symbols in classes that are marked to be exported, similar to
 # -fvisibility-inlines-hidden on Unix systems (https://blog.llvm.org/2018/11/30-faster-windows-builds-with-clang-cl_14.html)
 # Currently this only reduces object sizes slightly, larger gains are possible if we compile V8 as
