@@ -25,6 +25,22 @@ kj::Maybe<const Module&> checkModule(const ResolveContext& context, const Module
   return module;
 };
 
+kj::String specifierToString(jsg::Lock& js, v8::Local<v8::String> spec) {
+  // Source files in workers end up being converted to UTF-8 bytes, so if the specifier
+  // string contains non-ASCII unicode characters, those will be directly encoded as UTF-8
+  // bytes, which unfortunately end up double-encoded if we try to read them using the
+  // regular js.toString() method. Doh! Fortunately they come through as one-byte strings,
+  // so we can detect that case and handle those correctly here.
+  if (spec->ContainsOnlyOneByte()) {
+    auto buf = kj::heapArray<char>(spec->Length() + 1);
+    spec->WriteOneByteV2(js.v8Isolate, 0, spec->Length(), buf.asBytes().begin(),
+        v8::String::WriteFlags::kNullTerminate);
+    KJ_ASSERT(buf[buf.size() - 1] == '\0');
+    return kj::String(kj::mv(buf));
+  }
+  return js.toString(spec);
+}
+
 // Ensure that the given module has been instantiated or errored.
 // If false is returned, then an exception should have been scheduled
 // on the isolate.
@@ -746,7 +762,7 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   try {
     return js.tryCatch([&]() -> v8::MaybeLocal<v8::Promise> {
-      auto spec = js.toString(specifier);
+      auto spec = specifierToString(js, specifier);
 
       // The proposed specification for import attributes strongly recommends that
       // embedders reject import attributes and types they do not understand/implement.
@@ -862,7 +878,7 @@ v8::MaybeLocal<std::conditional_t<IsSourcePhase, v8::Object, v8::Module>> resolv
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
 
   return js.tryCatch([&]() -> v8::MaybeLocal<ReturnType> {
-    auto spec = kj::str(specifier);
+    auto spec = specifierToString(js, specifier);
 
     // The proposed specification for import attributes strongly recommends that
     // embedders reject import attributes and types they do not understand/implement.
@@ -1202,27 +1218,99 @@ ModuleBundle::BundleBuilder::BundleBuilder(const jsg::Url& bundleBase)
       bundleBase(bundleBase) {}
 
 namespace {
-kj::StringPtr checkSpecifierName(kj::StringPtr name) {
-  if (name.startsWith("/")) {
-    name = name.slice(1);
-  }
-  if (name.size() == 0) {
-    KJ_FAIL_REQUIRE("Module name cannot be empty");
-  }
-  return name;
-}
-
 static constexpr auto BUNDLE_CLONE_OPTIONS = jsg::Url::EquivalenceOption::IGNORE_FRAGMENTS |
     jsg::Url::EquivalenceOption::IGNORE_SEARCH | jsg::Url::EquivalenceOption::NORMALIZE_PATH;
+
+// Takes the user-provided module name and normalizes it to a form that can be
+// resolved relative to the bundle base. This involves pre-parsing the name as a URL
+// relative to a dummy base URL in order to normalize out dot and double-dot segments,
+// then stripping off any leading slashes so that the name is always relative and cannot
+// be interpreted as an absolute path.
+jsg::Url normalizeModuleName(kj::StringPtr name, const jsg::Url& base) {
+  // This first step normalizes out path segments like "." and "..", drops query
+  // strings and fragments, and normalizes percent-encoding in the path.
+  auto url = KJ_ASSERT_NONNULL(base.tryResolve(name)).clone(BUNDLE_CLONE_OPTIONS);
+
+  // If the protocol is not file:, then we don't need to do any more processing
+  // here. We will check the validity of the result as a module URL in the next
+  // step.
+  if (url.getProtocol() != "file:"_kj) {
+    return kj::mv(url);
+  }
+
+  auto urlPath = url.getPathname();
+  auto basePath = base.getPathname();
+
+  // The url path must not be identical to the base...
+  KJ_REQUIRE(urlPath != basePath, "Invalid empty module name");
+
+  // If the url path starts with the base path, then we're good!
+  if (urlPath.startsWith(basePath)) {
+    return kj::mv(url);
+  }
+
+  // Otherwise, let's make sure that the url path is processed as
+  // relative to the base path. We do this by stripping off any
+  // leading slashes from the front of the URL then re-resolve
+  // against the base. This should be an exceedingly rare edge
+  // case if the worker bundle is being constructed properly. It's
+  // meant only to handle cases where silliness like "///foo" is
+  // given as a module name.
+  while (urlPath.startsWith("/"_kj) && urlPath.size() > 0) {
+    urlPath = urlPath.slice(1);
+  }
+  KJ_REQUIRE(urlPath.size() > 0, "Invalid empty module name");
+
+  return KJ_ASSERT_NONNULL(base.tryResolve(urlPath));
+}
+
+bool isValidBundleModuleUrl(const jsg::Url& url, const jsg::Url& base) {
+  KJ_DASSERT(base.getProtocol() == "file:"_kj);
+  KJ_DASSERT(base.getPathname().endsWith("/"_kj));
+
+  // Let's forbid users from using cloudflare: and workerd: URLs in bundles so that
+  // we can protect those namespaces for our own future use. Specifically, these
+  // should only be used by the runtime to refer to built-in modules. We don't
+  // restrict other non-standard protocols like node:
+  KJ_REQUIRE(url.getProtocol() != "cloudflare:"_kj,
+      "The cloudflare: protocol is reserved and cannot be used in module bundles");
+  KJ_REQUIRE(url.getProtocol() != "workerd:"_kj,
+      "The workerd: protocol is reserved and cannot be used in module bundles");
+
+  if (url.getProtocol() != "file:"_kj) {
+    // Different protocols are always OK
+    return true;
+  }
+
+  // Module file: URLs must not have a host component.
+  // We already know the protocol is "file:" here because of the check above.
+  if (url.getHost() != ""_kj) {
+    return false;
+  }
+
+  // Check if url is subordinate to the base.
+  // This means url's path should start with base's path as a prefix
+  auto aPath = url.getPathname();
+  auto bPath = base.getPathname();
+
+  return aPath.startsWith(bPath);
+}
+
+// Converts the name given for a user-bundle module into a fully qualified module url.
+// This involves normalizing the name such that it is relative to the bundle base, removes
+// any query parameters or fragments, removes dot and double-dot path segments, normalizes
+// percent-encoding, and otherwise validates that the resulting URL is a valid URL.
+const jsg::Url processModuleName(kj::StringPtr name, const jsg::Url& base) {
+  auto url = normalizeModuleName(name, base);
+  KJ_REQUIRE(isValidBundleModuleUrl(url, base), "Invalid module name: ", name);
+  return url;
+}
+
 }  // namespace
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
     kj::StringPtr name, EvaluateCallback callback, kj::Array<kj::String> namedExports) {
-  name = checkSpecifierName(name);
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  // TODO(cleanup): Eliminate the double cloning here.
-  // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(BUNDLE_CLONE_OPTIONS);
+  const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), namedExports = kj::mv(namedExports),
           type = type()](const ResolveContext& context) mutable
@@ -1236,10 +1324,7 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
     kj::StringPtr name, kj::ArrayPtr<const char> source, Module::Flags flags) {
-  name = checkSpecifierName(name);
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(BUNDLE_CLONE_OPTIONS);
+  const auto url = processModuleName(name, bundleBase);
   add(url,
       [url = url.clone(), source, flags, type = type()](const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
@@ -1251,11 +1336,8 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
     kj::StringPtr name, kj::ArrayPtr<const kj::byte> data) {
-  name = checkSpecifierName(name);
+  const auto url = processModuleName(name, bundleBase);
   auto callback = jsg::modules::Module::newWasmModuleHandler(data);
-  auto url = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  // Make sure that percent-encoding in the path is normalized so we can match correctly.
-  url = url.clone(BUNDLE_CLONE_OPTIONS);
   add(url,
       [url = url.clone(), callback = kj::mv(callback), type = type()](
           const ResolveContext& context) mutable
@@ -1269,12 +1351,8 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addWasmModule(
 
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::alias(
     kj::StringPtr alias, kj::StringPtr name) {
-  alias = checkSpecifierName(alias);
-  name = checkSpecifierName(name);
-  auto aliasUrl = KJ_ASSERT_NONNULL(bundleBase.tryResolve(alias));
-  auto id = KJ_ASSERT_NONNULL(bundleBase.tryResolve(name));
-  aliasUrl = aliasUrl.clone(BUNDLE_CLONE_OPTIONS);
-  id = id.clone(BUNDLE_CLONE_OPTIONS);
+  const auto id = processModuleName(name, bundleBase);
+  const auto aliasUrl = processModuleName(alias, bundleBase);
   Builder::alias(aliasUrl, id);
   return *this;
 }

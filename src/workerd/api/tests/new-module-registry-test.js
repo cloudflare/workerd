@@ -139,6 +139,54 @@ await rejects(import('module-not-found'), {
   message: /Module not found: file:\/\/\/bundle\/module-not-found/,
 });
 
+await rejects(import('file:///outside'), {
+  message: /Module not found/,
+});
+
+await import('file:///bundle/outside');
+
+const abc123 = await import('abc123');
+strictEqual(abc123.default, 1);
+
+// Full URLs can be used as module specifiers. These would not
+// actually resolve to network requests.
+const mod = await import('https://example.com/mod');
+strictEqual(mod.default, 'example');
+
+// Whitespace and leading ./, ../, and multiple slashes are
+// stripped and ignored when setting up the module registry,
+// so they should resolve as expected here as being relative
+// to the bundle base URL.
+const mod2 = await import('   ./should/be/ok   ');
+strictEqual(mod2.default, 1);
+
+// UTF-8 percent-encoded of 部品 (Japanese for "component")
+const mod3 = await import('%E9%83%A8%E5%93%81');
+const mod4 = await import('部品'); // Get's converted into UTF-8 bytes in source
+const mod5 = await import('\u90e8\u54c1'); // Specifically UTF-16 code units in source
+const mod6 = await import('\xE9\x83\xA8\xE5\x93\x81');
+import { default as mod7 } from '部品';
+import { default as mod8 } from '\u90e8\u54c1';
+import { default as mod9 } from '\xE9\x83\xA8\xE5\x93\x81';
+import { default as mod10 } from '%E9%83%A8%E5%93%81';
+
+strictEqual(mod3.default, 1);
+strictEqual(mod4.default, 1);
+strictEqual(mod5.default, 1);
+strictEqual(mod6.default, 1);
+strictEqual(mod7, 1);
+strictEqual(mod8, 1);
+strictEqual(mod9, 1);
+strictEqual(mod10, 1);
+
+// The percent-encoded UTF-16 form of 部品 should not work.
+await rejects(import('%E8%90%C1%54'), {
+  message: /Module not found/,
+});
+await rejects(import('%90%E8%54%C1'), {
+  message: /Module not found/,
+});
+
 // Verify that a module is unable to perform IO operations at the top level, even if
 // the dynamic import is initiated within the scope of an active IoContext.
 export const noTopLevelIo = {
