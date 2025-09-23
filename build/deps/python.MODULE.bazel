@@ -47,7 +47,9 @@ pip.parse(
 
     hub_name = "v8_python_deps",
     python_version = "3.13",
-    requirements_lock = "@v8//:bazel/requirements.txt",
+    # TODO(alexeagle): switch back to upstream when v8 comes via bzlmod
+    # requirements_lock = "@v8//:bazel/requirements.txt",
+    requirements_lock = "//build/deps:v8.requirements.txt",
 )
 
 
