@@ -251,7 +251,7 @@ DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
 
-  this->maybePrimary = js.alloc<DurableObject>(
+  this->maybePrimary = js.alloc<DurableObjectStub>(
       js.alloc<DurableObjectId>(kj::mv(primaryActorId)), kj::mv(outgoingFactory), requiresHost);
 }
 
@@ -864,7 +864,7 @@ void DurableObjectStorage::disableReplicas() {
   return cache->disableReplicas();
 }
 
-jsg::Optional<jsg::Ref<DurableObject>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
+jsg::Optional<jsg::Ref<DurableObjectStub>> DurableObjectStorage::getPrimary(jsg::Lock& js) {
   KJ_IF_SOME(primary, maybePrimary) {
     return primary.addRef();
   }
@@ -1002,7 +1002,7 @@ jsg::Ref<Fetcher> DurableObjectFacets::get(jsg::Lock& js,
       ? Fetcher::RequiresHostAndProtocol::YES
       : Fetcher::RequiresHostAndProtocol::NO;
 
-  // We return a plain Fetcher, not a DurableObject, because we don't want the stub to have
+  // We return a plain Fetcher, not a DurableObjectStub, because we don't want the stub to have
   // `name` or `id` properties.
   return js.alloc<Fetcher>(ioCtx.addObject(kj::mv(factory)), requiresHost, true /* isInHouse */);
 }
