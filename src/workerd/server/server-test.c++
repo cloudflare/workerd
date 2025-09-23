@@ -4361,8 +4361,8 @@ KJ_TEST("Server: ctx.exports self-referential bindings") {
     services = [
       ( name = "hello",
         worker = (
-          compatibilityDate = "2024-02-23",
-          compatibilityFlags = ["experimental"],
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
@@ -4704,7 +4704,7 @@ KJ_TEST("Server: Durable Object facets") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2025-04-01",
-          compatibilityFlags = ["experimental"],
+          compatibilityFlags = ["experimental","enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =
@@ -4975,7 +4975,7 @@ KJ_TEST("Server: Pass service stubs in ctx.props.") {
       ( name = "hello",
         worker = (
           compatibilityDate = "2025-08-01",
-          compatibilityFlags = ["experimental"],
+          compatibilityFlags = ["enable_ctx_exports"],
           modules = [
             ( name = "main.js",
               esModule =

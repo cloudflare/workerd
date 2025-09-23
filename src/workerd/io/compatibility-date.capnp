@@ -1184,4 +1184,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $experimental;
   # Enables the Node.js non-functional stub sqlite module. It is required to use this
   # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableCtxExports @139 :Bool
+    $compatEnableFlag("enable_ctx_exports");
+  # Enable the ctx.exports API.
 }
