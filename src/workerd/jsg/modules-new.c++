@@ -1277,6 +1277,14 @@ bool isValidBundleModuleUrl(const jsg::Url& url, const jsg::Url& base) {
   KJ_REQUIRE(url.getProtocol() != "workerd:"_kj,
       "The workerd: protocol is reserved and cannot be used in module bundles");
 
+  // Let's forbid data: URL use from module bundles. They are not yet supported
+  // by the runtime due to dynamic eval restrictions. Even when we do support them
+  // eventually, we want to be able to reserve the data: URL namespace for that
+  // use. If we allowed worker bundles to use data: URLs that we could end up
+  // requiring a compat flag later to actually properly enable them.
+  KJ_REQUIRE(
+      url.getProtocol() != "data:"_kj, "The data: protocol cannot be used in module bundles");
+
   if (url.getProtocol() != "file:"_kj) {
     // Different protocols are always OK
     return true;
