@@ -685,7 +685,7 @@ export let ctxExports = {
     let worker = env.loader.get('ctxExports', () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['experimental'],
+        compatibilityFlags: ['enable_ctx_exports'],
         mainModule: 'foo.js',
         allowExperimental: true,
         modules: {
