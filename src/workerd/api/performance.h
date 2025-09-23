@@ -6,6 +6,7 @@
 
 #include <workerd/api/basics.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/limit-enforcer.h>
 #include <workerd/jsg/jsg.h>
 
 namespace workerd::api {
@@ -404,6 +405,9 @@ class Performance: public EventTarget {
  public:
   static jsg::Ref<Performance> constructor() = delete;
 
+  explicit Performance(const IsolateLimitEnforcer& isolateLimitEnforcer)
+      : isolateLimitEnforcer(isolateLimitEnforcer) {}
+
   // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
   // is no other appropriate time origin to use given that the Worker platform is intended to be
   // treated like one big computer rather than many individual instances. In particular, if and
@@ -483,6 +487,7 @@ class Performance: public EventTarget {
   }
 
  private:
+  const IsolateLimitEnforcer& isolateLimitEnforcer;
   kj::Vector<jsg::Ref<PerformanceEntry>> entries;
 };
 

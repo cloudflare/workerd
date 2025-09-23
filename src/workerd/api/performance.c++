@@ -14,7 +14,7 @@ namespace workerd::api {
 double Performance::now(jsg::Lock& js) {
   // We define performance.now() for compatibility purposes, but due to Spectre concerns it
   // returns exactly what Date.now() returns.
-  Worker::Isolate::from(js).getLimitEnforcer().markPerfEvent("performance_now"_kjc);
+  isolateLimitEnforcer.markPerfEvent("performance_now"_kjc);
   return dateNow();
 }
 
@@ -167,8 +167,8 @@ kj::ArrayPtr<jsg::Ref<PerformanceEntry>> PerformanceObserverEntryList::getEntrie
 
 jsg::Ref<PerformanceMark> Performance::mark(
     jsg::Lock& js, kj::String name, jsg::Optional<PerformanceMark::Options> options) {
-  // TODO(someday): Include `nmae` in the perf event name?
-  Worker::Isolate::from(js).getLimitEnforcer().markPerfEvent("performance_mark"_kjc);
+  // TODO(someday): Include `name` in the perf event name?
+  isolateLimitEnforcer.markPerfEvent("performance_mark"_kjc);
   double startTime = dateNow();
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(time, opts.startTime) {
@@ -192,7 +192,7 @@ jsg::Ref<PerformanceMeasure> Performance::measure(jsg::Lock& js,
     kj::String measureName,
     kj::OneOf<PerformanceMeasure::Options, kj::String> measureOptionsOrStartMark,
     jsg::Optional<kj::String> maybeEndMark) {
-  Worker::Isolate::from(js).getLimitEnforcer().markPerfEvent("performance_measure"_kjc);
+  isolateLimitEnforcer.markPerfEvent("performance_measure"_kjc);
   double startTime = dateNow();
   double endTime = startTime;
 

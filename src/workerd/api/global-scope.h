@@ -584,7 +584,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   }
 
   jsg::Ref<Performance> getPerformance(jsg::Lock& js) {
-    return js.alloc<Performance>();
+    return js.alloc<Performance>(Worker::Isolate::from(js).getLimitEnforcer());
   }
 
   jsg::Ref<Cloudflare> getCloudflare(jsg::Lock& js) {
