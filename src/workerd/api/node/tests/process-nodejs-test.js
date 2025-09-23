@@ -82,6 +82,7 @@ const processImplementedOrStubbedKeys = [
   'arch',
   'argv',
   'argv0',
+  'assert',
   'availableMemory',
   'channel',
   'chdir',
@@ -1113,5 +1114,13 @@ export const processStdio = {
     assert.strictEqual(process.stdin.fd, 0, 'process.stdin.fd should be 0');
     assert.strictEqual(process.stdout.fd, 1, 'process.stdout.fd should be 1');
     assert.strictEqual(process.stderr.fd, 2, 'process.stderr.fd should be 2');
+  },
+};
+
+export const processAssert = {
+  test() {
+    assert.ok('assert' in process);
+    assert.notStrictEqual(process.assert, undefined);
+    assert.strictEqual(typeof process.assert, 'function');
   },
 };

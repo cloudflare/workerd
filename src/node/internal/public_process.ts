@@ -21,7 +21,6 @@ import { parseEnv } from 'node-internal:internal_utils';
 import { Writable } from 'node-internal:streams_writable';
 import { writeSync } from 'node-internal:internal_fs_sync';
 import { ReadStream } from 'node-internal:internal_fs_streams';
-import type * as NodeFS from 'node:fs';
 import {
   platform,
   nextTick,
@@ -31,7 +30,9 @@ import {
   _setEventsProcess,
 } from 'node-internal:internal_process';
 import { validateString } from 'node-internal:validators';
+import internalAssert from 'node-internal:internal_assert';
 import type { Readable } from 'node-internal:streams_readable';
+import type * as NodeFS from 'node:fs';
 
 export { platform, nextTick, emitWarning, env, features };
 
@@ -622,7 +623,14 @@ export const _disconnect = undefined,
   _channel = undefined,
   _send = undefined;
 
+export let assert: typeof internalAssert.ok | undefined = undefined;
+
+if (!Cloudflare.compatibilityFlags.remove_nodejs_compat_eol_v23) {
+  assert = internalAssert.ok.bind(internalAssert);
+}
+
 const _process = {
+  assert,
   version,
   versions,
   title,
