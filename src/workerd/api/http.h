@@ -339,7 +339,7 @@ public:
   // https://fetch.spec.whatwg.org/#concept-bodyinit-extract
   static ExtractedBody extractBody(jsg::Lock& js, Initializer init);
 
-  explicit Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers);
+  explicit Body(kj::Maybe<ExtractedBody> init, Headers& headers);
 
   kj::Maybe<Buffer> getBodyBuffer(jsg::Lock& js);
 
@@ -856,7 +856,7 @@ public:
           kj::Maybe<Body::ExtractedBody> body, kj::Maybe<jsg::Ref<AbortSignal>> thisSignal,
           CacheMode cacheMode = CacheMode::NONE,
           Response_BodyEncoding responseBodyEncoding = Response_BodyEncoding::AUTO)
-    : Body(js, kj::mv(body), *headers), method(method), url(kj::str(url)),
+    : Body(kj::mv(body), *headers), method(method), url(kj::str(url)),
       redirect(redirect), headers(kj::mv(headers)), fetcher(kj::mv(fetcher)),
       cacheMode(cacheMode), cf(kj::mv(cf)), responseBodyEncoding(responseBodyEncoding) {
     KJ_IF_SOME(s, signal) {

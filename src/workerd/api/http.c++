@@ -730,10 +730,11 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     kj::mv(contentType)};
 }
 
-Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
-    : impl(kj::mv(init).map([&headers, &js](auto i) -> Impl {
+Body::Body(kj::Maybe<ExtractedBody> init, Headers& headers)
+    : impl(kj::mv(init).map([&headers](auto i) -> Impl {
         KJ_IF_SOME(ct, i.contentType) {
           if (!headers.hasLowerCase("content-type")) {
+            auto& js = IoContext::current().getCurrentLock();
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
             headers.set(js, jsg::ByteString(kj::str("Content-Type")), jsg::ByteString(kj::mv(ct)));
@@ -1369,7 +1370,7 @@ Response::Response(jsg::Lock& js,
     kj::Array<kj::String> urlList,
     kj::Maybe<jsg::Ref<WebSocket>> webSocket,
     Response::BodyEncoding bodyEncoding)
-    : Body(js, kj::mv(body), *headers),
+    : Body(kj::mv(body), *headers),
       statusCode(statusCode),
       statusText(kj::mv(statusText)),
       headers(kj::mv(headers)),
