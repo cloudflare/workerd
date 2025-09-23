@@ -309,6 +309,12 @@ build:windows_dbg --copt='/Gy' --copt='/Gw'
 build:windows_dbg --linkopt='/OPT:REF'
 build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 
+# Apply function-level and data-level linking optimizations similar to Linux gc-sections
+# /INCREMENTAL:NO is required when using /OPT:REF
+build:windows --copt='/Gy' --copt='/Gw'
+build:windows --linkopt='/OPT:REF'
+build:windows --linkopt='/INCREMENTAL:NO'
+
 # This hides inline symbols in classes that are marked to be exported, similar to
 # -fvisibility-inlines-hidden on Unix systems (https://blog.llvm.org/2018/11/30-faster-windows-builds-with-clang-cl_14.html)
 # Currently this only reduces object sizes slightly, larger gains are possible if we compile V8 as
