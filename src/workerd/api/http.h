@@ -1282,8 +1282,6 @@ private:
   // body twice, they can specify encodeBody: "manual".
   Response::BodyEncoding bodyEncoding;
 
-  bool hasEnabledWebSocketCompression = false;
-
   // Capturing the AsyncContextFrame when the Response is created is necessary because there's
   // a natural separation that occurs between the moment the Response is created and when we
   // actually start consuming it. If a JS-backed ReadableStream is used, we end up losing the

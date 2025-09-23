@@ -1377,7 +1377,6 @@ Response::Response(jsg::Lock& js,
       urlList(kj::mv(urlList)),
       webSocket(kj::mv(webSocket)),
       bodyEncoding(bodyEncoding),
-      hasEnabledWebSocketCompression(FeatureFlags::get(js).getWebSocketCompression()),
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 // Defined later in this file.
@@ -1657,6 +1656,8 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
         "Worker tried to return a WebSocket in a response to a request "
         "which did not contain the header \"Upgrade: websocket\".");
 
+    const bool hasEnabledWebSocketCompression = FeatureFlags::get(js).getWebSocketCompression();
+
     if (hasEnabledWebSocketCompression &&
         outHeaders.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS) == kj::none) {
       // Since workerd uses `MANUAL_COMPRESSION` mode for websocket compression, we need to
@@ -1674,9 +1675,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
           }
         }
       }
-    }
-
-    if (!hasEnabledWebSocketCompression) {
+    } else if (!hasEnabledWebSocketCompression) {
       // While we guard against an origin server including `Sec-WebSocket-Extensions` in a Response
       // (we don't send the extension in an offer, and if the server includes it in a response we
       // will reject the connection), a Worker could still explicitly add the header to a Response.
