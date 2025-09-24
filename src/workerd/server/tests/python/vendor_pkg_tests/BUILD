@@ -1,6 +1,9 @@
 load(":vendor_test.bzl", "vendored_py_wd_test")
 
-vendored_py_wd_test("fastapi")
+vendored_py_wd_test(
+    "fastapi",
+    skip_python_flags = ["0.26.0a2"],
+)
 
 vendored_py_wd_test(
     "beautifulsoup4",
