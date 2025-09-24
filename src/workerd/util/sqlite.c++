@@ -920,6 +920,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
   KJ_IF_SOME(t, triggerName) {
     if (!regulator.isAllowedTrigger(t)) {
+      KJ_DBG(actionCode, param1, param2, dbName, triggerName);
+
       // Log an error because it seems really suspicious if a trigger runs when it's not allowed.
       // I want to understand if this can even happen.
       KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", t, kj::getStackTrace());
@@ -1500,6 +1502,8 @@ void SqliteDatabase::Query::nextRow(bool first) {
   auto& statementAndEffect = getStatementAndEffect();
   sqlite3_stmt* statement = statementAndEffect.statement;
 
+  KJ_DBG("boom::1");
+
   KJ_ASSERT(db.currentStatement == kj::none, "recursive nextRow()?");
   KJ_DEFER(db.currentStatement = kj::none);
   db.currentStatement = *statement;
@@ -1509,9 +1513,14 @@ void SqliteDatabase::Query::nextRow(bool first) {
   KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
+  KJ_DBG("boom::2");
+
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
+
+    KJ_DBG("boom::3");
+
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
@@ -1521,6 +1530,7 @@ void SqliteDatabase::Query::nextRow(bool first) {
     if (err == SQLITE_DONE) {
       done = true;
     } else if (err != SQLITE_ROW) {
+      KJ_DBG("boom::4");
       SQLITE_CALL_FAILED("sqlite3_step()", err);
     }
   }

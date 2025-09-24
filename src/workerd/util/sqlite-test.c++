@@ -1680,5 +1680,75 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
   });
 }
 
+KJ_TEST("SQLite SQLITE_NOMEM for large transactions") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run("CREATE TABLE large_text_table (id INTEGER PRIMARY KEY, data TEXT, version INTEGER)");
+
+  // Set SQLite's memory limit low to trigger SQLITE_NOMEM
+  // 4_400_000 causes SQLITE_NOMEM, but 4_500_000 does not.
+  db.run("PRAGMA hard_heap_limit=4500000");
+
+  db.run("BEGIN TRANSACTION");
+
+  KJ_DBG("boom:: pre INSERTS");
+
+  int total_rows = 1000;
+  for (int i = 0; i < total_rows; i++) {
+    db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+      INSERT INTO large_text_table (data)
+      VALUES (
+        zeroblob(1048576) -- Generates a 1MB blob of zeros
+      );
+    )"));
+  }
+
+  KJ_DBG("boom:: post INSERTS");
+
+  {
+    auto r = db.run("SELECT id, version FROM large_text_table LIMIT 10;");
+    while (!r.isDone()) {
+      KJ_DBG(r.getValue(0), r.getValue(1));
+      r.nextRow();
+    }
+  }
+
+  db.run("COMMIT TRANSACTION");
+
+  KJ_DBG("boom:: post INSERTS commit");
+
+  db.run("BEGIN TRANSACTION");
+
+  KJ_DBG("boom:: pre UPDATES");
+
+  db.run("UPDATE large_text_table SET \"version\" = 1 WHERE \"version\" IS NULL;");
+
+  KJ_DBG("boom:: post UPDATES");
+
+  db.run("COMMIT TRANSACTION");
+
+  KJ_DBG("boom:: post UPDATES commit");
+
+  {
+    auto r = db.run(
+        "SELECT (SELECT count(1) FROM large_text_table WHERE \"version\" IS NULL) as cnt1, (SELECT count(1) FROM large_text_table WHERE \"version\" IS NOT NULL) as cnt2;");
+    while (!r.isDone()) {
+      KJ_EXPECT(r.getInt(0) == 0);
+      KJ_EXPECT(r.getInt(1) == total_rows);
+      r.nextRow();
+    }
+  }
+
+  {
+    auto r = db.run("SELECT id, version FROM large_text_table WHERE \"version\" IS NULL LIMIT 10;");
+    while (!r.isDone()) {
+      KJ_DBG(r.getValue(0), r.getValue(1));
+      r.nextRow();
+    }
+  }
+}
+
 }  // namespace
 }  // namespace workerd
