@@ -104,14 +104,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.47",
-    actual = "@crates_vendor__clap-4.5.47//:clap",
+    name = "clap-4.5.48",
+    actual = "@crates_vendor__clap-4.5.48//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.47//:clap",
+    actual = "@crates_vendor__clap-4.5.48//:clap",
     tags = ["manual"],
 )
 
@@ -272,14 +272,14 @@ alias(
 )
 
 alias(
-    name = "serde-1.0.225",
-    actual = "@crates_vendor__serde-1.0.225//:serde",
+    name = "serde-1.0.226",
+    actual = "@crates_vendor__serde-1.0.226//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.225//:serde",
+    actual = "@crates_vendor__serde-1.0.226//:serde",
     tags = ["manual"],
 )
 
@@ -412,7 +412,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.47//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.48//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

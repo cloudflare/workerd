@@ -46,7 +46,7 @@ rust_library(
         "@crates_vendor__bitflags-2.9.4//:bitflags",
         "@crates_vendor__cfg-if-1.0.3//:cfg_if",
         "@crates_vendor__io-uring-0.7.10//:build_script_build",
-        "@crates_vendor__libc-0.2.175//:libc",
+        "@crates_vendor__libc-0.2.176//:libc",
     ],
 )
 
