@@ -673,7 +673,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // into a regular `Promise<T>`, including registering pending events as needed.
   template <typename T>
   kj::Promise<T> waitForDeferredProxy(kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return promise.then([this](api::DeferredProxy<T> deferredProxy) {
+    /*return promise.then([this](api::DeferredProxy<T> deferredProxy) {
+      return deferredProxy.proxyTask.attach(registerPendingEvent());
+    });*/
+    api::DeferredProxy<T> deferredProxy = co_await promise;
+    co_return deferredProxy.proxyTask.attach(registerPendingEvent());
+  }
+  template <>
+  kj::Promise<void> waitForDeferredProxy(kj::Promise<api::DeferredProxy<void>>&& promise) {
+    return promise.then([this](api::DeferredProxy<void> deferredProxy) {
       return deferredProxy.proxyTask.attach(registerPendingEvent());
     });
   }
@@ -1171,25 +1179,37 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
-    return kj::cp(ex);
+    if constexpr (kj::isSameType<decltype(func(kj::instance<Worker::Lock&>())), void>()) {
+    co_return;
+    } else {
+    throw kj::cp(ex);
+    }
   }
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
     if (inputLock == kj::none) {
-      return a.getInputGate().wait().then(
+    if constexpr (kj::isSameType<decltype(func(kj::instance<Worker::Lock&>())), void>()) {
+      co_await a.getInputGate().wait().then(
           [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
         return run(kj::fwd<Func>(func), kj::mv(inputLock));
       });
-    }
+      co_return;
+    } else {
+      co_return a.getInputGate().wait().then(
+          [this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
+        return run(kj::fwd<Func>(func), kj::mv(inputLock));
+      });
+    }}
 
     asyncLockPromise = worker->takeAsyncLockWhenActorCacheReady(now(), a, getMetrics());
   } else {
     asyncLockPromise = worker->takeAsyncLock(getMetrics());
   }
 
-  return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
-                                   Worker::AsyncLock lock) mutable {
+  Worker::AsyncLock lock = co_await asyncLockPromise;
+  //return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
+  //                                 Worker::AsyncLock lock) mutable {
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
     if constexpr (kj::isSameType<Result, void>()) {
@@ -1218,12 +1238,12 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
       RunnableImpl runnable{kj::fwd<Func>(func)};
       runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
       KJ_IF_SOME(r, runnable.result) {
-        return kj::mv(r);
+        co_return kj::mv(r);
       } else {
         KJ_UNREACHABLE;
       }
     }
-  });
+  //});
 }
 
 template <typename T, typename Func>
