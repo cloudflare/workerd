@@ -19,6 +19,7 @@ import {
   ERR_INVALID_PROTOCOL,
   ERR_INVALID_ARG_VALUE,
   ERR_HTTP_HEADERS_SENT,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -42,6 +43,7 @@ import {
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
+import type { Socket } from 'net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
@@ -58,6 +60,7 @@ function validateHost(host: unknown, name: string): string {
   return host as string;
 }
 
+// @ts-expect-error TS2720 Complaining due to "override req" being undefined.
 export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #abortController = new AbortController();
   #body: (Buffer | Uint8Array)[] = [];
@@ -79,6 +82,13 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   port: string = '80';
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
+
+  // Unused fields required to be Node.js compatible.
+  aborted: boolean = false;
+  reusedSocket: boolean = false;
+  maxHeadersCount: number = Infinity;
+  connection: Socket | null = null;
+  socket: Socket | null = null;
 
   [kUniqueHeaders]: Set<string> | null = null;
 
@@ -410,6 +420,17 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     this._ended = true;
   }
 
+  onSocket(_socket: Socket): void {
+    // Do nothing. Our implementation does not depend on socket class.
+  }
+
+  addTrailers(
+    _headers: OutgoingHttpHeaders | ReadonlyArray<[string, string]>
+  ): void {
+    // We don't support trailers.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers');
+  }
+
   abort(error?: Error | null): void {
     this.destroyed = true;
     this.#resetTimers({ finished: true });
@@ -481,10 +502,9 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     return super.write(chunk, encoding, callback);
   }
 
-  // @ts-expect-error TS2416 Type mismatch.
   override end(
     data?: Buffer | string | VoidFunction,
-    encoding?: NodeJS.BufferEncoding,
+    encoding?: BufferEncoding | VoidFunction,
     callback?: VoidFunction
   ): this {
     this._ended = true;
@@ -494,20 +514,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       data = undefined;
     }
 
-    // Only capture any final data passed to end()
-    if (
-      this.method !== 'GET' &&
-      this.method !== 'HEAD' &&
-      data &&
-      typeof data !== 'function'
-    ) {
-      if (typeof data === 'string') {
-        this.#body.push(Buffer.from(data, encoding || 'utf8'));
-      } else {
-        this.#body.push(data);
-      }
-    }
-
+    // Don't duplicate data here - let the parent's end() call write() which will handle it
     Writable.prototype.end.call(
       this,
       data,

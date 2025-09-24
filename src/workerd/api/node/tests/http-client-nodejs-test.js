@@ -487,6 +487,49 @@ export const testHttpGetTestSearchParams = {
   },
 };
 
+// Regression test for https://github.com/cloudflare/workerd/issues/5148
+export const testBodyDataDuplicationRegression = {
+  async test(_ctrl, env) {
+    const { promise, resolve, reject } = Promise.withResolvers();
+
+    http
+      .request(
+        {
+          hostname: env.SIDECAR_HOSTNAME,
+          port: env.HELLO_WORLD_SERVER_PORT,
+          path: '/echo',
+          method: 'post',
+          headers: {
+            'content-type': 'application/json;charset=utf-8',
+          },
+        },
+        (response) => {
+          strictEqual(response.statusCode, 200);
+          let expected = '';
+          response.on('data', (chunk) => (expected += chunk));
+          response.on('end', () => {
+            strictEqual(
+              expected,
+              '{"email":"posting-wrangler@email.mail","from":"wrangler"}'
+            );
+            resolve(response);
+          });
+        }
+      )
+      .on('error', reject)
+      .end(
+        Buffer.from(
+          JSON.stringify({
+            email: 'posting-wrangler@email.mail',
+            from: 'wrangler',
+          })
+        )
+      );
+
+    await promise;
+  },
+};
+
 // Relevant Node.js tests
 // - [ ] test/parallel/test-http-client-abort-destroy.js
 // - [ ] test/parallel/test-http-client-abort-event.js
