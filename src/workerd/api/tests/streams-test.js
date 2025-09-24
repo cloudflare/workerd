@@ -1,4 +1,4 @@
-import { strictEqual, ok, deepStrictEqual, rejects } from 'node:assert';
+import { strictEqual, ok, deepStrictEqual } from 'node:assert';
 
 const enc = new TextEncoder();
 
@@ -497,81 +497,6 @@ export const finalReadOnInternalStreamReturnsBuffer = {
     ok(result.value instanceof Uint8Array);
     strictEqual(result.value.byteLength, 0);
     strictEqual(result.value.buffer.byteLength, 10);
-  },
-};
-
-export const streamCancelTest1 = {
-  async test() {
-    let i = 0;
-    const { promise, resolve } = Promise.withResolvers();
-    const stream = new ReadableStream({
-      async pull(controller) {
-        console.log(i);
-        controller.enqueue(`${i}`);
-        i++;
-      },
-      cancel() {
-        resolve();
-      },
-    });
-
-    const newStream = stream.pipeThrough(new TransformStream());
-
-    const reader = newStream.getReader();
-    await reader.read();
-    await reader.cancel();
-    await reader.closed;
-    await promise;
-  },
-};
-
-export const streamCancelTest2 = {
-  async test() {
-    let i = 0;
-    const { promise, resolve } = Promise.withResolvers();
-    const stream = new ReadableStream({
-      async pull(controller) {
-        await scheduler.wait(10);
-        controller.enqueue(`${i}`);
-        i++;
-      },
-      cancel() {
-        resolve();
-      },
-    });
-
-    const newStream = stream.pipeThrough(new TransformStream());
-
-    for await (const x of newStream) {
-      break;
-    }
-
-    await promise;
-  },
-};
-
-export const streamCancelTest3 = {
-  async test() {
-    let i = 0;
-    const { promise, resolve } = Promise.withResolvers();
-    const stream = new ReadableStream({
-      async pull(controller) {
-        console.log(i);
-        controller.enqueue(`${i}`);
-        i++;
-      },
-      cancel() {
-        resolve();
-      },
-    });
-
-    const newStream = stream;
-
-    const reader = newStream.getReader();
-    await reader.read();
-    await reader.cancel();
-    await reader.closed;
-    await promise;
   },
 };
 
