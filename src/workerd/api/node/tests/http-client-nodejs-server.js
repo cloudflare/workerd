@@ -100,7 +100,7 @@ const helloWorldServer = http.createServer((req, res) => {
       break;
     }
 
-    case 'echo':
+    case 'echo': {
       // Echo the request body back as the response
       let body = '';
       req.on('data', (chunk) => {
@@ -111,8 +111,11 @@ const helloWorldServer = http.createServer((req, res) => {
         res.end(body);
       });
       break;
-    default:
+    }
+
+    default: {
       res.end();
+    }
   }
 });
 
