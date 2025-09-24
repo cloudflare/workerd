@@ -30,13 +30,6 @@ py_repositories()
 # benchmark_deps()
 
 # ========================================================================================
-# Rust bootstrap
-
-load("//:build/rust_toolchains.bzl", "rust_toolchains")
-
-rust_toolchains()
-
-# ========================================================================================
 # Node.js bootstrap
 #
 # workerd uses Node.js scripts for generating TypeScript types.
