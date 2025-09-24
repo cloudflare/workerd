@@ -2243,9 +2243,6 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
 
   const auto doCancel = [&](auto& consumer) {
     auto reason = js.v8Ref(maybeReason.orDefault([&] { return js.v8Undefined(); }));
-
-    lock.onClose(js);
-
     KJ_DEFER(state.init<StreamStates::Closed>());
     return consumer->cancel(js, reason.getHandle(js));
   };
@@ -3356,10 +3353,7 @@ void WritableStreamJsController::doError(jsg::Lock& js, v8::Local<v8::Value> rea
   KJ_IF_SOME(locked, lock.state.tryGet<WriterLocked>()) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
-  } else KJ_IF_SOME(locked, lock.state.tryGet<WritableLockImpl::PipeLocked>()) {
-    if (!locked.preventCancel) {
-      locked.readableStreamRef->getController().cancel(js, reason);
-    }
+  } else if (lock.state.tryGet<WritableLockImpl::PipeLocked>() != kj::none) {
     lock.state.init<Unlocked>();
   }
 }
