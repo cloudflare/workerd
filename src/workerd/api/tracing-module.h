@@ -20,7 +20,7 @@ class InternalSpan: public jsg::Object {
   InternalSpan(kj::Maybe<IoOwn<InternalSpanImpl>> impl);
 
   void end();
-  void setTag(jsg::Lock& js, kj::String key, kj::Maybe<kj::OneOf<bool, double, kj::String>> value);
+  void setTag(jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> value);
   bool getIsRecording();
   SpanParent makeSpanParent();
 
