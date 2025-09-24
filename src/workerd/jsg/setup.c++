@@ -45,17 +45,6 @@ static void v8DcheckError(const char* file, int line, const char* message) {
   reportV8FatalError(kj::str(file, ':', line), message);
 }
 
-class PlatformDisposer final: public kj::Disposer {
- public:
-  virtual void disposeImpl(void* pointer) const override {
-    delete static_cast<v8::Platform*>(pointer);
-  }
-
-  static const PlatformDisposer instance;
-};
-
-const PlatformDisposer PlatformDisposer::instance{};
-
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount) {
   return kj::Own<v8::Platform>(
       v8::platform::NewDefaultPlatform(backgroundThreadCount,  // default thread pool size
@@ -63,7 +52,7 @@ kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount) {
           v8::platform::InProcessStackDumping::kDisabled,      // KJ's stack traces are better
           nullptr)                                             // default TracingController
           .release(),
-      PlatformDisposer::instance);
+      kj::_::HeapDisposer<v8::Platform>::instance);
 }
 
 static kj::Own<v8::Platform> userPlatform(v8::Platform& platform) {

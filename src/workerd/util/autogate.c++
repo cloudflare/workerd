@@ -13,7 +13,7 @@
 
 namespace workerd::util {
 
-kj::Maybe<Autogate> globalAutogate;
+static kj::Maybe<Autogate> globalAutogate;
 
 kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
   switch (key) {

@@ -24,6 +24,7 @@
 #include <workerd/api/kv.h>
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/modules.h>
+#include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/node.h>
 #include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>

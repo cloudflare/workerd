@@ -37,7 +37,7 @@ BENCHMARK_F(KjHeaders, Parse)(benchmark::State& state) {
       "Connection: keep-alive\r\n"
       "\r\n");
 
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED: state) {
     kj::HttpHeaders headers(*table);
 
     for (size_t i = 0; i < 1000; ++i) {

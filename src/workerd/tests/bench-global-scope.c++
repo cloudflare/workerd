@@ -32,7 +32,7 @@ struct GlobalScopeBenchmark: public benchmark::Fixture {
 };
 
 BENCHMARK_F(GlobalScopeBenchmark, request)(benchmark::State& state) {
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED: state) {
     for (size_t i = 0; i < 1000; ++i) {
       benchmark::DoNotOptimize(
           fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj));

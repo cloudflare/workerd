@@ -73,18 +73,20 @@ struct ResolveObserver {
   // Called when a module is being resolved. The returned ResolveStatus
   // object will be used to report the result of the resolution.
   // It is guaranteed that isolate lock is not held during invocation.
-  virtual kj::Own<ResolveStatus> onResolveModule(
+  kj::Own<ResolveStatus> onResolveModule(
       const Url& specifier, Context context, Source source) const {
-    static ResolveStatus nonopStatus;
+    // static ResolveStatus nonopStatus;
+    ResolveStatus nonopStatus;
     return {&nonopStatus, kj::NullDisposer::instance};
   }
 
   // Called when a module is being resolved. The returned ResolveStatus
   // object will be used to report the result of the resolution.
   // It is guaranteed that isolate lock is not held during invocation.
-  virtual kj::Own<ResolveStatus> onResolveModule(
+  kj::Own<ResolveStatus> onResolveModule(
       kj::StringPtr specifier, Context context, Source source) const {
-    static ResolveStatus nonopStatus;
+    //static ResolveStatus nonopStatus;
+    ResolveStatus nonopStatus;
     return {&nonopStatus, kj::NullDisposer::instance};
   }
 };

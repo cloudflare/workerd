@@ -21,7 +21,7 @@ KJ_TEST("Test that CfProperty is frozen by default") {
     )SCRIPT"_kj});
 
   try {
-    auto result = fixture.runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj);
+    fixture.runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "TEST"_kj);
     KJ_FAIL_REQUIRE("exception expected");
   } catch (kj::Exception& e) {
     KJ_EXPECT(e.getDescription() ==

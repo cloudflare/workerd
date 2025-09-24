@@ -5,7 +5,7 @@ namespace workerd {
 namespace {
 
 static void MimeType_ParseAndSerialize(benchmark::State& state) {
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED: state) {
     for (size_t i = 0; i < 10000; i++) {
       benchmark::DoNotOptimize(MimeType::parse("text/plain;charset=UTF-8"_kj).toString());
       benchmark::DoNotOptimize(
@@ -24,7 +24,7 @@ static void MimeType_ParseAndSerialize(benchmark::State& state) {
 }
 
 static void MimeType_Serialize(benchmark::State& state) {
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED : state) {
     for (size_t i = 0; i < 100000; ++i) {
       benchmark::DoNotOptimize(MimeType::PLAINTEXT.toString());
       benchmark::DoNotOptimize(MimeType::CSS.toString());

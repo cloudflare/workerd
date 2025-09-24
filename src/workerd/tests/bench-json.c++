@@ -17,7 +17,7 @@ static void Test_JSON_ENC(benchmark::State& state) {
   capnp::JsonCodec json;
   // Perform setup here
 
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED: state) {
     for (size_t i = 0; i < 10000; i++) {
       // This code gets timed
       KJ_EXPECT(json.encode(capnp::VOID) == "null");
@@ -46,7 +46,7 @@ static void Test_JSON_DEC(benchmark::State& state) {
   static constexpr kj::StringPtr dummy =
       "{\"version\":1,\"method\":\"completeMultipartUpload\",\"object\":\"multipart_object_name4\",\"uploadId\":\"uploadId\",\"parts\":[{\"etag\":\"1234\",\"part\":1},{\"etag\":\"56789\",\"part\":2}]}"_kj;
 
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED: state) {
     for (size_t i = 0; i < 100000; i++) {
       auto responseBuilder =
           responseMessage.initRoot<workerd::api::public_beta::R2BindingRequest>();

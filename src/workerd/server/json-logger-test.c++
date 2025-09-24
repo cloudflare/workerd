@@ -58,6 +58,7 @@ class OutputCapture {
     char buffer[4096];
     ssize_t n;
     KJ_SYSCALL(n = read(readFd.get(), buffer, sizeof(buffer) - 1));
+    KJ_ASSERT(n >= 0);
     buffer[n] = '\0';
 
     return kj::str(buffer, n);

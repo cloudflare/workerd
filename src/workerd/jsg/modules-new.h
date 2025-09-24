@@ -483,9 +483,11 @@ class Module {
 };
 
 constexpr Module::Flags operator&(const Module::Flags& a, const Module::Flags& b) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   return static_cast<Module::Flags>(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
 }
 constexpr Module::Flags operator|(const Module::Flags& a, const Module::Flags& b) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   return static_cast<Module::Flags>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
 }
 

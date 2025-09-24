@@ -1384,6 +1384,7 @@ struct ResourceTypeBuilder {
       inspectProperties->Set(v8Name, v8::False(isolate), v8::PropertyAttribute::ReadOnly);
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     instance->SetNativeDataProperty(v8Name, &Gcb::callback, nullptr, v8::Local<v8::Value>(),
         Gcb::enumerable ? v8::PropertyAttribute::ReadOnly
                         : static_cast<v8::PropertyAttribute>(

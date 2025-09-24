@@ -42,7 +42,7 @@ struct RegExpBenchmark: public benchmark::Fixture {
 };
 
 BENCHMARK_F(RegExpBenchmark, request)(benchmark::State& state) {
-  for (auto _: state) {
+  for (auto _ KJ_UNUSED : state) {
     auto result =
         fixture->runRequest(kj::HttpMethod::POST, "http://www.example.com"_kj, "accepted"_kj);
     KJ_EXPECT(result.statusCode == 200 && result.body == "word found in dictionary"_kj);

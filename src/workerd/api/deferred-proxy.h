@@ -195,6 +195,7 @@ class DeferredProxyCoroutine: public kj::_::PromiseNode,
   void fulfillOuterPromise() {
     // Fulfill the outer promise if it hasn't already settled.
 
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.Branch)
     if (!deferredProxyingHasBegun) {
       // Our `result` is put in place already by `get_return_object()`, so all we have to do is arm
       // the event.
