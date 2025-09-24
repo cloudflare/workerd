@@ -673,6 +673,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // into a regular `Promise<T>`, including registering pending events as needed.
   template <typename T>
   kj::Promise<T> waitForDeferredProxy(kj::Promise<api::DeferredProxy<T>>&& promise) {
+<<<<<<< Updated upstream
     /*return promise.then([this](api::DeferredProxy<T> deferredProxy) {
       return deferredProxy.proxyTask.attach(registerPendingEvent());
     });*/
@@ -683,6 +684,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Promise<void> waitForDeferredProxy(kj::Promise<api::DeferredProxy<void>>&& promise) {
     return promise.then([this](api::DeferredProxy<void> deferredProxy) {
       return deferredProxy.proxyTask.attach(registerPendingEvent());
+||||||| constructed merge base
+    return promise.then([this](api::DeferredProxy<T> deferredProxy) {
+      return deferredProxy.proxyTask.attach(registerPendingEvent());
+=======
+    return promise.then([](api::DeferredProxy<T> deferredProxy) {
+      return kj::mv(deferredProxy.proxyTask)/*.attach(registerPendingEvent())*/;
+>>>>>>> Stashed changes
     });
   }
 
@@ -1250,25 +1258,25 @@ template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIo(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
   return awaitIoImpl(
-      js, promise.attach(registerPendingEvent()), getCriticalSection(), kj::fwd<Func>(func));
+      js, kj::mv(promise)/*.attach(registerPendingEvent())*/, getCriticalSection(), kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIo(jsg::Lock& js, kj::Promise<T> promise) {
   return awaitIoImpl(
-      js, promise.attach(registerPendingEvent()), getCriticalSection(), IdentityFunc<T>());
+      js, kj::mv(promise)/*.attach(registerPendingEvent())*/, getCriticalSection(), IdentityFunc<T>());
 }
 
 template <typename T, typename Func>
 jsg::PromiseForResult<Func, T, true> IoContext::awaitIoWithInputLock(
     jsg::Lock& js, kj::Promise<T> promise, Func&& func) {
   return awaitIoImpl(
-      js, promise.attach(registerPendingEvent()), getInputLock(), kj::fwd<Func>(func));
+      js, kj::mv(promise)/*.attach(registerPendingEvent())*/, getInputLock(), kj::fwd<Func>(func));
 }
 
 template <typename T>
 jsg::Promise<T> IoContext::awaitIoWithInputLock(jsg::Lock& js, kj::Promise<T> promise) {
-  return awaitIoImpl(js, promise.attach(registerPendingEvent()), getInputLock(), IdentityFunc<T>());
+  return awaitIoImpl(js, kj::mv(promise)/*.attach(registerPendingEvent())*/, getInputLock(), IdentityFunc<T>());
 }
 
 template <typename T>

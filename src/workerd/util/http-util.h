@@ -13,12 +13,13 @@ namespace workerd {
 // The given object must support `kj::addRef()` (e.g. `kj::Refcount`).
 template <typename T>
 kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttachment) {
-  req.body = req.body.attach(kj::addRef(*rcAttachment));
-  req.response = req.response.then(
+  (void)rcAttachment;
+  //req.body = req.body.attach(kj::addRef(*rcAttachment));
+  /*req.response = req.response.then(
       [rcAttachment = kj::mv(rcAttachment)](kj::HttpClient::Response&& response) mutable {
-    response.body = response.body.attach(kj::mv(rcAttachment));
+    //response.body = response.body.attach(kj::mv(rcAttachment));
     return kj::mv(response);
-  });
+  });*/
   return req;
 }
 
@@ -27,7 +28,7 @@ kj::HttpClient::Request attachToRequest(kj::HttpClient::Request req, T&& rcAttac
 template <typename T>
 kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
     kj::Promise<kj::HttpClient::WebSocketResponse> promise, T&& attachment) {
-  return promise.then(
+  /*return promise.then(
       [attachment = kj::mv(attachment)](kj::HttpClient::WebSocketResponse&& response) mutable {
     KJ_SWITCH_ONEOF(response.webSocketOrBody) {
       KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncInputStream>) {
@@ -38,7 +39,9 @@ kj::Promise<kj::HttpClient::WebSocketResponse> attachToWebSocketResponse(
       }
     }
     return kj::mv(response);
-  });
+  });*/
+  (void)attachment;
+  return promise;
 }
 
 // A Response kj::HttpService::Response implementation that records the status

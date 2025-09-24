@@ -2465,8 +2465,7 @@ rpc::JsRpcTarget::Client Fetcher::getClientForOneCall(
   // propagated the exception to any RPC calls that we're waiting on, so we even ignore errors
   // here -- otherwise they'll end up logged as "uncaught exceptions" even if they were, in fact,
   // caught elsewhere.
-  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).then([](auto&&) {
-  }, [](kj::Exception&&) {}));
+  ioContext.addTask(worker->customEvent(kj::mv(event)).attach(kj::mv(worker)).ignoreResult());
 
   // (Don't extend `path` because we're the root.)
 
