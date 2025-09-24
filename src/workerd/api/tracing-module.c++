@@ -21,7 +21,7 @@ void InternalSpan::end() {
 }
 
 void InternalSpan::setTag(
-    jsg::Lock& js, kj::String key, kj::Maybe<kj::OneOf<bool, double, kj::String>> maybeValue) {
+    jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
   KJ_IF_SOME(value, maybeValue) {
     kj::OneOf<bool, double, kj::String> tagValue;
 
@@ -38,7 +38,7 @@ void InternalSpan::setTag(
     }
 
     KJ_IF_SOME(s, impl) {
-      s->setTag(kj::ConstString(kj::str(kj::mv(key))), kj::mv(tagValue));
+      s->setTag(kj::ConstString(kj::mv(key)), kj::mv(tagValue));
     }
   }
 }
