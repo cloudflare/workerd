@@ -274,8 +274,26 @@ class ReadableStreamSourceJsAdapter final {
 // the filled in Array after the read completes, but that's a larger refactor.
 class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
  public:
-  ReadableStreamSourceKjAdapter(
-      jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream);
+  enum class MinReadPolicy {
+    // The read will complete as soon as at least minBytes have been read,
+    // even if more bytes are available and the buffer is not full. This
+    // may result in more read calls (keeping in mind that each read needs
+    // to acquire the isolate lock) but may keep the stream flowing more.
+    IMMEDIATE,
+    // The read will attempt to fill the entire buffer until either
+    // maxBytes, the stream ends, or we determine the buffer is "full enough".
+    // This will result in fewer read calls (and thus grabbing the isolate
+    // lock less often) but may result in higher latency for each read.
+    OPPORTUNISTIC,
+  };
+  struct Options {
+    MinReadPolicy minReadPolicy;
+  };
+
+  ReadableStreamSourceKjAdapter(jsg::Lock& js,
+      IoContext& ioContext,
+      jsg::Ref<ReadableStream> stream,
+      Options options = {.minReadPolicy = MinReadPolicy::OPPORTUNISTIC});
   ~ReadableStreamSourceKjAdapter() noexcept(false);
 
   // Attempts to read at least minBytes and up to maxBytes into the provided
@@ -336,12 +354,13 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   KJ_DECLARE_NON_POLYMORPHIC(Active);
   struct Closed {};
   kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
+  const Options options;
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
 
   kj::Promise<size_t> tryReadImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
   kj::Promise<void> pumpToImpl(WritableStreamSink& output, bool end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
-      jsg::Lock& js, kj::Own<ReadContext> context);
+      jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
 };
 
 }  // namespace workerd::api::streams

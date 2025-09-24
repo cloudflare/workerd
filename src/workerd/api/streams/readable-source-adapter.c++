@@ -5,6 +5,12 @@
 namespace workerd::api::streams {
 
 namespace {
+// Per the ReadableStream spec, when a read(buf) is performed on a BYOB reader,
+// if the stream is already closed, we still need to return the allocated buffer
+// back to the caller, but it must be in a zero-length view. This utility function
+// does that. It takes the original allocation and wraps it into a new ArrayBuffer
+// instance that is wrapped by a zero-length view of the same type as the original
+// TypedArray we were given.
 jsg::BufferSource transferToEmptyBuffer(jsg::Lock& js, jsg::BufferSource buffer) {
   KJ_DASSERT(!buffer.isDetached() && buffer.canDetach(js));
   auto backing = buffer.detach(js);
@@ -552,8 +558,9 @@ void ReadableStreamSourceKjAdapter::Active::cancel(kj::Exception reason) {
 }
 
 ReadableStreamSourceKjAdapter::ReadableStreamSourceKjAdapter(
-    jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream)
+    jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream, Options options)
     : state(kj::heap<Active>(js, ioContext, kj::mv(stream))),
+      options(options),
       selfRef(kj::rc<WeakRef<ReadableStreamSourceKjAdapter>>(
           kj::Badge<ReadableStreamSourceKjAdapter>{}, *this)) {}
 
@@ -562,7 +569,7 @@ ReadableStreamSourceKjAdapter::~ReadableStreamSourceKjAdapter() noexcept(false) 
 }
 
 jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStreamSourceKjAdapter::
-    readInternal(jsg::Lock& js, kj::Own<ReadContext> context) {
+    readInternal(jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy) {
   using ReadInternalResult = kj::Maybe<kj::OneOf<kj::String, jsg::BufferSource>>;
 
   auto& ioContext = IoContext::current();
@@ -618,8 +625,8 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
     return js.rejectedPromise<ReadInternalResult>(kj::mv(exception));
   }))
       .then(js,
-          ioContext.addFunctor(
-              [context = kj::mv(context)](jsg::Lock& js, ReadInternalResult maybeResult) mutable {
+          ioContext.addFunctor([context = kj::mv(context), minReadPolicy](
+                                   jsg::Lock& js, ReadInternalResult maybeResult) mutable {
     KJ_IF_SOME(result, maybeResult) {
       kj::Array<const kj::byte> data = ([&] {
         KJ_SWITCH_ONEOF(result) {
@@ -655,20 +662,26 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
         // Also, we should still have some space left in our destination buffer.
         KJ_DASSERT(context->buffer.size() > 0);
 
-        // If we have satisfied the minimum read requirement and there are fewer
-        // than 1024 bytes left in the buffer, we will just return what we
+        // If we have satisfied the minimum read requirement and either
+        // (a) the minReadPolicy is IMMEDIATE or (b) there are fewer
+        // than 512 bytes left in the buffer, we will just return what we
         // have. The idea here is that while we could just return what we have
         // and let the caller call read again, that would be inefficient if
         // the caller has a large buffer and is trying to read a lot of data.
         // Instead of returning early with a minimally filled buffer, let's
-        // try to fill it up a bit more before returning. The 1024 byte limit
+        // try to fill it up a bit more before returning. The 512 byte limit
         // is somewhat arbitrary. The risk, of course, is that the next read
         // will return too much data to fit into the buffer, which will then
         // have to be stashed away as left over data. There's also a risk that
         // the stream is slow and we end up with more latency waiting for
         // the next chunk of data to arrive. In practice, this seems unlikely
-        // to be a problem.
-        if (context->totalRead >= context->minBytes && context->buffer.size() < 1024) {
+        // to be a problem. The IMMEDIATE policy is useful in the latter case,
+        // when the caller wants to get whatever data is available as soon
+        // as possible, even if it is just a small amount. The downside of the
+        // IMMEDIATE policy is that it can lead to a lot of small reads that
+        // are expensive because they have to grab the isolate lock each time.
+        if (context->totalRead >= context->minBytes &&
+            (minReadPolicy == MinReadPolicy::IMMEDIATE || context->buffer.size() < 512)) {
           // We have satisfied the minimum read requirement.
           KJ_DASSERT(context->totalRead >= context->minBytes);
           // Our read is complete.
@@ -691,7 +704,7 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
         }
 
         // Ok, still active, let's continue reading.
-        return readInternal(js, kj::mv(context));
+        return readInternal(js, kj::mv(context), minReadPolicy);
       }
 
       // We received more data than we can fit into our destination
@@ -745,11 +758,12 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
 
     // Did we at least satisfy the minimum bytes?
     if (size >= minBytes) {
-      // Awesome, we are technically done.
-      // TODO(performance): If we have a lot more room left in our dest
-      // buffer then we could try to read more from the stream to fill
-      // it up more, but for now, just return what we have since we have
-      // satisfied the minimum requirements of the contract.
+      // Awesome, we are technically done with this read.
+      // While we might actually have more room in our buffer, and the
+      // minReadyPolicy might be OPPORTUNISTIC, we will not try to
+      // read more from the stream right now so that we can avoid having
+      // to grab the isolate lock for this read. Instead, let's return
+      // what we have and let the caller call read again if/when they want.
       return size;
     }
   }
@@ -777,11 +791,12 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
           // while we are in the promise chain. Instead, we capture a weak
           // reference to the adapter itself and check that we are still alive
           // and active before trying to update any state.
-          active.ioContext.run([context = kj::mv(context), self = selfRef.addRef()](
+          active.ioContext.run([context = kj::mv(context), self = selfRef.addRef(),
+                                   minReadPolicy = options.minReadPolicy](
                                    jsg::Lock& js) mutable -> kj::Promise<size_t> {
     auto& ioContext = IoContext::current();
 
-    return ioContext.awaitJs(js, readInternal(js, kj::mv(context)))
+    return ioContext.awaitJs(js, readInternal(js, kj::mv(context), minReadPolicy))
         .then([self = kj::mv(self)](kj::Own<ReadContext> context) mutable -> kj::Promise<size_t> {
       // By the time we get here, it is possible that the adapter has been
       // destroyed. If that's the case, it's okay, that's what our weak ref
