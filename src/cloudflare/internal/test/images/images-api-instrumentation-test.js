@@ -68,11 +68,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------583079568443922091480339',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------310253009656403672722808',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -80,11 +79,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------917895793710282367115997',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------721037829633019043454026',
         'http.response.status_code': 200n,
         'http.response.body.size': 57n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -92,11 +90,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------274020163342001891217006',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------953568754209602608781375',
         'http.response.status_code': 200n,
         'http.response.body.size': 491605n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -104,11 +101,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------016965139147113097012573',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------440652620341578841384574',
         'http.response.status_code': 200n,
         'http.response.body.size': 655465n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -116,11 +112,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------800533565867149828727514',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------134462238417857686794018',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -128,11 +123,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------788884220072645140944057',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------451520024689691544877699',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
-        closed: true,
+        closed: true
       },
       {
         name: 'images_info',
@@ -140,7 +134,7 @@ export const test = {
         'cloudflare.images.info.file_size': 123,
         'cloudflare.images.info.width': 123,
         'cloudflare.images.info.height': 123,
-        closed: true,
+        closed: true
       },
       {
         name: 'images_info',
@@ -149,13 +143,13 @@ export const test = {
         'cloudflare.images.info.file_size': 123,
         'cloudflare.images.info.width': 123,
         'cloudflare.images.info.height': 123,
-        closed: true,
+        closed: true
       },
       { name: 'images_info', closed: true },
       {
         name: 'images_info',
         'cloudflare.images.info.format': 'image/svg+xml',
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -163,11 +157,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------076772162047566398596413',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------549443388595697638206735',
         'http.response.status_code': 200n,
         'http.response.body.size': 359n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -175,11 +168,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------683302700719873337688257',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------827110864910850091668521',
         'http.response.status_code': 200n,
         'http.response.body.size': 102n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -187,11 +179,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------638268216708834840270438',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------663260270205734226709932',
         'http.response.status_code': 409n,
         'http.response.body.size': 22n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -199,11 +190,10 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------467138828766648388569910',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------302484619284257147072706',
         'http.response.status_code': 200n,
         'http.response.body.size': 88n,
-        closed: true,
+        closed: true
       },
       {
         name: 'fetch',
@@ -211,12 +201,11 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------165527776325986498384287',
+        'http.request.header.content-type': 'multipart/form-data; boundary=--------------------------775478735866429733305436',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
-        closed: true,
-      },
+        closed: true
+      }
     ];
 
     for (const each of received) {
