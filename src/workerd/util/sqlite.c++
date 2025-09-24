@@ -920,6 +920,8 @@ bool SqliteDatabase::isAuthorized(int actionCode,
 
   KJ_IF_SOME(t, triggerName) {
     if (!regulator.isAllowedTrigger(t)) {
+      KJ_DBG(actionCode, param1, param2, dbName, triggerName);
+
       // Log an error because it seems really suspicious if a trigger runs when it's not allowed.
       // I want to understand if this can even happen.
       KJ_LOG(ERROR, "disallowed trigger somehow ran in trusted scope?", t, kj::getStackTrace());
@@ -1428,6 +1430,24 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
   }
 }
 
+void print_memory_stats(const char* label) {
+  sqlite3_int64 current_mem = 0;
+  sqlite3_int64 peak_mem = 0;
+
+  // Get memory stats without resetting the peak value
+  sqlite3_status64(SQLITE_STATUS_MEMORY_USED, &current_mem, &peak_mem, 0);
+  KJ_DBG("\tSQLITE_STATUS_MEMORY_USED", label, current_mem, peak_mem);
+
+  sqlite3_status64(SQLITE_STATUS_MALLOC_SIZE, &current_mem, &peak_mem, 0);
+  KJ_DBG("\tSQLITE_STATUS_MALLOC_SIZE", label, current_mem, peak_mem);
+
+  sqlite3_status64(SQLITE_STATUS_PAGECACHE_USED, &current_mem, &peak_mem, 0);
+  KJ_DBG("\tSQLITE_STATUS_PAGECACHE_USED", label, current_mem, peak_mem);
+
+  sqlite3_status64(SQLITE_STATUS_PAGECACHE_OVERFLOW, &current_mem, &peak_mem, 0);
+  KJ_DBG("\tSQLITE_STATUS_PAGECACHE_OVERFLOW", label, current_mem, peak_mem);
+}
+
 void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
   checkRequirements(bindings.size());
 
@@ -1435,7 +1455,9 @@ void SqliteDatabase::Query::init(kj::ArrayPtr<const ValuePtr> bindings) {
     bind(i, bindings[i]);
   }
 
+  print_memory_stats("PRE-NEXTROW");
   nextRow(/*first=*/true);
+  print_memory_stats("AFTER-NEXTROW");
 }
 
 void SqliteDatabase::Query::bind(uint i, ValuePtr value) {
@@ -1500,6 +1522,8 @@ void SqliteDatabase::Query::nextRow(bool first) {
   auto& statementAndEffect = getStatementAndEffect();
   sqlite3_stmt* statement = statementAndEffect.statement;
 
+  KJ_DBG("boom::1");
+
   KJ_ASSERT(db.currentStatement == kj::none, "recursive nextRow()?");
   KJ_DEFER(db.currentStatement = kj::none);
   db.currentStatement = *statement;
@@ -1509,21 +1533,33 @@ void SqliteDatabase::Query::nextRow(bool first) {
   KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
+  KJ_DBG("boom::2");
+  print_memory_stats("BOOM:STATS:2");
+
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
     queryEvent.setQueryResult(err);
+
+    KJ_DBG("boom::3");
+    print_memory_stats("BOOM:STATS:3");
+
     // TODO(perf): This is slightly inefficient to call for every row read, but not bad enough to
     // fix it immediately. The alternate way would be to getRowsRead/Written once when we emit it
     // in the Dtor, and handle the case where the statement could be null when the Query gets
     // destructed
     rowsRead = getRowsRead();
     rowsWritten = getRowsWritten();
+    print_memory_stats("BOOM:STATS:3A");
     if (err == SQLITE_DONE) {
       done = true;
     } else if (err != SQLITE_ROW) {
+      print_memory_stats("BOOM:STATS:4");
+      KJ_DBG("boom::4");
       SQLITE_CALL_FAILED("sqlite3_step()", err);
     }
   }
+
+  print_memory_stats("BOOM:STATS:5");
 
   if (first) {
     // A statement's effect is applied on the first step.

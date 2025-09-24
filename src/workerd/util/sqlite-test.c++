@@ -1680,5 +1680,99 @@ KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
   });
 }
 
+KJ_TEST("SQLite SQLITE_NOMEM for large transactions") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.run("PRAGMA journal_mode=WAL;");
+
+  db.run("CREATE TABLE large_text_table (id INTEGER PRIMARY KEY, data TEXT, version INTEGER)");
+
+  // Set SQLite's memory limit low to trigger SQLITE_NOMEM
+  // 4_400_000 causes SQLITE_NOMEM, but 4_500_000 does not.
+  // according to the sqlite3_status64 stats the peak mem used is 4467536 bytes.
+  // db.run("PRAGMA hard_heap_limit=536870912");
+  db.run("PRAGMA soft_heap_limit=16000000");
+  db.run("PRAGMA hard_heap_limit=128000000");
+  // db.run("PRAGMA hard_heap_limit=4000000");
+  // default is `-2000`.
+  // db.run("PRAGMA cache_size=-2000");
+  db.run("PRAGMA temp_store=MEMORY;");
+
+  db.run("BEGIN TRANSACTION");
+
+  KJ_DBG("boom:: pre INSERTS");
+
+  int total_rows = 500;
+  for (int i = 0; i < total_rows; i++) {
+    db.run(SqliteDatabase::TRUSTED, kj::str(R"(
+      INSERT INTO large_text_table (data)
+      VALUES (
+        randomblob(1048576) -- Generates a 1MB blob of zeros
+      );
+    )"));
+  }
+
+  KJ_DBG("boom:: post INSERTS");
+
+  {
+    auto r = db.run("SELECT id, version FROM large_text_table LIMIT 10;");
+    while (!r.isDone()) {
+      KJ_DBG(r.getValue(0), r.getValue(1));
+      r.nextRow();
+    }
+  }
+
+  db.run("COMMIT TRANSACTION");
+
+  KJ_DBG("boom:: post INSERTS commit");
+
+  db.run("BEGIN TRANSACTION");
+
+  {
+    auto r = db.run("PRAGMA hard_heap_limit");
+    while (!r.isDone()) {
+      KJ_DBG("PRAGMA hard_heap_limit = ", r.getInt(0));
+      r.nextRow();
+    }
+  }
+  {
+    auto r = db.run("PRAGMA cache_size");
+    while (!r.isDone()) {
+      KJ_DBG("PRAGMA cache_size = ", r.getInt(0));
+      r.nextRow();
+    }
+  }
+
+  KJ_DBG("boom:: pre UPDATES");
+
+  db.run(
+      "UPDATE large_text_table SET \"version\" = 1 WHERE \"version\" IS NULL; UPDATE large_text_table SET \"version\" = 2 WHERE \"version\" IS NULL;");
+
+  KJ_DBG("boom:: post UPDATES");
+
+  db.run("COMMIT TRANSACTION");
+
+  KJ_DBG("boom:: post UPDATES commit");
+
+  {
+    auto r = db.run(
+        "SELECT (SELECT count(1) FROM large_text_table WHERE \"version\" IS NULL) as cnt1, (SELECT count(1) FROM large_text_table WHERE \"version\" IS NOT NULL) as cnt2;");
+    while (!r.isDone()) {
+      KJ_EXPECT(r.getInt(0) == 0);
+      KJ_EXPECT(r.getInt(1) == total_rows);
+      r.nextRow();
+    }
+  }
+
+  {
+    auto r = db.run("SELECT id, version FROM large_text_table WHERE \"version\" IS NULL LIMIT 10;");
+    while (!r.isDone()) {
+      KJ_DBG(r.getValue(0), r.getValue(1));
+      r.nextRow();
+    }
+  }
+}
+
 }  // namespace
 }  // namespace workerd
