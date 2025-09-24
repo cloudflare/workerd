@@ -12,9 +12,6 @@
 namespace workerd::tracing {
 namespace {
 
-// Uniquely identifies js tail session failures
-constexpr kj::Exception::DetailTypeId TAIL_STREAM_JS_FAILURE = 0xcde53d65a46183f7;
-
 #define STRS(V)                                                                                    \
   V(ALARM, "alarm")                                                                                \
   V(ATTRIBUTES, "attributes")                                                                      \
@@ -606,10 +603,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
 
-    auto promise =
-        ioContext
-            .run([this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
-                     Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise = ioContext.run(
+        [this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
+            Worker::Lock& lock) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
@@ -638,19 +634,33 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       } else {
         return kj::mv(result);
       }
-    }).catch_([](kj::Exception&& e) {
+    });
+
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
+        [&, &fulfiller = *paf.fulfiller](kj::Exception&& e) {
+      // This is the top level exception catcher for tail events being delivered.
+      // When we reach this point, we are at the top-level exception catcher of the RPC call used to
+      // report a tail event. Unlike with JsRpc, we do not want to propagate JS exceptions to the
+      // client side (STW tail events are reported from C++ whereas JsRpc calls are made from JS,
+      // where the client side may want to catch exceptions from the JsRpc call). We also need to
+      // make sure that an exception here results in no further calls being made. Therefore, we
+      // propagate the exception to the doneFulfiller, where it is used to return the appropriate
+      // outcome code (for JS exceptions) or re-throw it so it gets reported as an uncaught
+      // exception (for any C++ exceptions). By doing this at the customEvent level and not the call
+      // level, we ensure that no more tail events get delivered (this previously caused errors when
+      // the weakIoContext was no longer valid when another tail event was reported after an
+      // exception).
       if (jsg::isTunneledException(e.getDescription())) {
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
         if (!description.startsWith("remote.")) {
           e.setDescription(kj::str("remote.", description));
         }
       }
-      kj::throwFatalException(kj::mv(e));
+      // We still fulfill this fulfiller to disarm the cancellation check below
+      fulfiller.fulfill();
+      doneFulfiller->reject(kj::mv(e));
     });
-
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&fulfiller = *paf.fulfiller](kj::Exception&& e) { fulfiller.reject(kj::mv(e)); });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
         fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
@@ -764,10 +774,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         results->get().setStop(true);
         doneFulfiller->fulfill();
       }),
-              ioContext.addFunctor([this, results = sharedResults.addRef()](
-                                       jsg::Lock& js, jsg::Value&& error) mutable {
+              ioContext.addFunctor(
+                  [results = sharedResults.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+        // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
+        // the exception later.
         results->get().setStop(true);
-        doneFulfiller->fulfill();
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
@@ -860,15 +871,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
       // the stream and has done all its work, that the stream self-evidently did not get canceled
       // prematurely. This applies even if promises were rejected.
+      // No need to catch exceptions here: They will be handled in report() alongside exceptions
+      // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
+      // identifier for them.
       if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); },
-            [&](jsg::Lock& js, jsg::Value&& value) {
-          // Convert the JS exception to a KJ exception, preserving all details
-          kj::Exception exception = js.exceptionToKj(kj::mv(value));
-          // Mark this as a tail stream failure for proper classification
-          exception.setDetail(TAIL_STREAM_JS_FAILURE, kj::heapArray<kj::byte>(0));
-          doneFulfiller->reject(kj::mv(exception));
-        });
+        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); });
       }
       return ioContext.awaitJs(js, kj::mv(p));
     }
@@ -916,8 +923,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
 
   auto eventOutcome = co_await donePromise.exclusiveJoin(ioContext.onAbort()).then([&]() {
     return ioContext.waitUntilStatus();
-  }, [](kj::Exception&& e) {
-    if (e.getDetail(TAIL_STREAM_JS_FAILURE) != kj::none) {
+  }, [&incomingRequest](kj::Exception&& e) {
+    // If we have a JSG exception, just set the appropriate return code – this will already have
+    // been logged and we do not need to treat it like a KJ exception.
+    if (jsg::isTunneledException(e.getDescription())) {
+      incomingRequest->getMetrics().reportFailure(e);
       return EventOutcome::EXCEPTION;
     }
     kj::throwRecoverableException(kj::mv(e));
