@@ -8,7 +8,7 @@ build --test_size_filters=-enormous
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
 # corresponds to small,medium,large,enormous tests (medium is default)
-build --test_timeout=1,15,60,240
+build --test_timeout=3,15,60,240
 
 # We're only using bzlmod in a nominal capacity so far
 common --enable_workspace
