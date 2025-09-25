@@ -1012,17 +1012,6 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto deleteKey = [&]() {
-      KJ_SWITCH_ONEOF(keys) {
-        KJ_CASE_ONEOF(ks, kj::Array<kj::String>) {
-          return kj::str(ks);
-        }
-        KJ_CASE_ONEOF(k, kj::String) {
-          return kj::str(k);
-        }
-      }
-      KJ_UNREACHABLE;
-    }();
 
     auto traceSpan = context.makeTraceSpan("r2_delete"_kjc);
     auto userSpan = context.makeUserTraceSpan("r2_delete"_kjc);
@@ -1037,7 +1026,6 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     KJ_IF_SOME(b, this->bucketName()) {
       traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
     }
-    traceContext.userSpan.setTag("cloudflare.r2.request.keys"_kjc, kj::str(deleteKey));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
