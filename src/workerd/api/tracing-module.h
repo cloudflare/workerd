@@ -11,13 +11,11 @@
 
 namespace workerd::api {
 
-// Forward declaration for InternalSpanImpl
-class InternalSpanImpl;
-
 // Wrapper class that manages span ownership through IoContext
 class InternalSpan: public jsg::Object {
  public:
-  InternalSpan(kj::Maybe<IoOwn<InternalSpanImpl>> impl);
+  InternalSpan(kj::Maybe<IoOwn<SpanBuilder>> span);
+  ~InternalSpan() noexcept(false);
 
   void end();
   void setTag(
@@ -31,25 +29,8 @@ class InternalSpan: public jsg::Object {
     JSG_METHOD(getIsRecording);
   }
 
-  friend class InternalSpanImpl;
-
  private:
-  kj::Maybe<IoOwn<InternalSpanImpl>> impl;
-};
-
-// Implementation class that actually manages the SpanBuilder
-class InternalSpanImpl {
- public:
-  InternalSpanImpl(SpanBuilder span);
-  ~InternalSpanImpl() noexcept(false);
-
-  void end();
-  void setTag(kj::ConstString key, kj::OneOf<bool, double, kj::String> value);
-  bool getIsRecording();
-  SpanParent makeSpanParent();
-
- private:
-  kj::Maybe<SpanBuilder> span;
+  kj::Maybe<IoOwn<SpanBuilder>> span;
 };
 
 // Keep JsSpanBuilder as alias for backward compatibility
