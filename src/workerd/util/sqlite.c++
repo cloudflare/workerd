@@ -557,9 +557,9 @@ bool SqliteDatabase::observedCriticalError() {
   return criticalErrorOccurred;
 }
 
-void SqliteDatabase::notifyWrite() {
+void SqliteDatabase::notifyWrite(bool allowUnconfirmed) {
   KJ_IF_SOME(cb, onWriteCallback) {
-    cb();
+    cb(allowUnconfirmed);
   }
 }
 
@@ -766,7 +766,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
               KJ_DEFER(currentRegulator = regulator);
               currentParseContext = kj::none;
               KJ_DEFER(currentParseContext = parseContext);
-              cb();
+              cb(false);  // prepareSql doesn't have access to allowUnconfirmed, use safe default
             }
           }
 
@@ -1423,7 +1423,7 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {
-      cb();
+      cb(allowUnconfirmed);
     }
   }
 }

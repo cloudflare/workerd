@@ -53,9 +53,11 @@ void SqliteKv::cancelCurrentCursor() {
   }
 }
 
-SqliteKv::Initialized& SqliteKv::ensureInitialized() {
+SqliteKv::Initialized& SqliteKv::ensureInitialized(bool allowUnconfirmed) {
   if (!tableCreated) {
-    db.run(R"(
+    db.run(SqliteDatabase::QueryOptions{.regulator = SqliteDatabase::TRUSTED,
+             .allowUnconfirmed = allowUnconfirmed},
+        R"(
       CREATE TABLE IF NOT EXISTS _cf_KV (
         key TEXT PRIMARY KEY,
         value BLOB
@@ -136,12 +138,14 @@ kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
   return KeyValuePair{state.query.getText(0), state.query.getBlob(1)};
 }
 
-void SqliteKv::put(KeyPtr key, ValuePtr value) {
-  ensureInitialized().stmtPut.run(key, value);
+void SqliteKv::put(KeyPtr key, ValuePtr value, bool allowUnconfirmed) {
+  ensureInitialized(allowUnconfirmed)
+      .stmtPut.run({.allowUnconfirmed = allowUnconfirmed}, key, value);
 }
 
-bool SqliteKv::delete_(KeyPtr key) {
-  auto query = ensureInitialized().stmtDelete.run(key);
+bool SqliteKv::delete_(KeyPtr key, bool allowUnconfirmed) {
+  auto query = ensureInitialized(allowUnconfirmed)
+                   .stmtDelete.run({.allowUnconfirmed = allowUnconfirmed}, key);
   return query.changeCount() > 0;
 }
 
@@ -149,7 +153,7 @@ uint SqliteKv::deleteAll() {
   // TODO(perf): Consider introducing a compatibility flag that causes deleteAll() to always return
   //   1. Apps almost certainly don't care about the return value but historically we returned the
   //   count of keys deleted, so now we're stuck counting the table size for no good reason.
-  uint count = tableCreated ? ensureInitialized().stmtCountKeys.run().getInt(0) : 0;
+  uint count = tableCreated ? ensureInitialized(false).stmtCountKeys.run().getInt(0) : 0;
   db.reset();
   return count;
 }
