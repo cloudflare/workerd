@@ -20,25 +20,11 @@ void InternalSpan::end() {
   }
 }
 
-void InternalSpan::setTag(
-    jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
-  KJ_IF_SOME(value, maybeValue) {
-    kj::OneOf<bool, double, kj::String> tagValue;
-
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(s, kj::String) {
-        tagValue = kj::mv(s);
-      }
-      KJ_CASE_ONEOF(b, bool) {
-        tagValue = b;
-      }
-      KJ_CASE_ONEOF(d, double) {
-        tagValue = d;
-      }
-    }
-
-    KJ_IF_SOME(s, impl) {
-      s->setTag(kj::ConstString(kj::mv(key)), kj::mv(tagValue));
+void InternalSpan::setTag(jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
+  KJ_IF_SOME(s, impl) {
+    // If maybeValue is nullopt (undefined from JS), we simply don't set the tag
+    KJ_IF_SOME(value, maybeValue) {
+      s->setTag(kj::ConstString(kj::mv(key)), kj::mv(value));
     }
   }
 }
@@ -66,17 +52,7 @@ void InternalSpanImpl::end() {
 
 void InternalSpanImpl::setTag(kj::ConstString key, kj::OneOf<bool, double, kj::String> value) {
   KJ_IF_SOME(s, span) {
-    KJ_SWITCH_ONEOF(value) {
-      KJ_CASE_ONEOF(b, bool) {
-        s.setTag(kj::mv(key), b);
-      }
-      KJ_CASE_ONEOF(d, double) {
-        s.setTag(kj::mv(key), d);
-      }
-      KJ_CASE_ONEOF(str, kj::String) {
-        s.setTag(kj::mv(key), kj::mv(str));
-      }
-    }
+    s.setTag(kj::mv(key), kj::mv(value));
   }
 }
 
