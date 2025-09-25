@@ -24,7 +24,7 @@ export type GatewayOptions = {
   retries?: GatewayRetries;
 };
 
-export type UniversalGatewayOptions = Exclude<GatewayOptions, 'id'> & {
+export type UniversalGatewayOptions = Omit<GatewayOptions, 'id'> & {
   /**
    ** @deprecated
    */
