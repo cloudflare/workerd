@@ -48,18 +48,64 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   }
 
   IoContext::current().addTask(req.sendIgnoringResult());
-
   running = true;
+  monitorOnBackgroundIfNeeded();
 }
 
-jsg::Promise<void> Container::monitor(jsg::Lock& js) {
+void Container::monitorOnBackgroundIfNeeded() {
+  if (monitoring || !running) {
+    return;
+  }
+  monitoring = true;
+
+  if (monitorKjPromise == kj::none) {
+    monitorKjPromise = rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+                           .send()
+                           .then([](auto&& results) -> uint8_t {
+      return results.getExitCode();
+    }).fork();
+  }
+
+  auto req = KJ_ASSERT_NONNULL(monitorKjPromise)
+                 .addBranch()
+                 .then([](uint8_t exitCode) {}, [this, self = JSG_THIS](kj::Exception&& error) {
+    // Check if there is an existing monitor request made by the user.
+    // If not, we can abort the current context and error.
+    if (!monitoringExplicitly) {
+      IoContext::current().abort(kj::mv(error));
+    }
+  }).attach(kj::defer([this, self = JSG_THIS]() {
+    running = false;
+    monitoring = false;
+  }));
+
+  IoContext::current().addTask(kj::mv(req));
+}
+
+jsg::MemoizedIdentity<jsg::Promise<void>>& Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
 
-  return IoContext::current()
-      .awaitIo(js, rpcClient->monitorRequest(capnp::MessageSize{4, 0}).send())
-      .then(js, [this](jsg::Lock& js, capnp::Response<rpc::Container::MonitorResults> results) {
+  monitoringExplicitly = true;
+
+  KJ_IF_SOME(memoized, monitorJsPromise) {
+    return memoized;
+  }
+
+  if (monitorKjPromise == kj::none) {
+    auto responsePromise =
+        rpcClient->monitorRequest(capnp::MessageSize{4, 0})
+            .send()
+            .then([](capnp::Response<rpc::Container::MonitorResults>&& results) -> uint8_t {
+      return results.getExitCode();
+    });
+    monitorKjPromise = responsePromise.fork();
+  }
+
+  auto jsPromise = IoContext::current()
+                       .awaitIo(js, KJ_ASSERT_NONNULL(monitorKjPromise).addBranch())
+                       .then(js, [this](jsg::Lock& js, uint8_t exitCode) {
     running = false;
-    auto exitCode = results.getExitCode();
+    monitoringExplicitly = false;
     KJ_IF_SOME(d, destroyReason) {
       jsg::Value error = kj::mv(d);
       destroyReason = kj::none;
@@ -73,9 +119,16 @@ jsg::Promise<void> Container::monitor(jsg::Lock& js) {
     }
   }, [this](jsg::Lock& js, jsg::Value&& error) {
     running = false;
+    monitoringExplicitly = false;
     destroyReason = kj::none;
     js.throwException(kj::mv(error));
   });
+
+  monitorJsPromise = jsg::MemoizedIdentity<jsg::Promise<void>>(kj::mv(jsPromise));
+
+  monitorOnBackgroundIfNeeded();
+
+  return KJ_ASSERT_NONNULL(monitorJsPromise);
 }
 
 jsg::Promise<void> Container::destroy(jsg::Lock& js, jsg::Optional<jsg::Value> error) {
