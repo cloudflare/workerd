@@ -305,8 +305,7 @@ struct WorkerdApi::Impl final {
       // Allows us to begin experimenting with eval/new fuction enabled in
       // preparation for *possibly* enabling it by default in the future
       // once v8 sandbox is fully enabled and rolled out.
-      if (featuresParam.getExperimentalAllowEvalAlways() &&
-          featuresParam.getWorkerdExperimental()) {
+      if (featuresParam.getExperimentalAllowEvalAlways()) {
         jsgIsolate.setAllowsAllowEval();
       }
     });
