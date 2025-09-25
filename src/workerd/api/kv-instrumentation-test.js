@@ -395,7 +395,8 @@ export const test = {
         'db.operation.name': 'put',
         'cloudflare.binding.name': 'KV',
         'cloudflare.binding.type': 'KV',
-        'cloudflare.kv.query.key': 'foo_with_exp',
+        'cloudflare.kv.query.keys': 'foo_with_exp',
+        'cloudflare.kv.query.keys.count': 1n,
         'cloudflare.kv.query.expiration': 10n,
         'cloudflare.kv.query.value_type': 'text',
         'cloudflare.kv.query.payload.size': 4n,
@@ -407,7 +408,8 @@ export const test = {
         'db.operation.name': 'put',
         'cloudflare.binding.name': 'KV',
         'cloudflare.binding.type': 'KV',
-        'cloudflare.kv.query.key': 'foo_with_expTtl',
+        'cloudflare.kv.query.keys': 'foo_with_expTtl',
+        'cloudflare.kv.query.keys.count': 1n,
         'cloudflare.kv.query.expiration_ttl': 15n,
         'cloudflare.kv.query.value_type': 'text',
         'cloudflare.kv.query.payload.size': 23n,
@@ -419,15 +421,14 @@ export const test = {
         'db.operation.name': 'put',
         'cloudflare.binding.name': 'KV',
         'cloudflare.binding.type': 'KV',
-        'cloudflare.kv.query.key': 'foo_with_expTtl',
+        'cloudflare.kv.query.keys': 'foo_with_expTtl',
+        'cloudflare.kv.query.keys.count': 1n,
         'cloudflare.kv.query.expiration_ttl': 15n,
         'cloudflare.kv.query.value_type': 'ArrayBuffer',
         'cloudflare.kv.query.payload.size': 256n,
         closed: true,
       },
     ];
-
-    console.log(received);
 
     assert.equal(
       received.length,
