@@ -1,4 +1,5 @@
 "Bazel dependencies, see https://registry.bazel.build"
+
 bazel_dep(name = "aspect_bazel_lib", version = "2.21.1")
 bazel_dep(name = "bazel_features", version = "1.35.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.1")
@@ -43,5 +44,7 @@ git_override(
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
 
 include("//build/deps:deps.MODULE.bazel")
+
 include("//build/deps:nodejs.MODULE.bazel")
+
 include("//build/deps:python.MODULE.bazel")

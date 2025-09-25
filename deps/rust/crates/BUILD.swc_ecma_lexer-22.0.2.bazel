@@ -56,7 +56,7 @@ rust_library(
         "@crates_vendor__num-bigint-0.4.6//:num_bigint",
         "@crates_vendor__phf-0.11.3//:phf",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__serde-1.0.225//:serde",
+        "@crates_vendor__serde-1.0.226//:serde",
         "@crates_vendor__smallvec-1.15.1//:smallvec",
         "@crates_vendor__smartstring-1.0.1//:smartstring",
         "@crates_vendor__stacker-0.1.21//:stacker",
