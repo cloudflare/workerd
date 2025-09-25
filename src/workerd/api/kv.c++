@@ -516,6 +516,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
           getContentEncoding(
               context, *response.headers, Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
+      KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+        traceContext.userSpan.setTag("cloudflare.kv.response.size"_kjc, static_cast<int64_t>(size));
+      }
+
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
@@ -549,7 +553,8 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     traceContext.userSpan.setTag("db.operation.name"_kjc, kj::str("put"_kjc));
     traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(bindingName));
     traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("KV"_kjc));
-    traceContext.userSpan.setTag("cloudflare.kv.query.key"_kjc, kj::str(name));
+    traceContext.userSpan.setTag("cloudflare.kv.query.keys"_kjc, kj::str(name));
+    traceContext.userSpan.setTag("cloudflare.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
     kj::Url url;
     url.scheme = kj::str("https");
