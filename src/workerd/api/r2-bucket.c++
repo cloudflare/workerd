@@ -329,23 +329,26 @@ void addHeadResultSpanTags(
       kj::str(toISOString(js, headResult.getUploaded()).asPtr()));
   auto checksums = headResult.getChecksums();
   KJ_IF_SOME(md5, checksums.get()->md5) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(md5));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(md5));
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("md5"));
   }
   KJ_IF_SOME(sha1, checksums.get()->sha1) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha1));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha1));
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha1"));
   }
   KJ_IF_SOME(sha256, checksums.get()->sha256) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha256));
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha256));
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha256"));
   }
   KJ_IF_SOME(sha384, checksums.get()->sha384) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha384));
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha384));
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha384"));
   }
   KJ_IF_SOME(sha512, checksums.get()->sha512) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::str(sha512));
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha512));
     traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha512"));
   }
 
@@ -697,7 +700,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             putBuilder.setMd5(bin.asArrayPtr());
             traceContext.userSpan.setTag("cloudflare.r2.request.checksum.type"_kjc, kj::str("md5"));
             traceContext.userSpan.setTag(
-                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
+                "cloudflare.r2.request.checksum.value"_kjc, kj::encodeHex(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 32, TypeError, "MD5 is 32 hex characters, not ",
@@ -720,7 +723,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             traceContext.userSpan.setTag(
                 "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha1"));
             traceContext.userSpan.setTag(
-                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
+                "cloudflare.r2.request.checksum.value"_kjc, kj::encodeHex(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 40, TypeError, "SHA-1 is 40 hex characters, not ",
@@ -744,7 +747,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             traceContext.userSpan.setTag(
                 "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha256"));
             traceContext.userSpan.setTag(
-                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
+                "cloudflare.r2.request.checksum.value"_kjc, kj::encodeHex(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 64, TypeError, "SHA-256 is 64 hex characters, not ",
@@ -769,7 +772,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             traceContext.userSpan.setTag(
                 "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha384"));
             traceContext.userSpan.setTag(
-                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
+                "cloudflare.r2.request.checksum.value"_kjc, kj::encodeHex(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 96, TypeError, "SHA-384 is 96 hex characters, not ",
@@ -794,7 +797,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             traceContext.userSpan.setTag(
                 "cloudflare.r2.request.checksum.type"_kjc, kj::str("sha512"));
             traceContext.userSpan.setTag(
-                "cloudflare.r2.request.checksum.value"_kjc, kj::str(bin.asArrayPtr()));
+                "cloudflare.r2.request.checksum.value"_kjc, kj::encodeHex(bin.asArrayPtr()));
           }
           KJ_CASE_ONEOF(hex, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(hex.value.size() == 128, TypeError, "SHA-512 is 128 hex characters, not ",
