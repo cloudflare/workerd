@@ -11,19 +11,22 @@
 
 namespace workerd::api {
 
-// InternalSpan implementation
-InternalSpan::InternalSpan(kj::Maybe<IoOwn<InternalSpanImpl>> impl): impl(kj::mv(impl)) {}
+InternalSpan::InternalSpan(kj::Maybe<IoOwn<SpanBuilder>> span): span(kj::mv(span)) {}
+
+InternalSpan::~InternalSpan() noexcept(false) {
+  end();
+}
 
 void InternalSpan::end() {
-  KJ_IF_SOME(s, impl) {
+  KJ_IF_SOME(s, span) {
     s->end();
+    span = kj::none;
   }
 }
 
 void InternalSpan::setTag(
     jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
-  KJ_IF_SOME(s, impl) {
-    // If maybeValue is nullopt (undefined from JS), we simply don't set the tag
+  KJ_IF_SOME(s, span) {
     KJ_IF_SOME(value, maybeValue) {
       s->setTag(kj::ConstString(kj::mv(key)), kj::mv(value));
     }
@@ -31,47 +34,12 @@ void InternalSpan::setTag(
 }
 
 bool InternalSpan::getIsRecording() {
-  KJ_IF_SOME(s, impl) {
-    return s->getIsRecording();
-  }
-  return false;
-}
-
-// InternalSpanImpl implementation
-InternalSpanImpl::InternalSpanImpl(SpanBuilder span): span(kj::mv(span)) {}
-
-InternalSpanImpl::~InternalSpanImpl() noexcept(false) {
-  end();
-}
-
-void InternalSpanImpl::end() {
-  KJ_IF_SOME(s, span) {
-    s.end();
-    span = kj::none;
-  }
-}
-
-void InternalSpanImpl::setTag(kj::ConstString key, kj::OneOf<bool, double, kj::String> value) {
-  KJ_IF_SOME(s, span) {
-    s.setTag(kj::mv(key), kj::mv(value));
-  }
-}
-
-bool InternalSpanImpl::getIsRecording() {
   return span != kj::none;
 }
 
-SpanParent InternalSpanImpl::makeSpanParent() {
-  KJ_IF_SOME(s, span) {
-    return SpanParent(s);
-  } else {
-    return SpanParent(nullptr);
-  }
-}
-
 SpanParent InternalSpan::makeSpanParent() {
-  KJ_IF_SOME(s, impl) {
-    return s->makeSpanParent();
+  KJ_IF_SOME(s, span) {
+    return SpanParent(*s);
   }
   return SpanParent(nullptr);
 }
@@ -81,9 +49,9 @@ jsg::Ref<InternalSpan> TracingModule::startSpan(jsg::Lock& js, const kj::String 
 
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
-    auto span = ioContext.makeUserTraceSpan(kj::mv(spanName));
-    auto impl = kj::heap<InternalSpanImpl>(kj::mv(span));
-    return js.alloc<InternalSpan>(ioContext.addObject(kj::mv(impl)));
+    auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(spanName));
+    auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
+    return js.alloc<InternalSpan>(kj::mv(ownedSpan));
   } else {
     // When no IoContext is available, create a no-op span
     return js.alloc<InternalSpan>(kj::none);
@@ -143,10 +111,10 @@ jsg::JsValue TracingModule::startSpanWithCallback(jsg::Lock& js,
   auto spanName = kj::ConstString(kj::str(operationName));
 
   auto& ioContext = IoContext::current();
-  auto span = ioContext.makeUserTraceSpan(kj::mv(spanName));
-  auto impl = kj::heap<InternalSpanImpl>(kj::mv(span));
+  auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(spanName));
+  auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
   // Create the JavaScript span object
-  jsg::Ref<InternalSpan> jsSpan = js.alloc<InternalSpan>(ioContext.addObject(kj::mv(impl)));
+  jsg::Ref<InternalSpan> jsSpan = js.alloc<InternalSpan>(kj::mv(ownedSpan));
 
   // Create new span parent for the callback execution context
   SpanParent newSpanParent = jsSpan->makeSpanParent();
