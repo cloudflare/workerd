@@ -45,7 +45,6 @@ const md5Buffer = new Uint8Array([
   0x9a, 0x03, 0x64, 0xb9, 0xe9, 0x9b, 0xb4, 0x80, 0xdd, 0x25, 0xe1, 0xf0, 0x28,
   0x4c, 0x85, 0x55,
 ]);
-const md5Hex = '9a0364b9e99bb480dd25e1f0284c8555';
 const objResponse = {
   name: key,
   version: 'objectVersion',
@@ -898,6 +897,7 @@ export default {
       let resp = await env.BUCKET.put('md5checksum', body, {
         md5: md5Buffer,
       });
+      assert.ok(resp);
     }
   },
 };
