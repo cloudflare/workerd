@@ -115,7 +115,8 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
   // Unfortunately this means we cannot prepare the statement, unless we prepare a series of
   // statements for each depth. (Actually, it could be reasonable to prepare statements for
   // depth 0 specifically, but I'm not going to try it for now.)
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   [&]() noexcept {
@@ -158,7 +159,8 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     precommitAlarmState = actorSqlite.startPrecommitAlarmScheduling();
   }
 
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
   KJ_IF_SOME(p, parent) {
@@ -192,8 +194,10 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 }
 
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("ROLLBACK TO _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_savepoint_", depth));
   KJ_IF_SOME(p, parent) {
     alarmDirty = p->alarmDirty;
   } else {
@@ -483,19 +487,23 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
       txn->commit();
     } else {
       // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
-      db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
+      db->run(
+          {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
       for (const auto& pair: pairs) {
         try {
           kv.put(pair.key, pair.value);
         } catch (kj::Exception& e) {
           // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
-          db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-          db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+          db->run({.regulator = SqliteDatabase::TRUSTED},
+              kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+          db->run({.regulator = SqliteDatabase::TRUSTED},
+              kj::str("RELEASE _cf_put_multiple_savepoint"));
           kj::throwFatalException(kj::mv(e));
         }
       }
       // We're done here. RELEASE the savepoint.
-      db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
+      db->run(
+          {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
     }
   } else {
     for (auto& pair: pairs) {

@@ -847,7 +847,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.first(statementLength));
     // Create a Query object, which will prepare & execute it
-    auto q = Query(*this, regulator, nextStatement);
+    auto q = Query(*this, QueryOptions{.regulator = regulator}, nextStatement);
 
     rowsRead += q.getRowsRead();
     rowsWritten += q.getRowsWritten();
@@ -1340,11 +1340,11 @@ void SqliteDatabase::Statement::beforeSqliteReset() {
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     Statement& statement,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       maybeStatement(statement.prepareForExecution()),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
@@ -1353,11 +1353,11 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     kj::StringPtr sqlCode,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
