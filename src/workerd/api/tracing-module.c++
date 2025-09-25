@@ -144,19 +144,18 @@ jsg::JsValue TracingModule::startSpanWithCallback(jsg::Lock& js,
       auto callbackResult = callback(js, kj::mv(callbackArgs));
       return jsg::JsValue(callbackResult.getHandle(js));
     }, [&](jsg::Value exception) -> jsg::JsValue {
-      resolver->Reject(js.v8Context(), exception.getHandle(js));
+      resolver->Reject(js.v8Context(), exception.getHandle(js)).IsJust();
       return jsg::JsValue(promise);
     });
 
     // If result is a promise, chain it to our resolver
     v8::Local<v8::Value> resultHandle = result;
     if (resultHandle->IsPromise()) {
-      auto resultPromise = resultHandle.As<v8::Promise>();
       // For simplicity, just return the result promise directly
       return result;
     } else {
       // Resolve with the result
-      resolver->Resolve(js.v8Context(), resultHandle);
+      resolver->Resolve(js.v8Context(), resultHandle).IsJust();
       return jsg::JsValue(promise);
     }
   }
@@ -186,7 +185,6 @@ jsg::JsValue TracingModule::startSpanWithCallback(jsg::Lock& js,
   // Define callback execution logic
   auto executeCallback = [&jsSpan, &js, &callback, callbackArgs = kj::mv(callbackArgs),
                              &valuePromiseHandler]() mutable -> jsg::JsValue {
-    auto v8Context = js.v8Context();
     return js.tryCatch([&]() -> jsg::JsValue {
       auto callbackResult = callback(js, kj::mv(callbackArgs));
       v8::Local<v8::Value> result = callbackResult.getHandle(js);
