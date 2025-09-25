@@ -32,7 +32,8 @@ namespace workerd::api::streams {
 //     │  │         State Management            │  │
 //     │  │                                     │  │
 //     │  │   Active ──► Closed                 │  │
-//     │  │     │                               │  │
+//     │  │     │          │                    │  │
+//     │  │     │          ▼                    │  │
 //     │  │     └─────► Canceled/Errored        │  │
 //     │  └─────────────────────────────────────┘  │
 //     │                   │                       │
@@ -133,14 +134,14 @@ class ReadableStreamSourceJsAdapter final {
   // Like cancel() but with the error reason provided as a JS value.
   void cancel(jsg::Lock& js, const jsg::JsValue& reason);
 
-  // Closed the stream immediatey without error if it is still
+  // Closes the stream immediatey without error if it is still
   // active. All in-flight and pending read requests will be
   // rejected with a cancelation error but the adapter will
   // transition to the closed state rather than the errored state.
   // If the adapter is already closed or canceled, this is a no-op.
   void shutdown(jsg::Lock& js);
 
-  // Causing the adapter to enter the closing state. Any pending
+  // Causes the adapter to enter the closing state. Any pending
   // read requests will be allowed to complete but no new read requests
   // will be accepted. The underlying source will be closed fully
   // once all pending reads complete. If cancel() has already been
@@ -170,11 +171,11 @@ class ReadableStreamSourceJsAdapter final {
     // The buffer containing the data that was read. The length
     // of the buffer may be less than the length of the buffer
     // provided in ReadOptions if fewer bytes were available.
-    // The identity of underlying ArrayBuffer will be the same
+    // The identity of the underlying ArrayBuffer will be the same
     // but the buffer itself will be a new type array view.
     // of the same type as that provided in ReadOptions.
     // If the read produced no data because the stream is
-    // closed, the Uint8Array will be zero length.
+    // closed, the type array will be zero length.
     jsg::BufferSource buffer;
 
     // True if the stream is now closed and no further reads
@@ -209,8 +210,9 @@ class ReadableStreamSourceJsAdapter final {
   jsg::Promise<jsg::BufferSource> readAllBytes(jsg::Lock& js, uint64_t limit = kj::maxValue);
 
   // If the stream is still active, tries to get the total length,
-  // if known. If the length is not known, or the stream is closed
-  // or errored, returns kj::none.
+  // if known. If the length is not known, the encoding does not
+  // match the encoding of the underlying stream, or the stream is
+  // closed or errored, returns kj::none.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
 
   struct Tee {

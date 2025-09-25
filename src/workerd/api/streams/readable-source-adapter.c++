@@ -21,6 +21,14 @@ jsg::BufferSource transferToEmptyBuffer(jsg::Lock& js, jsg::BufferSource buffer)
 }
 }  // namespace
 
+// The Active state maintains a queue of tasks, such as read or close operations. Each task
+// contains a promise-returning functin object and a fulfiller. When the first task is
+// enqueued, the active state begins processing the queue asynchronously. Each function
+// is invoked in order, its promise awaited, and the result passed to the fulfiller. The
+// fulfiller notifies the code which enqueued the task that the task has completed. In
+// this way, read and close operations are safely executed in serial, even if one operation
+// is called before the previous completes. This mechanism satisfies KJ's restriction on
+// concurrent operations on streams.
 struct ReadableStreamSourceJsAdapter::Active {
   struct Task {
     kj::Function<kj::Promise<size_t>()> task;
@@ -73,7 +81,7 @@ struct ReadableStreamSourceJsAdapter::Active {
   }
 
   kj::Promise<size_t> enqueue(kj::Function<kj::Promise<size_t>()> task) {
-    KJ_DASSERT(!canceled, "cannot enqueue tasks on an canceled queue");
+    KJ_DASSERT(!canceled, "cannot enqueue tasks on a canceled queue");
     auto paf = kj::newPromiseAndFulfiller<size_t>();
     queue.push(kj::heap<Task>(kj::mv(task), kj::mv(paf.fulfiller)));
     if (!running) {
@@ -145,10 +153,7 @@ bool ReadableStreamSourceJsAdapter::isClosed() {
 }
 
 kj::Maybe<const kj::Exception&> ReadableStreamSourceJsAdapter::isCanceled() {
-  if (state.template is<kj::Exception>()) {
-    return state.template get<kj::Exception>();
-  }
-  return kj::none;
+  return state.tryGet<kj::Exception>();
 }
 
 jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAdapter::read(
@@ -173,8 +178,14 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
 
       auto buffer = kj::mv(options.buffer);
       auto elementSize = buffer.getElementSize();
-      auto minBytes =
-          kj::min(kj::max(options.minBytes.orDefault(elementSize), elementSize), buffer.size());
+
+      // The buffer size should always be a multiple of the element size and should
+      // always be at least as large as minBytes. This should be handled for us by
+      // the jsg::BufferSource, but just to be safe, we will double-check with a
+      // debug assert here.
+      KJ_DASSERT(buffer.size() % elementSize == 0);
+
+      auto minBytes = kj::min(options.minBytes.orDefault(elementSize), buffer.size());
       // We want to be sure that minBytes is a multiple of the element size
       // of the buffer, otherwise we might never be able to satisfy the request
       // correcty. If the caller provided a minBytes, and it is not a multiple
@@ -183,7 +194,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
         minBytes = minBytes + (elementSize - (minBytes % elementSize)) % elementSize;
       }
 
-      // Note: We do not enforce that the source must provide as least minBytes
+      // Note: We do not enforce that the source must provide at least minBytes
       // if available here as that is part of the contract of the source itself.
       // We will simply pass minBytes along to the source and it is up to the
       // source to honor it. We do, however, enforce that the source must
@@ -194,6 +205,10 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
       // chain that follows the read in order to keep it alive.
       auto promise = active.enqueue(kj::coCapture(
           [&active, buffer = buffer.asArrayPtr(), minBytes]() mutable -> kj::Promise<size_t> {
+        // TODO(soon): The underlying kj streams API now supports passing the
+        // kj::ArrayPtr directly to the read call, but ReadableStreamSource has
+        // not yet been updated to do so. When it is, we can update this read to
+        // pass `buffer` directly rather than passing the begin() and size().
         co_return co_await active.source->tryRead(buffer.begin(), minBytes, buffer.size());
       }));
       return ioContext
@@ -215,7 +230,17 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
           });
         }
         KJ_DASSERT(bytesRead <= buffer.size());
-        KJ_DASSERT(bytesRead % buffer.getElementSize() == 0);
+
+        // If bytesRead is not a multiple of the element size, that indicates
+        // that the source either read less than minBytes (and ended), or is
+        // simply unable to satisfy the element size requirement. We cannot
+        // provide a partial element to the caller, so reject the read.
+        if (bytesRead % buffer.getElementSize() != 0) {
+          return js.rejectedPromise<ReadResult>(
+              js.typeError(kj::str("The underlying stream failed to provide a multiple of the "
+                                   "target element size ",
+                  buffer.getElementSize())));
+        }
 
         auto backing = buffer.detach(js);
         backing.limit(bytesRead);
@@ -301,7 +326,7 @@ jsg::Promise<jsg::JsRef<jsg::JsString>> ReadableStreamSourceJsAdapter::readAllTe
 
       if (active.closePending) {
         return js.rejectedPromise<jsg::JsRef<jsg::JsString>>(
-            js.typeError("Close already pending, cannot close again."));
+            js.typeError("Close already pending, cannot read."));
       }
       active.closePending = true;
 
@@ -362,7 +387,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
 
       if (active.closePending) {
         return js.rejectedPromise<jsg::BufferSource>(
-            js.typeError("Close already pending, cannot close again."));
+            js.typeError("Close already pending, cannot read."));
       }
       active.closePending = true;
 
