@@ -353,6 +353,7 @@ export const test = {
         'cloudflare.binding.type': 'KV',
         'cloudflare.kv.query.prefix': 'te',
         'cloudflare.kv.response.cache_status': 'HIT',
+        'cloudflare.kv.response.size': 291n,
         'cloudflare.kv.response.list_complete': false,
         'cloudflare.kv.response.cursor': '6Ck1la0VxJ0djhidm1MdX2FyD',
         'cloudflare.kv.response.expiration': 1234n,
@@ -369,6 +370,7 @@ export const test = {
         'cloudflare.kv.query.prefix': 'te',
         'cloudflare.kv.query.cursor': '123',
         'cloudflare.kv.response.cache_status': 'HIT',
+        'cloudflare.kv.response.size': 6939n,
         'cloudflare.kv.response.list_complete': true,
         'cloudflare.kv.response.expiration': 1234n,
         'cloudflare.kv.response.returned_rows': 100n,
@@ -382,6 +384,7 @@ export const test = {
         'cloudflare.binding.type': 'KV',
         'cloudflare.kv.query.prefix': 'not-found',
         'cloudflare.kv.response.cache_status': 'HIT',
+        'cloudflare.kv.response.size': 32n,
         'cloudflare.kv.response.list_complete': true,
         'cloudflare.kv.response.returned_rows': 0n,
         closed: true,
@@ -423,6 +426,8 @@ export const test = {
         closed: true,
       },
     ];
+
+    console.log(received);
 
     assert.equal(
       received.length,

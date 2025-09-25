@@ -516,6 +516,10 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
           getContentEncoding(
               context, *response.headers, Response::BodyEncoding::AUTO, FeatureFlags::get(js)));
 
+      KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+        traceContext.userSpan.setTag("cloudflare.kv.response.size"_kjc, static_cast<int64_t>(size));
+      }
+
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
