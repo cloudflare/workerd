@@ -50,9 +50,9 @@ rust_library(
     version = "1.0.145",
     deps = [
         "@crates_vendor__itoa-1.0.15//:itoa",
-        "@crates_vendor__memchr-2.7.5//:memchr",
+        "@crates_vendor__memchr-2.7.6//:memchr",
         "@crates_vendor__ryu-1.0.20//:ryu",
-        "@crates_vendor__serde_core-1.0.225//:serde_core",
+        "@crates_vendor__serde_core-1.0.226//:serde_core",
         "@crates_vendor__serde_json-1.0.145//:build_script_build",
     ],
 )

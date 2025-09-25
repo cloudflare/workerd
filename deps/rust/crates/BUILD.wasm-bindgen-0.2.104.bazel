@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "libc",
+    name = "wasm_bindgen",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,26 +29,27 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "extra_traits",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__wasm-bindgen-macro-0.2.104//:wasm_bindgen_macro",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=wasm-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.175",
+    version = "0.2.104",
     deps = [
-        "@crates_vendor__libc-0.2.175//:build_script_build",
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__once_cell-1.21.3//:once_cell",
+        "@crates_vendor__wasm-bindgen-0.2.104//:build_script_build",
+        "@crates_vendor__wasm-bindgen-shared-0.2.104//:wasm_bindgen_shared",
     ],
 )
 
@@ -58,6 +59,9 @@ cargo_build_script(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
+    aliases = {
+        "@crates_vendor__rustversion-1.0.22//:rustversion": "rustversion_compat",
+    },
     compile_data = glob(
         include = ["**"],
         allow_empty = True,
@@ -71,11 +75,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "extra_traits",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -91,18 +90,24 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "libc",
+    link_deps = [
+        "@crates_vendor__wasm-bindgen-shared-0.2.104//:wasm_bindgen_shared",
+    ],
+    pkg_name = "wasm-bindgen",
+    proc_macro_deps = [
+        "@crates_vendor__rustversion-1.0.22//:rustversion",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=libc",
+        "crate-name=wasm-bindgen",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.2.175",
+    version = "0.2.104",
     visibility = ["//visibility:private"],
 )
 

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "memchr",
+    name = "wasm_bindgen_macro_support",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,11 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "alloc",
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -40,10 +35,17 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=memchr",
+        "crate-name=wasm-bindgen-macro-support",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.7.5",
+    version = "0.2.104",
+    deps = [
+        "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
+        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__syn-2.0.106//:syn",
+        "@crates_vendor__wasm-bindgen-backend-0.2.104//:wasm_bindgen_backend",
+        "@crates_vendor__wasm-bindgen-shared-0.2.104//:wasm_bindgen_shared",
+    ],
 )

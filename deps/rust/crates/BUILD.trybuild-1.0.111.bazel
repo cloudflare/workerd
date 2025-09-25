@@ -31,7 +31,7 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2021",
     proc_macro_deps = [
-        "@crates_vendor__serde_derive-1.0.225//:serde_derive",
+        "@crates_vendor__serde_derive-1.0.226//:serde_derive",
     ],
     rustc_flags = [
         "--cap-lints=allow",
@@ -46,7 +46,7 @@ rust_library(
     version = "1.0.111",
     deps = [
         "@crates_vendor__glob-0.3.3//:glob",
-        "@crates_vendor__serde-1.0.225//:serde",
+        "@crates_vendor__serde-1.0.226//:serde",
         "@crates_vendor__serde_json-1.0.145//:serde_json",
         "@crates_vendor__target-triple-0.1.4//:target_triple",
         "@crates_vendor__termcolor-1.4.1//:termcolor",

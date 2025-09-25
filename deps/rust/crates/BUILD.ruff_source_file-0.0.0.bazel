@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "0.0.0",
     deps = [
-        "@crates_vendor__memchr-2.7.5//:memchr",
+        "@crates_vendor__memchr-2.7.6//:memchr",
         "@crates_vendor__ruff_text_size-0.0.0//:ruff_text_size",
     ],
 )

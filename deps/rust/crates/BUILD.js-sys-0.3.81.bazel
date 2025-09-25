@@ -40,9 +40,9 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.80",
+    version = "0.3.81",
     deps = [
         "@crates_vendor__once_cell-1.21.3//:once_cell",
-        "@crates_vendor__wasm-bindgen-0.2.103//:wasm_bindgen",
+        "@crates_vendor__wasm-bindgen-0.2.104//:wasm_bindgen",
     ],
 )
