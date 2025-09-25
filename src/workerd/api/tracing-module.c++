@@ -20,7 +20,8 @@ void InternalSpan::end() {
   }
 }
 
-void InternalSpan::setTag(jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
+void InternalSpan::setTag(
+    jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
   KJ_IF_SOME(s, impl) {
     // If maybeValue is nullopt (undefined from JS), we simply don't set the tag
     KJ_IF_SOME(value, maybeValue) {
