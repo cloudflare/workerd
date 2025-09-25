@@ -712,7 +712,8 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
     //   depth to each savepoint name like I originally thought. We should refactor this -- and use
     //   prepared statements.
 
-    sqlite.run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
+    sqlite.run(
+        {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_sync_savepoint_", depth));
     return js.tryCatch([&]() {
       auto result = callback(js);
 
@@ -721,14 +722,17 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
       JSG_REQUIRE(!sqlite.observedCriticalError(), Error,
           "Cannot commit transaction due to an earlier SQL critical error");
 
-      sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+      sqlite.run(
+          {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
       return kj::mv(result);
     }, [&](jsg::Value exception) -> jsg::JsRef<jsg::JsValue> {
       // If a critical error forced an automatic rollback, we skip the rollback and release
       // attempt, because savepoints should already be released.
       if (!sqlite.observedCriticalError()) {
-        sqlite.run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
-        sqlite.run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_sync_savepoint_", depth));
+        sqlite.run({.regulator = SqliteDatabase::TRUSTED},
+            kj::str("ROLLBACK TO _cf_sync_savepoint_", depth));
+        sqlite.run(
+            {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_sync_savepoint_", depth));
       }
       js.throwException(kj::mv(exception));
     });
