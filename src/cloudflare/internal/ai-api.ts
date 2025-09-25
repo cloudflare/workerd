@@ -4,7 +4,7 @@
 
 import { AiGateway, type GatewayOptions } from 'cloudflare-internal:aig-api';
 import { AutoRAG } from 'cloudflare-internal:autorag-api';
-import base64 from 'cloudflare-internal:base64';
+import { ToMarkdownService, type ConversionResponse } from 'cloudflare-internal:to-markdown-api';
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -39,14 +39,6 @@ export type AiOptions = {
 export type AiInputReadableStream = {
   body: ReadableStream;
   contentType: string;
-};
-
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: 'markdown';
-  tokens: number;
-  data: string;
 };
 
 export type AiModelsSearchParams = {
@@ -88,10 +80,6 @@ export class AiInternalError extends Error {
     super(message);
     this.name = name;
   }
-}
-
-async function blobToBase64(blob: Blob): Promise<string> {
-  return base64.encodeArrayToString(await blob.arrayBuffer());
 }
 
 // TODO: merge this function with the one with images-api.ts
@@ -399,6 +387,7 @@ export class Ai {
     }
   }
 
+  toMarkdown(): ToMarkdownService;
   async toMarkdown(
     files: { name: string; blob: Blob }[],
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
@@ -410,75 +399,17 @@ export class Ai {
     },
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse>;
-  async toMarkdown(
-    files: { name: string; blob: Blob } | { name: string; blob: Blob }[],
+  toMarkdown(
+    files?: { name: string; blob: Blob } | { name: string; blob: Blob }[],
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
-  ): Promise<ConversionResponse | ConversionResponse[]> {
-    const input = Array.isArray(files) ? files : [files];
+  ): ToMarkdownService | Promise<ConversionResponse | ConversionResponse[]> {
 
-    const processedFiles = [];
-    for (const file of input) {
-      processedFiles.push({
-        name: file.name,
-        mimeType: file.blob.type,
-        data: await blobToBase64(file.blob),
-      });
-    }
+    const service = new ToMarkdownService(this.#fetcher);
 
-    const fetchOptions = {
-      method: 'POST',
-      body: JSON.stringify({
-        files: processedFiles,
-        options: options,
-      }),
-      headers: {
-        ...options?.extraHeaders,
-        'content-type': 'application/json',
-      },
-    };
+    if (arguments.length < 1) return service;
 
-    const endpointUrl = `${this.#endpointURL}/to-everything/markdown/transformer`;
-
-    const res = await this.#fetcher.fetch(endpointUrl, fetchOptions);
-
-    if (!res.ok) {
-      const content = await res.text();
-      let parsedContent;
-
-      try {
-        parsedContent = JSON.parse(content) as {
-          errors: { message: string }[];
-        };
-      } catch {
-        throw new AiInternalError(content);
-      }
-
-      throw new AiInternalError(
-        parsedContent.errors.at(0)?.message || 'Internal Error'
-      );
-    }
-
-    const data = (await res.json()) as { result: ConversionResponse[] };
-
-    if (data.result.length === 0) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    // If the user sent a list of files, return an array of results, otherwise, return just the first object
-    if (Array.isArray(files)) {
-      return data.result;
-    }
-
-    const obj = data.result.at(0);
-    if (!obj) {
-      throw new AiInternalError(
-        'Internal Error Converting files into Markdown'
-      );
-    }
-
-    return obj;
+    //@ts-ignore -- NOTE(nunopereira): Typescript is being funny here because it can't resolve the specific type that it should return. We know this type ourselves so just ignore this error
+    return service.transform(files!, options);
   }
 
   gateway(gatewayId: string): AiGateway {
