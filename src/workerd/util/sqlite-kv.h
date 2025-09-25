@@ -54,11 +54,17 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   class ListCursor;
   kj::Own<ListCursor> list(KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order);
 
+  struct WriteOptions {
+    bool allowUnconfirmed = false;
+  };
+
   // Store a value into the table.
   void put(KeyPtr key, ValuePtr value);
+  void put(KeyPtr key, ValuePtr value, WriteOptions options);
 
   // Delete the key and return whether it was matched.
   bool delete_(KeyPtr key);
+  bool delete_(KeyPtr key, WriteOptions options);
 
   uint deleteAll();
 
@@ -148,7 +154,7 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   void cancelCurrentCursor();
 
-  Initialized& ensureInitialized();
+  Initialized& ensureInitialized(bool allowUnconfirmed);
   // Make sure the KV table is created and prepared statements are ready. Not called until the
   // first write.
 

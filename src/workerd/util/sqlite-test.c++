@@ -449,7 +449,7 @@ KJ_TEST("SQLite onWrite callback") {
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
 
   bool sawWrite = false;
-  db.onWrite([&]() { sawWrite = true; });
+  db.onWrite([&](bool allowUnconfirmed) { sawWrite = true; });
 
   setupSql(db);
   KJ_EXPECT(sawWrite);

@@ -220,7 +220,7 @@ void ActorSqlite::onCriticalError(
   }
 }
 
-void ActorSqlite::onWrite() {
+void ActorSqlite::onWrite(bool allowUnconfirmed) {
   requireNotBroken();
   if (currentTxn.is<NoTxn>()) {
     auto txn = kj::heap<ImplicitTxn>(*this);
@@ -471,7 +471,7 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
-  kv.put(key, value);
+  kv.put(key, value, {.allowUnconfirmed = options.allowUnconfirmed});
   return kj::none;
 }
 
@@ -491,7 +491,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
           {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
       for (const auto& pair: pairs) {
         try {
-          kv.put(pair.key, pair.value);
+          kv.put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
         } catch (kj::Exception& e) {
           // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
           db->run({.regulator = SqliteDatabase::TRUSTED},
@@ -507,7 +507,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
     }
   } else {
     for (auto& pair: pairs) {
-      kv.put(pair.key, pair.value);
+      kv.put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
     }
   }
   return kj::none;
@@ -516,7 +516,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions options) {
   requireNotBroken();
 
-  return kv.delete_(key);
+  return kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, WriteOptions options) {
@@ -524,7 +524,7 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 
   uint count = 0;
   for (auto& key: keys) {
-    count += kv.delete_(key);
+    count += kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
   }
   return count;
 }

@@ -227,7 +227,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   AlarmLaterErrorHandler alarmLaterErrorHandler;
   kj::TaskSet alarmLaterTasks;
 
-  void onWrite();
+  void onWrite(bool allowUnconfirmed);
 
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);
 
