@@ -491,7 +491,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
   // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
   if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
     if (currentTxn.is<NoTxn>()) {
-      // If we are not in a transcation, let's use an ExplicitTxn, which should rollback automatically
+      // If we are not in a transaction, let's use an ExplicitTxn, which should rollback automatically
       // if some put fails.
 
       // TODO(someday) this should really start an ImplicitTxn, which has the advantage of
