@@ -24,5 +24,5 @@ export {
 export {
   ToMarkdownService,
   type ConversionResponse,
-  type SupportedFileFormat
+  type SupportedFileFormat,
 } from 'cloudflare-internal:to-markdown-api';

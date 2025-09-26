@@ -16,42 +16,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    if (url.pathname === '/to-everything/markdown/transformer') {
-      const body = await request.json();
-      const decoder = new TextDecoder('utf-8');
-
-      const result = [];
-
-      for (const file of body.files) {
-        if (file.name === 'headers.md') {
-          const newHeaders = new Headers(request.headers);
-          newHeaders.delete('content-length');
-          result.push({
-            name: file.name,
-            mimeType: file.mimeType,
-            format: 'markdown',
-            tokens: 0,
-            data: Object.fromEntries(newHeaders.entries()),
-          });
-        } else {
-          const fileblob = await base64ToBlob(file.data, file.mimeType);
-          const arr = await fileblob.arrayBuffer();
-          result.push({
-            name: file.name,
-            mimeType: file.mimeType,
-            format: 'markdown',
-            tokens: 0,
-            data: decoder.decode(arr),
-          });
-        }
-      }
-
-      return Response.json({
-        success: true,
-        result: result,
-      });
-    }
-
     if (url.pathname === '/ai-api/models/search') {
       return Response.json({
         success: true,
