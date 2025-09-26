@@ -1,10 +1,14 @@
 export type ConversionResponse = {
   name: string;
   mimeType: string;
+} & ({
   format: "markdown";
   tokens: number;
   data: string;
-};
+} | {
+  format: "error",
+  error: string,
+});
 
 export type SupportedFileFormat = {
   mimeType: string;
