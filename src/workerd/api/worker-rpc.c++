@@ -1922,9 +1922,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   IoContext& ioctx = incomingRequest->getContext();
 
   incomingRequest->delivered();
-  KJ_IF_SOME(tracer, incomingRequest->getWorkerTracer()) {
-    tracer.setIsJsRpc();
-  }
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client

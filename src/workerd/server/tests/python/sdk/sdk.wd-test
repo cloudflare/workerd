@@ -7,16 +7,16 @@ const python :Workerd.Worker = (
   bindings = [
     ( name = "SELF", service = "python-sdk" ),
   ],
-  compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
+  compatibilityDate = "2025-09-01",
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "service_binding_extra_handlers"],
 );
 
 const server :Workerd.Worker = (
   modules = [
     (name = "server.py", pythonModule = embed "server.py")
   ],
-  compatibilityDate = "2024-10-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "python_no_global_handlers"],
+  compatibilityDate = "2025-09-01",
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
 );
 
 # We need this proxy so that internal requests made to fetch packages for Python Workers are sent
@@ -29,7 +29,7 @@ const jsChooserProxy :Workerd.Worker = (
     ( name = "PYTHON", service = "python-server" ),
     ( name = "INTERNET", service = "external" ),
   ],
-  compatibilityDate = "2024-10-01",
+  compatibilityDate = "2025-09-01",
 );
 
 const unitTests :Workerd.Config = (

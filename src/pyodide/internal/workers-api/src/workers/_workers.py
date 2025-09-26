@@ -841,9 +841,13 @@ def _python_from_rpc_default_converter(value, convert, cache):
     elif value.constructor.name == "Number":
         return value.valueOf()
 
-    raise TypeError(
-        f"Couldn't convert object to Python type, got {value.constructor.name}"
-    )
+    # We used to throw an error here, but since these conversions are now automatic when the default
+    # entrypoint is being used, it makes sense to be less loud about it and just pass through the
+    # JS value un-modified.
+    #
+    # This does mean that in the future we need to be careful when adding type wrappers for new
+    # types here, so if you're doing this make sure to do so behind a compat flag.
+    return value
 
 
 def python_from_rpc(obj: "JsProxy"):
