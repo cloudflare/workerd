@@ -25,6 +25,8 @@ SqlStorage::~SqlStorage() {}
 
 jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_exec"_kjc);
+
   // Internalize the string, so that the cache can be keyed by string identity rather than content.
   // Any string we put into the cache is expected to live there for a while anyway, so even if it
   // is a one-off, internalizing it (which moves it to the old generation) shouldn't hurt.
@@ -72,6 +74,7 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_ingest"_kjc);
   SqliteDatabase::Regulator& regulator = *this;
   auto result = getDb(js).ingestSql(regulator, querySql);
   return IngestResult(
@@ -88,6 +91,8 @@ jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString
 }
 
 double SqlStorage::getDatabaseSize(jsg::Lock& js) {
+  auto userSpan =
+      IoContext::current().makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
   auto& db = getDb(js);
   int64_t pages = execMemoized(db, pragmaPageCount,
       "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
