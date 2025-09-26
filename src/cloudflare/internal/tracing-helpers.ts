@@ -33,7 +33,7 @@ export function withSpan<T>(
   const span = tracing.startSpan(name);
 
   // Check if this is a recording span (not a no-op)
-  const isRecording = span.getIsRecording?.() ?? true;
+  const isRecording = span.getIsRecording();
 
   try {
     const result = fn(span);
@@ -42,7 +42,7 @@ export function withSpan<T>(
     if (isRecording) {
       // Handle promises - ensure span ends after async completion
       if (result && typeof result === 'object' && 'then' in result) {
-        return (result as unknown as Promise<any>).finally(() => {
+        return (result as unknown as Promise<unknown>).finally(() => {
           span.end();
         }) as T;
       }
