@@ -492,26 +492,32 @@ struct ReadableStreamSourceKjAdapter::Active {
   jsg::Ref<ReadableStreamDefaultReader> reader;
   kj::Canceler canceler;
 
-  // Previously read but unconsumed bytes. We keep these
-  // around for the next read call.
-  kj::Maybe<kj::Array<const kj::byte>> leftOver;
-  kj::ArrayPtr<const kj::byte> leftOverView = nullptr;
+  bool pumping = false;
 
-  // The contract for ReadableStreamSource is that there can be
-  // only one read() in-flight at a time.
-  bool readPending = false;
+  struct Idle {};
+  struct Readable {
+    // Previously read but unconsumed bytes. We keep these around for the next read call.
+    kj::Array<const kj::byte> data;
+    kj::ArrayPtr<const kj::byte> view;
+  };
+  struct Reading {
+    // The contract for ReadableStreamSource is that there can be only one read() in-flight
+    // against the underlying stream at a time.
+  };
+  struct Done {
+    // If a read returns fewer than the requested minBytes, that indicates the stream is done. We
+    // make note of that here to prevent any further reads. We cannot transition to the closed
+    // state in the promise chain of the read because the adapter will cancel the read promise
+    // itself once Active is destroyed, and that would be a bad thing.
+  };
+  struct Canceling {
+    kj::Exception exception;
+  };
+  struct Canceled {
+    kj::Exception exception;
+  };
 
-  // If a read returns fewer than the requested minBytes,
-  // that indicates the stream is done. We make note of that
-  // here to prevent any further reads. We cannot transition
-  // to the closed state in the promise chain of the read
-  // because the adapter will cancel the read promise itself
-  // once Active is destroyed, and that would be a bad thing.
-  bool previousReadWasLast = false;
-  kj::Maybe<kj::Exception> pendingCancel;
-
-  // Prevent cancel() from being called multiple times.
-  bool canceled = false;
+  kj::OneOf<Idle, Readable, Reading, Done, Canceling, Canceled> state = Idle();
 
   Active(jsg::Lock& js, IoContext& ioContext, jsg::Ref<ReadableStream> stream);
   KJ_DISALLOW_COPY_AND_MOVE(Active);
@@ -536,7 +542,7 @@ struct ReadableStreamSourceKjAdapter::ReadContext {
   kj::ArrayPtr<kj::byte> buffer;
   size_t totalRead = 0;
   size_t minBytes = 0;
-  kj::Maybe<kj::Array<const kj::byte>> maybeLeftOver;
+  kj::Maybe<Active::Readable> maybeLeftOver;
   // We keep a weak reference to the adapter itself so we can track
   // whether it is still alive while we are in a JS promise chain.
   // If the adapter is gone, or transitions to a closed or canceled
@@ -545,6 +551,8 @@ struct ReadableStreamSourceKjAdapter::ReadContext {
 };
 
 namespace {
+constexpr size_t kMinRemainingForAdditionalRead = 512;
+
 jsg::Ref<ReadableStreamDefaultReader> initReader(jsg::Lock& js, jsg::Ref<ReadableStream>& stream) {
   JSG_REQUIRE(!stream->isLocked(), TypeError, "ReadableStream is locked.");
   JSG_REQUIRE(!stream->isDisturbed(), TypeError, "ReadableStream is disturbed.");
@@ -564,21 +572,23 @@ ReadableStreamSourceKjAdapter::Active::~Active() noexcept(false) {
 }
 
 void ReadableStreamSourceKjAdapter::Active::cancel(kj::Exception reason) {
-  if (canceled) return;
-  canceled = true;
+  if (state.template is<Canceled>()) {
+    return;
+  }
+  bool wasDone = state.template is<Done>();
+  state.init<Canceled>(kj::cp(reason));
   canceler.cancel(kj::cp(reason));
-  if (!previousReadWasLast) {
+  if (!wasDone) {
     // If the previous read indicated that it was the last read, then
     // the reader will have already been dropped. We do not need to
     // cancel it here.
     ioContext.addTask(ioContext.run([readable = kj::mv(stream), reader = kj::mv(reader),
-                                        exception = kj::cp(reason)](jsg::Lock& js) mutable {
+                                        exception = kj::mv(reason)](jsg::Lock& js) mutable {
       auto& ioContext = IoContext::current();
       auto error = js.exceptionToJsValue(kj::mv(exception));
       auto promise = reader->cancel(js, error.getHandle(js));
       return ioContext.awaitJs(js, kj::mv(promise));
     }));
-    auto dropped KJ_UNUSED = kj::mv(leftOver);
   }
 }
 
@@ -706,7 +716,8 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
         // IMMEDIATE policy is that it can lead to a lot of small reads that
         // are expensive because they have to grab the isolate lock each time.
         if (context->totalRead >= context->minBytes &&
-            (minReadPolicy == MinReadPolicy::IMMEDIATE || context->buffer.size() < 512)) {
+            (minReadPolicy == MinReadPolicy::IMMEDIATE ||
+                context->buffer.size() < kMinRemainingForAdditionalRead)) {
           // We have satisfied the minimum read requirement.
           KJ_DASSERT(context->totalRead >= context->minBytes);
           // Our read is complete.
@@ -737,7 +748,11 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
       // over data for the next read.
       context->buffer.copyFrom(data.first(context->buffer.size()));
       context->totalRead += context->buffer.size();
-      context->maybeLeftOver = data.slice(context->buffer.size()).attach(kj::mv(data));
+      auto view = data.slice(context->buffer.size());
+      context->maybeLeftOver = Active::Readable{
+        .data = kj::mv(data),
+        .view = view,
+      };
       KJ_DASSERT(context->totalRead >= context->minBytes);
       // Our read is complete.
       return js.resolvedPromise(kj::mv(context));
@@ -749,37 +764,37 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
   }));
 }
 
-// We separate out the actual real implementation so that it can be used by
+// We separate out the actual read implementation so that it can be used by
 // both tryRead and the pumpToImpl implementation.
 kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
     Active& active, kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
 
-  if (active.leftOverView.size() > 0) {
+  KJ_IF_SOME(readable, active.state.tryGet<Active::Readable>()) {
     // We have some data left over from a previous read. Use that first.
 
     // If we have enough left over to fully satisfy this read,
     // Use it, then update our left over view.
-    if (active.leftOverView.size() >= dest.size()) {
-      dest.copyFrom(active.leftOverView.first(dest.size()));
-      active.leftOverView = active.leftOverView.slice(dest.size());
-      if (active.leftOverView.size() == 0) {
-        // Our left over buffer is now fully consumed. Drop it.
-        auto dropped KJ_UNUSED = kj::mv(active.leftOver);
-        active.leftOverView = nullptr;
+    if (readable.view.size() >= dest.size()) {
+      dest.copyFrom(readable.view.first(dest.size()));
+      readable.view = readable.view.slice(dest.size());
+      if (readable.view.size() == 0) {
+        // We used up all our left over data. We can transition to the idle state.
+        active.state.init<Active::Idle>();
       }
       // Otherwise we still have some left over data. That
       // is ok, we will keep it around for the next read.
+      // We intentionally do not transition to the idle state
+      // here because we want to keep the left over data for
+      // the next read.
       return dest.size();
     }
 
     // Otherwise, consume what we do have left over.
-    auto size = active.leftOverView.size();
-    dest.first(size).copyFrom(active.leftOverView);
+    auto size = readable.view.size();
+    dest.first(size).copyFrom(readable.view);
     dest = dest.slice(size);
 
-    // And drop our left over buffer.
-    auto dropped KJ_UNUSED = kj::mv(active.leftOver);
-    active.leftOverView = nullptr;
+    active.state.init<Active::Idle>();
 
     // Did we at least satisfy the minimum bytes?
     if (size >= minBytes) {
@@ -796,7 +811,8 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
   // If we got here, we still have not satisfied the minimum bytes,
   // so we will continue on to read more from the stream. But, we
   // also should not have any more data left over. Let's verify.
-  KJ_DASSERT(active.leftOverView.size() == 0);
+  KJ_ASSERT(active.state.is<Active::Idle>());
+  active.state.init<Active::Reading>();
 
   // Our read context holds all the state needed to perform the read.
   // Ownership of the context is passed into the read operation and
@@ -821,6 +837,7 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
                                    jsg::Lock& js) mutable -> kj::Promise<size_t> {
     auto& ioContext = IoContext::current();
 
+    // Perform the actual read.
     return ioContext.awaitJs(js, readInternal(js, kj::mv(context), minReadPolicy))
         .then([self = kj::mv(self)](kj::Own<ReadContext> context) mutable -> kj::Promise<size_t> {
       // By the time we get here, it is possible that the adapter has been
@@ -835,23 +852,35 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
           // Ok, we're still active. Let's see if we have any left over data
           // that we need to stash away for the next read.
           KJ_IF_SOME(leftOver, context->maybeLeftOver) {
-            active->leftOver = kj::mv(leftOver);
-            active->leftOverView = KJ_ASSERT_NONNULL(active->leftOver);
-          }
-          active->readPending = false;
-          if (context->totalRead < context->minBytes) {
-            active->previousReadWasLast = true;
+            // We have some left over data. Stash it away for the next read.
+            active->state = kj::mv(leftOver);
+            // In this branch, we must have filled the entire destination
+            // buffer and satisfied the minimum read requirement or else
+            // we wouldn't have any left over data. Let's just assert that
+            // invariant just in case.
+            KJ_DASSERT(context->totalRead >= context->minBytes);
+          } else if (context->totalRead < context->minBytes) {
+            // We returned fewer than the minimum bytes requested. This is our
+            // signal that we're done.
+            active->state.init<Active::Done>();
             // We cannot change the state to Closed here because we are still
             // inside the kj::Promise chain wrapped by the canceler. If we
             // change the state to Closed, the Active would be destroyed, causing
-            // this promise chain to be canceled. Instead, we will se a flag to
-            // be checked on the next read and treat it as closed then. We can,
-            // however, drop out reader, stream, and left over buffer now to
-            // release those resources since we know we won't be reading again.
-            KJ_DASSERT(active->leftOverView.size() == 0);
+            // this promise chain to be canceled.
             auto droppedReader KJ_UNUSED = kj::mv(active->reader);
             auto droppedStream KJ_UNUSED = kj::mv(active->stream);
-            auto droppedLeftOver KJ_UNUSED = kj::mv(active->leftOver);
+            // In this branch, we should not have any left over data.
+            // Let's assert that invariant just in case.
+            KJ_DASSERT(context->maybeLeftOver == kj::none);
+          } else {
+            // Our read is complete. Return to the idle state and we're done.
+            active->state.init<Active::Idle>();
+
+            // In this branch, we must have satisfied the minimum read
+            // requirement. Let's just assert that invariant just in case.
+            KJ_DASSERT(context->totalRead >= context->minBytes);
+            // We should not have any left over data.
+            KJ_DASSERT(context->maybeLeftOver == kj::none);
           }
         } else {
           // We were closed or canceled while we were reading. Doh!
@@ -863,11 +892,10 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
     });
   })).catch_([self = selfRef.addRef()](kj::Exception exception) -> kj::Promise<size_t> {
     self->runIfAlive([&](ReadableStreamSourceKjAdapter& self) {
-      // While nothing should be waiting on the read promise, we
-      // should still reject it just in case.
       KJ_IF_SOME(active, self.state.tryGet<kj::Own<Active>>()) {
-        active->readPending = false;
-        active->pendingCancel = kj::cp(exception);
+        active->state.init<Active::Canceling>(Active::Canceling{
+          .exception = kj::cp(exception),
+        });
       }
     });
     return kj::mv(exception);
@@ -890,25 +918,38 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryRead(
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(active, kj::Own<Active>) {
-      KJ_REQUIRE(!active->readPending, "Cannot have multiple concurrent reads.");
-      if (active->previousReadWasLast) {
-        // The previous read indicated that it was the last read by returning
-        // less than the minimum bytes requested. We have to treat this as
-        // the stream being closed.
-        state.init<Closed>();
-        return static_cast<size_t>(0);
+      KJ_SWITCH_ONEOF(active->state) {
+        KJ_CASE_ONEOF(_, Active::Reading) {
+          KJ_FAIL_REQUIRE("Cannot have multiple concurrent reads.");
+        }
+        KJ_CASE_ONEOF(_, Active::Done) {
+          // The previous read indicated that it was the last read by returning
+          // less than the minimum bytes requested. We have to treat this as
+          // the stream being closed.
+          state.init<Closed>();
+          return static_cast<size_t>(0);
+        }
+        KJ_CASE_ONEOF(canceling, Active::Canceling) {
+          auto exception = kj::mv(canceling.exception);
+          state = kj::cp(exception);
+          return kj::mv(exception);
+        }
+        KJ_CASE_ONEOF(canceled, Active::Canceled) {
+          auto exception = kj::cp(canceled.exception);
+          state = kj::cp(exception);
+          return kj::mv(exception);
+        }
+        KJ_CASE_ONEOF(r, Active::Readable) {
+          // There is some data left over from a previous read.
+          kj::ArrayPtr dest(static_cast<kj::byte*>(buffer), maxBytes);
+          return tryReadImpl(*active, dest, minBytes);
+        }
+        KJ_CASE_ONEOF(_, Active::Idle) {
+          // There are no pending reads and no left over data.
+          kj::ArrayPtr dest(static_cast<kj::byte*>(buffer), maxBytes);
+          return tryReadImpl(*active, dest, minBytes);
+        }
       }
-      KJ_IF_SOME(exc, active->pendingCancel) {
-        auto excepton = kj::cp(exc);
-        state = kj::mv(exc);
-        return kj::mv(excepton);
-      }
-      active->readPending = true;
-
-      // The ReadableStreamSource should really just accept a kj::ArrayPtr for
-      // reads but that's a larger refactor.
-      kj::ArrayPtr dest(static_cast<kj::byte*>(buffer), maxBytes);
-      return tryReadImpl(*active, dest, minBytes);
     }
     KJ_CASE_ONEOF(_, Closed) {
       return static_cast<size_t>(0);
@@ -923,14 +964,15 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryRead(
 
 kj::Maybe<uint64_t> ReadableStreamSourceKjAdapter::tryGetLength(StreamEncoding encoding) {
   KJ_IF_SOME(active, state.tryGet<kj::Own<Active>>()) {
-    if (active->previousReadWasLast) {
+    if (active->state.is<Active::Done>()) {
       // If the previous read indicated that it was the last, then
       // let's just transition to the closed state now and return kj::none.
       state.init<Closed>();
       return kj::none;
     }
-    KJ_IF_SOME(exc, active->pendingCancel) {
-      state = kj::mv(exc);
+    KJ_IF_SOME(canceling, active->state.tryGet<Active::Canceling>()) {
+      auto exception = kj::mv(canceling.exception);
+      state = kj::mv(exception);
       return kj::none;
     }
     return active->stream->tryGetLength(encoding);
@@ -954,17 +996,16 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& 
   // Let's make sure we're in the right state before we start.
   KJ_DASSERT(state.is<kj::Own<Active>>());
   bool writeFailed = false;
-  try {
-    while (true) {
-      // Check our state before each iteration of the loop. This
-      // is a bit redundant since the canceler should take care
-      // of aborting the loop if we are canceled, but it's good
-      // to be extra careful. If this proves to be a performance
-      // problem, we can wrap the KJ_SWITCH_ONEOF if an if KJ_DEBUG
-      // define so that the additional checks are only done in
-      // debug builds.
-      KJ_SWITCH_ONEOF(state) {
-        KJ_CASE_ONEOF(active, kj::Own<Active>) {
+
+  while (true) {
+    // Check our state before each iteration of the loop. This is a bit redundant since the
+    // canceler should take care of aborting the loop if we are canceled, but it's good to
+    // be extra careful. If this proves to be a performance problem, we can wrap the
+    // KJ_SWITCH_ONEOF in an if KJ_DEBUG define so that the additional checks are only done in
+    // debug builds.
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(active, kj::Own<Active>) {
+        try {
           // Read at least 8192 bytes up to the size of our buffer.
           // Keep in mind that tryRead() requires acquiring the isolate lock
           // on each call, so we want to try to read a decent amount each time
@@ -981,19 +1022,13 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& 
 
           // Only write if we actually read something.
           if (bytesRead > 0) {
-            try {
-              co_await output.write(buffer.asPtr().slice(0, bytesRead));
-            } catch (...) {
-              auto ex = kj::getCaughtExceptionAsKj();
-              writeFailed = true;
-              kj::throwFatalException(kj::cp(ex));
-            }
+            KJ_ON_SCOPE_FAILURE(writeFailed = true);
+            co_await output.write(buffer.asPtr().slice(0, bytesRead));
           }
 
           if (bytesRead < kMinRead) {
             KJ_IF_SOME(active, state.tryGet<kj::Own<Active>>()) {
-              active->previousReadWasLast = true;
-              active->readPending = false;
+              active->state.init<Active::Done>();
               // We cannot change the state to Closed here because we are still
               // inside the kj::Promise chain wrapped by the canceler. If we
               // change the state to Closed, the Active would be destroyed, causing
@@ -1004,37 +1039,32 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& 
             // The source indicated that this was the last read by returning
             // less than the minimum bytes requested.
             if (end) {
-              try {
-                co_await output.end();
-              } catch (...) {
-                auto ex = kj::getCaughtExceptionAsKj();
-                // If the end failed, we have to cancel the stream.
-                // and exit the pump.
-                KJ_IF_SOME(active, state.tryGet<kj::Own<Active>>()) {
-                  active->cancel(kj::cp(ex));
-                }
-                writeFailed = true;
-                kj::throwFatalException(kj::cp(ex));
-              }
+              KJ_ON_SCOPE_FAILURE(writeFailed = true);
+              co_await output.end();
             }
             co_return;
           }
-        }
-        KJ_CASE_ONEOF(_, Closed) {
-          co_return;
-        }
-        KJ_CASE_ONEOF(exception, kj::Exception) {
-          kj::throwFatalException(kj::cp(exception));
+        } catch (...) {
+          auto exception = kj::getCaughtExceptionAsKj();
+          KJ_IF_SOME(active, state.tryGet<kj::Own<Active>>()) {
+            active->state.init<Active::Canceling>(Active::Canceling{
+              .exception = kj::cp(exception),
+            });
+          }
+          if (!writeFailed) {
+            output.abort(kj::cp(exception));
+          }
+          // throw ok because we're in a coroutine
+          kj::throwFatalException(kj::mv(exception));
         }
       }
+      KJ_CASE_ONEOF(_, Closed) {
+        co_return;
+      }
+      KJ_CASE_ONEOF(exception, kj::Exception) {
+        kj::throwFatalException(kj::cp(exception));
+      }
     }
-  } catch (...) {
-    auto exception = kj::getCaughtExceptionAsKj();
-    if (!writeFailed) {
-      output.abort(kj::cp(exception));
-    }
-    // throw ok because we're in a coroutine
-    kj::throwFatalException(kj::cp(exception));
   }
 }
 
@@ -1046,39 +1076,45 @@ kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
   // be rejected. Once pumping is complete, the adapter will be closed.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(active, kj::Own<Active>) {
-      KJ_REQUIRE(!active->readPending, "Cannot have multiple concurrent reads.");
+      KJ_REQUIRE(!active->state.is<Active::Reading>() && !active->pumping,
+          "Cannot have multiple concurrent reads.");
+      active->pumping = true;
 
-      if (active->previousReadWasLast) {
+      if (active->state.is<Active::Done>()) {
         // The previous read indicated that it was the last read by returning
         // less than the minimum bytes requested. We have to treat this as
         // the stream being closed.
         state.init<Closed>();
         return newNoopDeferredProxy();
       }
-      KJ_IF_SOME(exc, active->pendingCancel) {
-        auto excepton = kj::cp(exc);
-        state = kj::mv(exc);
-        return kj::Promise<DeferredProxy<void>>(kj::mv(excepton));
+
+      KJ_IF_SOME(canceling, active->state.tryGet<Active::Canceling>()) {
+        auto exception = kj::mv(canceling.exception);
+        state = kj::cp(exception);
+        return kj::Promise<DeferredProxy<void>>(kj::mv(exception));
       }
-      active->readPending = true;
 
       // Notice that we are wrapping the promise returned by pumpToImpl()
       // with the canceler. This means that if the adapter is canceled while
       // pumping, or the adapter is dropped, the pump will be aborted.
-      // After wrapping te promise, we add continuations to transition the
+      // After wrapping the promise, we add continuations to transition the
       // adapter to the closed or errored state as appropriate. It is important
       // to do this after wrapping since changing the state will cause the
       // Active to be destroyed, triggering the canceler to cancel the wrapped
       // promise chain if we haven't already exited it.
       return addNoopDeferredProxy(active->canceler.wrap(pumpToImpl(output, end))
                                       .then([self = selfRef.addRef()]() -> kj::Promise<void> {
-        self->runIfAlive([](ReadableStreamSourceKjAdapter& self) { self.state.init<Closed>(); });
+        self->runIfAlive([](ReadableStreamSourceKjAdapter& self) {
+          // At this point, pumping should have completed successfully.
+          self.state.init<Closed>();
+        });
         return kj::READY_NOW;
       }, [self = selfRef.addRef()](kj::Exception exception) -> kj::Promise<void> {
         self->runIfAlive([&](ReadableStreamSourceKjAdapter& self) {
           KJ_IF_SOME(active, self.state.tryGet<kj::Own<Active>>()) {
             active->cancel(kj::cp(exception));
           }
+          self.state = kj::cp(exception);
         });
         return kj::mv(exception);
       }));

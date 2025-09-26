@@ -252,7 +252,7 @@ class ReadableStreamSourceJsAdapter final {
 // the pending reads will be rejected with the same exception as the cancel.
 // Because JavaScript promises are not cancelable, reads that are in progress
 // won't be aborted immediately but the results will be ignored when they
-// complete and a best-effort will be made to interupt the read as soon as
+// complete and a best-effort will be made to interrupt the read as soon as
 // possible. If the stream is already closed, reads will complete immediately
 // with 0 bytes read. If the stream errors, reads will reject with the same
 // exception.
@@ -329,7 +329,8 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
 
   // If the stream is still active, tries to get the total length,
-  // if known. If the length is not known, or the stream is closed
+  // if known. If the length is not known, the encoding does not
+  // match the encoding of the underlying stream, or the stream is closed
   // or errored, returns kj::none.
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
 
