@@ -3512,13 +3512,6 @@ export type AiOptions = {
   prefix?: string;
   extraHeaders?: object;
 };
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: "markdown";
-  tokens: number;
-  data: string;
-};
 export type AiModelsSearchParams = {
   author?: string;
   hide_experimental?: boolean;
@@ -3571,6 +3564,7 @@ export declare abstract class Ai<AiModelList extends AiModelListType = AiModels>
         : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(): ToMarkdownService;
   toMarkdown(
     files: {
       name: string;
