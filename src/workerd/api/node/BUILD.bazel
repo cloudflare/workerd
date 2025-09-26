@@ -57,7 +57,6 @@ wd_cc_library(
     name = "node-core",
     srcs = [
         "buffer.c++",
-        "dns.c++",
         "i18n.c++",
         "sqlite.c++",
         "url.c++",
@@ -72,8 +71,6 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
-        "//src/rust/cxx-integration",
-        "//src/rust/dns",
         "//src/rust/net",
         "@ada-url",
         "@nbytes",
@@ -84,6 +81,7 @@ wd_cc_library(
         # Please do not add //src/workerd/io here – this target is intended for code that does not
         # depend on it, move files to the main node target if needed. That way, the files here don't
         # need to be rebuilt if there are changes to io.
+        "//src/rust/dns",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         "//src/workerd/util:mimetype",

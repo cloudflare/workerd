@@ -25,6 +25,7 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
+        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )
@@ -128,6 +129,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@ssl",
+        "@workerd-cxx//kj-rs",
         "@workerd-v8//:v8",
     ],
 )
@@ -254,6 +256,7 @@ wd_cc_library(
     deps = [
         ":jsg",
         ":rtti_capnp",
+        "//src/rust/cxx-integration",
     ],
 )
 
@@ -283,7 +286,11 @@ wd_cc_library(
 [kj_test(
     src = f,
     local_defines = ["JSG_IMPLEMENTATION"],
-    deps = [":jsg"],
+    deps = [
+        ":jsg",
+        "//src/rust/cxx-integration",
+        "@workerd-cxx//kj-rs",
+    ],
 ) for f in glob(
     ["*-test.c++"],
     exclude = [
