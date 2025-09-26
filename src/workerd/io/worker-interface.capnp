@@ -67,7 +67,8 @@ struct Trace @0x8e8d911203762d34 {
     message @2 :Text;
   }
 
-  spans @26 :List(UserSpanData);
+  obsolete26 @26 :List(UserSpanData);
+  # spans are unavailable in full trace objects.
 
   exceptions @1 :List(Exception);
   struct Exception {

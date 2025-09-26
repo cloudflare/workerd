@@ -864,7 +864,6 @@ class Trace final: public kj::Refcounted {
   kj::Maybe<kj::String> durableObjectId;
 
   kj::Vector<tracing::Log> logs;
-  kj::Vector<CompleteSpan> spans;
   // A request's trace can have multiple exceptions due to separate request/waitUntil tasks.
   kj::Vector<tracing::Exception> exceptions;
 

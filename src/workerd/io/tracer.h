@@ -102,7 +102,7 @@ class BaseTracer: public kj::Refcounted {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) = 0;
-  // Add a span. There can be at most MAX_USER_SPANS spans in a trace.
+  // Add a span.
   virtual void addSpan(CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
@@ -137,12 +137,6 @@ class BaseTracer: public kj::Refcounted {
   // Allow setting the user request span after the tracer has been created so its observer can
   // reference the tracer. This can only be set once.
   void setUserRequestSpan(SpanParent&& span);
-
-  // TODO(felix): Used for debug logging, remove after a few days.
-  void setIsJsRpc();
-
-  // Indicates that we're reporting from a JsRpc customEvent.
-  bool isJsRpc = false;
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,

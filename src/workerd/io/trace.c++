@@ -663,14 +663,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
   }
 
   {
-    // Add spans to the builder.
-    auto list = builder.initSpans(spans.size());
-    for (auto i: kj::indices(spans)) {
-      spans[i].copyTo(list[i]);
-    }
-  }
-
-  {
     auto list = builder.initExceptions(exceptions.size());
     for (auto i: kj::indices(exceptions)) {
       exceptions[i].copyTo(list[i]);
@@ -796,7 +788,6 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
   // "full", so we may need to filter out the extra data after receiving the traces back.
   if (pipelineLogLevel != PipelineLogLevel::NONE) {
     logs.addAll(reader.getLogs());
-    spans.addAll(reader.getSpans());
     exceptions.addAll(reader.getExceptions());
     diagnosticChannelEvents.addAll(reader.getDiagnosticChannelEvents());
   }
