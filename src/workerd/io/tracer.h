@@ -95,6 +95,8 @@ class PipelineTracer: public kj::Refcounted {
 // there will be plenty of cleanup potential.
 class BaseTracer: public kj::Refcounted {
  public:
+  virtual ~BaseTracer() noexcept(false) {};
+
   // Adds log line to trace.  For Spectre, timestamp should only be as accurate as JS Date.now().
   virtual void addLog(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -130,7 +132,11 @@ class BaseTracer: public kj::Refcounted {
   // be available afterwards.
   virtual void recordTimestamp(kj::Date timestamp) = 0;
 
-  virtual SpanParent getUserRequestSpan() = 0;
+  SpanParent getUserRequestSpan();
+
+  // Allow setting the user request span after the tracer has been created so its observer can
+  // reference the tracer. This can only be set once.
+  void setUserRequestSpan(SpanParent&& span);
 
   // TODO(felix): Used for debug logging, remove after a few days.
   void setIsJsRpc();
@@ -141,11 +147,25 @@ class BaseTracer: public kj::Refcounted {
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
+
+ protected:
+  // helper method for addSpan() implementations
+  void adjustSpanTime(CompleteSpan& span);
+
+  // The root span for the new tracing format.
+  SpanParent userRequestSpan = SpanParent(nullptr);
+
+  // Time to be reported for the outcome event time. This will be set before the outcome is
+  // dispatched.
+  kj::Date completeTime = kj::UNIX_EPOCH;
+
+  // Weak reference to the IoContext, used to report span end time if available.
+  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 };
 
 // Records a worker stage's trace information into a Trace object.  When all references to the
 // Tracer are released, its Trace is considered complete and ready for submission.
-class WorkerTracer: public BaseTracer {
+class WorkerTracer final: public BaseTracer {
  public:
   explicit WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       kj::Own<Trace> trace,
@@ -177,17 +197,12 @@ class WorkerTracer: public BaseTracer {
       IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
   // Variant for when we don't have a proper IoContext but instead provide context and timestamp
   // directly, used internally for RPC-based tracing.
-  virtual void setEventInfoInternal(
+  void setEventInfoInternal(
       const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
 
   void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
   virtual void recordTimestamp(kj::Date timestamp) override;
-
-  SpanParent getUserRequestSpan() override;
-  // Allow setting the user request span after the tracer has been created so its observer can
-  // reference the tracer. This can only be set once.
-  void setUserRequestSpan(SpanParent&& span);
 
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
@@ -199,12 +214,8 @@ class WorkerTracer: public BaseTracer {
  private:
   PipelineLogLevel pipelineLogLevel;
   kj::Own<Trace> trace;
-  // The root span for the new tracing format.
-  SpanParent userRequestSpan;
   // span attributes to be added to the onset event.
   kj::Vector<tracing::Attribute> attributes;
-  // Weak reference to the IoContext, used to report span end time if available.
-  kj::Maybe<kj::Own<IoContext::WeakRef>> weakIoContext;
 
   // TODO(streaming-tail): Top-level invocation span context, used to add a placeholder span context
   // for trace events. This should no longer be needed after merging the existing span ID and
@@ -216,9 +227,5 @@ class WorkerTracer: public BaseTracer {
   kj::Maybe<kj::Rc<PipelineTracer>> parentPipeline;
 
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> maybeTailStreamWriter;
-
-  // Time to be reported for the outcome event time. This will be set before the outcome is
-  // dispatched.
-  kj::Date completeTime = kj::UNIX_EPOCH;
 };
 }  // namespace workerd
