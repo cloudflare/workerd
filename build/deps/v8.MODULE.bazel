@@ -14,6 +14,20 @@ There is an official mirror for V8 itself on GitHub, but not for dependencies li
 fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
 """
 bazel_dep(name = "perfetto", version = "0.0.0")
+bazel_dep(name = "workerd-v8", version = "0.0.0")
+
+# Tell workerd code where to find v8.
+#
+# We indirect through `@workerd-v8` to allow dependents to override how and where `v8` is built.
+#
+# TODO(cleanup): There must be a better way to do this?
+# TODO(soon): Figure out how to build v8 with perfetto enabled. It does not appear
+#             as if the v8 bazel build currently includes support for building with
+#             perfetto enabled as an option.
+local_path_override(
+    module_name = "workerd-v8",
+    path = "build/deps/workerd-v8",
+)
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
