@@ -5,6 +5,7 @@
 #include "http.h"
 
 #include "data-url.h"
+#include "hwy/highway.h"
 #include "queue.h"
 #include "sockets.h"
 #include "system-streams.h"
@@ -28,8 +29,6 @@
 #include <kj/encoding.h>
 #include <kj/memory.h>
 #include <kj/parse/char.h>
-
-#include <set>
 
 namespace workerd::api {
 
@@ -92,32 +91,83 @@ jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   return jsg::ByteString(kj::str(slice));
 }
 
+// Fast lookup table for HTTP header name validation
+static constexpr uint8_t HTTP_HEADER_NAME_VALID[256] = {
+  // 0x00-0x0F: control chars - invalid
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  // 0x10-0x1F: control chars - invalid
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  // 0x20-0x2F: space and separators - mostly invalid
+  0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0,
+  // 0x30-0x3F: digits and separators
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+  // 0x40-0x4F: @ and uppercase letters
+  0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  // 0x50-0x5F: uppercase letters and separators
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+  // 0x60-0x6F: ` and lowercase letters
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  // 0x70-0x7F: lowercase letters and separators
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0,
+  // 0x80-0xFF: high-bit chars - invalid for HTTP headers
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+bool validateHeaderName(const char* data, size_t len) {
+  uint8_t valid = 1;
+  for (size_t i = 0; i < len; ++i) {
+    valid &= HTTP_HEADER_NAME_VALID[static_cast<uint8_t>(data[i])];
+  }
+  return valid;
+}
+
+bool validateHeaderValue(const char* data, size_t len) {
+  if (len < 64) {
+    uint8_t valid = 1;
+    for (size_t i = 0; i < len; ++i) {
+      char c = data[i];
+      valid &= (c != '\0') & (c != '\r') & (c != '\n');
+    }
+    return valid;
+  }
+
+  namespace hn = hwy::HWY_NAMESPACE;
+  const hn::ScalableTag<uint8_t> d;
+  const size_t N = hn::Lanes(d);
+
+  size_t i = 0;
+  for (; i + N <= len; i += N) {
+    const auto bytes = hn::LoadU(d, reinterpret_cast<const uint8_t*>(data + i));
+    const auto has_null = hn::Eq(bytes, hn::Set(d, '\0'));
+    const auto has_cr = hn::Eq(bytes, hn::Set(d, '\r'));
+    const auto has_lf = hn::Eq(bytes, hn::Set(d, '\n'));
+    const auto invalid = hn::Or(hn::Or(has_null, has_cr), has_lf);
+
+    if (!hn::AllTrue(d, hn::Not(invalid))) {
+      return false;
+    }
+  }
+
+  uint8_t valid = 1;
+  for (; i < len; ++i) {
+    char c = data[i];
+    valid &= (c != '\0') & (c != '\r') & (c != '\n');
+  }
+  return valid;
+}
+
 void requireValidHeaderName(const jsg::ByteString& name) {
   // TODO(cleanup): Code duplication with kj/compat/http.c++
-
   warnIfBadHeaderString(name);
 
-  constexpr auto HTTP_SEPARATOR_CHARS = kj::parse::anyOfChars("()<>@,;:\\\"/[]?={} \t");
-  // RFC2616 section 2.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec2.html#sec2.2
-
-  constexpr auto HTTP_TOKEN_CHARS = kj::parse::controlChar.orChar('\x7f')
-                                        .orGroup(kj::parse::whitespaceChar)
-                                        .orGroup(HTTP_SEPARATOR_CHARS)
-                                        .invert();
-  // RFC2616 section 2.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec2.html#sec2.2
-  // RFC2616 section 4.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
-
-  for (char c: name) {
-    JSG_REQUIRE(HTTP_TOKEN_CHARS.contains(c), TypeError, "Invalid header name.");
-  }
+  JSG_REQUIRE(validateHeaderName(name.cStr(), name.size()), TypeError, "Invalid header name.");
 }
 
 void requireValidHeaderValue(kj::StringPtr value) {
   // TODO(cleanup): Code duplication with kj/compat/http.c++
-
-  for (char c: value) {
-    JSG_REQUIRE(c != '\0' && c != '\r' && c != '\n', TypeError, "Invalid header value.");
-  }
+  JSG_REQUIRE(validateHeaderValue(value.cStr(), value.size()), TypeError, "Invalid header value.");
 }
 
 Request::CacheMode getCacheModeFromName(kj::StringPtr value) {

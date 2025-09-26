@@ -8,6 +8,7 @@
 -Iexternal/ada-url/
 -Iexternal/abseil-cpp/
 -Iexternal/simdutf/
+-Iexternal/highway+/
 -Iexternal/nbytes/include/
 -Iexternal/codspeed/google_benchmark/include/
 -Iexternal/perfetto/include/
