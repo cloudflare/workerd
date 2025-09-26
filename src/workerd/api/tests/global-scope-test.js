@@ -777,3 +777,35 @@ export const reuseCtx = {
     ctx.reused = true;
   },
 };
+
+export const structuredCloneError = {
+  test() {
+    // If it doesn't crash, we're good.
+    var globalProp = {
+      get p1() {
+        return this;
+      },
+      get trigger() {
+        function createSab() {
+          var sab = new SharedArrayBuffer(4096);
+          return sab;
+        }
+        var prop = {};
+        Object.defineProperty(prop, 'constructor', {
+          writable: true,
+          value: createSab,
+        });
+        return prop.constructor();
+      },
+      get p1() {
+        var gTCtor = globalThis.Intl.constructor;
+        var returnVal;
+        try {
+          returnVal = gTCtor.entries(this);
+        } catch (e) {}
+        return returnVal;
+      },
+    };
+    globalThis.structuredClone(globalProp);
+  },
+};
