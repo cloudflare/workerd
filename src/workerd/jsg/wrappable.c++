@@ -372,9 +372,15 @@ void Wrappable::attachWrapper(
 
   // Set up internal fields for a newly-allocated object.
   KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  int indices[] = {WRAPPABLE_TAG_FIELD_INDEX, WRAPPED_OBJECT_FIELD_INDEX};
-  void* values[] = {const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG), this};
-  object->SetAlignedPointerInInternalFields(2, indices, values);
+  // The third argument is the type tag, a small integer that should be
+  // different for every pointer type to avoid type confusion attacks.  We just
+  // use the slot index for now, since we have a different pointer type for
+  // each slot.
+  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(WRAPPED_OBJECT_FIELD_INDEX, this,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX));
 
   v8::Object::Wrap<WRAPPABLE_TAG>(isolate, object, tracer.allocateShim(*this));
 
