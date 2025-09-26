@@ -42,16 +42,9 @@ class TracingModule: public jsg::Object {
   TracingModule(jsg::Lock&, const jsg::Url&) {}
 
   jsg::Ref<InternalSpan> startSpan(jsg::Lock& js, const kj::String name);
-  jsg::JsValue startSpanWithCallback(jsg::Lock& js,
-      kj::String operationName,
-      jsg::Function<jsg::Value(jsg::Arguments<jsg::Value>)> callback,
-      jsg::Arguments<jsg::Value> args,
-      const jsg::TypeHandler<jsg::Ref<InternalSpan>>& jsSpanHandler,
-      const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler);
 
   JSG_RESOURCE_TYPE(TracingModule) {
     JSG_METHOD(startSpan);
-    JSG_METHOD(startSpanWithCallback);
 
     JSG_NESTED_TYPE(InternalSpan);
   }

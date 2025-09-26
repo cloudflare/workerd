@@ -6,7 +6,7 @@ import {
   createBase64DecoderTransformStream,
   createBase64EncoderTransformStream,
 } from 'cloudflare-internal:streaming-base64';
-import tracing from 'cloudflare-internal:tracing';
+import { withSpan } from 'cloudflare-internal:tracing-helpers';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -234,7 +234,7 @@ class ImagesBindingImpl implements ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
-    return await tracing.startSpanWithCallback('images_info', async (span) => {
+    return await withSpan('images_info', async (span) => {
       const body = new StreamableFormData();
 
       const decodedStream =
