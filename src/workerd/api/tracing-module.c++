@@ -65,61 +65,18 @@ jsg::JsValue TracingModule::startSpanWithCallback(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<InternalSpan>>& jsSpanHandler,
     const jsg::TypeHandler<jsg::Promise<jsg::Value>>& valuePromiseHandler) {
 
-  // Get the current span parent
-  if (!IoContext::hasCurrent()) {
-    // Create a resolver and promise
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(js.v8Context()).ToLocal(&resolver)) {
-      return js.undefined();
+  // Create span - either real or no-op depending on IoContext availability
+  jsg::Ref<InternalSpan> jsSpan = [&]() {
+    if (!IoContext::hasCurrent()) {
+      return js.alloc<InternalSpan>(kj::none);
     }
-    auto promise = resolver->GetPromise();
+    auto& ioContext = IoContext::current();
+    auto spanBuilder = ioContext.makeUserTraceSpan(kj::ConstString(kj::str(operationName)));
+    auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
+    return js.alloc<InternalSpan>(kj::mv(ownedSpan));
+  }();
 
-    // Prepare callback arguments - create a new Arguments with span prepended
-    kj::Vector<jsg::Value> callbackArgVector;
-    // Add a no-op span as first argument
-    auto noOpSpan = js.alloc<InternalSpan>(kj::none);
-    callbackArgVector.add(js.v8Ref(jsSpanHandler.wrap(js, kj::mv(noOpSpan))));
-    for (auto& arg: args) {
-      callbackArgVector.add(arg.addRef(js));
-    }
-    auto callbackArgs = jsg::Arguments<jsg::Value>(callbackArgVector.releaseAsArray());
-
-    // Execute callback directly
-    auto result = js.tryCatch([&]() -> jsg::JsValue {
-      auto callbackResult = callback(js, kj::mv(callbackArgs));
-      return jsg::JsValue(callbackResult.getHandle(js));
-    }, [&](jsg::Value exception) -> jsg::JsValue {
-      resolver->Reject(js.v8Context(), exception.getHandle(js)).IsJust();
-      return jsg::JsValue(promise);
-    });
-
-    // If result is a promise, chain it to our resolver
-    v8::Local<v8::Value> resultHandle = result;
-    if (resultHandle->IsPromise()) {
-      // For simplicity, just return the result promise directly
-      return result;
-    } else {
-      // Resolve with the result
-      resolver->Resolve(js.v8Context(), resultHandle).IsJust();
-      return jsg::JsValue(promise);
-    }
-  }
-
-  SpanParent parent = IoContext::current().getCurrentTraceSpan();
-
-  // Create the span implementation
-  auto spanName = kj::ConstString(kj::str(operationName));
-
-  auto& ioContext = IoContext::current();
-  auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(spanName));
-  auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
-  // Create the JavaScript span object
-  jsg::Ref<InternalSpan> jsSpan = js.alloc<InternalSpan>(kj::mv(ownedSpan));
-
-  // Create new span parent for the callback execution context
-  SpanParent newSpanParent = jsSpan->makeSpanParent();
-
-  // Prepare callback arguments - create a new Arguments with span prepended
+  // Prepare callback arguments with span prepended
   kj::Vector<jsg::Value> callbackArgVector;
   callbackArgVector.add(js.v8Ref(jsSpanHandler.wrap(js, jsSpan.addRef())));
   for (auto& arg: args) {
@@ -127,42 +84,35 @@ jsg::JsValue TracingModule::startSpanWithCallback(jsg::Lock& js,
   }
   auto callbackArgs = jsg::Arguments<jsg::Value>(callbackArgVector.releaseAsArray());
 
-  // Define callback execution logic
-  auto executeCallback = [&jsSpan, &js, &callback, callbackArgs = kj::mv(callbackArgs),
-                             &valuePromiseHandler]() mutable -> jsg::JsValue {
-    return js.tryCatch([&]() -> jsg::JsValue {
-      auto callbackResult = callback(js, kj::mv(callbackArgs));
-      v8::Local<v8::Value> result = callbackResult.getHandle(js);
+  // Execute callback with automatic span cleanup
+  return js.tryCatch([&]() -> jsg::JsValue {
+    auto callbackResult = callback(js, kj::mv(callbackArgs));
+    v8::Local<v8::Value> result = callbackResult.getHandle(js);
 
-      // Check if result is a promise for async handling
-      if (result->IsPromise()) {
-        auto promise = KJ_ASSERT_NONNULL(valuePromiseHandler.tryUnwrap(js, result))
-                           .then(js,
-                               [jsSpan = jsSpan.addRef()](
-                                   jsg::Lock& js, jsg::Value value) mutable -> jsg::Value {
-          // Call end() at the end of async scope on success
-          jsSpan->end();
-          return kj::mv(value);
-        },
-                               [jsSpan = jsSpan.addRef()](
-                                   jsg::Lock& js, jsg::Value exception) mutable -> jsg::Value {
-          // Call end() at the end of async scope on exception
-          jsSpan->end();
-          js.throwException(kj::mv(exception));
-        });
-        return jsg::JsValue(valuePromiseHandler.wrap(js, kj::mv(promise)));
-      } else {
-        // Call end() at the end of synchronous scope on success
+    // Handle async callbacks - attach span cleanup to promise chain
+    if (result->IsPromise()) {
+      auto promise = KJ_ASSERT_NONNULL(valuePromiseHandler.tryUnwrap(js, result))
+                         .then(js,
+                             [jsSpan = jsSpan.addRef()](
+                                 jsg::Lock& js, jsg::Value value) mutable -> jsg::Value {
         jsSpan->end();
-        return jsg::JsValue(result);
-      }
-    }, [&](jsg::Value exception) -> jsg::JsValue {
-      // Call end() at the end of synchronous scope on exception
-      jsSpan->end();
-      js.throwException(kj::mv(exception));
-    });
-  };
-  return executeCallback();
+        return kj::mv(value);
+      },
+                             [jsSpan = jsSpan.addRef()](
+                                 jsg::Lock& js, jsg::Value exception) mutable -> jsg::Value {
+        jsSpan->end();
+        js.throwException(kj::mv(exception));
+      });
+      return jsg::JsValue(valuePromiseHandler.wrap(js, kj::mv(promise)));
+    }
+
+    // Handle sync callbacks - end span immediately
+    jsSpan->end();
+    return jsg::JsValue(result);
+  }, [&](jsg::Value exception) -> jsg::JsValue {
+    jsSpan->end();
+    js.throwException(kj::mv(exception));
+  });
 }
 
 }  // namespace workerd::api
