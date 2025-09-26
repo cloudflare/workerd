@@ -1,5 +1,5 @@
-import { AiInternalError } from "./ai-api";
-import type { GatewayOptions } from "./aig-api";
+import { AiInternalError } from 'cloudflare-internal:ai-api';
+import type { GatewayOptions } from 'cloudflare-internal:aig-api';
 import base64 from 'cloudflare-internal:base64';
 
 interface Fetcher {
@@ -18,14 +18,13 @@ export type ConversionResponse = {
 export type SupportedFileFormat = {
   mimeType: string;
   extension: string;
-}
+};
 
 async function blobToBase64(blob: Blob): Promise<string> {
   return base64.encodeArrayToString(await blob.arrayBuffer());
 }
 
 export class ToMarkdownService {
-
   readonly #fetcher: Fetcher;
   readonly #endpointURL = 'https://workers-binding.ai';
 
@@ -71,7 +70,7 @@ export class ToMarkdownService {
       },
     };
 
-    const endpointUrl = `${this.#endpointURL}/to-everything/markdown/supported`;
+    const endpointUrl = `${this.#endpointURL}/to-everything/markdown/transformer`;
 
     const res = await this.#fetcher.fetch(endpointUrl, fetchOptions);
 
@@ -128,7 +127,9 @@ export class ToMarkdownService {
     const res = await this.#fetcher.fetch(endpointUrl, fetchOptions);
 
     // This endpoint never fails so just parse the output
-    const { result: extensions } = (await res.json()) as { result: SupportedFileFormat[] };
+    const { result: extensions } = (await res.json()) as {
+      result: SupportedFileFormat[];
+    };
 
     return extensions;
   }
