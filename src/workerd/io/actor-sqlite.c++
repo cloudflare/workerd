@@ -25,6 +25,14 @@ static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alar
   return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
 }
 
+// Set options.allowUnconfirmed to false and log a reason why.
+void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr reason) {
+  if (options.allowUnconfirmed) {
+    KJ_LOG(WARNING, "NOSENTRY allowUnconfirmed disabled", reason);
+    options.allowUnconfirmed = false;
+  }
+}
+
 }  // namespace
 
 ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
@@ -471,6 +479,9 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "single put is using an already-existing ExplicitTxn");
+  }
   kv.put(key, value, {.allowUnconfirmed = options.allowUnconfirmed});
   return kj::none;
 }
@@ -482,10 +493,19 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
     if (currentTxn.is<NoTxn>()) {
       // If we are not in a transcation, let's use an ExplicitTxn, which should rollback automatically
       // if some put fails.
+
+      // TODO(someday) this should really start an ImplicitTxn, which has the advantage of
+      // supporting allowUnconfirmed.
+      disableAllowUnconfirmed(options, "multi put will create an ExplicitTxn");
+
       auto txn = startTransaction();
       txn->put(kj::mv(pairs), options);
       txn->commit();
     } else {
+      if (currentTxn.is<ExplicitTxn*>()) {
+        disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
+      }
+
       // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
       db->run(
           {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
@@ -516,11 +536,19 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions options) {
   requireNotBroken();
 
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "single delete is using an already-existing ExplicitTxn");
+  }
+
   return kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, WriteOptions options) {
   requireNotBroken();
+
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "multi delete put is using an already-existing ExplicitTxn");
+  }
 
   uint count = 0;
   for (auto& key: keys) {
@@ -532,6 +560,8 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
+
+  disableAllowUnconfirmed(options, "setAlarm is not supported");
 
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
@@ -555,6 +585,8 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
   requireNotBroken();
+
+  disableAllowUnconfirmed(options, "deleteAll is not supported");
 
   // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
   // the metadata table, to try to match the behavior of ActorCache, which preserves the set alarm
@@ -827,22 +859,27 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     Key key, Value value, WriteOptions options) {
+  disableAllowUnconfirmed(options, "single put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(key), kj::mv(value), options);
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     kj::Array<KeyValuePair> pairs, WriteOptions options) {
+  disableAllowUnconfirmed(options, "multi put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(pairs), options);
 }
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::ExplicitTxn::delete_(
     Key key, WriteOptions options) {
+  disableAllowUnconfirmed(options, "single delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(key), options);
 }
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::ExplicitTxn::delete_(
     kj::Array<Key> keys, WriteOptions options) {
+  disableAllowUnconfirmed(options, "multi delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(keys), options);
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
+  disableAllowUnconfirmed(options, "setAlarm in ExplicitTxn not supported");
   return actorSqlite.setAlarm(newAlarmTime, options);
 }
 
