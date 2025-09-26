@@ -445,31 +445,34 @@ class NameWrapper {
 // same reason discussed in PrimitiveWrapper.
 class StringWrapper {
  public:
-  static constexpr const char* getName(kj::String*) {
-    return "string";
-  }
-
   // TODO(someday): The conversion to kj::String doesn't explicitly consider the distinction
   // between DOMString (~ WTF-8; could contain invalid code points) and USVString (invalid code
   // points are always replaced with U+FFFD). Code should make an explict choice between the two.
 
-  static constexpr const char* getName(kj::ArrayPtr<const char>*) {
+  template <typename T>
+    requires(kj::isSameType<T, kj::ArrayPtr<const char>>() ||
+        kj::isSameType<T, kj::Array<const char>>() || kj::isSameType<T, kj::String>())
+  static constexpr const char* getName(T*) {
     return "string";
   }
-  static constexpr const char* getName(kj::Array<const char>*) {
-    return "string";
+
+  template <typename T>
+    requires(kj::isSameType<T, ByteString>() || kj::isSameType<T, USVString>() ||
+        kj::isSameType<T, DOMString>())
+  static constexpr const char* getName(T*) {
+    if constexpr (kj::isSameType<T, ByteString>()) {
+      return "ByteString";
+    } else if constexpr (kj::isSameType<T, USVString>()) {
+      return "USVString";
+    } else if constexpr (kj::isSameType<T, DOMString>()) {
+      return "DOMString";
+    }
+    KJ_UNREACHABLE;
   }
 
-  static constexpr const char* getName(ByteString*) {
-    return "ByteString";
-  }
-
-  static constexpr const char* getName(USVString*) {
-    return "USVString";
-  }
-
-  static constexpr const char* getName(DOMString*) {
-    return "DOMString";
+  v8::Local<v8::String> wrap(
+      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::StringPtr value) {
+    return v8Str(isolate, value);
   }
 
   v8::Local<v8::String> wrap(Lock& js,
@@ -486,37 +489,22 @@ class StringWrapper {
     return wrap(js, context, creator, value.asPtr());
   }
 
+  template <typename T>
+    requires(kj::isSameType<T, const ByteString&>() || kj::isSameType<T, const USVString&>() ||
+        kj::isSameType<T, const DOMString&>())
   v8::Local<v8::String> wrap(
-      v8::Isolate* isolate, kj::Maybe<v8::Local<v8::Object>> creator, kj::StringPtr value) {
-    return v8Str(isolate, value);
-  }
-
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const ByteString& value) {
+      Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
-    return wrap(js, context, creator, value.asPtr());
+    return v8Str(js.v8Isolate, value.asPtr());
   }
 
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const USVString& value) {
-    return wrap(js, context, creator, value.asPtr());
-  }
-
-  v8::Local<v8::String> wrap(Lock& js,
-      v8::Local<v8::Context> context,
-      kj::Maybe<v8::Local<v8::Object>> creator,
-      const DOMString& value) {
-    return wrap(js, context, creator, value.asPtr());
-  }
-
-  kj::Maybe<kj::String> tryUnwrap(Lock& js,
+  template <typename T>
+    requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, ByteString>() ||
+        kj::isSameType<T, USVString>() || kj::isSameType<T, DOMString>())
+  kj::Maybe<T> tryUnwrap(Lock& js,
       v8::Local<v8::Context> context,
       v8::Local<v8::Value> handle,
-      kj::String*,
+      T*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     // Note that if handle is already a string, calling ToString will just
     // return handle without any further coercion. For any other type of
@@ -524,34 +512,17 @@ class StringWrapper {
     // for us to check if handle is a string here or not, ToString does
     // that for us.
     JsString str(check(handle->ToString(context)));
-    return str.toString(js);
-  }
+    if constexpr (kj::isSameType<T, kj::String>()) {
+      return str.toString(js);
+    } else if constexpr (kj::isSameType<T, ByteString>()) {
+      return str.toByteString(js);
+    } else if constexpr (kj::isSameType<T, USVString>()) {
+      return str.toUSVString(js);
+    } else if constexpr (kj::isSameType<T, DOMString>()) {
+      return str.toDOMString(js);
+    }
 
-  kj::Maybe<ByteString> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      ByteString*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(context)));
-    return str.toByteString(js);
-  }
-
-  kj::Maybe<USVString> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      USVString*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(context)));
-    return str.toUSVString(js);
-  }
-
-  kj::Maybe<DOMString> tryUnwrap(Lock& js,
-      v8::Local<v8::Context> context,
-      v8::Local<v8::Value> handle,
-      DOMString*,
-      kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    JsString str(check(handle->ToString(context)));
-    return str.toDOMString(js);
+    KJ_UNREACHABLE;
   }
 };
 
