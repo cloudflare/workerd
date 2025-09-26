@@ -731,6 +731,11 @@ const process: Process = Object.setPrototypeOf(
 ) as Process;
 EventEmitter.call(process);
 
+Object.defineProperty(process, Symbol.toStringTag, {
+  value: 'process',
+  configurable: true,
+});
+
 // We lazily attach unhandled rejection and rejection handled listeners
 // to ensure performance optimizations remain in the no listener case
 let addedUnhandledRejection = false,

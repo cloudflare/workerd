@@ -1124,3 +1124,12 @@ export const processAssert = {
     assert.strictEqual(typeof process.assert, 'function');
   },
 };
+
+export const processToStringTag = {
+  test() {
+    assert.strictEqual(
+      Object.prototype.toString.call(process),
+      '[object process]'
+    );
+  },
+};
