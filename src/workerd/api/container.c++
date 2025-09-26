@@ -54,7 +54,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
   JSG_REQUIRE(
-      durationMs < 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
+      durationMs > 0, TypeError, "setInactivityTimeout() cannot be called with a durationMs <= 0");
 
   auto req = rpcClient->setInactivityTimeoutRequest();
 
