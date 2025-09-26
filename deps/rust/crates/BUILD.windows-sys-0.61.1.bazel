@@ -50,7 +50,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.61.0",
+    version = "0.61.1",
     deps = [
         "@crates_vendor__windows-link-0.2.0//:windows_link",
     ],

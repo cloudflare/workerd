@@ -6,13 +6,16 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+)
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "object",
+    name = "addr2line",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -36,20 +39,19 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=object",
+        "crate-name=addr2line",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.36.7",
+    version = "0.25.1",
     deps = [
-        "@crates_vendor__memchr-2.7.6//:memchr",
-        "@crates_vendor__object-0.36.7//:build_script_build",
+        "@crates_vendor__gimli-0.32.3//:gimli",
     ],
 )
 
-cargo_build_script(
-    name = "_bs",
+rust_binary(
+    name = "addr2line__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -59,7 +61,6 @@ cargo_build_script(
         allow_empty = True,
         exclude = [
             "**/* *",
-            "**/*.rs",
             ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
@@ -67,38 +68,21 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
+    crate_root = "src/bin/addr2line.rs",
     edition = "2018",
-    pkg_name = "object",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=object",
+        "crate-name=addr2line",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.36.7",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
+    version = "0.25.1",
+    deps = [
+        ":addr2line",
+        "@crates_vendor__gimli-0.32.3//:gimli",
+    ],
 )
