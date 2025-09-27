@@ -64,7 +64,8 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   // Internal API
 
-  void attach(WritableStreamController& controller,
+  void attach(jsg::Lock& js,
+      WritableStreamController& controller,
       jsg::Promise<void> closedPromise,
       jsg::Promise<void> readyPromise) override;
 
@@ -72,9 +73,11 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   void lockToStream(jsg::Lock& js, WritableStream& stream);
 
-  void replaceReadyPromise(jsg::Promise<void> readyPromise) override;
+  void replaceReadyPromise(jsg::Lock& js, jsg::Promise<void> readyPromise) override;
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  kj::Maybe<jsg::Promise<void>> isReady(jsg::Lock& js);
 
  private:
   struct Initial {};
@@ -93,6 +96,7 @@ class WritableStreamDefaultWriter: public jsg::Object, public WritableStreamCont
 
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> closedPromise;
   kj::Maybe<jsg::MemoizedIdentity<jsg::Promise<void>>> readyPromise;
+  kj::Maybe<jsg::Promise<void>> readyPromisePending;
 
   void visitForGc(jsg::GcVisitor& visitor);
 };
