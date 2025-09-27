@@ -60,6 +60,7 @@ PERFETTO_CONFIG = struct(
         protobuf_py = [],
         pandas_py = [],
         tp_vendor_py = [],
+        tp_resolvers_py = [],
 
         # There are multiple configurations for the function name demangling
         # logic in trace processor:
