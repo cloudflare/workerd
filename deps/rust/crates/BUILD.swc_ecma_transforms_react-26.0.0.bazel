@@ -55,7 +55,7 @@ rust_library(
         "@crates_vendor__indexmap-2.11.4//:indexmap",
         "@crates_vendor__once_cell-1.21.3//:once_cell",
         "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
-        "@crates_vendor__serde-1.0.227//:serde",
+        "@crates_vendor__serde-1.0.228//:serde",
         "@crates_vendor__sha1-0.10.6//:sha1",
         "@crates_vendor__swc_atoms-7.0.0//:swc_atoms",
         "@crates_vendor__swc_common-14.0.4//:swc_common",

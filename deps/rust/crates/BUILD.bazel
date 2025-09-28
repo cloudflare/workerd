@@ -272,14 +272,14 @@ alias(
 )
 
 alias(
-    name = "serde-1.0.227",
-    actual = "@crates_vendor__serde-1.0.227//:serde",
+    name = "serde-1.0.228",
+    actual = "@crates_vendor__serde-1.0.228//:serde",
     tags = ["manual"],
 )
 
 alias(
     name = "serde",
-    actual = "@crates_vendor__serde-1.0.227//:serde",
+    actual = "@crates_vendor__serde-1.0.228//:serde",
     tags = ["manual"],
 )
 

@@ -47,7 +47,7 @@ rust_library(
     version = "1.2.0",
     deps = [
         "@crates_vendor__camino-1.2.0//:build_script_build",
-        "@crates_vendor__serde_core-1.0.227//:serde_core",
+        "@crates_vendor__serde_core-1.0.228//:serde_core",
     ],
 )
 

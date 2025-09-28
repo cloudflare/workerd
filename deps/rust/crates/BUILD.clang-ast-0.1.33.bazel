@@ -43,6 +43,6 @@ rust_library(
     version = "0.1.33",
     deps = [
         "@crates_vendor__foldhash-0.2.0//:foldhash",
-        "@crates_vendor__serde-1.0.227//:serde",
+        "@crates_vendor__serde-1.0.228//:serde",
     ],
 )
