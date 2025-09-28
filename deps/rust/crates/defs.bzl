@@ -314,7 +314,7 @@ _NORMAL_DEPENDENCIES = {
             "ruff_python_ast": Label("@crates_vendor//:ruff_python_ast-0.0.0"),
             "ruff_python_parser": Label("@crates_vendor//:ruff_python_parser-0.0.0"),
             "scratch": Label("@crates_vendor//:scratch-1.0.9"),
-            "serde": Label("@crates_vendor//:serde-1.0.227"),
+            "serde": Label("@crates_vendor//:serde-1.0.228"),
             "serde_json": Label("@crates_vendor//:serde_json-1.0.145"),
             "static_assertions": Label("@crates_vendor//:static_assertions-1.1.0"),
             "swc_core": Label("@crates_vendor//:swc_core-35.0.0"),
@@ -2090,32 +2090,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__serde-1.0.227",
-        sha256 = "80ece43fc6fbed4eb5392ab50c07334d3e577cbf40997ee896fe7af40bba4245",
+        name = "crates_vendor__serde-1.0.228",
+        sha256 = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/serde/1.0.227/download"],
-        strip_prefix = "serde-1.0.227",
-        build_file = Label("//deps/rust/crates:BUILD.serde-1.0.227.bazel"),
+        urls = ["https://static.crates.io/crates/serde/1.0.228/download"],
+        strip_prefix = "serde-1.0.228",
+        build_file = Label("//deps/rust/crates:BUILD.serde-1.0.228.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__serde_core-1.0.227",
-        sha256 = "7a576275b607a2c86ea29e410193df32bc680303c82f31e275bbfcafe8b33be5",
+        name = "crates_vendor__serde_core-1.0.228",
+        sha256 = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/serde_core/1.0.227/download"],
-        strip_prefix = "serde_core-1.0.227",
-        build_file = Label("//deps/rust/crates:BUILD.serde_core-1.0.227.bazel"),
+        urls = ["https://static.crates.io/crates/serde_core/1.0.228/download"],
+        strip_prefix = "serde_core-1.0.228",
+        build_file = Label("//deps/rust/crates:BUILD.serde_core-1.0.228.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__serde_derive-1.0.227",
-        sha256 = "51e694923b8824cf0e9b382adf0f60d4e05f348f357b38833a3fa5ed7c2ede04",
+        name = "crates_vendor__serde_derive-1.0.228",
+        sha256 = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/serde_derive/1.0.227/download"],
-        strip_prefix = "serde_derive-1.0.227",
-        build_file = Label("//deps/rust/crates:BUILD.serde_derive-1.0.227.bazel"),
+        urls = ["https://static.crates.io/crates/serde_derive/1.0.228/download"],
+        strip_prefix = "serde_derive-1.0.228",
+        build_file = Label("//deps/rust/crates:BUILD.serde_derive-1.0.228.bazel"),
     )
 
     maybe(
@@ -3169,7 +3169,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__ruff_python_parser-0.0.0", is_dev_dep = False),
         struct(repo = "crates_vendor__rustversion-1.0.22", is_dev_dep = False),
         struct(repo = "crates_vendor__scratch-1.0.9", is_dev_dep = False),
-        struct(repo = "crates_vendor__serde-1.0.227", is_dev_dep = False),
+        struct(repo = "crates_vendor__serde-1.0.228", is_dev_dep = False),
         struct(repo = "crates_vendor__serde_json-1.0.145", is_dev_dep = False),
         struct(repo = "crates_vendor__static_assertions-1.1.0", is_dev_dep = False),
         struct(repo = "crates_vendor__swc_core-35.0.0", is_dev_dep = False),

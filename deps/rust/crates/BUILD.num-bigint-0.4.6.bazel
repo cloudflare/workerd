@@ -49,6 +49,6 @@ rust_library(
     deps = [
         "@crates_vendor__num-integer-0.1.46//:num_integer",
         "@crates_vendor__num-traits-0.2.19//:num_traits",
-        "@crates_vendor__serde-1.0.227//:serde",
+        "@crates_vendor__serde-1.0.228//:serde",
     ],
 )
