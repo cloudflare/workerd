@@ -133,6 +133,19 @@ export default {
       );
     }
 
+    if (modelName === 'multipartStreamInputs') {
+      return Response.json(
+        {
+          inputs: {},
+          options: { ...data.options },
+          requestUrl: request.url,
+        },
+        {
+          headers: respHeaders,
+        }
+      );
+    }
+
     if (modelName === 'inputErrorModel') {
       return Response.json(
         {

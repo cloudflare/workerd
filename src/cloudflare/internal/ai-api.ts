@@ -94,6 +94,27 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return base64.encodeArrayToString(await blob.arrayBuffer());
 }
 
+/**
+ * Helper function to convert a ReadableStream to a Blob
+ */
+async function streamToBlob(
+  stream: ReadableStream,
+  contentType: string
+): Promise<Blob> {
+  const reader = stream.getReader();
+  const chunks = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  while (true) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+
+  return new Blob(chunks, { type: contentType });
+}
+
 // TODO: merge this function with the one with images-api.ts
 function isReadableStream(obj: unknown): obj is ReadableStream {
   return !!(
@@ -246,6 +267,74 @@ export class Ai {
   }
 
   /**
+   * Generate fetch call for all ReadableStream inputs
+   * It will attempt to convert them into a single multipart/form-data stream
+   * */
+  async #generateMultipleStreamFetch(
+    inputs: Record<string, string | AiInputReadableStream>,
+    options: AiOptions,
+    model: string,
+    streamKeys: string[]
+  ): Promise<Response> {
+    if (options.gateway?.id) {
+      throw new AiInternalError(
+        'AI Gateway does not support ReadableStreams yet.'
+      );
+    }
+
+    const formData = new FormData();
+    for (let i = 0; i < streamKeys.length; i++) {
+      const streamKey = streamKeys[i] ?? '';
+      const stream = streamKey ? inputs[streamKey] : null;
+      const body = (stream as AiInputReadableStream).body;
+      const contentType = (stream as AiInputReadableStream).contentType;
+
+      // Make sure user has supplied the Content-Type
+      // This allows AI binding to treat the ReadableStream correctly
+      if (!contentType) {
+        throw new AiInternalError(
+          `Content-Type is required with ReadableStream inputs ['${streamKey}']`
+        );
+      }
+
+      const blob = await streamToBlob(body, contentType);
+      formData.append(streamKey, blob);
+
+      // remove the stream key from the inputs,
+      // this will help us pass the rest of the
+      // keys as query params
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete inputs[streamKey];
+    }
+
+    // Pass single ReadableStream in request body
+    const fetchOptions = {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...this.#options.sessionOptions?.extraHeaders,
+        ...this.#options.extraHeaders,
+        'cf-consn-sdk-version': '2.0.0',
+        'cf-consn-model-id': `${this.#options.prefix ? `${this.#options.prefix}:` : ''}${model}`,
+      },
+    };
+
+    // Construct query params
+    // Append inputs with ai.run options that are passed to the inference request
+    const query = {
+      ...options,
+      version: '3',
+      userInputs: JSON.stringify({ ...inputs }),
+    };
+    const aiEndpoint = new URL(`${this.#endpointURL}/run`);
+    for (const [key, value] of Object.entries(query)) {
+      aiEndpoint.searchParams.set(key, value as string);
+    }
+
+    return await this.#fetcher.fetch(aiEndpoint, fetchOptions);
+  }
+
+  /**
    * Generate call to open a websocket connection
    * */
   async #generateWebsocketFetch(
@@ -306,8 +395,11 @@ export class Ai {
       if (streamKeys.length === 0) {
         res = await this.#generateFetch(inputs, cleanedOptions, model);
       } else if (streamKeys.length > 1) {
-        throw new AiInternalError(
-          `Multiple ReadableStreams are not supported. Found streams in keys: [${streamKeys.join(', ')}]`
+        res = await this.#generateMultipleStreamFetch(
+          inputs,
+          options,
+          model,
+          streamKeys
         );
       } else {
         res = await this.#generateStreamFetch(

@@ -182,36 +182,44 @@ export const tests = {
     }
 
     {
-      // Test errors from two readable stream inputs
-      await assert.rejects(
-        async () => {
-          const arr = [1, 2, 3];
-          const stream = new ReadableStream({
+      // Test two readable stream inputs
+      const encoder = new TextEncoder();
+      const arr = [1, 2, 3];
+      const resp = await env.ai.run('multipartStreamInputs', {
+        audio: {
+          body: new ReadableStream({
             start(controller) {
-              const encoder = new TextEncoder();
               for (const ele of arr) {
-                controller.enqueue(encoder.encode(ele));
+                controller.enqueue(encoder.encode(ele.toString()));
               }
               controller.close();
             },
-          });
-          const resp = await env.ai.run('readableStreamIputs', {
-            audio: {
-              body: stream,
-              contentType: 'audio/wav',
-            },
-            image: {
-              body: stream,
-              contentType: 'image/png',
-            },
-          });
+          }),
+          contentType: 'audio/wav',
         },
-        {
-          name: 'AiInternalError',
-          message:
-            'Multiple ReadableStreams are not supported. Found streams in keys: [audio, image]',
-        }
-      );
+        image: {
+          body: new ReadableStream({
+            start(controller) {
+              for (const ele of arr) {
+                controller.enqueue(encoder.encode(ele.toString()));
+              }
+              controller.close();
+            },
+          }),
+          contentType: 'image/png',
+        },
+        prompt: 'summarize the image and audio',
+      });
+
+      assert.deepStrictEqual(resp, {
+        inputs: {},
+        options: {
+          userInputs: '{"prompt":"summarize the image and audio"}',
+          version: '3',
+        },
+        requestUrl:
+          'https://workers-binding.ai/run?version=3&userInputs=%7B%22prompt%22%3A%22summarize+the+image+and+audio%22%7D',
+      });
     }
 
     {
