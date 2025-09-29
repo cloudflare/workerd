@@ -22,7 +22,6 @@ kj_test(
     src = "cxx-rust-integration-test.c++",
     deps = [
         ":cxx-integration-test",
-        "//deps/rust:runtime",
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/kj:kj-async",
         "@workerd-cxx//kj-rs",

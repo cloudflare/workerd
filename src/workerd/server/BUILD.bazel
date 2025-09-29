@@ -145,7 +145,6 @@ wd_cc_library(
         ":fallback-service",
         ":pyodide",
         ":workerd_capnp",
-        "//deps/rust:runtime",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide:pyodide_static",
