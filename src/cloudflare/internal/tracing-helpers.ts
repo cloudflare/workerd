@@ -25,6 +25,10 @@ import tracing from 'cloudflare-internal:tracing';
  *   span.setTag('query', sql);
  *   return await database.execute(sql);
  * });
+ *
+ * @note Generator functions are not currently supported and will have their
+ * spans ended immediately after the generator object is returned, not when
+ * the generator is exhausted.
  */
 export function withSpan<T>(
   name: string,
@@ -32,31 +36,31 @@ export function withSpan<T>(
 ): T {
   const span = tracing.startSpan(name);
 
-  // Check if this is a recording span (not a no-op)
-  const isRecording = span.getIsRecording();
-
   try {
     const result = fn(span);
 
-    // Only end recording spans, not no-op spans
-    if (isRecording) {
-      // Handle promises - ensure span ends after async completion
-      if (result && typeof result === 'object' && 'then' in result) {
-        return (result as unknown as Promise<unknown>).finally(() => {
-          span.end();
-        }) as T;
-      }
-
-      // Synchronous result - end span immediately
-      span.end();
+    // Handle async results - ensure span ends after completion
+    // Check if result is thenable (Promise or Promise-like)
+    if (
+      result &&
+      (typeof result === 'object' || typeof result === 'function') &&
+      'then' in result &&
+      typeof (result as any).then === 'function'
+    ) {
+      // Convert to real Promise to ensure we have .finally()
+      // This handles both real Promises and thenables
+      return Promise.resolve(result).finally(() => {
+        span.end();
+      }) as T;
     }
 
+    // Synchronous result - end span immediately
+    span.end();
     return result;
   } catch (error) {
-    // Ensure span ends on error (only for recording spans)
-    if (isRecording) {
-      span.end();
-    }
+    // Always end span on error - no need to check isRecording
+    // as span.end() should be idempotent/safe to call on no-op spans
+    span.end();
     throw error;
   }
 }
