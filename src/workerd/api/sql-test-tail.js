@@ -12,8 +12,6 @@ export default {
       (span) => span.name !== 'jsRpcSession'
     );
 
-    const expected = [];
-
     const reduced = received.reduce((acc, curr) => {
       if (!acc[curr.name]) acc[curr.name] = 0;
       acc[curr.name]++;
