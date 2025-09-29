@@ -22,10 +22,6 @@ export default {
         closed: true,
       },
       {
-        name: 'worker',
-        closed: true,
-      },
-      {
         name: 'writeLogfwdr',
         closed: true,
       },
@@ -46,23 +42,24 @@ export default {
     );
 
     return (event) => {
+      const spanId = event.event.spanId || event.spanContext.spanId;
       switch (event.event.type) {
         case 'spanOpen':
           // The span ids will change between tests, but Map preserves insertion order
-          spans.set(event.spanId, { name: event.event.name });
+          spans.set(spanId, { name: event.event.name });
           break;
         case 'attributes': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(spanId) || {};
           for (let { name, value } of event.event.info) {
             span[name] = value;
           }
-          spans.set(event.spanId, span);
+          spans.set(spanId, span);
           break;
         }
         case 'spanClose': {
-          let span = spans.get(event.spanId);
+          let span = spans.get(spanId);
           span['closed'] = true;
-          spans.set(event.spanId, span);
+          spans.set(spanId, span);
           break;
         }
         case 'outcome':
