@@ -18,17 +18,17 @@ class JsSpan: public jsg::Object {
   // If the span is not explicitly ended, it will be automatically ended when the
   // JsSpan object is destroyed.
   void end();
-  // Sets a tag on the span. Values can be string, number, boolean, or undefined.
-  // If undefined is passed, the tag is not set (allows optional chaining).
+  // Sets an attribute on the span. Values can be string, number, boolean, or undefined.
+  // If undefined is passed, the attribute is not set (allows optional chaining).
   // Note: We intentionally don't support BigInt/int64_t. JavaScript numbers (doubles)
   // are sufficient for most tracing use cases, and BigInt conversion to int64_t would
   // require handling truncation for values outside the int64_t range.
-  void setTag(
+  void setAttribute(
       jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> value);
 
   JSG_RESOURCE_TYPE(JsSpan) {
     JSG_METHOD(end);
-    JSG_METHOD(setTag);
+    JSG_METHOD(setAttribute);
   }
 
  private:
