@@ -15,14 +15,14 @@ import tracing from 'cloudflare-internal:tracing';
  * @example
  * // Synchronous usage
  * const result = withSpan('prepare', (span) => {
- *   span.setTag('query', sql);
+ *   span.setAttribute('query', sql);
  *   return new PreparedStatement(sql);
  * });
  *
  * @example
  * // Asynchronous usage
  * const result = await withSpan('exec', async (span) => {
- *   span.setTag('query', sql);
+ *   span.setAttribute('query', sql);
  *   return await database.execute(sql);
  * });
  *
