@@ -28,8 +28,10 @@ void JsSpan::setTag(
     jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
   KJ_IF_SOME(s, span) {
     KJ_IF_SOME(value, maybeValue) {
+      // JavaScript numbers (double) are stored as-is, not converted to int64_t
       s->setTag(kj::ConstString(kj::mv(key)), kj::mv(value));
     }
+    // If value is undefined/none, we simply don't set the tag
   }
 }
 
