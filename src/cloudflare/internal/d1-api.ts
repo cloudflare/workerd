@@ -86,7 +86,7 @@ class D1Database {
 
   prepare(query: string): D1PreparedStatement {
     return withSpan('prepare', (span) => {
-      span.setTag('query', query);
+      span.setAttribute('query', query);
       return new D1PreparedStatement(this.alwaysPrimarySession, query);
     });
   }
@@ -99,7 +99,7 @@ class D1Database {
 
   async exec(query: string): Promise<D1ExecResult> {
     return withSpan('exec', async (span) => {
-      span.setTag('query', query);
+      span.setAttribute('query', query);
       return this.alwaysPrimarySession.exec(query);
     });
   }
@@ -164,7 +164,7 @@ class D1DatabaseSession {
 
   prepare(sql: string): D1PreparedStatement {
     return withSpan('prepare', (span) => {
-      span.setTag('sql', sql);
+      span.setAttribute('sql', sql);
       return new D1PreparedStatement(this, sql);
     });
   }
