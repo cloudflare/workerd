@@ -106,6 +106,13 @@ const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
 };
+if (LOADED_SNAPSHOT_META) {
+  Object.assign(
+    CREATED_SNAPSHOT_META.soMemoryBases,
+    LOADED_SNAPSHOT_META.soMemoryBases
+  );
+  CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
+}
 export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
 
 /**
