@@ -113,7 +113,8 @@ SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 # invoke workerd twice for snapshot tests.
 
 WINDOWS_RUNTEST_SNAPSHOT = """
-powershell -Command \"%* --python-save-snapshot $ENV:PYTHON_SAVE_SNAPSHOT_ARGS\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+$PYTHON_SAVE_SNAPSHOT_OPTIONS = $ENV:PYTHON_SAVE_SNAPSHOT_ARGS -split ' '
+powershell -Command \"%* --python-save-snapshot @PYTHON_SAVE_SNAPSHOT_OPTIONS\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
 set TEST_EXIT=!ERRORLEVEL!
 if !TEST_EXIT! EQU 0 (
     powershell -Command \"%* --python-load-snapshot snapshot.bin\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR

@@ -72,3 +72,21 @@ py_wd_test(
     make_snapshot = False,
     use_snapshot = "numpy",
 )
+
+py_wd_test(
+    name = "numpy_stacked_snapshot",
+    directory = "numpy",
+    feature_flags = ["python_dedicated_snapshot"],
+    make_snapshot = True,
+    python_flags = ["0.28.2"],
+    use_snapshot = "baseline",
+)
+
+py_wd_test(
+    name = "fastapi_stacked_snapshot",
+    directory = "fastapi",
+    feature_flags = ["python_dedicated_snapshot"],
+    make_snapshot = True,
+    python_flags = ["0.28.2"],
+    use_snapshot = "baseline",
+)
