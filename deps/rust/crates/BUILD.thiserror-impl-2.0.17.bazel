@@ -40,10 +40,10 @@ rust_proc_macro(
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.16",
+    version = "2.0.17",
     deps = [
         "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
-        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__quote-1.0.41//:quote",
         "@crates_vendor__syn-2.0.106//:syn",
     ],
 )

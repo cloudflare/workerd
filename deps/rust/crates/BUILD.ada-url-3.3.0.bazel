@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "thiserror",
+    name = "ada_url",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -34,23 +34,20 @@ rust_library(
         "std",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__thiserror-impl-2.0.16//:thiserror_impl",
-    ],
+    edition = "2024",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=ada-url",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.16",
+    version = "3.3.0",
     deps = [
-        "@crates_vendor__thiserror-2.0.16//:build_script_build",
+        "@crates_vendor__ada-url-3.3.0//:build_script_build",
     ],
 )
 
@@ -91,20 +88,25 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "thiserror",
+    edition = "2024",
+    pkg_name = "ada-url",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=ada-url",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.16",
+    version = "3.3.0",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__cc-1.2.39//:cc",
+        "@crates_vendor__link_args-0.6.0//:link_args",
+        "@crates_vendor__regex-1.11.3//:regex",
+    ],
 )
 
 alias(

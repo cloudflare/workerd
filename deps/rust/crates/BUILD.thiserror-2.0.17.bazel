@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "lolhtml",
+    name = "thiserror",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,28 +30,27 @@ rust_library(
         ],
     ),
     crate_features = [
-        "capi",
         "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__thiserror-impl-2.0.17//:thiserror_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lol_html_c_api",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.3.0",
+    version = "2.0.17",
     deps = [
-        "@crates_vendor__encoding_rs-0.8.35//:encoding_rs",
-        "@crates_vendor__libc-0.2.176//:libc",
-        "@crates_vendor__lol_html-2.6.0//:lol_html",
-        "@crates_vendor__lol_html_c_api-1.3.0//:build_script_build",
-        "@crates_vendor__thiserror-2.0.17//:thiserror",
+        "@crates_vendor__thiserror-2.0.17//:build_script_build",
     ],
 )
 
@@ -75,8 +74,8 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "capi",
         "default",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -93,19 +92,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    links = "lolhtml",
-    pkg_name = "lol_html_c_api",
+    pkg_name = "thiserror",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=lol_html_c_api",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.3.0",
+    version = "2.0.17",
     visibility = ["//visibility:private"],
 )
 
