@@ -17,12 +17,13 @@ def _py_wd_test_helper(
         make_snapshot,
         use_snapshot,
         args,
+        feature_flags,
         data = [],
         **kwargs):
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
-    flags = _get_enable_flags(python_flag)
+    flags = _get_enable_flags(python_flag) + feature_flags
     feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
 
     load_snapshot = None
@@ -106,6 +107,7 @@ def py_wd_test(
         name = None,
         python_flags = "all",
         skip_python_flags = [],
+        feature_flags = [],
         args = [],
         size = "enormous",
         tags = [],
@@ -148,6 +150,7 @@ def py_wd_test(
             python_flag,
             make_snapshot = make_snapshot,
             use_snapshot = use_snapshot,
+            feature_flags = feature_flags,
             data = data,
             args = args,
             size = size,
