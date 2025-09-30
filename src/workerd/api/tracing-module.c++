@@ -33,17 +33,6 @@ void InternalSpan::setTag(
   }
 }
 
-bool InternalSpan::getIsRecording() {
-  return span != kj::none;
-}
-
-SpanParent InternalSpan::makeSpanParent() {
-  KJ_IF_SOME(s, span) {
-    return SpanParent(*s);
-  }
-  return SpanParent(nullptr);
-}
-
 jsg::Ref<InternalSpan> TracingModule::startSpan(jsg::Lock& js, const kj::String name) {
   auto spanName = kj::ConstString(kj::str(name));
 
