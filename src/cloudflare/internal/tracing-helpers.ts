@@ -58,8 +58,8 @@ export function withSpan<T>(
     span.end();
     return result;
   } catch (error) {
-    // Always end span on error - no need to check isRecording
-    // as span.end() should be idempotent/safe to call on no-op spans
+    // Always end span on error
+    // span.end() is idempotent/safe to call on no-op spans
     span.end();
     throw error;
   }
