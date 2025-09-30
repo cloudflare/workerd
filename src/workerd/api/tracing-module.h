@@ -14,6 +14,9 @@ class JsSpan: public jsg::Object {
   JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span);
   ~JsSpan() noexcept(false);
 
+  // Ends the span, marking its completion. Once ended, the span cannot be modified.
+  // If the span is not explicitly ended, it will be automatically ended when the
+  // JsSpan object is destroyed.
   void end();
   // Sets a tag on the span. Values can be string, number, boolean, or undefined.
   // If undefined is passed, the tag is not set (allows optional chaining).
@@ -32,11 +35,27 @@ class JsSpan: public jsg::Object {
   kj::Maybe<IoOwn<SpanBuilder>> span;
 };
 
+// Module that provides tracing capabilities for Workers.
+// This module is available as "cloudflare-internal:tracing" and provides
+// functionality to create and manage tracing spans.
 class TracingModule: public jsg::Object {
  public:
   TracingModule() = default;
   TracingModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Creates a new tracing span with the given name.
+  // The span will be associated with the current IoContext and will track
+  // the execution of the code within its lifetime.
+  // If no IoContext is available (e.g., during initialization), a no-op span
+  // is returned that safely ignores all operations.
+  //
+  // Example usage:
+  //   const span = tracing.startSpan("my-operation");
+  //   try {
+  //     // ... perform operation ...
+  //   } finally {
+  //     span.end();
+  //   }
   jsg::Ref<JsSpan> startSpan(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(TracingModule) {
