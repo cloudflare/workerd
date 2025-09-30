@@ -11,20 +11,20 @@
 
 namespace workerd::api {
 
-InternalSpan::InternalSpan(kj::Maybe<IoOwn<SpanBuilder>> span): span(kj::mv(span)) {}
+JsSpan::JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span): span(kj::mv(span)) {}
 
-InternalSpan::~InternalSpan() noexcept(false) {
+JsSpan::~JsSpan() noexcept(false) {
   end();
 }
 
-void InternalSpan::end() {
+void JsSpan::end() {
   KJ_IF_SOME(s, span) {
     s->end();
     span = kj::none;
   }
 }
 
-void InternalSpan::setTag(
+void JsSpan::setTag(
     jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> maybeValue) {
   KJ_IF_SOME(s, span) {
     KJ_IF_SOME(value, maybeValue) {
@@ -33,17 +33,17 @@ void InternalSpan::setTag(
   }
 }
 
-jsg::Ref<InternalSpan> TracingModule::startSpan(jsg::Lock& js, const kj::String name) {
+jsg::Ref<JsSpan> TracingModule::startSpan(jsg::Lock& js, const kj::String name) {
   auto spanName = kj::ConstString(kj::str(name));
 
   if (IoContext::hasCurrent()) {
     auto& ioContext = IoContext::current();
     auto spanBuilder = ioContext.makeUserTraceSpan(kj::mv(spanName));
     auto ownedSpan = ioContext.addObject(kj::heap(kj::mv(spanBuilder)));
-    return js.alloc<InternalSpan>(kj::mv(ownedSpan));
+    return js.alloc<JsSpan>(kj::mv(ownedSpan));
   } else {
     // When no IoContext is available, create a no-op span
-    return js.alloc<InternalSpan>(kj::none);
+    return js.alloc<JsSpan>(kj::none);
   }
 }
 
