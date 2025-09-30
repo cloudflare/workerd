@@ -83,7 +83,7 @@ SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) 
 
 void SqlStorage::setMaxPageCountForTest(jsg::Lock& js, int count) {
   auto& db = getDb(js);
-  db.run(SqliteDatabase::TRUSTED, kj::str("PRAGMA max_page_count = ", count));
+  db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str("PRAGMA max_page_count = ", count));
 }
 
 jsg::Ref<SqlStorage::Statement> SqlStorage::prepare(jsg::Lock& js, jsg::JsString query) {
@@ -156,7 +156,7 @@ SqlStorage::Cursor::State::State(SqliteDatabase& db,
     kj::StringPtr sqlCode,
     kj::Array<BindingValue> bindingsParam)
     : bindings(kj::mv(bindingsParam)),
-      query(db.run(regulator, sqlCode, mapBindings(bindings).asPtr())) {}
+      query(db.run({.regulator = regulator}, sqlCode, mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::State::State(
     kj::Rc<CachedStatement> cachedStatementParam, kj::Array<BindingValue> bindingsParam)

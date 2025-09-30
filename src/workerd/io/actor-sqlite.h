@@ -125,10 +125,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
     void commit();
     void rollback();
 
+    void setSomeWriteConfirmed(bool someWriteConfirmed);
+    bool isSomeWriteConfirmed() const;
+
    private:
     ActorSqlite& parent;
 
     bool committed = false;
+
+    // True if any of the writes in this commit are confirmed writes.
+    bool someWriteConfirmed = false;
   };
 
   class ExplicitTxn: public ActorCacheInterface::Transaction, public kj::Refcounted {
@@ -186,6 +192,10 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // If true, then a commit is scheduled as a result of deleteAll() having been called.
   bool deleteAllCommitScheduled = false;
 
+  // State for tracking completion of all commits (both confirmed and unconfirmed) for implementing
+  // sync() in onNoPendingFlush.
+  kj::ForkedPromise<void> lastCommit = kj::Promise<void>(kj::READY_NOW).fork();
+
   // Backs the `kj::Own<void>` returned by `armAlarmHandler()`.
   class DeferredAlarmDeleter: public kj::Disposer {
    public:
@@ -227,7 +237,7 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   AlarmLaterErrorHandler alarmLaterErrorHandler;
   kj::TaskSet alarmLaterTasks;
 
-  void onWrite();
+  void onWrite(bool allowUnconfirmed);
 
   void onCriticalError(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException);
 
