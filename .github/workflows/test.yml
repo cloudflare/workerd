@@ -35,7 +35,7 @@ jobs:
           [
             { name: linux, arch: X64, image: ubuntu-22.04 },
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm },
-            { name: macOS, arch: ARM64, image: macos-15 },
+            { name: macOS, arch: ARM64, image: macos-26 },
             { name: windows, arch: X64, image: windows-2025 },
           ]
         config: [
@@ -60,7 +60,7 @@ jobs:
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, arch: ARM64 ,image: macos-15 }
+          - os: { name: macOS, arch: ARM64, image: macos-26 }
             config: { suffix: -debug }
           - os: { name: linux, arch: X64, image: ubuntu-22.04 }
             config: { suffix: -debug }
