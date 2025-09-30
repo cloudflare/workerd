@@ -61,7 +61,7 @@ struct PythonConfig {
   const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
-  bool loadSnapshotFromDisk;
+  kj::Maybe<kj::String> loadSnapshotFromDisk;
 };
 
 // A function to read a segment of the tar file into a buffer
