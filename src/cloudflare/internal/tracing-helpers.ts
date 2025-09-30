@@ -45,7 +45,7 @@ export function withSpan<T>(
       result &&
       (typeof result === 'object' || typeof result === 'function') &&
       'then' in result &&
-      typeof (result as any).then === 'function'
+      typeof (result as Record<string, unknown>).then === 'function'
     ) {
       // Convert to real Promise to ensure we have .finally()
       // This handles both real Promises and thenables
