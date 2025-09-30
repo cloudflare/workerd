@@ -4,11 +4,6 @@
 
 #include "tracing-module.h"
 
-#include "src/workerd/jsg/inspector.h"
-
-#include <workerd/api/actor-state.h>
-#include <workerd/api/global-scope.h>
-
 namespace workerd::api {
 
 JsSpan::JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span): span(kj::mv(span)) {}
