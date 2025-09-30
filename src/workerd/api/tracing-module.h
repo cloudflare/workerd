@@ -20,13 +20,10 @@ class InternalSpan: public jsg::Object {
   void end();
   void setTag(
       jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> value);
-  bool getIsRecording();
-  SpanParent makeSpanParent();
 
   JSG_RESOURCE_TYPE(InternalSpan) {
     JSG_METHOD(end);
     JSG_METHOD(setTag);
-    JSG_METHOD(getIsRecording);
   }
 
  private:
