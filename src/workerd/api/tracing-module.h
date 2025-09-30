@@ -37,7 +37,7 @@ class TracingModule: public jsg::Object {
   TracingModule() = default;
   TracingModule(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::Ref<JsSpan> startSpan(jsg::Lock& js, const kj::String name);
+  jsg::Ref<JsSpan> startSpan(jsg::Lock& js, kj::String name);
 
   JSG_RESOURCE_TYPE(TracingModule) {
     JSG_METHOD(startSpan);
