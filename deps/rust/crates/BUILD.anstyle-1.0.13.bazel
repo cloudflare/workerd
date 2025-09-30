@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clang_ast",
+    name = "anstyle",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,10 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,14 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clang-ast",
+        "crate-name=anstyle",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.33",
-    deps = [
-        "@crates_vendor__foldhash-0.2.0//:foldhash",
-        "@crates_vendor__serde-1.0.228//:serde",
-    ],
+    version = "1.0.13",
 )

@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "camino",
+    name = "thiserror",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,24 +30,27 @@ rust_library(
         ],
     ),
     crate_features = [
-        "serde1",
+        "default",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__thiserror-impl-2.0.17//:thiserror_impl",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=camino",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.0",
+    version = "2.0.17",
     deps = [
-        "@crates_vendor__camino-1.2.0//:build_script_build",
-        "@crates_vendor__serde_core-1.0.228//:serde_core",
+        "@crates_vendor__thiserror-2.0.17//:build_script_build",
     ],
 )
 
@@ -71,7 +74,8 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "serde1",
+        "default",
+        "std",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -88,18 +92,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "camino",
+    pkg_name = "thiserror",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=camino",
+        "crate-name=thiserror",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.0",
+    version = "2.0.17",
     visibility = ["//visibility:private"],
 )
 

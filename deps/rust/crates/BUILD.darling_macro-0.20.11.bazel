@@ -43,7 +43,7 @@ rust_proc_macro(
     version = "0.20.11",
     deps = [
         "@crates_vendor__darling_core-0.20.11//:darling_core",
-        "@crates_vendor__quote-1.0.40//:quote",
+        "@crates_vendor__quote-1.0.41//:quote",
         "@crates_vendor__syn-2.0.106//:syn",
     ],
 )
