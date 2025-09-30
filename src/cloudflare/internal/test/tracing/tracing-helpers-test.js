@@ -10,8 +10,8 @@ export const syncFunction = {
 
     // Test: Synchronous function - span should end immediately
     const result = withSpan('sync-op', (span) => {
-      span.setTag('type', 'sync');
-      span.setTag('test', 'syncFunction');
+      span.setAttribute('type', 'sync');
+      span.setAttribute('test', 'syncFunction');
       return 'sync-value';
     });
 
@@ -25,8 +25,8 @@ export const asyncFunction = {
 
     // Test: Async function returning Promise - span should end after promise resolves
     const result = await withSpan('async-op', async (span) => {
-      span.setTag('type', 'async');
-      span.setTag('test', 'asyncFunction');
+      span.setAttribute('type', 'async');
+      span.setAttribute('test', 'asyncFunction');
       await new Promise((resolve) => setTimeout(resolve, 10));
       return 'async-value';
     });
@@ -48,8 +48,8 @@ export const thenableObject = {
     };
 
     const result = await withSpan('thenable-op', (span) => {
-      span.setTag('type', 'thenable');
-      span.setTag('test', 'thenableObject');
+      span.setAttribute('type', 'thenable');
+      span.setAttribute('test', 'thenableObject');
       return thenable;
     });
 
@@ -65,8 +65,8 @@ export const syncError = {
     let errorCaught = false;
     try {
       withSpan('sync-error-op', (span) => {
-        span.setTag('type', 'sync-error');
-        span.setTag('test', 'syncError');
+        span.setAttribute('type', 'sync-error');
+        span.setAttribute('test', 'syncError');
         throw new Error('sync error');
       });
     } catch (e) {
@@ -85,8 +85,8 @@ export const asyncError = {
     let errorCaught = false;
     try {
       await withSpan('async-error-op', async (span) => {
-        span.setTag('type', 'async-error');
-        span.setTag('test', 'asyncError');
+        span.setAttribute('type', 'async-error');
+        span.setAttribute('test', 'asyncError');
         await new Promise((resolve) => setTimeout(resolve, 10));
         throw new Error('async error');
       });
@@ -109,8 +109,8 @@ export const notThenableObject = {
     };
 
     const result = withSpan('not-thenable-op', (span) => {
-      span.setTag('type', 'not-thenable');
-      span.setTag('test', 'notThenableObject');
+      span.setAttribute('type', 'not-thenable');
+      span.setAttribute('test', 'notThenableObject');
       return notThenable;
     });
 
@@ -124,13 +124,13 @@ export const nullAndUndefinedReturns = {
 
     // Test: Null and undefined returns - should be treated as sync
     const nullResult = withSpan('null-op', (span) => {
-      span.setTag('type', 'null');
+      span.setAttribute('type', 'null');
       return null;
     });
     assert.strictEqual(nullResult, null);
 
     const undefinedResult = withSpan('undefined-op', (span) => {
-      span.setTag('type', 'undefined');
+      span.setAttribute('type', 'undefined');
       return undefined;
     });
     assert.strictEqual(undefinedResult, undefined);
@@ -143,8 +143,8 @@ export const generatorFunction = {
 
     // Test: Generator function (documenting current behavior)
     function* generatorFn(span) {
-      span.setTag('type', 'generator');
-      span.setTag('test', 'generatorFunction');
+      span.setAttribute('type', 'generator');
+      span.setAttribute('test', 'generatorFunction');
       yield 1;
       yield 2;
       yield 3;
@@ -168,8 +168,8 @@ export const asyncGeneratorFunction = {
 
     // Test: Async generator function (documenting current behavior)
     async function* asyncGeneratorFn(span) {
-      span.setTag('type', 'async-generator');
-      span.setTag('test', 'asyncGeneratorFunction');
+      span.setAttribute('type', 'async-generator');
+      span.setAttribute('test', 'asyncGeneratorFunction');
       yield 1;
       await new Promise((resolve) => setTimeout(resolve, 10));
       yield 2;
@@ -204,8 +204,8 @@ export const callableThenable = {
     );
 
     const result = await withSpan('callable-thenable-op', (span) => {
-      span.setTag('type', 'callable-thenable');
-      span.setTag('test', 'callableThenable');
+      span.setAttribute('type', 'callable-thenable');
+      span.setAttribute('test', 'callableThenable');
       return callableThenable;
     });
 
@@ -219,8 +219,8 @@ export const multipleEndCalls = {
 
     // Test: Multiple spans ending idempotently (span.end() called multiple times is safe)
     const result = withSpan('multi-end-op', (span) => {
-      span.setTag('type', 'multi-end');
-      span.setTag('test', 'multipleEndCalls');
+      span.setAttribute('type', 'multi-end');
+      span.setAttribute('test', 'multipleEndCalls');
       span.end(); // Manual end
       span.end(); // Should be idempotent
       return 'multi-end-value';
@@ -237,10 +237,10 @@ export const nestedSpans = {
 
     // Test: Nested spans
     const result = await withSpan('outer-op', async (outerSpan) => {
-      outerSpan.setTag('type', 'outer');
+      outerSpan.setAttribute('type', 'outer');
 
       const innerResult = await withSpan('inner-op', async (innerSpan) => {
-        innerSpan.setTag('type', 'inner');
+        innerSpan.setAttribute('type', 'inner');
         await new Promise((resolve) => setTimeout(resolve, 10));
         return 'inner-value';
       });

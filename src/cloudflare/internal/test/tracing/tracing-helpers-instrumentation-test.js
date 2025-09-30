@@ -37,12 +37,12 @@ export default {
           break;
 
         case 'attributes': {
-          // Record span attributes/tags
+          // Record span attributes
           let span = spans.get(spanKey);
           if (span) {
             for (let { name, value } of event.event.info) {
               span.tags[name] = value;
-              // Extract test name from tags
+              // Extract test name from attributes
               if (name === 'test') {
                 span.test = value;
               }

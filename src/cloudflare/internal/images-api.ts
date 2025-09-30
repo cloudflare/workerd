@@ -242,7 +242,7 @@ class ImagesBindingImpl implements ImagesBinding {
           ? stream.pipeThrough(createBase64DecoderTransformStream())
           : stream;
 
-      span.setTag('cloudflare.images.info.encoding', options?.encoding);
+      span.setAttribute('cloudflare.images.info.encoding', options?.encoding);
 
       body.append('image', decodedStream, { type: 'file' });
 
@@ -261,7 +261,7 @@ class ImagesBindingImpl implements ImagesBinding {
 
       const r = (await response.json()) as RawInfoResponse;
 
-      span.setTag('cloudflare.images.info.format', r.format);
+      span.setAttribute('cloudflare.images.info.format', r.format);
 
       if ('file_size' in r) {
         const ret = {
@@ -270,9 +270,9 @@ class ImagesBindingImpl implements ImagesBinding {
           height: r.height,
           format: r.format,
         };
-        span.setTag('cloudflare.images.info.file_size', ret.fileSize);
-        span.setTag('cloudflare.images.info.width', ret.width);
-        span.setTag('cloudflare.images.info.height', ret.height);
+        span.setAttribute('cloudflare.images.info.file_size', ret.fileSize);
+        span.setAttribute('cloudflare.images.info.width', ret.width);
+        span.setAttribute('cloudflare.images.info.height', ret.height);
         return ret;
       }
 
