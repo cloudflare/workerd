@@ -978,11 +978,15 @@ bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::In
 // ======================================================================================
 
 Immediate::Immediate(IoContext& context, TimeoutId timeoutId)
-    : contextRef(context.getWeakRef()),
+    : ioContext(context.addObject(context)),
       timeoutId(timeoutId) {}
 
 void Immediate::dispose() {
-  contextRef->runIfAlive([&](IoContext& context) { context.clearTimeoutImpl(timeoutId); });
+  // IoPtr will throw if the IoContext is no longer valid, which is fine - if the context is gone,
+  // the timeout is already cleared.
+  KJ_IF_SOME(_, kj::runCatchingExceptions([&]() { ioContext->clearTimeoutImpl(timeoutId); })) {
+    // IoContext is gone, nothing to do.
+  }
 }
 
 jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
