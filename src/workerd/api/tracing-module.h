@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include "http.h"
-#include "worker-rpc.h"
-
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
