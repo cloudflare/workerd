@@ -18,7 +18,7 @@ kj::Promise<void> connect(HttpService& service,
     AsyncIoStream& connection,
     ConnectResponse& response,
     HttpConnectSettings settings) {
-  auto strHost = kj::str(kj_rs::from<kj_rs::Rust>(host).asChars());
+  auto strHost = kj::str(kj::from<kj_rs::Rust>(host).asChars());
   return service.connect(strHost, headers, connection, response,
       {
         .useTls = settings.use_tls,

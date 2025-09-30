@@ -95,7 +95,7 @@ inline kj::Promise<void> request(HttpService& service,
     const HttpHeaders& headers,
     AsyncInputStream& request_body,
     HttpServiceResponse& response) {
-  auto strUrl = kj::str(kj_rs::from<kj_rs::Rust>(url).asChars());
+  auto strUrl = kj::str(kj::from<kj_rs::Rust>(url).asChars());
   co_await service.request(method, strUrl, headers, request_body, response);
 }
 
