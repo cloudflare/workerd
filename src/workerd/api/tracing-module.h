@@ -11,17 +11,17 @@
 
 namespace workerd::api {
 
-// Wrapper class that manages span ownership through IoContext
-class InternalSpan: public jsg::Object {
+// JavaScript-accessible span class that manages span ownership through IoContext
+class JsSpan: public jsg::Object {
  public:
-  InternalSpan(kj::Maybe<IoOwn<SpanBuilder>> span);
-  ~InternalSpan() noexcept(false);
+  JsSpan(kj::Maybe<IoOwn<SpanBuilder>> span);
+  ~JsSpan() noexcept(false);
 
   void end();
   void setTag(
       jsg::Lock& js, kj::String key, jsg::Optional<kj::OneOf<bool, double, kj::String>> value);
 
-  JSG_RESOURCE_TYPE(InternalSpan) {
+  JSG_RESOURCE_TYPE(JsSpan) {
     JSG_METHOD(end);
     JSG_METHOD(setTag);
   }
@@ -30,20 +30,17 @@ class InternalSpan: public jsg::Object {
   kj::Maybe<IoOwn<SpanBuilder>> span;
 };
 
-// Keep JsSpanBuilder as alias for backward compatibility
-using JsSpanBuilder = InternalSpan;
-
 class TracingModule: public jsg::Object {
  public:
   TracingModule() = default;
   TracingModule(jsg::Lock&, const jsg::Url&) {}
 
-  jsg::Ref<InternalSpan> startSpan(jsg::Lock& js, const kj::String name);
+  jsg::Ref<JsSpan> startSpan(jsg::Lock& js, const kj::String name);
 
   JSG_RESOURCE_TYPE(TracingModule) {
     JSG_METHOD(startSpan);
 
-    JSG_NESTED_TYPE(InternalSpan);
+    JSG_NESTED_TYPE(JsSpan);
   }
 };
 
@@ -63,4 +60,4 @@ kj::Own<jsg::modules::ModuleBundle> getInternalTracingModuleBundle(auto featureF
 }
 };  // namespace workerd::api
 
-#define EW_TRACING_MODULE_ISOLATE_TYPES api::TracingModule, api::InternalSpan
+#define EW_TRACING_MODULE_ISOLATE_TYPES api::TracingModule, api::JsSpan
