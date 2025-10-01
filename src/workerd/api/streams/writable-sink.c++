@@ -3,6 +3,7 @@
 #include <workerd/io/io-context.h>
 #include <workerd/util/stream-utils.h>
 
+#include <capnp/compat/byte-stream.h>
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
 #include <kj/compat/gzip.h>
@@ -139,6 +140,11 @@ class WritableStreamSinkImpl: public WritableStreamSink {
   virtual kj::Promise<void> flush(kj::AsyncOutputStream& output) {
     // When using the default implementation, we assume IDENTITY encoding.
     KJ_ASSERT(encoding == rpc::StreamEncoding::IDENTITY);
+    if (auto endable = dynamic_cast<EndableAsyncOutputStream*>(&output)) {
+      co_await endable->end();
+    } else if (auto endable = dynamic_cast<capnp::ExplicitEndOutputStream*>(&output)) {
+      co_await endable->end();
+    }
     // By default there's nothing to flush.
     co_return;
   }
@@ -199,6 +205,10 @@ class EncodedAsyncOutputStream final: public WritableStreamSinkImpl {
       co_await gzip->end();
     } else if (auto br = dynamic_cast<kj::BrotliAsyncOutputStream*>(&output)) {
       co_await br->end();
+    } else if (auto endable = dynamic_cast<EndableAsyncOutputStream*>(&output)) {
+      co_await endable->end();
+    } else if (auto endable = dynamic_cast<capnp::ExplicitEndOutputStream*>(&output)) {
+      co_await endable->end();
     }
     // By default there's nothing to flush.
   }
