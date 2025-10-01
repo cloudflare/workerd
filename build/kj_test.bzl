@@ -53,7 +53,7 @@ def kj_test(
         name = test_name,
         size = size,
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
+        data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
     )
     sh_test(
@@ -61,6 +61,6 @@ def kj_test(
         size = size,
         env = {"WORKERD_ALL_AUTOGATES": "1"},
         srcs = ["//build/fixtures:kj_test.sh"],
-        data = [cross_alias],
+        data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
     )
