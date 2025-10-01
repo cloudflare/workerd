@@ -454,7 +454,7 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
 
   // The default non-optimized pumpTo() implementation which initiates a loop
   // that reads a chunk from the input stream and writes it to the output
-  // stream until EOF is reached. The maximum size of each read is 8192 bytes.
+  // stream until EOF is reached. The maximum size of each read is 16384 bytes.
   // The pump is canceled by dropping the returned.
   virtual kj::Promise<void> pumpImpl(WritableStreamSink& output, bool end) {
     KJ_SWITCH_ONEOF(state) {
@@ -468,16 +468,30 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
         co_return;
       }
       KJ_CASE_ONEOF(_, kj::Own<kj::AsyncInputStream>) {
-        kj::FixedArray<kj::byte, 8192> buffer;
+        kj::FixedArray<kj::byte, 16384> buffer;
+        static constexpr size_t N = buffer.size();
+        static constexpr size_t kMinBytes = (N >> 2) + (N >> 1);  // 3/4 of N
         while (true) {
-          auto amount = co_await readImpl(buffer, 1);
-          if (amount == 0) {
+          // It's most likely that our write below is potentially a write into
+          // a JS-backed stream which requires grabbing the isolate lock.
+          // To minimize the number of times we need to grab the lock, we
+          // want to read as much data as we can here before doing the write.
+          // We obviously need to balance that with not waiting too long
+          // between writes. We'll set our minBytes to 3/4 of the buffer size
+          // to try to strike a balance.
+          auto amount = co_await readImpl(buffer, kMinBytes);
+          // If the amount is less than kMinBytes, we assume we've reached EOF.
+
+          if (amount > 0) {
+            co_await output.write(buffer.asPtr().first(amount));
+          }
+
+          if (amount < kMinBytes) {
             if (end) {
               co_await output.end();
             }
             co_return;
           }
-          co_await output.write(buffer.asPtr().first(amount));
         }
       }
     }
