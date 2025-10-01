@@ -137,9 +137,9 @@ wd_cc_library(
 kj_test(
     src = "test-reprl.c++",
     data = [
-        "//src/workerd/server:workerd",
         "//fuzzilli:config.capnp",
         "//fuzzilli:worker.js",
+        "//src/workerd/server:workerd",
     ],
     deps = [
         ":libreprl",

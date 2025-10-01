@@ -1,8 +1,9 @@
-#include <kj/test.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
+
+#include <kj/test.h>
 
 // Libreprl is a .c file so the header needs to be in an 'extern "C"' block.
 extern "C" {
@@ -78,12 +79,7 @@ KJ_TEST("REPRL basic functionality") {
   std::string config_path = runfiles->Rlocation("_main/fuzzilli/config.capnp");
 
   const char* args[] = {
-    workerd_path.c_str(),
-    "fuzzilli",
-    config_path.c_str(),
-    "--experimental",
-    nullptr
-  };
+    workerd_path.c_str(), "fuzzilli", config_path.c_str(), "--experimental", nullptr};
 
   if (reprl_initialize_context(ctx, args, env, 1, 1) != 0) {
     KJ_FAIL_REQUIRE("REPRL initialization failed");
