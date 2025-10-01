@@ -1,19 +1,26 @@
+#include <kj/test.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 // Libreprl is a .c file so the header needs to be in an 'extern "C"' block.
 extern "C" {
 #include "libreprl/libreprl.h"
-}  // extern "C"
+}
+
+#include "tools/cpp/runfiles/runfiles.h"
+
+using bazel::tools::cpp::runfiles::Runfiles;
+
+namespace workerd {
+namespace {
 
 void print_splitter() {
   printf("---------------------------------\n");
 }
 
-struct reprl_context* ctx;
-
-bool execute(const char* code) {
+bool execute(struct reprl_context* ctx, const char* code) {
   uint64_t exec_time;
   const uint64_t SECONDS = 1000000;  // Timeout is in microseconds.
   print_splitter();
@@ -42,60 +49,81 @@ bool execute(const char* code) {
   return RIFEXITED(status) && REXITSTATUS(status) == 0;
 }
 
-void expect_success(const char* code) {
-  if (!execute(code)) {
-    printf("Execution of \"%s\" failed\n", code);
-    exit(1);
+void expect_success(struct reprl_context* ctx, const char* code) {
+  if (!execute(ctx, code)) {
+    KJ_FAIL_REQUIRE("Execution unexpectedly failed", code);
   }
 }
 
-void expect_failure(const char* code) {
-  if (execute(code)) {
-    printf("Execution of \"%s\" unexpectedly succeeded\n", code);
-    exit(1);
+void expect_failure(struct reprl_context* ctx, const char* code) {
+  if (execute(ctx, code)) {
+    KJ_FAIL_REQUIRE("Execution unexpectedly succeeded", code);
   }
 }
 
-int main(int argc, char** argv) {
+KJ_TEST("REPRL basic functionality") {
 #ifdef __linux__
-  ctx = reprl_create_context();
+  std::string error;
+  std::unique_ptr<Runfiles> runfiles(Runfiles::CreateForTest(&error));
+  KJ_REQUIRE(runfiles != nullptr, "Failed to create runfiles", error.c_str());
+
+  auto ctx = reprl_create_context();
+  KJ_REQUIRE(ctx != nullptr, "Failed to create REPRL context");
 
   const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-19", nullptr};
-  if (argc < 4) {
-    printf("Usage: %s <workerd_path> <command> <path-to-config> <workerd-flags>", argv[0]);
-    exit(-1);
-  }
 
-  // Forward workerd_path + all remaining args (argv[1..argc-1])
-  const char** args = (const char**)&argv[1];
+  // Use Runfiles API to get absolute paths
+  std::string workerd_path = runfiles->Rlocation("_main/src/workerd/server/workerd");
+  // Use config.capnp which has a socket (needed to trigger fetch() which calls Stdin.reprl())
+  std::string config_path = runfiles->Rlocation("_main/fuzzilli/config.capnp");
+
+  const char* args[] = {
+    workerd_path.c_str(),
+    "fuzzilli",
+    config_path.c_str(),
+    "--experimental",
+    nullptr
+  };
 
   if (reprl_initialize_context(ctx, args, env, 1, 1) != 0) {
-    printf("REPRL initialization failed\n");
-    return -1;
+    KJ_FAIL_REQUIRE("REPRL initialization failed");
   }
 
   // Basic functionality test
-  if (!execute("let greeting = \"Hello World!\";")) {
-    printf("Script execution failed\n");
-    return -1;
-  }
+  expect_success(ctx, "let greeting = \"Hello World!\";");
+
+  // Test with console.log output
+  expect_success(ctx, "console.log('Hello from JavaScript!');");
 
   // Verify that runtime exceptions can be detected
-  expect_failure("throw 'failure';");
-  expect_success("42;");
+  expect_failure(ctx, "throw 'failure';");
+  expect_success(ctx, "42;");
+
   // Verify that existing state is properly reset between executions
-  // expect_success("globalProp = 42; Object.prototype.foo = \"bar\";");
-  // expect_success("if (typeof(globalProp) !== 'undefined') throw 'failure'");
-  // expect_success("if (typeof(({}).foo) !== 'undefined') throw 'failure'");
+  // These tests are commented out as they may not apply to workerd's execution model
+  // expect_success(ctx, "globalProp = 42; Object.prototype.foo = \"bar\";");
+  // expect_success(ctx, "if (typeof(globalProp) !== 'undefined') throw 'failure'");
+  // expect_success(ctx, "if (typeof(({}).foo) !== 'undefined') throw 'failure'");
 
   // Verify that rejected promises are properly reset between executions
-  expect_failure("function fail() { throw 42; }; fail()");
+  expect_failure(ctx, "function fail() { throw 42; }; fail()");
 
-  expect_failure("fuzzilli('FUZZILLI_CRASH',3);");
-  // async is not failing in workerd
-  //expect_failure("async function fail() { throw 42; }; fail()");
-  fflush(stdout);
-  puts("OK");
+  // Verify that fuzzilli crash command is detected as failure
+  expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',0);");
+  expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',1);");
+  expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',2);");
+  expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',3);");
+  expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',4);");
+  //expect_failure(ctx, "fuzzilli('FUZZILLI_CRASH',5);");
+
+  // async is not failing in workerd (commented out from original)
+  // expect_failure(ctx, "async function fail() { throw 42; }; fail()");
+
+  reprl_destroy_context(ctx);
+#else
+  KJ_LOG(WARNING, "REPRL tests only supported on Linux");
 #endif
-  return 0;
 }
+
+}  // namespace
+}  // namespace workerd

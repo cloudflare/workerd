@@ -339,6 +339,10 @@ static int reprl_spawn_child(struct reprl_context* ctx)
 
         // close all other FDs. We try to use FD_CLOEXEC everywhere, but let's be extra sure we don't leak any fds to the child.
         int tablesize = getdtablesize();
+        // Cap at reasonable limit - getdtablesize() can return RLIM_INFINITY which is huge
+        if (tablesize > 1024 || tablesize < 0) {
+            tablesize = 1024;
+        }
         for (int i = 3; i < tablesize; i++) {
             if (i == REPRL_CHILD_CTRL_IN || i == REPRL_CHILD_CTRL_OUT || i == REPRL_CHILD_DATA_IN || i == REPRL_CHILD_DATA_OUT) {
                 continue;
