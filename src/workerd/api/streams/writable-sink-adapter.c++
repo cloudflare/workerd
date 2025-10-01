@@ -19,9 +19,14 @@ struct WritableStreamSinkJsAdapter::Active final {
   struct Task {
     kj::Function<kj::Promise<void>()> task;
     kj::Own<kj::PromiseFulfiller<void>> fulfiller;
-    Task(kj::Function<kj::Promise<void>()> task, kj::Own<kj::PromiseFulfiller<void>> fulfiller)
+    kj::Maybe<kj::Promise<void>> maybeOutputLock;
+
+    Task(kj::Function<kj::Promise<void>()> task,
+        kj::Own<kj::PromiseFulfiller<void>> fulfiller,
+        kj::Maybe<kj::Promise<void>> maybeOutputLock = kj::none)
         : task(kj::mv(task)),
-          fulfiller(kj::mv(fulfiller)) {}
+          fulfiller(kj::mv(fulfiller)),
+          maybeOutputLock(kj::mv(maybeOutputLock)) {}
     KJ_DISALLOW_COPY_AND_MOVE(Task);
   };
   using TaskQueue = workerd::util::Queue<kj::Own<Task>>;
@@ -80,9 +85,11 @@ struct WritableStreamSinkJsAdapter::Active final {
   kj::Promise<void> enqueue(kj::Function<kj::Promise<void>()> task) {
     KJ_DASSERT(!aborted, "cannot enqueue tasks on an aborted queue");
     auto paf = kj::newPromiseAndFulfiller<void>();
-    queue.push(kj::heap<Task>(kj::mv(task), kj::mv(paf.fulfiller)));
+    auto& ioContext = IoContext::current();
+    queue.push(kj::heap<Task>(
+        kj::mv(task), kj::mv(paf.fulfiller), ioContext.waitForOutputLocksIfNecessary()));
     if (!running) {
-      IoContext::current().addTask(canceler.wrap(run()));
+      ioContext.addTask(canceler.wrap(run()));
     }
     return kj::mv(paf.promise);
   }
@@ -103,6 +110,9 @@ struct WritableStreamSinkJsAdapter::Active final {
       });
       bool taskFailed = false;
       try {
+        KJ_IF_SOME(lock, task->maybeOutputLock) {
+          co_await lock;
+        }
         co_await task->task();
         task->fulfiller->fulfill();
       } catch (...) {
