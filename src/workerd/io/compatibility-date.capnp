@@ -634,7 +634,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # correctly. The fix, however, can break existing implementations that don't account
   # for the bug so we need to put the fix behind a compat flag.
 
-  # Experimental support for exporting user spans to tail worker.
   obsolete69 @69 :Bool
       $compatEnableFlag("tail_worker_user_spans")
       $experimental;
