@@ -228,17 +228,26 @@ class IoContextWritableStreamSinkWrapper: public WritableStreamSinkWrapper {
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     auto pending = ioContext.registerPendingEvent();
-    return getInner().write(buffer);
+    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+      co_await kj::mv(p);
+    }
+    co_await getInner().write(buffer);
   }
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     auto pending = ioContext.registerPendingEvent();
-    return getInner().write(pieces);
+    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+      co_await kj::mv(p);
+    }
+    co_await getInner().write(pieces);
   }
 
   kj::Promise<void> end() override {
     auto pending = ioContext.registerPendingEvent();
-    return getInner().end();
+    KJ_IF_SOME(p, ioContext.waitForOutputLocksIfNecessary()) {
+      co_await kj::mv(p);
+    }
+    co_await getInner().end();
   }
 
  private:
