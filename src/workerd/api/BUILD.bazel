@@ -434,6 +434,7 @@ wd_test(
     data = [
         "kv-instrumentation-test.js",
         "kv-test.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
 
@@ -449,6 +450,7 @@ wd_test(
     data = [
         "r2-instrumentation-test.js",
         "r2-test.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
 
@@ -892,5 +894,6 @@ wd_test(
     data = [
         "actor-kv-test.js",
         "actor-kv-test-tail.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
