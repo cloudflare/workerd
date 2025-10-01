@@ -56,7 +56,7 @@ export const test = {
     await Promise.allSettled(invocationPromises);
 
     // Recorded streaming tail worker events, in insertion order,
-    // filtering spans not associated with KV
+    // filtering spans not associated with D1
     let received = Array.from(spans.values()).filter(
       (span) => span.name !== 'jsRpcSession'
     );
