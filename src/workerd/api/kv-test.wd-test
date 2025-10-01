@@ -16,6 +16,11 @@ const unitTests :Workerd.Config = (
     ),
     (name = "tail", worker = .tailWorker, ),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const tailWorker :Workerd.Worker = (

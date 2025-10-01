@@ -6,6 +6,11 @@ const config :Workerd.Config = (
     (name = "TEST_TMPDIR", disk = (writable = true)),
     (name = "tail", worker = .tailWorker),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const mainWorker :Workerd.Worker = (
