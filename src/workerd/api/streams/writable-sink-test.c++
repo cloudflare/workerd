@@ -3,6 +3,7 @@
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/own-util.h>
+#include <workerd/util/stream-utils.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/gzip.h>
@@ -130,6 +131,32 @@ class MemoryAsyncOutputStream final: public kj::AsyncOutputStream {
   bool writeShouldError = false;
 
   kj::Vector<kj::byte> data;
+};
+
+struct MockEndable final: public EndableAsyncOutputStream {
+  bool isEnded = false;
+  kj::Vector<kj::byte> data;
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    data.addAll(buffer);
+    co_return;
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    for (auto piece: pieces) {
+      data.addAll(piece);
+    }
+    co_return;
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Promise<void> end() override {
+    isEnded = true;
+    co_return;
+  }
 };
 
 // ======================================================================================
@@ -515,6 +542,24 @@ KJ_TEST("IoContext aware wrapper") {
   });
 
   KJ_ASSERT(inner.data == "some data"_kjb);
+}
+
+// ======================================================================================
+// EndableAsyncOutputStream Tests
+
+KJ_TEST("EndableAsyncOutputStream") {
+  TestFixture fixture;
+  MockEndable inner;
+  auto fakeOwn = kj::Own<MockEndable>(&inner, kj::NullDisposer::instance);
+  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+
+  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+    co_await sink->write("some data"_kjb);
+    co_await sink->end();
+  });
+
+  KJ_ASSERT(inner.data == "some data"_kjb);
+  KJ_ASSERT(inner.isEnded);
 }
 
 }  // namespace
