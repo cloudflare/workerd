@@ -120,9 +120,12 @@ class BaseTracer: public kj::Refcounted {
   virtual void setEventInfo(
       IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) = 0;
 
-  // Adds info about the response. Must not be called more than once, and only
-  // after passing a FetchEventInfo to setEventInfo().
-  virtual void setFetchResponseInfo(tracing::FetchResponseInfo&& info) = 0;
+  // Sets the return event for Streaming Tail Worker, including fetchResponseInfo (HTTP status code)
+  // if available. Must not be called more than once, and fetchResponseInfo should only be set for
+  // fetch events. For legacy tail worker, there is no distinct return event so we only add
+  // fetchResponseInfo to the trace if present.
+  virtual void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) = 0;
 
   // Reports the outcome event of the worker invocation. For Streaming Tail Worker, this will be the
   // final event, causing the stream to terminate.
@@ -143,6 +146,11 @@ class BaseTracer: public kj::Refcounted {
       const kj::ConstString& methodName) = 0;
 
  protected:
+  // Retrieves the current timestamp. If the IoContext is no longer available, we assume that the
+  // worker must have wrapped up and reported its outcome event, we report completeTime in that case
+  // acordingly.
+  kj::Date getTime();
+
   // helper method for addSpan() implementations
   void adjustSpanTime(CompleteSpan& span);
 
@@ -194,12 +202,14 @@ class WorkerTracer final: public BaseTracer {
   void setEventInfoInternal(
       const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
 
-  void setFetchResponseInfo(tracing::FetchResponseInfo&& info) override;
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
   virtual void recordTimestamp(kj::Date timestamp) override;
 
   // Set a worker-level tag/attribute to be provided in the onset event.
   void setWorkerAttribute(kj::ConstString key, Span::TagValue value);
+
+  void setReturn(kj::Maybe<kj::Date> time = kj::none,
+      kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo = kj::none) override;
 
   void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
