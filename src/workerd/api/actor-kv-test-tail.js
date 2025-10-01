@@ -4,9 +4,6 @@ let invocationPromises = [];
 let spans = new Map();
 
 export default {
-  async fetch(ctrl, env, ctx) {
-    return new Response('');
-  },
   async test(ctrl, env, ctx) {
     const expected = [
       {
@@ -47,7 +44,6 @@ export default {
     return (event) => {
       switch (event.event.type) {
         case 'spanOpen':
-          console.log('span open', event.event.name);
           if (event.event.name === 'durable_object_subrequest') {
             let span = spans.get(event.event.spanId);
             span['subrequests'] = span['subrequests']
@@ -60,7 +56,6 @@ export default {
           }
           break;
         case 'attributes': {
-          console.log('attributes', event);
           let span = spans.get(event.event.spanId);
           for (let { name, value } of event.event.info) {
             span[name] = value;
