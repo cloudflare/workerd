@@ -144,3 +144,32 @@ wd_cc_binary(
     visibility = ["//visibility:public"],
     deps = [":test-fixture"],
 )
+
+# KJ_TEST version of REPRL tests that includes libreprl sources
+wd_cc_library(
+    name = "libreprl",
+    srcs = ["libreprl/libreprl.c"],
+    hdrs = ["libreprl/libreprl.h"],
+    copts = ["-Ilibreprl"],
+    includes = ["libreprl"],
+)
+
+kj_test(
+    src = "test-reprl-kj.c++",
+    data = [
+        "//src/workerd/server:workerd",
+        "//samples/reprl:config-full.capnp",
+        "//samples/reprl:worker-full.js",
+        "//samples/reprl:worker-consume-request.js",
+        "//samples/reprl:kv-mock.js",
+        "//samples/reprl:d1-mock.js",
+        "//samples/reprl:r2-mock.js",
+        "//samples/reprl:analytics-mock.js",
+        "//samples/reprl:queue-mock.js",
+    ],
+    deps = [
+        ":test-fixture",
+        ":libreprl",
+        "@bazel_tools//tools/cpp/runfiles",
+    ],
+)

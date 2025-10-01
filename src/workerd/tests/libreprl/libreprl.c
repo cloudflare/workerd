@@ -494,9 +494,19 @@ int reprl_execute(struct reprl_context* ctx, const char* script, uint64_t script
     // Copy the script to the data channel.
     memcpy(ctx->data_out->mapping, script, script_size);
 
+    fprintf(stderr, "[libreprl] About to write 'exec' command to child (ctrl_out fd=%d, pid=%d)\n",
+            ctx->ctrl_out, ctx->pid);
+    fflush(stderr);
+
     // Tell child to execute the script.
-    if (write(ctx->ctrl_out, "exec", 4) != 4 ||
-        write(ctx->ctrl_out, &script_size, 8) != 8) {
+    ssize_t write1 = write(ctx->ctrl_out, "exec", 4);
+    ssize_t write2 = write(ctx->ctrl_out, &script_size, 8);
+
+    fprintf(stderr, "[libreprl] Write results: exec=%zd (expected 4), script_size=%zd (expected 8)\n",
+            write1, write2);
+    fflush(stderr);
+
+    if (write1 != 4 || write2 != 8) {
         // These can fail if the child unexpectedly terminated between executions.
         // Check for that here to be able to provide a better error message.
         int status;
@@ -511,10 +521,32 @@ int reprl_execute(struct reprl_context* ctx, const char* script, uint64_t script
         return reprl_error(ctx, "Failed to send command to child process: %s", strerror(errno));
     }
 
+    fprintf(stderr, "[libreprl] Command written successfully, now polling for response (ctrl_in fd=%d, timeout=%dms)\n",
+            ctx->ctrl_in, timeout_ms);
+    fflush(stderr);
+
+    // Check if child is still alive before polling
+    int check_status;
+    pid_t check = waitpid(ctx->pid, &check_status, WNOHANG);
+    if (check == ctx->pid) {
+        fprintf(stderr, "[libreprl] WARNING: Child died before poll! status=%d\n", check_status);
+        fflush(stderr);
+    } else if (check < 0) {
+        fprintf(stderr, "[libreprl] WARNING: waitpid check failed: %s\n", strerror(errno));
+        fflush(stderr);
+    } else {
+        fprintf(stderr, "[libreprl] Child still alive (pid=%d), proceeding with poll\n", ctx->pid);
+        fflush(stderr);
+    }
+
     // Wait for child to finish execution (or crash).
     uint64_t start_time = current_usecs();
     struct pollfd fds = {.fd = ctx->ctrl_in, .events = POLLIN, .revents = 0};
+    fprintf(stderr, "[libreprl] Calling poll...\n");
+    fflush(stderr);
     int res = poll(&fds, 1, timeout_ms);
+    fprintf(stderr, "[libreprl] poll() returned %d (revents=0x%x)\n", res, fds.revents);
+    fflush(stderr);
     *execution_time = current_usecs() - start_time;
     if (res == 0) {
         // Execution timed out. Kill child and return a timeout status.
