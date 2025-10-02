@@ -225,11 +225,13 @@ class WorkerdApi final: public Worker::Api {
       kj::String moduleName;
       kj::String entrypoint;
       kj::Array<Global> innerBindings;
+      kj::String bindingName;
 
       Wrapped clone() const {
         return Wrapped{.moduleName = kj::str(moduleName),
           .entrypoint = kj::str(entrypoint),
-          .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); }};
+          .innerBindings = KJ_MAP(b, innerBindings) { return b.clone(); },
+          .bindingName = kj::str(bindingName)};
       }
     };
     struct AnalyticsEngine {

@@ -3663,6 +3663,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         .moduleName = kj::str(wrapped.getModuleName()),
         .entrypoint = kj::str(wrapped.getEntrypoint()),
         .innerBindings = innerGlobals.releaseAsArray(),
+        .bindingName = kj::str(bindingName),
       });
     }
 
