@@ -109,16 +109,23 @@ class D1Database {
   // eslint-disable-next-line no-restricted-syntax
   private readonly alwaysPrimarySession: D1DatabaseSessionAlwaysPrimary;
   protected readonly fetcher: Fetcher;
+  protected readonly bindingName: string;
 
-  constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher, bindingName: string) {
     this.fetcher = fetcher;
+    this.bindingName = bindingName;
     this.alwaysPrimarySession = new D1DatabaseSessionAlwaysPrimary(
-      this.fetcher
+      this.fetcher,
+      this.bindingName
     );
   }
 
   prepare(query: string): D1PreparedStatement {
-    return new D1PreparedStatement(this.alwaysPrimarySession, query);
+    return new D1PreparedStatement(
+      this.alwaysPrimarySession,
+      query,
+      this.bindingName
+    );
   }
 
   async batch<T = unknown>(
@@ -138,7 +145,11 @@ class D1Database {
     if (constraintOrBookmark == null || constraintOrBookmark === '') {
       constraintOrBookmark = D1_SESSION_CONSTRAINT_FIRST_UNCONSTRAINED;
     }
-    return new D1DatabaseSession(this.fetcher, constraintOrBookmark);
+    return new D1DatabaseSession(
+      this.fetcher,
+      constraintOrBookmark,
+      this.bindingName
+    );
   }
 
   /**
@@ -152,13 +163,16 @@ class D1Database {
 class D1DatabaseSession {
   protected fetcher: Fetcher;
   protected bookmarkOrConstraint: D1SessionBookmarkOrConstraint;
+  protected bindingName: string;
 
   constructor(
     fetcher: Fetcher,
-    bookmarkOrConstraint: D1SessionBookmarkOrConstraint
+    bookmarkOrConstraint: D1SessionBookmarkOrConstraint,
+    bindingName: string
   ) {
     this.fetcher = fetcher;
     this.bookmarkOrConstraint = bookmarkOrConstraint;
+    this.bindingName = bindingName;
 
     if (!this.bookmarkOrConstraint) {
       throw new Error('D1_SESSION_ERROR: invalid bookmark or constraint');
@@ -190,13 +204,14 @@ class D1DatabaseSession {
   }
 
   prepare(sql: string): D1PreparedStatement {
-    return new D1PreparedStatement(this, sql);
+    return new D1PreparedStatement(this, sql, this.bindingName);
   }
 
   async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     return withSpan('d1_batch', async (span) => {
+      span.setAttribute('cloudflare.binding.name', this.bindingName);
       span.setAttribute(
         'cloudflare.d1.query.statements.count',
         statements.length
@@ -383,9 +398,9 @@ class D1DatabaseSession {
 }
 
 class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
-  constructor(fetcher: Fetcher) {
+  constructor(fetcher: Fetcher, bindingName: string) {
     // Will always go to primary, since we won't be ever updating this constraint.
-    super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY);
+    super(fetcher, D1_SESSION_CONSTRAINT_FIRST_PRIMARY, bindingName);
   }
 
   // We ignore bookmarks for this special type of session,
@@ -415,6 +430,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'exec');
       span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute('cloudflare.binding.name', this.bindingName);
       span.setAttribute('cloudflare.d1.query.statement', query.trim());
 
       const lines = query.trim().split('\n');
@@ -527,14 +543,17 @@ class D1PreparedStatement {
   private readonly dbSession: D1DatabaseSession;
   readonly statement: string;
   readonly params: unknown[];
+  private readonly bindingName: string;
 
   constructor(
     dbSession: D1DatabaseSession,
     statement: string,
+    bindingName: string,
     values?: unknown[]
   ) {
     this.dbSession = dbSession;
     this.statement = statement;
+    this.bindingName = bindingName;
     this.params = values || [];
   }
 
@@ -578,6 +597,7 @@ class D1PreparedStatement {
     return new D1PreparedStatement(
       this.dbSession,
       this.statement,
+      this.bindingName,
       transformedValues
     );
   }
@@ -591,6 +611,7 @@ class D1PreparedStatement {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'first');
       span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute('cloudflare.binding.name', this.bindingName);
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
@@ -683,6 +704,7 @@ class D1PreparedStatement {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'run');
       span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute('cloudflare.binding.name', this.bindingName);
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
@@ -759,6 +781,7 @@ class D1PreparedStatement {
         span.setAttribute('db.system.name', 'cloudflare-d1');
         span.setAttribute('db.operation.name', 'all');
         span.setAttribute('cloudflare.binding.type', 'D1');
+        span.setAttribute('cloudflare.binding.name', this.bindingName);
         span.setAttribute('cloudflare.d1.query.statement', this.statement);
         span.setAttribute(
           'cloudflare.d1.query.bookmark',
@@ -834,6 +857,7 @@ class D1PreparedStatement {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'raw');
       span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute('cloudflare.binding.name', this.bindingName);
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
@@ -1005,6 +1029,9 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
   return aggregatedMeta;
 }
 
-export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
-  return new D1Database(env.fetcher);
+export default function makeBinding(env: {
+  fetcher: Fetcher;
+  __bindingName: string;
+}): D1Database {
+  return new D1Database(env.fetcher, env.__bindingName);
 }

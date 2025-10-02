@@ -782,6 +782,8 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
         // build env object with inner bindings
         auto env = v8::Object::New(lock.v8Isolate);
+        // Add the binding name so wrapped bindings can access it
+        lock.v8Set(env, "__bindingName", lock.wrap(context, wrapped.bindingName.asPtr()));
         for (const auto& innerBinding: wrapped.innerBindings) {
           lock.v8Set(env, innerBinding.name,
               createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider));
