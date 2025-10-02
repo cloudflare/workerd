@@ -69,17 +69,3 @@ def deps_v8():
         patch_cmds_win = ["Get-ChildItem -Path source -File -Include BUILD.bazel -Recurse | Remove-Item"],
         remote = "https://chromium.googlesource.com/chromium/deps/icu.git",
     )
-
-    http_archive(
-        name = "perfetto",
-        integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
-        strip_prefix = "perfetto-51.2",
-        url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
-    )
-
-    # For use with perfetto
-    native.new_local_repository(
-        name = "perfetto_cfg",
-        build_file_content = "",
-        path = "build/perfetto",
-    )

@@ -5,14 +5,6 @@ bazel_dep(name = "bazel_features", version = "1.35.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.1")
 bazel_dep(name = "rules_shell", version = "0.6.0")
 
-# needed by perfetto, but not actually used.
-bazel_dep(name = "rules_android", version = "0.6.4")
-
-# protobuf for use with perfetto
-# Updated protobuf can't be imported reliably under WORKSPACE logic in Bazel 8, so we need to use
-# bzlmod.
-bazel_dep(name = "protobuf", version = "32.0", repo_name = "com_google_protobuf")
-
 # abseil is used by protobuf and tcmalloc.
 bazel_dep(name = "abseil-cpp", version = "20250814.0")
 
@@ -49,3 +41,5 @@ include("//build/deps:deps.MODULE.bazel")
 include("//build/deps:nodejs.MODULE.bazel")
 
 include("//build/deps:python.MODULE.bazel")
+
+include("//build/deps:v8.MODULE.bazel")
