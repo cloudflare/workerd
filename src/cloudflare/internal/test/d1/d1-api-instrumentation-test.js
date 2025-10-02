@@ -2,115 +2,26 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import {
+  createInstrumentationState,
+  createTailStreamHandler,
+  runInstrumentationTest,
+} from 'instrumentation-test-helper';
 
-// tailStream is going to be invoked multiple times, but we want to wait
-// to run the test until all executions are done. Collect promises for
-// each
-let invocationPromises = [];
-let spans = new Map();
+// Create module-level state using the helper
+const state = createInstrumentationState();
 
 export default {
-  tailStream(event, env, ctx) {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-
-    // Accumulate the span info for easier testing
-    return (event) => {
-      let spanKey = `${event.invocationId}#${event.event.spanId || event.spanContext.spanId}`;
-      switch (event.event.type) {
-        case 'spanOpen':
-          // The span ids will change between tests, but Map preserves insertion order
-          spans.set(spanKey, { name: event.event.name });
-          break;
-        case 'attributes': {
-          let span = spans.get(spanKey);
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
-          }
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'spanClose': {
-          let span = spans.get(spanKey);
-          span['closed'] = true;
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  },
+  tailStream: createTailStreamHandler(state),
 };
 
 export const test = {
   async test() {
-    // Wait for all the tailStream executions to finish
-    await Promise.allSettled(invocationPromises);
-
-    // Recorded streaming tail worker events, in insertion order,
-    // filtering spans not associated with D1
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
-    let failed = 0;
-    let i = -1;
-    let tolerance = 5n;
-    try {
-      assert.equal(received.length, expectedSpans.length);
-      for (i = 0; i < received.length; i++) {
-        compareBigIntProps(
-          received[i],
-          expectedSpans[i],
-          ['http.response.body.size'],
-          tolerance
-        );
-        assert.deepStrictEqual(received[i], expectedSpans[i]);
-      }
-    } catch (e) {
-      failed++;
-      if (i >= 0) {
-        console.log('spans are not identical', e);
-      } else {
-        console.error(e);
-      }
-    }
-    if (failed > 0) {
-      throw 'D1 instrumentation test failed';
-    }
+    await runInstrumentationTest(state, expectedSpans, {
+      testName: 'D1 instrumentation',
+    });
   },
 };
-
-function compareBigIntProps(receivedSpan, expectedSpan, propNames, tolerance) {
-  for (const propName of propNames) {
-    if (Object.keys(expectedSpan).includes(propName)) {
-      if (
-        bitIntAbsDelta(receivedSpan[propName], expectedSpan[propName]) >
-        tolerance
-      ) {
-        throw `${propName} attribute outside of tolerance`;
-      } else {
-        delete receivedSpan[propName];
-        delete expectedSpan[propName];
-      }
-    }
-  }
-}
-
-function bitIntAbsDelta(receivedBigInt, expectedBigInt) {
-  const delta = BigInt(receivedBigInt) - BigInt(expectedBigInt);
-  if (delta < 0) {
-    return delta * -1n;
-  }
-  return delta;
-}
 
 const expectedSpans = [
   {

@@ -3,88 +3,38 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
+import {
+  createTailStreamCollector,
+  groupSpansBy,
+} from 'instrumentation-test-helper';
 
-// Collect spans and their lifecycle events
-let invocationPromises = [];
-let spans = new Map();
-let testResults = [];
-
-export default {
-  tailStream(event, env, ctx) {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-
-    // Process streaming tail events
-    return (event) => {
-      let spanKey = `${event.invocationId}#${event.event.spanId || event.spanContext.spanId}`;
-
-      switch (event.event.type) {
-        case 'spanOpen':
-          // Record span creation
-          spans.set(spanKey, {
-            name: event.event.name,
-            opened: true,
-            closed: false,
-            tags: {},
-            test: null,
-          });
-          break;
-
-        case 'attributes': {
-          // Record span attributes
-          let span = spans.get(spanKey);
-          if (span) {
-            for (let { name, value } of event.event.info) {
-              span.tags[name] = value;
-              // Extract test name from attributes
-              if (name === 'test') {
-                span.test = value;
-              }
-            }
-            spans.set(spanKey, span);
-          }
-          break;
-        }
-
-        case 'spanClose': {
-          // Record span closure
-          let span = spans.get(spanKey);
-          if (span) {
-            span.closed = true;
-            spans.set(spanKey, span);
-          }
-          break;
-        }
-
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  },
-};
+// Create the collector and export it for the tail worker
+const collector = createTailStreamCollector();
+export default collector;
 
 // After all tests complete, validate the spans
 export const validateSpans = {
   async test() {
     // Wait for all the tailStream executions to finish
-    await Promise.allSettled(invocationPromises);
+    await collector.waitForCompletion();
+
+    // Get all spans and add custom attributes for this test
+    const allSpans = collector.getSpans();
+
+    // Process spans to extract test names from tags
+    for (const span of allSpans) {
+      // Handle the special tags structure for this test
+      if (!span.tags) {
+        span.tags = {};
+      }
+      // If test attribute exists at top level, move it to tags for consistency
+      if (span.test) {
+        span.tags.test = span.test;
+      }
+    }
 
     // Group spans by test
-    const spansByTest = new Map();
-    for (const [key, span] of spans) {
-      const testName = span.test || 'unknown';
-      if (!spansByTest.has(testName)) {
-        spansByTest.set(testName, []);
-      }
-      spansByTest.get(testName).push(span);
-    }
+    const spansByTest = groupSpansBy(allSpans, 'test');
 
     console.log('\n=== Span Validation Results ===\n');
 
@@ -132,16 +82,14 @@ export const validateSpans = {
           );
 
           for (const span of relevantSpans) {
-            assert(
-              span.opened,
-              `Test ${test}: Span '${span.name}' should be opened`
-            );
+            // Note: The helper sets 'opened' implicitly when a span is created
+            assert(span.name, `Test ${test}: Span should have a name`);
             assert(
               span.closed,
               `Test ${test}: Span '${span.name}' should be closed`
             );
             assert.strictEqual(
-              span.tags.test,
+              span.test || span.tags?.test,
               test,
               `Test ${test}: Span should have correct test tag`
             );
@@ -156,12 +104,8 @@ export const validateSpans = {
     }
 
     // Check for null/undefined tests
-    const nullSpans = Array.from(spans.values()).filter(
-      (s) => s.name === 'null-op'
-    );
-    const undefinedSpans = Array.from(spans.values()).filter(
-      (s) => s.name === 'undefined-op'
-    );
+    const nullSpans = allSpans.filter((s) => s.name === 'null-op');
+    const undefinedSpans = allSpans.filter((s) => s.name === 'undefined-op');
 
     try {
       assert(nullSpans.length > 0, 'Should have null-op span');
@@ -175,12 +119,8 @@ export const validateSpans = {
     }
 
     // Check nested spans
-    const outerSpans = Array.from(spans.values()).filter(
-      (s) => s.name === 'outer-op'
-    );
-    const innerSpans = Array.from(spans.values()).filter(
-      (s) => s.name === 'inner-op'
-    );
+    const outerSpans = allSpans.filter((s) => s.name === 'outer-op');
+    const innerSpans = allSpans.filter((s) => s.name === 'inner-op');
 
     try {
       assert(outerSpans.length > 0, 'Should have outer-op span');
@@ -194,9 +134,7 @@ export const validateSpans = {
     }
 
     console.log('\n=== Summary ===');
-    const totalSpans = Array.from(spans.values()).filter(
-      (s) => !s.name.includes('jsRpcSession')
-    );
+    const totalSpans = allSpans.filter((s) => !s.name.includes('jsRpcSession'));
     const closedSpans = totalSpans.filter((s) => s.closed);
     console.log(`Total test spans: ${totalSpans.length}`);
     console.log(`Closed spans: ${closedSpans.length}`);
