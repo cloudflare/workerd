@@ -3641,11 +3641,6 @@ Worker::Actor::Actor(const Worker& worker,
   }
 }
 
-Worker::Actor::~Actor() noexcept(false) {
-  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
-  // to our thread, or is a handle that can be dropped outside of the lock.
-}
-
 void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_SOME(info, impl->classInstance.tryGet<ActorClassInfo*>()) {
     // IMPORTANT: We need to set the state to "Initializing" synchronously, before
@@ -3730,6 +3725,11 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
     context.abort(kj::cp(e));
     impl->classInstance = kj::mv(e);
   }
+}
+
+Worker::Actor::~Actor() noexcept(false) {
+  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
+  // to our thread, or is a handle that can be dropped outside of the lock.
 }
 
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
