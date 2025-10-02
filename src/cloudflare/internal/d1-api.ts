@@ -412,6 +412,9 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       // We need to trim the query here, since it is trimmed before passed to the D1 API
       // and we receive a line number of the trimmed query. Without trimming, the line number
       // may be incorrect, especially with indented multiline strings.
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'exec');
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute('cloudflare.d1.query.statement', query.trim());
 
       const lines = query.trim().split('\n');
@@ -585,6 +588,9 @@ class D1PreparedStatement {
     colName?: string
   ): Promise<Record<string, T> | T | null> {
     return withSpan('d1_first', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'first');
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
@@ -674,6 +680,9 @@ class D1PreparedStatement {
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
   async run<T = Record<string, unknown>>(): Promise<D1Response> {
     return withSpan('d1_run', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'run');
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
@@ -747,6 +756,9 @@ class D1PreparedStatement {
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
     return withSpan('d1_all', async (span) => {
       try {
+        span.setAttribute('db.system.name', 'cloudflare-d1');
+        span.setAttribute('db.operation.name', 'all');
+        span.setAttribute('cloudflare.binding.type', 'D1');
         span.setAttribute('cloudflare.d1.query.statement', this.statement);
         span.setAttribute(
           'cloudflare.d1.query.bookmark',
@@ -818,7 +830,10 @@ class D1PreparedStatement {
   }
 
   async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
-    return withSpan('d1_all', async (span) => {
+    return withSpan('d1_raw', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'raw');
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',

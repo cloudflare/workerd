@@ -115,6 +115,8 @@ export async function runInstrumentationTest(
   // filtering spans not associated with the test
   let received = Array.from(state.spans.values()).filter(filterFn);
 
+  console.log(received);
+
   let failed = 0;
   let i = -1;
 
