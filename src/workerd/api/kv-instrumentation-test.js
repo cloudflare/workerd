@@ -4,12 +4,14 @@
 import * as assert from 'node:assert';
 import {
   createInstrumentationState,
-  createTailStreamHandler,
-  runInstrumentationTest,
 } from 'instrumentation-test-helper';
 
-// KV test needs custom handling for top-level span filtering
-// So we create a custom state and handler
+// KV test uses a custom tail stream handler and test implementation because:
+// 1. It uses a different span key format: "invocationId + spanId" (without separator)
+//    instead of the standard "invocationId#spanId" format
+// 2. It needs custom error handling for unknown spans
+// 3. It collects and reports all assertion errors at once rather than failing on first error
+// We still use createInstrumentationState for the basic state management
 const state = createInstrumentationState();
 
 // Custom handler that uses different span key format and filters top-level spans
