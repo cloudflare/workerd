@@ -189,7 +189,6 @@ wd_cc_library(
         "//src/workerd/api:memory-cache",
         "//src/workerd/api:pyodide",
         "//src/workerd/io",
-        "//src/workerd/io:trace-stream",
         "//src/workerd/io:worker-entrypoint",
         "//src/workerd/jsg",
         "//src/workerd/util:perfetto",

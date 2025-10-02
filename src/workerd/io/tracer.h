@@ -45,11 +45,18 @@ class WorkerTracer;
 // A tracer which records traces for a set of stages. All traces for a pipeline's stages and
 // possible subpipeline stages are recorded here, where they can be used to call a pipeline's
 // trace worker.
-class PipelineTracer: public kj::Refcounted {
+class PipelineTracer final: public kj::Refcounted {
  public:
+  typedef kj::Function<kj::Array<kj::Own<WorkerInterface>>()> GetTracerCallback;
+
   // Creates a pipeline tracer (with a possible parent).
-  explicit PipelineTracer() = default;
-  virtual ~PipelineTracer() noexcept(false);
+  explicit PipelineTracer(kj::Maybe<kj::Rc<PipelineTracer>> parentTracer = kj::none,
+      kj::Maybe<GetTracerCallback> callback = kj::none)
+      : parentTracer(kj::mv(parentTracer)),
+        getStreamingTailWorkers(kj::mv(callback)),
+        self(kj::refcounted<WeakRef<PipelineTracer>>(kj::Badge<PipelineTracer>{}, *this)) {}
+  ~PipelineTracer() noexcept(false);
+
   KJ_DISALLOW_COPY_AND_MOVE(PipelineTracer);
 
   // Returns a promise that fulfills when traces are complete.  Only one such promise can
@@ -79,10 +86,31 @@ class PipelineTracer: public kj::Refcounted {
 
   void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
 
+  // Constructs a tail stream writer to be used with a worker stage and adds it to the tracer. Only
+  // used internally.
+  kj::Maybe<kj::Own<tracing::TailStreamWriter>> getStageTailStreamWriter(
+      kj::TaskSet& waitUntilTasks);
+
+  kj::Rc<PipelineTracer> addRef() {
+    return addRefToThis();
+  }
+  kj::Own<WeakRef<PipelineTracer>> addWeakRef() {
+    return self->addRef();
+  }
+
  private:
   kj::Vector<kj::Own<Trace>> traces;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<kj::Array<kj::Own<Trace>>>>> completeFulfiller;
   kj::Vector<kj::Own<tracing::TailStreamWriter>> tailStreamWriters;
+
+  // Recursively collect any streaming tail workers from the callback for this pipeline and any
+  // parent pipelines.
+  void addTracers(kj::Vector<kj::Own<WorkerInterface>>& traceWorkers);
+
+  kj::Maybe<kj::Rc<PipelineTracer>> parentTracer;
+  kj::Maybe<GetTracerCallback> getStreamingTailWorkers;
+  // weak reference, this is only used internally.
+  kj::Own<WeakRef<PipelineTracer>> self;
 
   friend class WorkerTracer;
 };

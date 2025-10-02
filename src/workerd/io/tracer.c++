@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
@@ -62,6 +63,7 @@ void TailStreamWriter::report(
 }  // namespace tracing
 
 PipelineTracer::~PipelineTracer() noexcept(false) {
+  self->invalidate();
   KJ_IF_SOME(f, completeFulfiller) {
     f.get()->fulfill(traces.releaseAsArray());
   }
@@ -116,6 +118,45 @@ WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
       trace(kj::mv(trace)),
       parentPipeline(kj::mv(parentPipeline)),
       maybeTailStreamWriter(kj::mv(maybeTailStreamWriter)) {}
+
+kj::Maybe<kj::Own<tracing::TailStreamWriter>> PipelineTracer::getStageTailStreamWriter(
+    kj::TaskSet& waitUntilTasks) {
+  // Construct trace worker interfaces across the pipeline stack through a callback interface.
+  // If we are in the top level pipeline and the logging parameter is available, we could create
+  // the streaming tail worker interfaces directly instead of using a callback, but having a
+  // single unified code path is cleaner.
+  kj::Vector<kj::Own<WorkerInterface>> traceWorkers;
+  addTracers(traceWorkers);
+
+  if (traceWorkers.size() == 0) {
+    return kj::none;
+  }
+
+  // Initialize streaming tail worker.
+  // TODO(streaming-tail): memory management is off here – we need to add this to the pipeline
+  // tracer to ensure that the tail stream writer is kept alive even after the corresponding
+  // WorkerTracer is deallocated. However, it is unclear to my why the initial tailStreamWriter
+  // must be moved there to avoid crahes and a reference is insufficient.
+  auto tailStreamWriter = KJ_ASSERT_NONNULL(
+      tracing::initializeTailStreamWriter(traceWorkers.releaseAsArray(), waitUntilTasks));
+  auto writerRef = kj::addRef(*tailStreamWriter);
+  addTailStreamWriter(kj::mv(tailStreamWriter));
+  return writerRef;
+};
+
+// Recursively collect any streaming tail workers from the callback for this pipeline and any
+// parent pipelines.
+void PipelineTracer::addTracers(kj::Vector<kj::Own<WorkerInterface>>& traceWorkers) {
+  KJ_IF_SOME(callback, getStreamingTailWorkers) {
+    auto tracers = callback();
+    for (auto& tracer: tracers) {
+      traceWorkers.add(kj::mv(tracer));
+    }
+  }
+  KJ_IF_SOME(p, parentTracer) {
+    p->addTracers(traceWorkers);
+  }
+}
 
 WorkerTracer::WorkerTracer(PipelineLogLevel pipelineLogLevel, ExecutionModel executionModel)
     : pipelineLogLevel(pipelineLogLevel),
