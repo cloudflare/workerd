@@ -35,6 +35,7 @@ PATCHES = [
     "0027-Implement-additional-Exception-construction-methods.patch",
     "0028-Export-icudata-file-to-facilitate-embedding-it.patch",
     "0029-IsGraphAsync-module-cast-check.patch",
+    "0030-bind-icu-to-googlesource.patch",
 ]
 
 # V8 and its dependencies
