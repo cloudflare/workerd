@@ -4,13 +4,46 @@
 
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
 
+interface D1Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
+
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
+}
+
 interface Fetcher {
   fetch: typeof fetch;
 }
 
 type D1Response = {
   success: true;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
   error?: never;
 };
 
@@ -26,7 +59,7 @@ type D1UpstreamFailure = {
   results?: never;
   error: string;
   success: false;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
 };
 
 type D1RowsColumns<T = unknown> = D1Response & {
@@ -85,10 +118,7 @@ class D1Database {
   }
 
   prepare(query: string): D1PreparedStatement {
-    return withSpan('prepare', (span) => {
-      span.setAttribute('query', query);
-      return new D1PreparedStatement(this.alwaysPrimarySession, query);
-    });
+    return new D1PreparedStatement(this.alwaysPrimarySession, query);
   }
 
   async batch<T = unknown>(
@@ -98,10 +128,7 @@ class D1Database {
   }
 
   async exec(query: string): Promise<D1ExecResult> {
-    return withSpan('exec', async (span) => {
-      span.setAttribute('query', query);
-      return this.alwaysPrimarySession.exec(query);
-    });
+    return this.alwaysPrimarySession.exec(query);
   }
 
   withSession(
@@ -163,22 +190,77 @@ class D1DatabaseSession {
   }
 
   prepare(sql: string): D1PreparedStatement {
-    return withSpan('prepare', (span) => {
-      span.setAttribute('sql', sql);
-      return new D1PreparedStatement(this, sql);
-    });
+    return new D1PreparedStatement(this, sql);
   }
 
   async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
-    const exec = (await this._sendOrThrow(
-      '/query',
-      statements.map((s: D1PreparedStatement) => s.statement),
-      statements.map((s: D1PreparedStatement) => s.params),
-      'ROWS_AND_COLUMNS'
-    )) as D1UpstreamSuccess<T>[];
-    return exec.map(toArrayOfObjects);
+    return withSpan('d1_batch', async (span) => {
+      span.setAttribute('cloudflare.d1.query.statements.count', statements.length);
+      span.setAttribute('cloudflare.d1.query.bookmark', this.getBookmark() ?? undefined);
+
+      try {
+        const exec = (await this._sendOrThrow(
+          '/query',
+          statements.map((s: D1PreparedStatement) => s.statement),
+          statements.map((s: D1PreparedStatement) => s.params),
+          'ROWS_AND_COLUMNS'
+        )) as D1UpstreamSuccess<T>[];
+
+        let aggregatedMeta: D1Meta = {
+          duration: 0,
+          size_after: 0,
+          rows_read: 0,
+          rows_written: 0,
+          last_row_id: 0,
+          changed_db: false,
+          changes: 0,
+        };
+        for (const result of exec) {
+          aggregatedMeta.duration += result.meta.duration;
+          aggregatedMeta.size_after += result.meta.size_after;
+          aggregatedMeta.rows_read += result.meta.rows_read;
+          aggregatedMeta.rows_written += result.meta.rows_written;
+          aggregatedMeta.last_row_id = result.meta.last_row_id;
+          aggregatedMeta.changed_db = result.meta.changed_db;
+          aggregatedMeta.changes += result.meta.changes;
+          if (result.meta.served_by_region) {
+            aggregatedMeta.served_by_region = result.meta.served_by_region;
+          }
+          if (result.meta.served_by_primary) {
+            aggregatedMeta.served_by_primary = result.meta.served_by_primary;
+          }
+          if (result.meta.timings?.sql_duration_ms) {
+            aggregatedMeta.timings = {
+              sql_duration_ms: (aggregatedMeta.timings?.sql_duration_ms ?? 0) + result.meta.timings.sql_duration_ms,
+            };
+          }
+          if (result.meta.total_attempts) {
+            aggregatedMeta.total_attempts = (aggregatedMeta.total_attempts ?? 0) + result.meta.total_attempts;
+          }
+        }
+
+        span.setAttribute('cloudflare.d1.response.bookmark', this.getBookmark() ?? undefined);
+        span.setAttribute('cloudflare.d1.response.size_after', aggregatedMeta.size_after);
+        span.setAttribute('cloudflare.d1.response.rows_read', aggregatedMeta.rows_read);
+        span.setAttribute('cloudflare.d1.response.rows_written', aggregatedMeta.rows_written);
+        span.setAttribute('cloudflare.d1.response.last_row_id', aggregatedMeta.last_row_id);
+        span.setAttribute('cloudflare.d1.response.changed_db', aggregatedMeta.changed_db);
+        span.setAttribute('cloudflare.d1.response.changes', aggregatedMeta.changes);
+        span.setAttribute('cloudflare.d1.response.served_by_region', aggregatedMeta.served_by_region);
+        span.setAttribute('cloudflare.d1.response.served_by_primary', aggregatedMeta.served_by_primary);
+        span.setAttribute('cloudflare.d1.response.sql_duration_ms', aggregatedMeta.timings?.sql_duration_ms ?? undefined);
+        span.setAttribute('cloudflare.d1.response.total_attempts', aggregatedMeta.total_attempts);
+
+        return exec.map(toArrayOfObjects);
+      } catch (error) {
+        if (error instanceof Error && error.cause instanceof Error) {
+          span.setAttribute('error.type', error.cause.message);
+        }
+        throw error;
+      }
+    });
   }
 
   // Returns the latest bookmark we received from all responses processed so far.
@@ -441,89 +523,181 @@ class D1PreparedStatement {
   async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
-    const info = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, T>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
+    return withSpan('d1_first', async (span) => {
+      span.setAttribute('cloudflare.d1.query.statement', this.statement);
+      span.setAttribute('cloudflare.d1.query.bookmark', this.dbSession.getBookmark() ?? undefined);
 
-    const results = toArrayOfObjects(info).results;
-    const hasResults = results.length > 0;
-    if (!hasResults) return null;
+      try {
+        const info = firstIfArray(
+          await this.dbSession._sendOrThrow<Record<string, T>>(
+            '/query',
+            this.statement,
+            this.params,
+            'ROWS_AND_COLUMNS'
+          )
+        );
 
-    const firstResult = results.at(0);
-    if (colName !== undefined) {
-      if (firstResult?.[colName] === undefined) {
-        throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
-          cause: new Error('Column not found'),
-        });
+        span.setAttribute('cloudflare.d1.response.bookmark', this.dbSession.getBookmark() ?? undefined);
+        span.setAttribute('cloudflare.d1.response.size_after', info.meta.size_after);
+        span.setAttribute('cloudflare.d1.response.rows_read', info.meta.rows_read);
+        span.setAttribute('cloudflare.d1.response.rows_written', info.meta.rows_written);
+        span.setAttribute('cloudflare.d1.response.last_row_id', info.meta.last_row_id);
+        span.setAttribute('cloudflare.d1.response.changed_db', info.meta.changed_db);
+        span.setAttribute('cloudflare.d1.response.changes', info.meta.changes);
+        span.setAttribute('cloudflare.d1.response.served_by_region', info.meta.served_by_region);
+        span.setAttribute('cloudflare.d1.response.served_by_primary', info.meta.served_by_primary);
+        span.setAttribute('cloudflare.d1.response.sql_duration_ms', info.meta.timings?.sql_duration_ms ?? undefined);
+        span.setAttribute('cloudflare.d1.response.total_attempts', info.meta.total_attempts);
+
+        const results = toArrayOfObjects(info).results;
+        const hasResults = results.length > 0;
+        if (!hasResults) return null;
+
+        const firstResult = results.at(0);
+        if (colName !== undefined) {
+          if (firstResult?.[colName] === undefined) {
+            span.setAttribute('error.type', 'Column not found');
+            throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
+              cause: new Error('Column not found'),
+            });
+          }
+          return firstResult[colName];
+        } else {
+          return firstResult as Record<string, T>;
+        }
+      } catch (error) {
+        if (error instanceof Error && error.cause instanceof Error) {
+          span.setAttribute('error.type', error.cause.message);
+        }
+        throw error;
       }
-      return firstResult[colName];
-    } else {
-      return firstResult as Record<string, T>;
-    }
+    });
   }
 
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
   async run<T = Record<string, unknown>>(): Promise<D1Response> {
-    return firstIfArray(
-      await this.dbSession._sendOrThrow<T>(
-        '/execute',
-        this.statement,
-        this.params,
-        'NONE'
-      )
-    );
+    return withSpan('d1_run', async (span) => {
+      span.setAttribute('cloudflare.d1.query.statement', this.statement);
+      span.setAttribute('cloudflare.d1.query.bookmark', this.dbSession.getBookmark() ?? undefined);
+
+      try {
+        const result = firstIfArray(
+          await this.dbSession._sendOrThrow<T>(
+            '/execute',
+            this.statement,
+            this.params,
+            'NONE'
+          )
+        );
+
+        span.setAttribute('cloudflare.d1.response.bookmark', this.dbSession.getBookmark() ?? undefined);
+        span.setAttribute('cloudflare.d1.response.size_after', result.meta.size_after);
+        span.setAttribute('cloudflare.d1.response.rows_read', result.meta.rows_read);
+        span.setAttribute('cloudflare.d1.response.rows_written', result.meta.rows_written);
+        span.setAttribute('cloudflare.d1.response.last_row_id', result.meta.last_row_id);
+        span.setAttribute('cloudflare.d1.response.changed_db', result.meta.changed_db);
+        span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
+        span.setAttribute('cloudflare.d1.response.served_by_region', result.meta.served_by_region);
+        span.setAttribute('cloudflare.d1.response.served_by_primary', result.meta.served_by_primary);
+        span.setAttribute('cloudflare.d1.response.sql_duration_ms', result.meta.timings?.sql_duration_ms ?? undefined);
+        span.setAttribute('cloudflare.d1.response.total_attempts', result.meta.total_attempts);
+        return result;
+      } catch (error) {
+        if (error instanceof Error && error.cause instanceof Error) {
+          span.setAttribute('error.type', error.cause.message);
+        }
+        throw error;
+      }
+    });
   }
 
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
-    return toArrayOfObjects(
-      firstIfArray(
-        await this.dbSession._sendOrThrow<T[]>(
+    return withSpan('d1_all', async (span) => {
+      try {
+        span.setAttribute('cloudflare.d1.query.statement', this.statement);
+        span.setAttribute('cloudflare.d1.query.bookmark', this.dbSession.getBookmark() ?? undefined);
+
+        const result = firstIfArray(
+          await this.dbSession._sendOrThrow<T[]>(
+            '/query',
+            this.statement,
+            this.params,
+            'ROWS_AND_COLUMNS'
+          )
+        );
+
+        span.setAttribute('cloudflare.d1.response.bookmark', this.dbSession.getBookmark() ?? undefined);
+        span.setAttribute('cloudflare.d1.response.size_after', result.meta.size_after);
+        span.setAttribute('cloudflare.d1.response.rows_read', result.meta.rows_read);
+        span.setAttribute('cloudflare.d1.response.rows_written', result.meta.rows_written);
+        span.setAttribute('cloudflare.d1.response.last_row_id', result.meta.last_row_id);
+        span.setAttribute('cloudflare.d1.response.changed_db', result.meta.changed_db);
+        span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
+        span.setAttribute('cloudflare.d1.response.served_by_region', result.meta.served_by_region);
+        span.setAttribute('cloudflare.d1.response.served_by_primary', result.meta.served_by_primary);
+        span.setAttribute('cloudflare.d1.response.sql_duration_ms', result.meta.timings?.sql_duration_ms ?? undefined);
+        span.setAttribute('cloudflare.d1.response.total_attempts', result.meta.total_attempts);
+
+        return toArrayOfObjects(result);
+      } catch (error) {
+        if (error instanceof Error && error.cause instanceof Error) {
+          span.setAttribute('error.type', error.cause.message);
+        }
+        throw error;
+      }
+    });
+  }
+
+  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
+    return withSpan('d1_all', async (span) => {
+      span.setAttribute('cloudflare.d1.query.statement', this.statement);
+      span.setAttribute('cloudflare.d1.query.bookmark', this.dbSession.getBookmark() ?? undefined);
+
+      const s = firstIfArray(
+        await this.dbSession._sendOrThrow<Record<string, unknown>>(
           '/query',
           this.statement,
           this.params,
           'ROWS_AND_COLUMNS'
         )
-      )
-    );
-  }
+      );
 
-  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
-    const s = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, unknown>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
-    // If no results returned, return empty array
-    if (!('results' in s)) return [];
+      span.setAttribute('cloudflare.d1.response.bookmark', this.dbSession.getBookmark() ?? undefined);
+      span.setAttribute('cloudflare.d1.response.size_after', s.meta.size_after);
+      span.setAttribute('cloudflare.d1.response.rows_read', s.meta.rows_read);
+      span.setAttribute('cloudflare.d1.response.rows_written', s.meta.rows_written);
+      span.setAttribute('cloudflare.d1.response.last_row_id', s.meta.last_row_id);
+      span.setAttribute('cloudflare.d1.response.changed_db', s.meta.changed_db);
+      span.setAttribute('cloudflare.d1.response.changes', s.meta.changes);
+      span.setAttribute('cloudflare.d1.response.served_by_region', s.meta.served_by_region);
+      span.setAttribute('cloudflare.d1.response.served_by_primary', s.meta.served_by_primary);
+      span.setAttribute('cloudflare.d1.response.sql_duration_ms', s.meta.timings?.sql_duration_ms ?? undefined);
+      span.setAttribute('cloudflare.d1.response.total_attempts', s.meta.total_attempts);
 
-    // If ARRAY_OF_OBJECTS returned, extract cells
-    if (Array.isArray(s.results)) {
-      const raw: T[] = [];
-      for (const row of s.results) {
-        if (options?.columnNames && raw.length === 0) {
-          raw.push(Array.from(Object.keys(row)) as T);
+      // If no results returned, return empty array
+      if (!('results' in s)) return [];
+
+      // If ARRAY_OF_OBJECTS returned, extract cells
+      if (Array.isArray(s.results)) {
+        const raw: T[] = [];
+        for (const row of s.results) {
+          if (options?.columnNames && raw.length === 0) {
+            raw.push(Array.from(Object.keys(row)) as T);
+          }
+          const entry = Object.keys(row).map((k) => {
+            return row[k];
+          });
+          raw.push(entry as T);
         }
-        const entry = Object.keys(row).map((k) => {
-          return row[k];
-        });
-        raw.push(entry as T);
+        return raw;
+      } else {
+        // Otherwise, data is already in the correct format
+        return [
+          ...(options?.columnNames ? [s.results.columns as T] : []),
+          ...(s.results.rows as T[]),
+        ];
       }
-      return raw;
-    } else {
-      // Otherwise, data is already in the correct format
-      return [
-        ...(options?.columnNames ? [s.results.columns as T] : []),
-        ...(s.results.rows as T[]),
-      ];
-    }
+    });
   }
 }
 
