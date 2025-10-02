@@ -132,3 +132,26 @@ http_archive(
     sha256 = "b92e186ff44840edd1350f57e6c75144d912407045a3057450014cf9b2014a83",
     build_file = "//:build/BUILD.simdutf",
 )
+
+http_archive(
+    name = "capnp-cpp",
+    url = "https://github.com/capnproto/capnproto/tarball/4af6d742d88c131f6b1b4d315707483eb6897cb5",
+    strip_prefix = "capnproto-capnproto-4af6d74/c++",
+    type = "tgz",
+    sha256 = "5fbac64487684ac5dd27198d48b8aefb863a85bb48e96b8132fca6a08a455576",
+)
+
+http_archive(
+    name = "brotli",
+    url = "https://api.github.com/repos/google/brotli/tarball/v1.1.0",
+    strip_prefix = "google-brotli-ed738e8",
+    type = "tgz",
+    sha256 = "10973f4b4199eafa1d5735ef661ddb2ec2f97319ee9fd1824d4aabe08cff5265",
+)
+
+http_archive(
+    name = "ada-url",
+    url = "https://github.com/ada-url/ada/releases/download/v3.3.0/singleheader.zip",
+    sha256 = "127994be3ce79a0416fd5bcdbb4b10cee84839c4ec8251e9c52aa8e6c6e16762",
+    build_file = "//:build/BUILD.ada-url",
+)
