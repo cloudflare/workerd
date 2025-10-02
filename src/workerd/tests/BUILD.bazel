@@ -141,6 +141,7 @@ kj_test(
         "//fuzzilli:worker.js",
         "//src/workerd/server:workerd",
     ],
+    tags = ["requires-fuzzilli"],
     deps = [
         ":libreprl",
         "@bazel_tools//tools/cpp/runfiles",

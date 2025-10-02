@@ -74,9 +74,9 @@ KJ_TEST("REPRL basic functionality") {
   const char* env[] = {"LLVM_SYMBOLIZER=/usr/bin/llvm-symbolizer-19", nullptr};
 
   // Use Runfiles API to get absolute paths
-  std::string workerd_path = runfiles->Rlocation("_main/src/workerd/server/workerd");
+  std::string workerd_path = runfiles->Rlocation("workerd/src/workerd/server/workerd");
   // Use config.capnp which has a socket (needed to trigger fetch() which calls Stdin.reprl())
-  std::string config_path = runfiles->Rlocation("_main/fuzzilli/config.capnp");
+  std::string config_path = runfiles->Rlocation("workerd/fuzzilli/config.capnp");
 
   const char* args[] = {
     workerd_path.c_str(), "fuzzilli", config_path.c_str(), "--experimental", nullptr};

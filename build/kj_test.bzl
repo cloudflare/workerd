@@ -55,6 +55,7 @@ def kj_test(
         srcs = ["//build/fixtures:kj_test.sh"],
         data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
+        tags = tags,
     )
     sh_test(
         name = test_name + "@all-autogates-enabled",
@@ -63,4 +64,5 @@ def kj_test(
         srcs = ["//build/fixtures:kj_test.sh"],
         data = [cross_alias] + data,
         args = ["$(location " + cross_alias + ")"],
+        tags = tags,
     )

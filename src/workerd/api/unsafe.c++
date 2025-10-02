@@ -203,4 +203,11 @@ jsg::Promise<void> UnsafeModule::abortAllDurableObjects(jsg::Lock& js) {
   return js.resolvedPromise();
 }
 
+#ifdef WORKERD_FUZZILLI
+void Fuzzilli::fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args) {
+  // Delegate to the fuzzilli_handler in fuzzilli.c++
+  fuzzilli_handler(js, args);
+}
+#endif
+
 }  // namespace workerd::api

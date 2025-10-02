@@ -31,6 +31,7 @@ export default {
   },
 
   async test(request, env, ctx) {
+    // fuzzilli is already globally available when compiled with WORKERD_FUZZILLI
     // Expose bindings
     //globalThis.CONSUMER_FETCH = env.CONSUMER.fetch;
 

@@ -12,6 +12,7 @@
 #include "performance.h"
 #ifdef WORKERD_FUZZILLI
 #include "fuzzilli.h"
+#include "unsafe.h"
 #endif
 
 #include <workerd/io/io-timers.h>
@@ -543,7 +544,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::JsString atob(jsg::Lock& js, kj::String data);
 
   void queueMicrotask(jsg::Lock& js, jsg::Function<void()> task);
+
+#ifdef WORKERD_FUZZILLI
   void fuzzilli(jsg::Lock& js, jsg::Arguments<jsg::Value> args);
+#endif
 
   struct StructuredCloneOptions {
     jsg::Optional<kj::Array<jsg::JsRef<jsg::JsValue>>> transfer;
@@ -645,10 +649,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_METHOD(fetch);
 
-#ifdef WORKERD_FUZZILLI
-    JSG_METHOD(fuzzilli);
-#endif
-
     // Unlike regular interface attributes, which Web IDL requires us to
     // implement as prototype properties, the global scope is special --
     // interface attributes defined on the global scope must be implemented as
@@ -675,6 +675,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_LAZY_INSTANCE_PROPERTY(performance, getPerformance);
     JSG_LAZY_INSTANCE_PROPERTY(Cloudflare, getCloudflare);
     JSG_READONLY_INSTANCE_PROPERTY(origin, getOrigin);
+
+#ifdef WORKERD_FUZZILLI
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(fuzzilli);
+    }
+#endif
 
     JSG_NESTED_TYPE(Event);
     JSG_NESTED_TYPE(ExtendableEvent);

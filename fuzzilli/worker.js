@@ -7,8 +7,6 @@ import { default as util } from "node:util";
 
 export default {
   async test() {
-    {
-      Stdin.reprl();
-    }
-  } 
+    Stdin.reprl();
+  }
 };
