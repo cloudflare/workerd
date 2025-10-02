@@ -1,5 +1,5 @@
---- a/BUILD.build
-+++ b/BUILD.build
+--- a/BUILD.bazel
++++ b/BUILD.bazel
 @@ -4517,7 +4517,7 @@
      copts = ["-Wno-implicit-fallthrough"],
      icu_deps = [
