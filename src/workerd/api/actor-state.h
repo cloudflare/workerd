@@ -9,6 +9,7 @@
 
 #include <workerd/api/actor.h>
 #include <workerd/api/container.h>
+#include <workerd/api/events.h>
 #include <workerd/io/actor-cache.h>
 #include <workerd/io/actor-id.h>
 #include <workerd/io/compatibility-date.capnp.h>
@@ -572,6 +573,8 @@ class DurableObjectState: public jsg::Object {
 
   void waitUntil(kj::Promise<void> promise);
 
+  void addEventListener(kj::String type, jsg::Function<void(jsg::Ref<Event>)> handler);
+
   jsg::JsValue getExports(jsg::Lock& js) {
     return exports.getHandle(js);
   }
@@ -656,6 +659,7 @@ class DurableObjectState: public jsg::Object {
 
   JSG_RESOURCE_TYPE(DurableObjectState, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
+    JSG_METHOD(addEventListener);
     if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
@@ -692,6 +696,7 @@ class DurableObjectState: public jsg::Object {
         readonly exports: Cloudflare.Exports;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
+        addEventListener(type: "unload", handler: (event: Event) => void): void;
         blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
       });
     } else {
@@ -700,6 +705,7 @@ class DurableObjectState: public jsg::Object {
         readonly props: Props;
         readonly id: DurableObjectId;
         readonly storage: DurableObjectStorage;
+        addEventListener(type: "unload", handler: (event: Event) => void): void;
         blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
       });
     }

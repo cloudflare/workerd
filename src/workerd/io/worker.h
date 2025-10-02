@@ -40,6 +40,7 @@ WD_STRONG_BOOL(ProcessStdioPrefixed);
 namespace api {
 class DurableObjectState;
 class DurableObjectStorage;
+class Event;
 class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
@@ -968,6 +969,9 @@ class Worker::Actor final: public kj::Refcounted {
   // Get the HibernationManager which should be used for all activity in this Actor. Returns null if
   // setHibernationManager() hasn't been called yet.
   kj::Maybe<HibernationManager&> getHibernationManager();
+
+  // Add an unload listener for DurableObjectState
+  void addUnloadListener(jsg::Function<void(jsg::Ref<api::Event>)> handler);
 
   // Set the HibernationManager for this actor. This is called once, on the first call to
   // `acceptWebSocket`.

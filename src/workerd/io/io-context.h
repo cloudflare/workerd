@@ -49,6 +49,10 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 
 class IoContext;
 
+namespace api {
+class Event;
+}  // namespace api
+
 // A WarningAggregator is a helper utility for deduplicating related warning messages.
 // It is a ref-counted object that is initially acquired from the IoContext, but is
 // capable of outliving the IoContext. When destroyed, if there are any pending warnings,
@@ -960,6 +964,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void pumpMessageLoop();
 
+  // Add unload event listener to be executed when IoContext is destroyed
+  void addUnloadListener(jsg::Function<void(jsg::Ref<api::Event>)> handler);
+
  private:
   ThreadContext& thread;
 
@@ -1001,6 +1008,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Maybe<kj::Promise<void>> abortFromHangTask;
 
   WarningAggregator::Map warningAggregatorMap;
+
+  // Unload event listeners to be executed when IoContext is destroyed
+  kj::Vector<jsg::Function<void(jsg::Ref<api::Event>)>> unloadListeners;
 
   // Objects pointed to by IoOwn<T>s.
   // NOTE: This must live below `deleteQueue`, as some of these OwnedObjects may own attachctx()'ed

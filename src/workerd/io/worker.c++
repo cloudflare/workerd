@@ -5,6 +5,7 @@
 #include "actor-cache.h"
 
 #include <workerd/api/actor-state.h>
+#include <workerd/api/events.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
@@ -3410,6 +3411,9 @@ struct Worker::Actor::Impl {
       >
       classInstance;
 
+  // Unload event listeners for DurableObjectState
+  kj::Vector<jsg::Function<void(jsg::Ref<api::Event>)>> unloadListeners;
+
   class HooksImpl: public InputGate::Hooks, public OutputGate::Hooks, public ActorCache::Hooks {
    public:
     HooksImpl(kj::Own<Loopback> loopback, TimerChannel& timerChannel, ActorObserver& metrics)
@@ -3637,6 +3641,11 @@ Worker::Actor::Actor(const Worker& worker,
   }
 }
 
+Worker::Actor::~Actor() noexcept(false) {
+  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
+  // to our thread, or is a handle that can be dropped outside of the lock.
+}
+
 void Worker::Actor::ensureConstructed(IoContext& context) {
   KJ_IF_SOME(info, impl->classInstance.tryGet<ActorClassInfo*>()) {
     // IMPORTANT: We need to set the state to "Initializing" synchronously, before
@@ -3723,11 +3732,6 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
   }
 }
 
-Worker::Actor::~Actor() noexcept(false) {
-  // Note: We do not need an isolate lock to destroy the actor impl. Everything in it is specific
-  // to our thread, or is a handle that can be dropped outside of the lock.
-}
-
 void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&> error) {
   // We're officially canceling all background work and we're going to destruct the Actor as soon
   // as all IoContexts that reference it go out of scope. We might still log additional
@@ -3736,6 +3740,25 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   // capability server should have triggered this (potentially indirectly) via its destructor.
   KJ_IF_SOME(r, impl->ioContext) {
     impl->metrics->shutdown(reasonCode, r.get()->getLimitEnforcer());
+
+    // Dispatch unload events for DurableObjectState if any were attached
+    if (!impl->unloadListeners.empty()) {
+      worker->runInLockScope(
+          Worker::Lock::TakeSynchronously(kj::none), [&](Worker::Lock& workerLock) {
+        JSG_WITHIN_CONTEXT_SCOPE(workerLock, workerLock.getContext(), [&](jsg::Lock& js) {
+          SuppressIoContextScope suppressIo;
+          auto unloadEvent = jsg::alloc<api::Event>("unload");
+          for (auto& listener: impl->unloadListeners) {
+            try {
+              listener(workerLock, unloadEvent.addRef());
+            } catch (...) {
+              // Dispose handler errors remain unhandled.
+              KJ_LOG(INFO, "Actor unload listener threw exception");
+            }
+          }
+        });
+      });
+    }
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.
@@ -4048,6 +4071,10 @@ jsg::JsValue Worker::Actor::getEnv(jsg::Lock& js) {
 kj::Maybe<Worker::Actor::HibernationManager&> Worker::Actor::getHibernationManager() {
   return impl->hibernationManager.map(
       [](kj::Own<HibernationManager>& hib) -> HibernationManager& { return *hib; });
+}
+
+void Worker::Actor::addUnloadListener(jsg::Function<void(jsg::Ref<api::Event>)> handler) {
+  impl->unloadListeners.add(kj::mv(handler));
 }
 
 void Worker::Actor::setHibernationManager(kj::Own<HibernationManager> hib) {

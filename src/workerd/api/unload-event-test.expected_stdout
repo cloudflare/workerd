@@ -1,0 +1,11 @@
+actor ok
+ACTOR UNLOAD FIRED
+ACTOR TEST UNLOAD FIRED
+Fetching
+Fetch
+Fetched
+FETCH UNLOAD FIRED
+Test end
+UNLOAD TEST UNLOAD FIRED
+worker:674: Uncaught Error: handler error
+UNLOAD TEST UNLOAD FIRED 2
