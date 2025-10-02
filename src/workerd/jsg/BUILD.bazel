@@ -6,16 +6,6 @@ load("//:build/wd_cc_library.bzl", "wd_cc_library")
 
 exports_files(["modules.capnp"])
 
-cc_library(
-    name = "workerd-v8",
-    defines = ["WORKERD_ICU_DATA_EMBED"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "@v8//:v8_icu",
-        "@workerd//:icudata-embed",
-    ],
-)
-
 wd_cc_library(
     name = "jsg",
     srcs = [],
@@ -31,11 +21,11 @@ wd_cc_library(
         ":jsg-core",
         ":memory-tracker",
         ":url",
-        ":workerd-v8",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -54,12 +44,12 @@ wd_cc_library(
         ":exception",
         ":jsg-core",
         ":memory-tracker",
-        ":workerd-v8",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
         "@simdutf",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -71,8 +61,8 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":jsg-core",
-        ":workerd-v8",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -130,7 +120,6 @@ wd_cc_library(
         ":modules_capnp",
         ":observer",
         ":url",
-        ":workerd-v8",
         "//src/workerd/util",
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
@@ -139,6 +128,7 @@ wd_cc_library(
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@ssl",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -153,8 +143,8 @@ wd_cc_library(
     local_defines = ["JSG_IMPLEMENTATION"],
     visibility = ["//visibility:public"],
     deps = [
-        ":workerd-v8",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -171,9 +161,9 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":jsg-core",
-        ":workerd-v8",
         "@capnp-cpp//src/kj",
         "@simdutf",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -183,8 +173,8 @@ wd_cc_library(
     hdrs = ["memory.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":workerd-v8",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -193,8 +183,8 @@ wd_cc_library(
     hdrs = ["meta.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":workerd-v8",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -284,9 +274,9 @@ wd_cc_library(
     hdrs = ["observer.h"],
     visibility = ["//visibility:public"],
     deps = [
-        ":workerd-v8",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
