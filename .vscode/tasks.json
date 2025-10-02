@@ -268,8 +268,8 @@
     },
     {
       "label": "Format all",
-      "command": "python3",
-      "args": ["${workspaceFolder}/tools/cross/format.py"],
+      "command": "bazel",
+      "args": ["run", "format"],
       "group": "build",
       "problemMatcher": [],
       "presentation": {

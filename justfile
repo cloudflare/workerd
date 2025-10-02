@@ -70,8 +70,7 @@ new-wpt-test test_name:
 
   echo >> src/wpt/BUILD.bazel
   echo 'wpt_test(name = "{{test_name}}", config = "{{test_name}}-test.ts", wpt_directory = "@wpt//:{{test_name}}@module")' >> src/wpt/BUILD.bazel
-
-  ./tools/cross/format.py
+  bazel run format
   bazel test //src/wpt:{{test_name}} --test_env=GEN_TEST_CONFIG=1 --test_output=streamed
 
 format: rustfmt
