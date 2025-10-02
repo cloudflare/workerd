@@ -1,0 +1,15 @@
+# For use with perfetto, see https://github.com/google/perfetto/blob/main/bazel/standalone/README.md
+local_path_override(
+    module_name = "perfetto_cfg",
+    path = "build/perfetto",
+)
+
+bazel_dep(name = "perfetto", version = "0.0.0")
+
+archive_override(
+    module_name = "perfetto",
+    patches = ["//:patches/perfetto/MODULE.bazel.patch"],
+    integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
+    strip_prefix = "perfetto-51.2",
+    url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
+)
