@@ -29,17 +29,18 @@ fi
 grep -vE "\[ PASS \]|\[ FAIL \]|\[ TEST \]" "$ACTUAL_STDERR" > "$FILTERED_STDERR" || true
 
 # Compare stderr with expected output FIRST
-echo "Comparing stderr..."
 if [[ -f "$EXPECTED_STDERR" ]]; then
+    echo "Comparing stderr..."
     EXPECTED_STDERR_CONTENT=$(tr -d '\r' < "$EXPECTED_STDERR")
-else
-    EXPECTED_STDERR_CONTENT=""
-fi
-
-if ! diff -u <(echo -n "$EXPECTED_STDERR_CONTENT") <(tr -d '\r' < "$FILTERED_STDERR"); then
-    echo "FAIL: stderr does not match expected output"
-    echo "Actual stdout was:"
-    cat "$ACTUAL_STDOUT"
+    if ! diff -u <(echo "$EXPECTED_STDERR_CONTENT") <(tr -d '\r' < "$FILTERED_STDERR") 2>/dev/null; then
+        echo "FAIL: stderr does not match expected output"
+        echo "STDOUT:"
+        cat "$ACTUAL_STDOUT"
+        exit 1
+    fi
+elif [[ -s "$FILTERED_STDERR" ]]; then
+    echo "Unexpected STDERR:"
+    cat "$FILTERED_STDERR"
     exit 1
 fi
 
