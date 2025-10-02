@@ -14,8 +14,7 @@ const unitTests :Workerd.Config = (
           (
             name = "tracingTest",
             wrapped = (
-              moduleName = "cloudflare-internal:test-tracing-wrapper",
-              innerBindings = [],
+              moduleName = "cloudflare-internal:test-tracing-wrapper"
             )
           )
         ],
