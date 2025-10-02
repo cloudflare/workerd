@@ -1,11 +1,12 @@
+import { defineConfig } from "eslint/config";
 import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 /**
- * @returns {import('typescript-eslint').ConfigArray}
+ * @returns {import('eslint/config').Config}
  */
 export function baseConfig() {
-  return tseslint.config(
+  return defineConfig([
     eslint.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
     {
@@ -74,5 +75,5 @@ export function baseConfig() {
         '@typescript-eslint/explicit-function-return-type': 'off',
       },
     },
-  )
+  ]);
 }
