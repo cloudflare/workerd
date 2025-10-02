@@ -23,11 +23,6 @@ load("@//build/deps:v8.bzl", "deps_v8")
 
 deps_v8()
 
-bind(
-    name = "icu",
-    actual = "@com_googlesource_chromium_icu//:icu",
-)
-
 # Tell workerd code where to find v8.
 #
 # We indirect through `@workerd-v8` to allow dependents to override how and where `v8` is built.
