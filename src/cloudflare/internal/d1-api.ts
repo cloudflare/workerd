@@ -199,11 +199,12 @@ class D1DatabaseSession {
     return withSpan('d1_batch', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'batch');
-      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute(
-        'cloudflare.d1.query.statements.count',
-        statements.length
+        'db.query.text',
+        statements.map((s: D1PreparedStatement) => s.statement).join('\n')
       );
+      span.setAttribute('db.operation.batch.size', statements.length);
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
         this.getBookmark() ?? undefined
@@ -417,8 +418,8 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       // may be incorrect, especially with indented multiline strings.
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'exec');
+      span.setAttribute('db.query.text', query.trim());
       span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute('cloudflare.d1.query.statement', query.trim());
 
       const lines = query.trim().split('\n');
       const _exec = await this._send('/execute', lines, [], 'NONE');
@@ -593,8 +594,8 @@ class D1PreparedStatement {
     return withSpan('d1_first', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'first');
+      span.setAttribute('db.query.text', this.statement);
       span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
         this.dbSession.getBookmark() ?? undefined
@@ -685,8 +686,8 @@ class D1PreparedStatement {
     return withSpan('d1_run', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'run');
+      span.setAttribute('db.query.text', this.statement);
       span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
         this.dbSession.getBookmark() ?? undefined
@@ -761,8 +762,8 @@ class D1PreparedStatement {
       try {
         span.setAttribute('db.system.name', 'cloudflare-d1');
         span.setAttribute('db.operation.name', 'all');
+        span.setAttribute('db.query.text', this.statement);
         span.setAttribute('cloudflare.binding.type', 'D1');
-        span.setAttribute('cloudflare.d1.query.statement', this.statement);
         span.setAttribute(
           'cloudflare.d1.query.bookmark',
           this.dbSession.getBookmark() ?? undefined
@@ -836,8 +837,8 @@ class D1PreparedStatement {
     return withSpan('d1_raw', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'raw');
+      span.setAttribute('db.query.text', this.statement);
       span.setAttribute('cloudflare.binding.type', 'D1');
-      span.setAttribute('cloudflare.d1.query.statement', this.statement);
       span.setAttribute(
         'cloudflare.d1.query.bookmark',
         this.dbSession.getBookmark() ?? undefined
