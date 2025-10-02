@@ -214,7 +214,7 @@ class D1DatabaseSession {
           'ROWS_AND_COLUMNS'
         )) as D1UpstreamSuccess<T>[];
 
-        let aggregatedMeta: D1Meta = {
+        const aggregatedMeta: D1Meta = {
           duration: 0,
           size_after: 0,
           rows_read: 0,
