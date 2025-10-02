@@ -448,6 +448,7 @@ wd_test(
     data = [
         "kv-instrumentation-test.js",
         "kv-test.js",
+        "//src/cloudflare/internal/test:instrumentation-test-helper.js",
     ],
 )
 

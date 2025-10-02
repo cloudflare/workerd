@@ -3,11 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
 
-// tailStream is going to be invoked multiple times, but we want to wait
-// to run the test until all executions are done. Collect promises for
-// each
-let invocationPromises = [];
-let spans = new Map();
+// Images test uses a different keying strategy (traceId-based)
+// So we need a custom collector
+const invocationPromises = [];
+const spans = new Map();
 
 export default {
   tailStream(event, env, ctx) {
@@ -68,8 +67,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------310253009656403672722808',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
         closed: true,
@@ -80,8 +77,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------721037829633019043454026',
         'http.response.status_code': 200n,
         'http.response.body.size': 57n,
         closed: true,
@@ -92,8 +87,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------953568754209602608781375',
         'http.response.status_code': 200n,
         'http.response.body.size': 491605n,
         closed: true,
@@ -104,8 +97,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------440652620341578841384574',
         'http.response.status_code': 200n,
         'http.response.body.size': 655465n,
         closed: true,
@@ -116,8 +107,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------134462238417857686794018',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
         closed: true,
@@ -128,8 +117,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------451520024689691544877699',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
         closed: true,
@@ -163,8 +150,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------549443388595697638206735',
         'http.response.status_code': 200n,
         'http.response.body.size': 359n,
         closed: true,
@@ -175,8 +160,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------827110864910850091668521',
         'http.response.status_code': 200n,
         'http.response.body.size': 102n,
         closed: true,
@@ -187,8 +170,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------663260270205734226709932',
         'http.response.status_code': 409n,
         'http.response.body.size': 22n,
         closed: true,
@@ -199,8 +180,6 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------302484619284257147072706',
         'http.response.status_code': 200n,
         'http.response.body.size': 88n,
         closed: true,
@@ -211,20 +190,36 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.request.header.content-type':
-          'multipart/form-data; boundary=--------------------------775478735866429733305436',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
         closed: true,
       },
     ];
 
+    // Validate and normalize content-type headers (they contain dynamic boundaries)
     for (const each of received) {
-      delete each['http.request.header.content-type'];
+      const contentType = each['http.request.header.content-type'];
+      if (contentType) {
+        // Verify it starts with the expected prefix
+        assert.ok(
+          contentType.startsWith('multipart/form-data; boundary='),
+          `Expected multipart/form-data content-type, got: ${contentType}`
+        );
+        // Normalize to a standard value for comparison
+        each['http.request.header.content-type'] =
+          'multipart/form-data; boundary=<dynamic>';
+      }
     }
 
+    // Add normalized content-type to expected spans
     for (const each of expected) {
-      delete each['http.request.header.content-type'];
+      if (
+        each.name === 'fetch' &&
+        each['url.full'] === 'https://js.images.cloudflare.com/transform'
+      ) {
+        each['http.request.header.content-type'] =
+          'multipart/form-data; boundary=<dynamic>';
+      }
     }
 
     assert.deepStrictEqual(received, expected);
