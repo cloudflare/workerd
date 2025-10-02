@@ -401,6 +401,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // True if this is the IoContext for the current thread (same as `hasCurrent() && tcx == current()`).
   bool isCurrent();
 
+  // Check if a current request is available. Used to provide better diagnostics when this is
+  // unexpectedly absent when reporting a user span.
+  // TODO(cleanup): This is a hack, remove after addressing the underlying issue.
+  bool hasCurrentIncomingRequest() {
+    return !incomingRequests.empty();
+  }
+
   // Like requireCurrent() but throws a JS error if this IoContext is not the current.
   void requireCurrentOrThrowJs();
 
