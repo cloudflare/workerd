@@ -44,9 +44,15 @@ elif [[ -s "$FILTERED_STDERR" ]]; then
     exit 1
 fi
 
+# Normalize line numbers in output (e.g. worker:456: -> worker:***:)
+normalize_line_numbers() {
+    sed -E 's/(worker:)[0-9]+:/\1***:/g' "$1"
+}
+
 # Compare stdout with expected output (normalize line endings for cross-platform compatibility)
 echo "Comparing stdout..."
-if ! diff -u <(tr -d '\r' < "$EXPECTED_STDOUT") <(tr -d '\r' < "$ACTUAL_STDOUT"); then
+if ! diff -u <(normalize_line_numbers "$EXPECTED_STDOUT" | tr -d '\r') \
+             <(normalize_line_numbers "$ACTUAL_STDOUT" | tr -d '\r'); then
     echo "FAIL: stdout does not match expected output"
     exit 1
 fi
