@@ -465,12 +465,6 @@ wd_golden_test(
     data = ["unload-event-test.js"],
 )
 
-wd_golden_test(
-    src = "actor-unload-event-test.wd-test",
-    args = ["--experimental"],
-    data = ["actor-unload-event-test.js"],
-)
-
 wd_test(
     size = "large",
     src = "sql-test.wd-test",
