@@ -172,11 +172,15 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   // available. If the given worker stage is only tailed by a streaming tail worker, adding the log
   // to the buffered trace object is not needed; this will be addressed in a future refactor.
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    // If message is too big on its own, truncate it.
-    writer->report(context,
-        {(tracing::Log(timestamp, logLevel,
-            kj::str(message.first(kj::min(message.size(), MAX_TRACE_BYTES)))))},
-        timestamp);
+    // If message is too big on its own, send error message instead of truncating
+    if (message.size() > MAX_TRACE_BYTES) {
+      writer->report(context,
+          {(tracing::Log(timestamp, logLevel,
+              kj::str("[\"Log message too large: ", message.size(), " bytes\"]")))},
+          timestamp);
+    } else {
+      writer->report(context, {(tracing::Log(timestamp, logLevel, kj::str(message)))}, timestamp);
+    }
   }
 
   if (trace->exceededLogLimit) {
