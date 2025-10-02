@@ -592,8 +592,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
   kj::Promise<void> report(ReportContext reportContext) override {
-    IoContext& ioContext = KJ_REQUIRE_NONNULL(
-        weakIoContext->tryGet(), "The destination object for this tail session no longer exists.");
+    IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
+        "The destination object for this tail session no longer exists.", doneReceiving);
 
     ioContext.getLimitEnforcer().topUpActor();
 
@@ -648,6 +648,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       }
       // We still fulfill this fulfiller to disarm the cancellation check below
       fulfiller.fulfill();
+      doneReceiving = true;
       doneFulfiller->reject(kj::mv(e));
     });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
@@ -694,6 +695,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
                                "not export a tailStream() handler.");
       results.setStop(true);
+      doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
@@ -761,19 +763,22 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         // And finally, we'll stop the stream since the tail worker did not return
         // a handler for us to continue with.
         results->get().setStop(true);
+        doneReceiving = true;
         doneFulfiller->fulfill();
       }),
               ioContext.addFunctor(
-                  [results = sharedResults.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+                  [&, results = sharedResults.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
         // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
         // the exception later.
         results->get().setStop(true);
+        doneReceiving = true;
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
                                "not return a valid tailStream() handler.");
       results.setStop(true);
+      doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
     }
@@ -812,6 +817,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       if (event.event.is<tracing::Outcome>()) {
         finishing = true;
         results.setStop(true);
+        doneReceiving = true;
         // We set doFulfill to indicate that the outcome event has been received via RPC and no more
         // events are expected.
         doFulfill = true;
@@ -855,7 +861,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     }
 
     KJ_IF_SOME(p, promise) {
-      // When doFulfill applies the last promise refers to the outcome event. In that case the chain
+      // When doFulfill is set, the last promise refers to the outcome event. In that case the chain
       // of promises provides all remaining events to the user tail handler, so we should fulfill
       // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
       // the stream and has done all its work, that the stream self-evidently did not get canceled
@@ -864,7 +870,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
       // identifier for them.
       if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) { doneFulfiller->fulfill(); });
+        p = p.then(js, [&](jsg::Lock& js) {
+          doneReceiving = true;
+          doneFulfiller->fulfill();
+        });
       }
       return ioContext.awaitJs(js, kj::mv(p));
     }
@@ -882,6 +891,10 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // The maybeHandler will be empty until we receive and process the
   // onset event.
   kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+
+  // Indicates that we told (or should have told) the client that we want no further events, used
+  // to debug events arriving when the IoContext is no longer valid.
+  bool doneReceiving = false;
 };
 }  // namespace
 
