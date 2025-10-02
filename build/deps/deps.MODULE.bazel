@@ -125,3 +125,10 @@ http_archive(
     strip_prefix = "dragonbox-6c7c925b571d54486b9ffae8d9d18a822801cbda",
     url = "https://github.com/jk-jeon/dragonbox/archive/6c7c925b571d54486b9ffae8d9d18a822801cbda.tar.gz",
 )
+
+http_archive(
+    name = "simdutf",
+    url = "https://github.com/simdutf/simdutf/releases/download/v7.4.0/singleheader.zip",
+    sha256 = "b92e186ff44840edd1350f57e6c75144d912407045a3057450014cf9b2014a83",
+    build_file = "//:build/BUILD.simdutf",
+)
