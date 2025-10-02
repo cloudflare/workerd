@@ -7,7 +7,7 @@ wd_test(
     data = glob(
         ["*.js"],
         exclude = ["d1-api-test-with-sessions.js"],
-    ),
+    ) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
