@@ -106,10 +106,6 @@ void PipelineTracer::addTrace(rpc::Trace::Reader reader) {
   traces.add(kj::refcounted<Trace>(reader));
 }
 
-void PipelineTracer::addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer) {
-  tailStreamWriters.add(kj::mv(writer));
-}
-
 WorkerTracer::WorkerTracer(kj::Rc<PipelineTracer> parentPipeline,
     kj::Own<Trace> trace,
     PipelineLogLevel pipelineLogLevel,
@@ -140,7 +136,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> PipelineTracer::getStageTailStream
   auto tailStreamWriter = KJ_ASSERT_NONNULL(
       tracing::initializeTailStreamWriter(traceWorkers.releaseAsArray(), waitUntilTasks));
   auto writerRef = kj::addRef(*tailStreamWriter);
-  addTailStreamWriter(kj::mv(tailStreamWriter));
+  tailStreamWriters.add(kj::mv(tailStreamWriter));
   return writerRef;
 };
 

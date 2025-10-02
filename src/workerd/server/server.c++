@@ -2167,14 +2167,14 @@ class Server::WorkerService final: public Service,
     if (legacyTailWorkers.size() > 0 || streamingTailWorkers.size() > 0) {
       // Setting up legacy tail workers support, but only if we actually have tail workers
       // configured.
-      auto tracer = kj::rc<PipelineTracer>();
+      PipelineTracer::GetTracerCallback callback =
+          [tails = kj::mv(streamingTailWorkers)]() mutable -> kj::Array<kj::Own<WorkerInterface>> {
+        return tails.releaseAsArray();
+      };
+      auto tracer = kj::rc<PipelineTracer>(kj::none, kj::mv(callback));
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
-      auto tailStreamWriter = tracing::initializeTailStreamWriter(
-          streamingTailWorkers.releaseAsArray(), waitUntilTasks);
-      KJ_IF_SOME(t, tailStreamWriter) {
-        tracer->addTailStreamWriter(kj::addRef(*t));
-      }
+      auto tailStreamWriter = tracer->getStageTailStreamWriter(waitUntilTasks);
       workerTracer = tracer->makeWorkerTracer(PipelineLogLevel::FULL, executionModel,
           kj::none /* scriptId */, kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, nullptr /* scriptTags */,

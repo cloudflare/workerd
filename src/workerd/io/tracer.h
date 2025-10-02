@@ -84,8 +84,6 @@ class PipelineTracer final: public kj::Refcounted {
   // tracer for a subordinate stage to add its collected traces to the parent pipeline.
   void addTracesFromChild(kj::ArrayPtr<kj::Own<Trace>> traces);
 
-  void addTailStreamWriter(kj::Own<tracing::TailStreamWriter>&& writer);
-
   // Constructs a tail stream writer to be used with a worker stage and adds it to the tracer. Only
   // used internally.
   kj::Maybe<kj::Own<tracing::TailStreamWriter>> getStageTailStreamWriter(
