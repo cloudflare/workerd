@@ -197,6 +197,9 @@ class D1DatabaseSession {
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
     return withSpan('d1_batch', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'batch');
+      span.setAttribute('cloudflare.binding.type', 'D1');
       span.setAttribute(
         'cloudflare.d1.query.statements.count',
         statements.length
