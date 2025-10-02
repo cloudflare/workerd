@@ -967,6 +967,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void pumpMessageLoop();
 
+  // Unload event listener to be executed when IoContext is destroyed
+  kj::Maybe<jsg::Function<void()>> onUnload;
+
  private:
   ThreadContext& thread;
 

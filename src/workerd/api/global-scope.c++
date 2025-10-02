@@ -94,6 +94,15 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   js.terminateExecutionNow();
 }
 
+jsg::Optional<jsg::Function<void()>> ExecutionContext::getOnUnload(jsg::Lock& js) {
+  return IoContext::current().onUnload.map(
+      [&](jsg::Function<void()>& handler) { return handler.addRef(js); });
+}
+
+void ExecutionContext::setOnUnload(jsg::Function<void()> handler) {
+  IoContext::current().onUnload.emplace(kj::mv(handler));
+}
+
 namespace {
 template <typename T>
 jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {
