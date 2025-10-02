@@ -20,8 +20,6 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Enable wrapping DO SQL KV put multiple in a transaction, fully rolling back if some put fails
-  SQL_KV_PUT_MULTIPLE_TRANSACTION,
   NumOfKeys  // Reserved for iteration.
 };
 
