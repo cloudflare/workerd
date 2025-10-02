@@ -2,9 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
-import {
-  createInstrumentationState,
-} from 'instrumentation-test-helper';
+import { createInstrumentationState } from 'instrumentation-test-helper';
 
 // KV test uses a custom tail stream handler and test implementation because:
 // 1. It uses a different span key format: "invocationId + spanId" (without separator)
