@@ -465,7 +465,29 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
   // missing topLevelInvocationSpanContext right after).
   if (weakIoContext != kj::none) {
     auto& weakIoCtx = KJ_ASSERT_NONNULL(weakIoContext);
-    weakIoCtx->runIfAlive([&span](IoContext& context) { span.endTime = context.now(); });
+    weakIoCtx->runIfAlive([this, &span](IoContext& context) {
+      if (context.hasCurrentIncomingRequest()) {
+        span.endTime = context.now();
+      } else {
+        // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
+        // this should not be happening. Still report completeTime as a useful timestamp if
+        // available.
+        bool hasCompleteTime = false;
+        if (completeTime != kj::UNIX_EPOCH) {
+          span.endTime = completeTime;
+          hasCompleteTime = true;
+        } else {
+          span.endTime = span.startTime;
+        }
+        if (isPredictableModeForTest()) {
+          KJ_FAIL_ASSERT(
+              "reported span without current request", span.operationName, hasCompleteTime);
+        } else {
+          KJ_LOG(WARNING, "reported span without current request", span.operationName,
+              hasCompleteTime);
+        }
+      }
+    });
     if (!weakIoCtx->isValid()) {
       // This can happen if we start a customEvent from this event and cancel it after this IoContext
       // gets destroyed. In that case we no longer have an IoContext available and can't get the
