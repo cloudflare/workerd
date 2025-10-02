@@ -8,7 +8,7 @@ const python :Workerd.Worker = (
     ( name = "SELF", service = "python-sdk" ),
   ],
   compatibilityDate = "2025-09-01",
-  compatibilityFlags = [%PYTHON_FEATURE_FLAGS],
+  compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "service_binding_extra_handlers"],
 );
 
 const server :Workerd.Worker = (

@@ -10,7 +10,7 @@ const unitTests :Workerd.Config = (
         bindings = [ ( name = "KV", kvNamespace = "kv-test" ), ],
         compatibilityDate = "2023-07-24",
         # "experimental" flag is needed to test deleteBulk
-        compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
         streamingTails = ["tail"],
       )
     ),

@@ -8,7 +8,7 @@ const unitTests :Workerd.Config = (
           ( name = "worker", esModule = embed "images-api-test.js" )
         ],
         compatibilityDate = "2024-05-12",
-        compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
         streamingTails = ["tail"],
         bindings = [
           ( name = "images",
