@@ -1,5 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_stdio_snapshot_test.bzl", "wd_stdio_snapshot_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
@@ -245,50 +245,16 @@ wd_test(
     data = ["process-legacy-nodejs-test.js"],
 )
 
-wd_test(
+wd_stdio_snapshot_test(
     src = "process-stdio-nodejs-test.wd-test",
+    args = ["--experimental"],
     data = ["process-stdio-nodejs-test.js"],
 )
 
-wd_test(
+wd_stdio_snapshot_test(
     src = "process-stdio-fs-nodejs-test.wd-test",
+    args = ["--experimental"],
     data = ["process-stdio-fs-nodejs-test.js"],
-)
-
-sh_test(
-    name = "process-stdio-sh-test",
-    srcs = ["test_process_stdio.sh"],
-    args = [
-        "$(location //src/workerd/server:workerd_cross)",
-        "$(location process-stdio-nodejs-test.wd-test)",
-        "$(location process-stdio-nodejs-test.expected_stdout)",
-        "$(location process-stdio-nodejs-test.expected_stderr)",
-    ],
-    data = [
-        "process-stdio-nodejs-test.expected_stderr",
-        "process-stdio-nodejs-test.expected_stdout",
-        "process-stdio-nodejs-test.js",
-        "process-stdio-nodejs-test.wd-test",
-        "//src/workerd/server:workerd_cross",
-    ],
-)
-
-sh_test(
-    name = "process-stdio-fs-sh-test",
-    srcs = ["test_process_stdio.sh"],
-    args = [
-        "$(location //src/workerd/server:workerd_cross)",
-        "$(location process-stdio-fs-nodejs-test.wd-test)",
-        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
-        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
-    ],
-    data = [
-        "process-stdio-fs-nodejs-test.expected_stderr",
-        "process-stdio-fs-nodejs-test.expected_stdout",
-        "process-stdio-fs-nodejs-test.js",
-        "process-stdio-fs-nodejs-test.wd-test",
-        "//src/workerd/server:workerd_cross",
-    ],
 )
 
 wd_test(

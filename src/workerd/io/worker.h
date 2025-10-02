@@ -91,7 +91,7 @@ struct EntrypointClasses {
 // Note: This class should be referred to as "Worker instance" in cases where the bare word
 //   "Worker" is ambiguous. I considered naming the class WorkerInstance, but it feels redundant
 //   for a class name to end in "Instance". ("I have an instance of WorkerInstance...")
-class Worker: public kj::AtomicRefcounted {
+class Worker: public kj::AtomicRefcounted, private kj::TaskSet::ErrorHandler {
  public:
   class Script;
   class Isolate;
@@ -185,6 +185,13 @@ class Worker: public kj::AtomicRefcounted {
 
   inline auto runInLockScope(LockType lockType, auto func) const;
 
+  // Helper for running unload handlers. Acquires an async lock, executes the callback
+  // with SuppressIoContextScope, then clears any queued microtasks.
+  void runInUnloadScope(kj::Function<void(jsg::Lock&)> func) const;
+
+  // Clear any pending unload tasks. Should be called during shutdown before the EventLoop is destroyed.
+  void clearUnloadTasks() const;
+
   class AsyncLock;
 
   // Places this thread into the queue of threads which are interested in locking this isolate,
@@ -231,6 +238,15 @@ class Worker: public kj::AtomicRefcounted {
 
   struct Impl;
   kj::Own<Impl> impl;
+
+  // TaskSet for tracking async unload handlers.
+  mutable kj::TaskSet unloadTasks;
+
+  // Note when tearing down so we don't add unload handlers while teardown is happening.
+  mutable bool tearingDown;
+
+  // TaskSet::ErrorHandler implementation
+  void taskFailed(kj::Exception&& exception) override;
 
   kj::HashMap<kj::String, ConnectFn> connectOverrides;
 
@@ -1000,6 +1016,9 @@ class Worker::Actor final: public kj::Refcounted {
   kj::Promise<WorkerInterface::ScheduleAlarmResult> scheduleAlarm(kj::Date scheduledTime);
 
   kj::Own<Worker::Actor> addRef();
+
+  // Reference to the DurableObjectState for this actor, used to dispatch unload events.
+  kj::Maybe<jsg::Ref<api::DurableObjectState>> durableObjectState;
 
  private:
   kj::Promise<WorkerInterface::ScheduleAlarmResult> handleAlarm(kj::Date scheduledTime);

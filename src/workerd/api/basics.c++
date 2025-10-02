@@ -324,6 +324,11 @@ void EventTarget::addEventListener(jsg::Lock& js,
       }
 
       set.handlers.upsert(kj::mv(eventHandler), [&](auto&&...) {});
+
+      // Notify listener callback if registered
+      KJ_IF_SOME(callback, maybeListenerCallback) {
+        callback(js, type, getHandlerCount(type));
+      }
     });
   }
 }
@@ -348,6 +353,11 @@ void EventTarget::removeEventListener(jsg::Lock& js,
     js.withinHandleScope([&] {
       KJ_IF_SOME(handlerSet, typeMap.find(type)) {
         handlerSet.handlers.eraseMatch(handler);
+
+        // Notify listener callback if registered
+        KJ_IF_SOME(callback, maybeListenerCallback) {
+          callback(js, type, getHandlerCount(type));
+        }
       }
     });
   }

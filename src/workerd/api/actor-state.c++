@@ -1057,7 +1057,14 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
         return js.alloc<Container>(kj::mv(cap), containerRunning);
       })),
       facetManager(facetManager.map(
-          [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })) {}
+          [&](Worker::Actor::FacetManager& ref) { return IoContext::current().addObject(ref); })),
+      weakThis(kj::rc<WeakRef<DurableObjectState>>(kj::Badge<DurableObjectState>(), *this)) {
+  setEventListenerCallback([this](jsg::Lock&, kj::StringPtr name, size_t count) {
+    if (name == "unload") {
+      hasUnloadHandlers = count > 0;
+    }
+  });
+}
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));

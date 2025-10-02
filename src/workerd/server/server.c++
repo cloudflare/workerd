@@ -222,6 +222,9 @@ class Server::Service: public IoChannelFactory::SubrequestChannel {
   // we must clear all the `Own<Service>`s before we can actually destroy the `Service`s.
   virtual void unlink() {}
 
+  // Clear any pending unload tasks. Called before server teardown.
+  virtual void clearUnloadTasks() {}
+
   // Begin an incoming request. Returns a `WorkerInterface` object that will be used for one
   // request then discarded.
   virtual kj::Own<WorkerInterface> startRequest(
@@ -283,6 +286,11 @@ Server::~Server() noexcept {
   // This destructor is explicitly `noexcept` because if one of the `unlink()`s throws then we'd
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
   // whatever, better to crash.
+
+  // Clear unload tasks from all workers to avoid EventLoop errors.
+  for (auto& service: services) {
+    service.value->clearUnloadTasks();
+  }
 
   // It's important to cancel all tasks before we start tearing down.
   tasks.clear();
@@ -1938,8 +1946,9 @@ class Server::WorkerService final: public Service,
   // Call immediately after the constructor to set up `actorNamespaces`. This can't happen during
   // the constructor itself since it sets up cyclic references, which will throw an exception if
   // done during the constructor.
-  void initActorNamespaces(
-      const kj::HashMap<kj::String, ActorConfig>& actorClasses, kj::Network& network) {
+  void initActorNamespaces(const kj::HashMap<kj::String, ActorConfig>& actorClasses,
+      kj::Network& network,
+      kj::Duration actorInactivityTimeout) {
     actorNamespaces.reserve(actorClasses.size());
     for (auto& entry: actorClasses) {
       if (!actorClassEntrypoints.contains(entry.key)) {
@@ -1953,9 +1962,9 @@ class Server::WorkerService final: public Service,
       }
 
       auto actorClass = kj::refcounted<ActorClassImpl>(*this, entry.key, Frankenvalue());
-      auto ns =
-          kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value, threadContext.getUnsafeTimer(),
-              threadContext.getByteStreamFactory(), network, dockerPath, waitUntilTasks);
+      auto ns = kj::heap<ActorNamespace>(kj::mv(actorClass), entry.value,
+          threadContext.getUnsafeTimer(), threadContext.getByteStreamFactory(), network, dockerPath,
+          waitUntilTasks, actorInactivityTimeout);
       actorNamespaces.insert(entry.key, kj::mv(ns));
     }
   }
@@ -2065,8 +2074,12 @@ class Server::WorkerService final: public Service,
     ioChannels = kj::mv(linked);
   }
 
+  void clearUnloadTasks() override {
+    worker->clearUnloadTasks();
+  }
+
   void unlink() override {
-    // Need to remove all waited until tasks before destroying `ioChannels`
+    // Need to remove all tasks before destroying `ioChannels`
     waitUntilTasks.clear();
 
     // Need to tear down all actors before tearing down `ioChannels.actorStorage`.
@@ -2231,14 +2244,16 @@ class Server::WorkerService final: public Service,
         capnp::ByteStreamFactory& byteStreamFactory,
         kj::Network& dockerNetwork,
         kj::Maybe<kj::StringPtr> dockerPath,
-        kj::TaskSet& waitUntilTasks)
+        kj::TaskSet& waitUntilTasks,
+        kj::Duration actorInactivityTimeout)
         : actorClass(kj::mv(actorClass)),
           config(config),
           timer(timer),
           byteStreamFactory(byteStreamFactory),
           dockerNetwork(dockerNetwork),
           dockerPath(dockerPath),
-          waitUntilTasks(waitUntilTasks) {}
+          waitUntilTasks(waitUntilTasks),
+          actorInactivityTimeout(actorInactivityTimeout) {}
 
     // Called at link time to provide needed resources.
     void link(kj::Maybe<const kj::Directory&> serviceActorStorage,
@@ -2678,10 +2693,8 @@ class Server::WorkerService final: public Service,
 
       // Processes the eviction of the Durable Object and hibernates active websockets.
       kj::Promise<void> handleShutdown() {
-        // After 10 seconds of inactivity, we destroy the Worker::Actor and hibernate any active
-        // JS WebSockets.
-        // TODO(someday): We could make this timeout configurable to make testing less burdensome.
-        co_await timer.afterDelay(10 * kj::SECONDS);
+        // After timeout of inactivity, we destroy the Worker::Actor and hibernate any active JS WebSockets.
+        co_await timer.afterDelay(ns.actorInactivityTimeout);
         // Cancel the onBroken promise, since we're about to destroy the actor anyways and don't
         // want to trigger it.
         onBrokenTask = kj::none;
@@ -2897,6 +2910,7 @@ class Server::WorkerService final: public Service,
     kj::Maybe<kj::StringPtr> dockerPath;
     kj::TaskSet& waitUntilTasks;
     kj::Maybe<AlarmScheduler&> alarmScheduler;
+    kj::Duration actorInactivityTimeout;
 
     // Removes actors from `actors` after 70 seconds of last access.
     kj::Promise<void> cleanupLoop() {
@@ -4636,7 +4650,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       kj::mv(errorReporter.defaultEntrypoint), kj::mv(errorReporter.namedEntrypoints),
       kj::mv(errorReporter.actorClasses), kj::mv(linkCallback),
       KJ_BIND_METHOD(*this, abortAllActors), kj::mv(dockerPath), def.isDynamic);
-  result->initActorNamespaces(def.localActorConfigs, network);
+  result->initActorNamespaces(def.localActorConfigs, network, actorInactivityTimeout);
   co_return result;
 }
 
@@ -5153,6 +5167,8 @@ kj::Promise<void> Server::run(
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
   }
 
+  actorInactivityTimeout = config.getActorInactivityTimeout() * kj::MILLISECONDS;
+
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
   invalidConfigServiceSingleton = kj::refcounted<InvalidConfigService>();
@@ -5556,6 +5572,8 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
   }
+
+  actorInactivityTimeout = config.getActorInactivityTimeout() * kj::MILLISECONDS;
 
   kj::HttpHeaderTable::Builder headerTableBuilder;
   globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);

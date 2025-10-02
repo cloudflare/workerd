@@ -970,6 +970,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   void pumpMessageLoop();
 
+  // Weak reference to the ExecutionContext for this request, used to dispatch unload events.
+  kj::Maybe<kj::Rc<workerd::WeakRef<api::ExecutionContext>>> executionContext;
+  // Fast path flag to check if unload handlers exist without needing isolate lock.
+  bool hasUnloadHandlers = false;
+
  private:
   ThreadContext& thread;
 

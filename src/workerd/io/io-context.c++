@@ -4,6 +4,8 @@
 
 #include "io-context.h"
 
+#include <workerd/api/events.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -583,6 +585,17 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  // Dispatch unload event on ExecutionContext if it was attached and still alive.
+  if (hasUnloadHandlers) {
+    KJ_IF_SOME(weakCtx, executionContext) {
+      worker->runInUnloadScope([weakCtx = weakCtx.addRef()](jsg::Lock& js) mutable {
+        weakCtx->runIfAlive([&](api::ExecutionContext& ctx) {
+          ctx.dispatchEvent(js, js.alloc<api::Event>("unload"_kjc));
+        });
+      });
+    }
+  }
+
   if (!canceler.isEmpty()) {
     KJ_IF_SOME(e, abortException) {
       // Assume the abort exception is why we are canceling.

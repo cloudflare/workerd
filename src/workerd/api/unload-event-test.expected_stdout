@@ -1,0 +1,24 @@
+actor ok
+ACTOR UNLOAD FIRED
+ACTOR TEST UNLOAD FIRED
+Storage test: first request complete
+STORAGE UNLOAD HANDLER FIRED
+past ctx is different instance
+Storage test: listener removed and replaced
+REPLACEMENT HANDLER FIRED
+past ctx is different instance
+STORAGE UNLOAD HANDLER FIRED
+Fetching
+Fetch
+Fetched
+FETCH UNLOAD FIRED
+Test end
+UNLOAD TEST UNLOAD FIRED
+Fetch
+past worker ctx is different instance
+FETCH UNLOAD FIRED
+Worker test: first request complete
+Fetch
+past worker ctx is different instance
+FETCH UNLOAD FIRED
+Worker test: verified each request gets new ctx

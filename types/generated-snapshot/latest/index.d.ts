@@ -474,7 +474,7 @@ declare const Cloudflare: Cloudflare;
 declare const origin: string;
 declare const navigator: Navigator;
 interface TestController {}
-interface ExecutionContext<Props = unknown> {
+interface ExecutionContext<Props = unknown> extends EventTarget {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
   readonly exports: Cloudflare.Exports;
@@ -625,7 +625,7 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
 interface DurableObjectClass<
   _T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {}
-interface DurableObjectState<Props = unknown> {
+interface DurableObjectState<Props = unknown> extends EventTarget {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;

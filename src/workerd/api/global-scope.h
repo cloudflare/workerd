@@ -186,14 +186,34 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-class ExecutionContext: public jsg::Object {
+class ExecutionContext: public EventTarget {
  public:
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports)
-      : exports(js, exports),
-        props(js, js.obj()) {}
+      : weakThis(kj::rc<workerd::WeakRef<ExecutionContext>>(kj::Badge<ExecutionContext>(), *this)),
+        exports(js, exports),
+        props(js, js.obj()) {
+    setEventListenerCallback([](jsg::Lock&, kj::StringPtr name, size_t count) {
+      if (name == "unload") {
+        if (IoContext::hasCurrent()) {
+          IoContext::current().hasUnloadHandlers = count > 0;
+        }
+      }
+    });
+  }
   ExecutionContext(jsg::Lock& js, jsg::JsValue exports, jsg::JsValue props)
-      : exports(js, exports),
-        props(js, props) {}
+      : weakThis(kj::rc<workerd::WeakRef<ExecutionContext>>(kj::Badge<ExecutionContext>(), *this)),
+        exports(js, exports),
+        props(js, props) {
+    setEventListenerCallback([](jsg::Lock&, kj::StringPtr name, size_t count) {
+      if (name == "unload") {
+        if (IoContext::hasCurrent()) {
+          IoContext::current().hasUnloadHandlers = count > 0;
+        }
+      }
+    });
+  }
+
+  static jsg::Ref<ExecutionContext> constructor() = delete;
 
   void waitUntil(kj::Promise<void> promise);
   void passThroughOnException();
@@ -211,6 +231,7 @@ class ExecutionContext: public jsg::Object {
   }
 
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
+    JSG_INHERIT(EventTarget);
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
     if (flags.getEnableCtxExports()) {
@@ -247,6 +268,8 @@ class ExecutionContext: public jsg::Object {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("props", props);
   }
+
+  mutable kj::Rc<workerd::WeakRef<ExecutionContext>> weakThis;
 
  private:
   jsg::JsRef<jsg::JsValue> exports;
