@@ -40,15 +40,7 @@ export function withSpan<T>(
     const result = fn(span);
 
     // Handle async results - ensure span ends after completion
-    // Check if result is thenable (Promise or Promise-like)
-    if (
-      result &&
-      (typeof result === 'object' || typeof result === 'function') &&
-      'then' in result &&
-      typeof (result as Record<string, unknown>).then === 'function'
-    ) {
-      // Convert to real Promise to ensure we have .finally()
-      // This handles both real Promises and thenables
+    if (result instanceof Promise) {
       return Promise.resolve(result).finally(() => {
         span.end();
       }) as T;
@@ -58,8 +50,9 @@ export function withSpan<T>(
     span.end();
     return result;
   } catch (error) {
-    // Always end span on error
-    // span.end() is idempotent/safe to call on no-op spans
+    // We'll have to special-case this in the tail worker.
+    // TODO: Expose a way of updating status
+    span.setAttribute('cloudflare.status', 'error');
     span.end();
     throw error;
   }
