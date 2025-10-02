@@ -7,6 +7,16 @@ export class TestActor extends DurableObject {
     ctx.addEventListener('unload', () => {
       console.log('ACTOR UNLOAD FIRED');
     });
+    ctx.addEventListener('unload', () => {
+      let p = new Promise((resolve) => setTimeout(resolve));
+      p.then(() => {
+        throw new Error('unexpected io');
+      });
+      throw new Error('actor unload error');
+    });
+    ctx.addEventListener('unload', () => {
+      console.log('ACTOR UNLOAD 2 FIRED');
+    });
   }
   async fetch() {
     return new Response('actor ok');

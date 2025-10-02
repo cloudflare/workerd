@@ -3751,10 +3751,7 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
           for (auto& listener: impl->unloadListeners) {
             try {
               listener(workerLock, unloadEvent.addRef());
-            } catch (...) {
-              // Dispose handler errors remain unhandled.
-              KJ_LOG(INFO, "Actor unload listener threw exception");
-            }
+            } catch (...) {}
           }
         });
       });
