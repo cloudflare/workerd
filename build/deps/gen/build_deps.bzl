@@ -14,4 +14,3 @@ def deps_gen():
     dep_cargo_bazel_macos_x64()
     dep_cargo_bazel_macos_arm64()
     dep_cargo_bazel_win_x64()
-

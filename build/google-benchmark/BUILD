@@ -1,16 +1,16 @@
+package(default_visibility = ["//visibility:public"])
+
 cc_library(
     name = "benchmark",
-    deps = [ "@codspeed//google_benchmark:benchmark" ],
-    visibility = ["//visibility:public"],
+    deps = ["@codspeed//google_benchmark:benchmark"],
 )
 
 cc_library(
     name = "benchmark_main",
-    deps = [ "@codspeed//google_benchmark:benchmark_main" ],
-    visibility = ["//visibility:public"],
+    deps = ["@codspeed//google_benchmark:benchmark_main"],
 )
 
 alias(
-  name = "codspeed_mode",
-  actual = "@codspeed//core:codspeed_mode",
+    name = "codspeed_mode",
+    actual = "@codspeed//core:codspeed_mode",
 )
