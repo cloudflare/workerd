@@ -493,14 +493,18 @@ KJ_TEST("Gzip-encoding sink") {
   auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
 
   // The data shuld be gzip-compressed.
+  static const kj::byte check[] = {31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 43, 206, 207, 77, 85, 72, 73,
+    44, 73, 84, 40, 201, 87, 72, 175, 202, 44, 0, 0, 40, 58, 113, 128, 17, 0, 0, 0};
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     co_await sink->write("some data to gzip"_kjb);
     co_await sink->end();
-  });
 
-  static const kj::byte check[] = {31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 43, 206, 207, 77, 85, 72, 73,
-    44, 73, 84, 40, 201, 87, 72, 175, 202, 44, 0, 0, 40, 58, 113, 128, 17, 0, 0, 0};
+    auto mem = newMemoryInputStream(inner.data);
+    kj::GzipAsyncInputStream gunzip(*mem);
+    auto data = co_await gunzip.readAllText(kj::maxValue);
+    KJ_ASSERT(data == "some data to gzip"_kj);
+  });
 
   KJ_ASSERT(inner.data == kj::arrayPtr(check, sizeof(check)));
 }

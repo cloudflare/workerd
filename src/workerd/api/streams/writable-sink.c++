@@ -88,7 +88,7 @@ class WritableStreamSinkImpl: public WritableStreamSink {
         // Instead, we just drop it, signaling EOF. Eventually, it might get
         // an end method, at which point we should use that instead.
         try {
-          co_await canceler.wrap(flush(*open));
+          co_await canceler.wrap(endImpl(*open));
           setClosed();
           co_return;
         } catch (...) {
@@ -137,7 +137,7 @@ class WritableStreamSinkImpl: public WritableStreamSink {
     co_await output.write(pieces);
   }
 
-  virtual kj::Promise<void> flush(kj::AsyncOutputStream& output) {
+  virtual kj::Promise<void> endImpl(kj::AsyncOutputStream& output) {
     // When using the default implementation, we assume IDENTITY encoding.
     KJ_ASSERT(encoding == rpc::StreamEncoding::IDENTITY);
     if (auto endable = dynamic_cast<EndableAsyncOutputStream*>(&output)) {
@@ -200,7 +200,7 @@ class EncodedAsyncOutputStream final: public WritableStreamSinkImpl {
     co_await output.write(pieces);
   }
 
-  kj::Promise<void> flush(kj::AsyncOutputStream& output) override {
+  kj::Promise<void> endImpl(kj::AsyncOutputStream& output) override {
     if (auto gzip = dynamic_cast<kj::GzipAsyncOutputStream*>(&output)) {
       co_await gzip->end();
     } else if (auto br = dynamic_cast<kj::BrotliAsyncOutputStream*>(&output)) {
