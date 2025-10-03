@@ -618,7 +618,10 @@ export const utilInspect = {
         util.inspect(a, true),
         "[ 'foo', <1 empty item>, 'baz', [length]: 3 ]"
       );
-      assert.strictEqual(util.inspect(new Array(5)), '[ <5 empty items> ]');
+      assert.strictEqual(
+        util.inspect(Array.from({ length: 5 })),
+        '[ <5 empty items> ]'
+      );
       a[3] = 'bar';
       a[100] = 'qux';
       assert.strictEqual(
@@ -1147,7 +1150,7 @@ export const utilInspect = {
         assert.strictEqual(countLines(withoutColor), countLines(withColor));
       }
 
-      const bigArray = new Array(100).fill().map((value, index) => index);
+      const bigArray = Array.from({ length: 100 }, (_value, index) => index);
 
       testLines([1, 2, 3, 4, 5, 6, 7]);
       testLines(bigArray);
@@ -1632,7 +1635,7 @@ export const utilInspect = {
     // Do not backport to v5/v4 unless all of
     // https://github.com/nodejs/node/pull/6334 is backported.
     {
-      const x = new Array(101).fill();
+      const x = Array.from({ length: 101 });
       assert(util.inspect(x).endsWith('1 more item\n]'));
       assert(
         !util.inspect(x, { maxArrayLength: 101 }).endsWith('1 more item\n]')
@@ -1648,7 +1651,7 @@ export const utilInspect = {
     }
 
     {
-      const x = Array(101);
+      const x = Array.from({ length: 101 });
       assert.strictEqual(
         util.inspect(x, { maxArrayLength: 0 }),
         '[ ... 101 more items ]'
@@ -1695,7 +1698,7 @@ export const utilInspect = {
 
     // util.inspect.defaultOptions tests.
     {
-      const arr = new Array(101).fill();
+      const arr = Array.from({ length: 101 });
       const obj = { a: { a: { a: { a: 1 } } } };
 
       const oldOptions = { ...util.inspect.defaultOptions };
@@ -2799,14 +2802,17 @@ export const utilInspect = {
         },
         b: [1, 2, [1, 2, { a: 1, b: 2, c: 3 }]],
         c: ['foo', 4, 444444],
-        d: Array.from({ length: 101 }).map((e, i) => {
+        d: Array.from({ length: 101 }, (_e, i) => {
           return i % 2 === 0 ? i * i : i;
         }),
-        e: Array(6).fill('foobar'),
-        f: Array(9).fill('foobar'),
-        g: Array(21).fill('foobar baz'),
-        h: [100].concat(Array.from({ length: 9 }).map((e, n) => n)),
-        long: Array(9).fill('This text is too long for grouping!'),
+        e: Array.from({ length: 6 }, () => 'foobar'),
+        f: Array.from({ length: 9 }, () => 'foobar'),
+        g: Array.from({ length: 21 }, () => 'foobar baz'),
+        h: [100].concat(Array.from({ length: 9 }, (_e, n) => n)),
+        long: Array.from(
+          { length: 9 },
+          () => 'This text is too long for grouping!'
+        ),
       };
 
       let out = util.inspect(obj, { compact: 3, depth: 10, breakLength: 60 });
@@ -2971,7 +2977,7 @@ export const utilInspect = {
             },
           },
         },
-        b: Array.from({ length: 9 }).map((e, n) => {
+        b: Array.from({ length: 9 }, (e, n) => {
           return n % 2 === 0 ? 'foobar' : 'baz';
         }),
       };
@@ -2999,7 +3005,7 @@ export const utilInspect = {
 
       assert.strictEqual(out, expected);
 
-      obj = Array.from({ length: 60 }).map((e, i) => i);
+      obj = Array.from({ length: 60 }, (_e, i) => i);
       out = util.inspect(obj, {
         compact: 1,
         breakLength: Infinity,
@@ -3424,7 +3430,10 @@ export const utilInspect = {
 
     {
       // Test for when breakLength results in a single column.
-      const obj = Array(9).fill('fhqwhgadshgnsdhjsdbkhsdabkfabkveybvf');
+      const obj = Array.from(
+        { length: 9 },
+        () => 'fhqwhgadshgnsdhjsdbkhsdabkfabkveybvf'
+      );
       assert.strictEqual(
         util.inspect(obj, { breakLength: 256 }),
         '[\n' +

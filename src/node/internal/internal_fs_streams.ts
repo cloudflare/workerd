@@ -972,15 +972,12 @@ function writevImpl(
   data: WriteVChunk[],
   callback: ErrorOnlyCallback
 ) {
-  const len = data.length;
-  const chunks = new Array(len);
   let size = 0;
-
-  for (let i = 0; i < len; i++) {
+  const chunks = Array.from({ length: data.length }, (_el, i) => {
     const chunk = (data[i] as any).chunk;
-    chunks[i] = chunk;
     size += chunk.length;
-  }
+    return chunk;
+  });
 
   this[kIsPerformingIO] = true;
   writevAll.call(this, chunks, size, this.pos, (er: unknown) => {

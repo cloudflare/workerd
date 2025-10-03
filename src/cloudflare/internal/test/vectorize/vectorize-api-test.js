@@ -20,11 +20,14 @@ export const test_vector_search_vector_query = {
     const IDX = env['vector-search'];
     {
       // with returnValues = true, returnMetadata = "indexed"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 3,
-        returnValues: true,
-        returnMetadata: 'indexed',
-      });
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 3,
+          returnValues: true,
+          returnMetadata: 'indexed',
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {
@@ -98,10 +101,13 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = false ("none")
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 3,
-        returnMetadata: false,
-      });
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 3,
+          returnMetadata: false,
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {
@@ -126,10 +132,13 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = true ("all")
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 3,
-        returnMetadata: true,
-      });
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 3,
+          returnMetadata: true,
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {
@@ -161,9 +170,12 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none)
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 3,
-      });
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 3,
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {
@@ -188,12 +200,15 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 1,
-        filter: {
-          text: { $eq: 'Peter Piper picked a peck of pickled peppers' },
-        },
-      });
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 1,
+          filter: {
+            text: { $eq: 'Peter Piper picked a peck of pickled peppers' },
+          },
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {
@@ -210,17 +225,20 @@ export const test_vector_search_vector_query = {
 
     {
       // with returnValues = unset (false), returnMetadata = unset (none), filter = "Peter Piper picked a peck of pickled peppers"
-      const results = await IDX.query(new Float32Array(new Array(5).fill(0)), {
-        topK: 1,
-        filter: {
-          text: {
-            $in: [
-              'Peter Piper picked a peck of pickled peppers',
-              'She sells seashells by the seashore',
-            ],
+      const results = await IDX.query(
+        new Float32Array(Array.from({ length: 5 }, () => 0)),
+        {
+          topK: 1,
+          filter: {
+            text: {
+              $in: [
+                'Peter Piper picked a peck of pickled peppers',
+                'She sells seashells by the seashore',
+              ],
+            },
           },
-        },
-      });
+        }
+      );
       assert.equal(true, results.count > 0);
       /** @type {VectorizeMatches}  */
       const expected = {

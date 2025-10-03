@@ -1786,9 +1786,7 @@ function parseIPv4(ip: string): FourNumbers | undefined {
   const parts = ip.split('.');
   if (parts.length !== 4) return undefined;
 
-  const nums: FourNumbers = Array.from({ length: parts.length }).fill(
-    0
-  ) as FourNumbers;
+  const nums = Array.from({ length: parts.length }, () => 0) as FourNumbers;
 
   for (let n = 0; n < parts.length; n++) {
     const part = parts[n];
@@ -1830,7 +1828,7 @@ function parseIPv6(ip: string): EightNumbers | undefined {
       const left = parts[0]?.split(':') ?? [];
       const right = parts[1]?.split(':') ?? [];
       const missing = 8 - left.length - right.length;
-      const middle = Array.from({ length: missing }).fill('0');
+      const middle = Array.from({ length: missing }, () => '0');
       expanded = [...left, ...middle, ...right].join(':');
     }
   }
@@ -1838,7 +1836,7 @@ function parseIPv6(ip: string): EightNumbers | undefined {
   const parts = expanded.split(':');
   if (parts.length !== 8) return undefined;
 
-  const nums: EightNumbers = parts.map((p) => {
+  const nums = parts.map((p) => {
     const num = parseInt(p || '0', 16);
     return num >= 0 && num <= 0xffff ? num : -1;
   }) as EightNumbers;
