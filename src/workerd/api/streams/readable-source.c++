@@ -7,6 +7,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/string-buffer.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/async-io.h>
 #include <kj/compat/brotli.h>
@@ -48,49 +49,15 @@ class AllReader final {
 
   template <typename T>
   kj::Promise<kj::Array<T>> read(ReadOption option = ReadOption::NONE) {
-    // There are a few complexities in this operation that make it difficult to completely
-    // optimize. The most important is that even if a stream reports an expected length
-    // using tryGetLength, we really don't know how much data the stream will produce until
-    // we try to read it. The only signal we have that the stream is done producing data
-    // is a zero-length result from tryRead. Unfortunately, we have to allocate a buffer
-    // in advance of calling tryRead so we have to guess a bit at the size of the buffer
-    // to allocate.
-    //
-    // In the previous implementation of this method, we would just blindly allocate a
-    // 4096 byte buffer on every allocation, limiting each read iteration to a maximum
-    // of 4096 bytes. This works fine for streams producing a small amount of data but
-    // risks requiring a greater number of loop iterations and small allocations for streams
-    // that produce larger amounts of data. Also in the previous implementation, every
-    // loop iteration would allocate a new buffer regardless of how much of the previous
-    // allocation was actually used -- so a stream that produces only 4000 bytes total
-    // but only provides 10 bytes per iteration would end up with 400 reads and 400 4096
-    // byte allocations. Doh! Fortunately our stream implementations tend to be a bit
-    // smarter than that but it's still a worst case possibility that it's likely better
-    // to avoid.
-    //
-    // So this implementation does things a bit differently.
-    // First, we check to see if the stream can give an estimate on how much data it
-    // expects to produce. If that length is within a given threshold, then best case
-    // is we can perform the entire read with at most two allocations and two calls to
-    // tryRead. The first allocation will be for the entire expected size of the stream,
-    // which the first tryRead will attempt to fulfill completely. In the best case the
-    // stream provides all of the data. The next allocation would be smaller and would
-    // end up resulting in a zero-length read signaling that we are done. Hooray!
-    //
-    // Not everything can be best case scenario tho, unfortunately. If our first tryRead
-    // does not fully consume the stream or fully fill the destination buffer, we're
-    // going to need to try again. It is possible that the new allocation in the next
-    // iteration will be wasted if the stream doesn't have any more data so it's important
-    // for us to try to be conservative with the allocation. If the running total of data
-    // we've seen so far is equal to or greater than the expected total length of the stream,
-    // then the most likely case is that the next read will be zero-length -- but unfortunately
-    // we can't know for sure! So for this we will fall back to a more conservative allocation
-    // which is either 4096 bytes or the calculated amountToRead, whichever is the lower number.
-
+    // Read in chunks and accumulate them. Use an exponential growth strategy
+    // to determine chunk sizes to minimize the number of iterations and
+    // allocations on large streams.
     kj::Vector<kj::Array<T>> parts;
     size_t runningTotal = 0;
+    // TODO(later): Make these configurable someday?
     static constexpr size_t MIN_BUFFER_CHUNK = 1024;
     static constexpr size_t DEFAULT_BUFFER_CHUNK = 4096;
+    // TODO(later): Consider increasing MAX_BUFFER_CHUNK, maybe up to 1 MB?
     static constexpr size_t MAX_BUFFER_CHUNK = DEFAULT_BUFFER_CHUNK * 4;
 
     // If we know in advance how much data we'll be reading, then we can attempt to optimize the
@@ -98,60 +65,34 @@ class AllReader final {
     // to be safe, let's enforce an upper bound on each allocation even if we do know the total.
     kj::Maybe<size_t> maybeLength = input.tryGetLength(rpc::StreamEncoding::IDENTITY);
 
-    // The amountToRead is the regular allocation size we'll use right up until we've read the
-    // number of expected bytes (if known). This number is calculated as the minimum of (limit,
-    // MAX_BUFFER_CHUNK, maybeLength or DEFAULT_BUFFER_CHUNK). In the best case scenario, this
-    // number is calculated such that we can read the entire stream in one go if the amount of
-    // data is small enough and the stream is well behaved.
-    //
-    // If the stream does report a length, once we've read that number of bytes, we'll
-    // fallback to the more conservative allocation.
-    size_t amountToRead =
-        kj::min(limit, kj::min(MAX_BUFFER_CHUNK, maybeLength.orDefault(DEFAULT_BUFFER_CHUNK)));
+    size_t amountToRead;
+    KJ_IF_SOME(length, maybeLength) {
+      if (length <= MAX_BUFFER_CHUNK) {
+        amountToRead = kj::min(limit, length);
+      } else {
+        amountToRead = DEFAULT_BUFFER_CHUNK;
+      }
+    } else {
+      amountToRead = MIN_BUFFER_CHUNK;
+    }
 
-    // amountToRead can be zero if the stream reported a zero-length. While the stream could
-    // be lying about its length, let's skip reading anything in this case.
     if (amountToRead != 0) {
       while (true) {
         auto bytes = kj::heapArray<T>(amountToRead);
-        // Note that we're passing amountToRead as the *minBytes* here so the tryRead should
-        // attempt to fill the entire buffer. If it doesn't, the implication is that we read
-        // everything.
-        size_t amount = co_await input.read(bytes.asBytes(), amountToRead);
-        KJ_DASSERT(amount <= amountToRead);
-
+        size_t amount = co_await input.read(bytes.asBytes(), bytes.size());
+        KJ_DASSERT(amount <= bytes.size());
         runningTotal += amount;
-        JSG_REQUIRE(runningTotal < limit, TypeError, "Memory limit exceeded before EOF.");
+        JSG_REQUIRE(runningTotal <= limit, TypeError, "Memory limit exceeded before EOF.");
 
-        if (amount < amountToRead) {
-          // The stream has indicated that we're all done by returning a value less than the
-          // full buffer length.
-          // It is possible/likely that at least some amount of data was written to the buffer.
-          // In which case we want to add that subset to the parts list here before we exit
-          // the loop.
+        if (amount == bytes.size()) {
+          parts.add(kj::mv(bytes));
+          // Adjust the next allocation size -- double it up to a maximum
+          amountToRead = kj::min(amountToRead * 2, kj::min(MAX_BUFFER_CHUNK, limit - runningTotal));
+        } else {
           if (amount > 0) {
             parts.add(bytes.first(amount).attach(kj::mv(bytes)));
           }
           break;
-        }
-
-        // Because we specify minSize equal to maxSize in the tryRead above, we should only
-        // get here if the buffer was completely filled by the read. If it wasn't completely
-        // filled, that is an indication that the stream is complete which is handled above.
-        KJ_DASSERT(amount == bytes.size());
-        parts.add(kj::mv(bytes));
-
-        // If the stream provided an expected length and our running total is equal to or
-        // greater than that length then we'll adjust our allocation strategy to be more
-        // conservative since the next read is likely (hopefully) going to be zero-length.
-        // Worst case, the stream is lying about its length and we have to keep reading.
-        // Best case, the next read is zero-length and we only had to do one additional
-        // small allocation.
-        KJ_IF_SOME(length, maybeLength) {
-          if (runningTotal >= length) {
-            amountToRead = kj::min(MIN_BUFFER_CHUNK, amountToRead);
-            continue;
-          }
         }
       }
     }
@@ -186,6 +127,7 @@ class AllReader final {
 
 // An AsyncInputStream wrapper that translates tee-related kj::Exceptions from read
 // operations into jsg::Exceptions.
+// TODO(later): We might be able to get rid of this and use a KJ exception detail instead.
 class TeeErrorAdapter final: public kj::AsyncInputStream {
  public:
   static kj::Own<kj::AsyncInputStream> wrap(kj::Own<kj::AsyncInputStream> inner) {
@@ -245,14 +187,14 @@ class TeeErrorAdapter final: public kj::AsyncInputStream {
 
 // A kj::AsyncInputStream implementation that delegates to a provided function
 // to produce data on each read.
-class DelegatingInputStream final: public kj::AsyncInputStream {
+class InputStreamFromProducer final: public kj::AsyncInputStream {
  public:
   using Producer = kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)>;
-  DelegatingInputStream(Producer producer, kj::Maybe<uint64_t> expectedLength)
+  InputStreamFromProducer(Producer producer, kj::Maybe<uint64_t> expectedLength)
       : producer(kj::mv(producer)),
         expectedLength(expectedLength) {}
 
-  KJ_DISALLOW_COPY_AND_MOVE(DelegatingInputStream);
+  KJ_DISALLOW_COPY_AND_MOVE(InputStreamFromProducer);
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_IF_SOME(p, producer) {
@@ -305,47 +247,87 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
     canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "stream was dropped"));
   }
 
-  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
-    KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
-    co_return co_await canceler.wrap(readImpl(buffer, minBytes, {.identityEncoding = true}));
+  kj::Promise<size_t> readInner(
+      kj::Own<kj::AsyncInputStream>& inner, kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) {
+    try {
+      auto& stream = setStream(ensureIdentityEncoding(kj::mv(inner)));
+      minBytes = kj::max(minBytes, 1u);
+      auto amount = co_await readImpl(stream, buffer, minBytes);
+      if (amount < minBytes) {
+        setClosed();
+      }
+      co_return amount;
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      setErrored(kj::cp(exception));
+      kj::throwFatalException(kj::mv(exception));
+    }
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    if (!canceler.isEmpty()) {
-      return kj::Promise<DeferredProxy<void>>(
-          DeferredProxy<void>{KJ_EXCEPTION(FAILED, "jsg.Error: Stream is already being read")});
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
+    KJ_SWITCH_ONEOF(state) {
+      KJ_CASE_ONEOF(errored, kj::Exception) {
+        kj::throwFatalException(kj::cp(errored));
+      }
+      KJ_CASE_ONEOF(_, Closed) {
+        co_return 0;
+      }
+      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncInputStream>) {
+        KJ_REQUIRE(canceler.isEmpty(), "jsg.Error: Stream is already being read");
+        co_return co_await canceler.wrap(readInner(inner, buffer, minBytes));
+        // If the source is dropped while a read is in progress, the canceler will
+        // trigger and abort the read. In such cases, we don't want to wrap this
+        // await in a try catch because it isn't safe to continue using the stream
+        // as it may no longer exist.
+      }
     }
+    KJ_UNREACHABLE;
+  }
+
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, EndAfterPump end = EndAfterPump::YES) override {
+    // By default, we assume the pump is eligible for deferred proxying.
+    KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+
+    if (!canceler.isEmpty()) {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: Stream is already being read"));
+    }
+
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncInputStream>) {
+        // Ownership of the underlying inner stream is transferred to the pump operation,
+        // where it will be either fully consumed or errored out. In either case, this
+        // ReadableSource becomes closed and no longer usable once pumpTo() is called.
+        // Critically... it is important that just because the ReadableSource is closed here
+        // does NOT mean that the underlying stream has been fully consumed.
+        auto stream = kj::mv(inner);
+        setClosed();
+
         if (output.getEncoding() != getEncoding()) {
           // The target encoding is different from our current encoding.
           // Let's ensure that our side is in identity encoding. The destination stream will
           // take care of itself.
-          ensureIdentityEncoding(inner);
+          stream = ensureIdentityEncoding(kj::mv(stream));
         } else {
           // Since the encodings match, we can tell the output stream that it doesn't need to
           // do any of the encoding work since we'll be providing data in the expected encoding.
           KJ_ASSERT(getEncoding() == output.disownEncodingResponsibility());
         }
 
-        // By default, we assume the pump is eligible for deferred proxying.
-        return kj::Promise<DeferredProxy<void>>(
-            DeferredProxy<void>{canceler.wrap(pumpImpl(output, end))});
+        // Note that because we are transferring ownership of the stream to the pump operation,
+        // and the pump itself should not rely on the ReadableStreamSource for any state, it is
+        // safe to drop the ReadableStreamSource once the pump operation begins.
+        co_return co_await pumpImpl(kj::mv(stream), output, end);
       }
       KJ_CASE_ONEOF(closed, Closed) {
         if (end) {
-          return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{
-            .proxyTask = output.end(),
-          });
-        } else {
-          return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{
-            .proxyTask = kj::READY_NOW,
-          });
+          co_await output.end();
         }
+        co_return;
       }
       KJ_CASE_ONEOF(errored, kj::Exception) {
         output.abort(kj::cp(errored));
-        return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{.proxyTask = kj::mv(errored)});
+        throwFatalException(kj::mv(errored));
       }
     }
     KJ_UNREACHABLE;
@@ -397,7 +379,7 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
     setErrored(kj::mv(reason));
   }
 
-  Tee tee(kj::Maybe<size_t> maybeLimit) override {
+  Tee tee(size_t limit) override {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(errored, kj::Exception) {
         return Tee{
@@ -413,12 +395,11 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
       }
       KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncInputStream>) {
         KJ_DEFER(state.init<Closed>());
-        KJ_IF_SOME(tee, tryTee(maybeLimit)) {
+        KJ_IF_SOME(tee, tryTee(limit)) {
           return kj::mv(tee);
         }
 
-        static constexpr size_t kMax = kj::maxValue;
-        auto tee = kj::newTee(kj::mv(stream), maybeLimit.orDefault(kMax));
+        auto tee = kj::newTee(kj::mv(stream), limit);
         return Tee{
           .branch1 = newReadableStreamSource(wrapTeeBranch(kj::mv(tee.branches[0]))),
           .branch2 = newReadableStreamSource(wrapTeeBranch(kj::mv(tee.branches[1]))),
@@ -435,67 +416,19 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
  protected:
   struct Closed {};
 
-  virtual kj::AsyncInputStream& ensureIdentityEncoding(kj::Own<kj::AsyncInputStream>& inner) {
+  // Implementations really should override this to provide encoding support!
+  virtual kj::Own<kj::AsyncInputStream> ensureIdentityEncoding(
+      kj::Own<kj::AsyncInputStream>&& inner) {
     // By default, we always use identity encoding so nothing to do here.
     // It is up to subclasses to override this if they support other encodings.
     KJ_DASSERT(encoding == rpc::StreamEncoding::IDENTITY);
-    return *inner;
+    return kj::mv(inner);
   }
-
-  virtual void prepareRead() {
-    // Do nothing by default.
-  };
 
   // Implementations should override to provide an alternative tee implementation.
   // This will only be called when the state is known to be not closed or errored.
-  virtual kj::Maybe<Tee> tryTee(kj::Maybe<size_t> maybeLimit) {
+  virtual kj::Maybe<Tee> tryTee(size_t limit) {
     return kj::none;
-  }
-
-  // The default non-optimized pumpTo() implementation which initiates a loop
-  // that reads a chunk from the input stream and writes it to the output
-  // stream until EOF is reached. The maximum size of each read is 16384 bytes.
-  // The pump is canceled by dropping the returned.
-  virtual kj::Promise<void> pumpImpl(WritableStreamSink& output, bool end) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
-      }
-      KJ_CASE_ONEOF(_, Closed) {
-        if (end) {
-          co_await output.end();
-        }
-        co_return;
-      }
-      KJ_CASE_ONEOF(_, kj::Own<kj::AsyncInputStream>) {
-        kj::FixedArray<kj::byte, 16384> buffer;
-        static constexpr size_t N = buffer.size();
-        static constexpr size_t kMinBytes = (N >> 2) + (N >> 1);  // 3/4 of N
-        while (true) {
-          // It's most likely that our write below is potentially a write into
-          // a JS-backed stream which requires grabbing the isolate lock.
-          // To minimize the number of times we need to grab the lock, we
-          // want to read as much data as we can here before doing the write.
-          // We obviously need to balance that with not waiting too long
-          // between writes. We'll set our minBytes to 3/4 of the buffer size
-          // to try to strike a balance.
-          auto amount = co_await readImpl(buffer, kMinBytes);
-          // If the amount is less than kMinBytes, we assume we've reached EOF.
-
-          if (amount > 0) {
-            co_await output.write(buffer.asPtr().first(amount));
-          }
-
-          if (amount < kMinBytes) {
-            if (end) {
-              co_await output.end();
-            }
-            co_return;
-          }
-        }
-      }
-    }
-    KJ_UNREACHABLE;
   }
 
   kj::OneOf<kj::Own<kj::AsyncInputStream>, Closed, kj::Exception>& getState() {
@@ -529,40 +462,134 @@ class ReadableStreamSourceImpl: public ReadableStreamSource {
     bool identityEncoding;
   };
 
-  kj::Promise<size_t> readImpl(kj::ArrayPtr<kj::byte> buffer,
-      size_t minBytes,
-      ReadOption option = {.identityEncoding = false}) {
-    KJ_SWITCH_ONEOF(state) {
-      KJ_CASE_ONEOF(errored, kj::Exception) {
-        kj::throwFatalException(kj::cp(errored));
-      }
-      KJ_CASE_ONEOF(_, Closed) {
-        co_return 0;
-      }
-      KJ_CASE_ONEOF(inner, kj::Own<kj::AsyncInputStream>) {
-        KJ_ASSERT(minBytes <= buffer.size());
-        kj::AsyncInputStream& stream =
-            option.identityEncoding ? ensureIdentityEncoding(inner) : *inner;
-        try {
-          // The read() method on AsyncInputStream will throw an exception on short reads.
-          auto amount = co_await stream.tryRead(buffer.begin(), minBytes, buffer.size());
-          if (amount < minBytes) {
-            setClosed();
-          }
-          co_return amount;
-        } catch (...) {
-          auto exception = kj::getCaughtExceptionAsKj();
-          if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-            // Treat disconnect as EOF.
-            setClosed();
-            co_return 0;
-          }
-          setErrored(kj::cp(exception));
-          kj::throwFatalException(kj::mv(exception));
-        }
+  // The default pumpTo() implementation which initiates a loop
+  // that reads a chunk from the input stream and writes it to the output
+  // stream until EOF is reached.
+  // The pump is canceled by dropping the returned promise.
+  static kj::Promise<void> pumpImpl(
+      kj::Own<kj::AsyncInputStream> stream, WritableStreamSink& output, EndAfterPump end) {
+    // These are fairly arbitrary but reasonable buffer size choices.
+    static constexpr size_t DEFAULT_BUFFER_SIZE = 16384;
+    static constexpr size_t MIN_BUFFER_SIZE = 1024;
+    static constexpr size_t MED_BUFFER_SIZE = 65536;
+    static constexpr size_t MAX_BUFFER_SIZE = 131072;
+    static constexpr size_t SMALL_THRESHOLD = 4096;
+    static constexpr size_t MEDIUM_THRESHOLD = 1048576;
+
+    // Determine optimal buffer size based on stream length. If the stream does
+    // not report a length, use the default. The logic here is simple: use larger
+    // buffer sizes for larger streams to reduce the number of read/write iterations.
+    // and smaller buffer sizes for smaller streams to reduce memory usage.
+    // If the size is unknown, we defer to a reasonable default.
+    size_t bufferSize = DEFAULT_BUFFER_SIZE;
+    kj::Maybe<uint64_t> maybeRemaining = stream->tryGetLength();
+    KJ_IF_SOME(length, maybeRemaining) {
+      if (length < SMALL_THRESHOLD) {
+        bufferSize = kj::max(MIN_BUFFER_SIZE, length);
+      } else if (length > DEFAULT_BUFFER_SIZE && length <= MEDIUM_THRESHOLD) {
+        bufferSize = MED_BUFFER_SIZE;
+      } else if (length > MEDIUM_THRESHOLD) {
+        bufferSize = MAX_BUFFER_SIZE;
       }
     }
-    KJ_UNREACHABLE;
+
+    // We use a double-buffering/pipelining strategy here to try to keep both the read
+    // and write operations busy in parallel. While one buffer is being written to the
+    // output, the other buffer is being filled with data from the input stream. It does
+    // mean that we use a bit more memory in the process but should improve throughput on
+    // high-latency streams.
+    int current = 0;
+    KJ_STACK_ARRAY(kj::byte, backing, bufferSize * 2, 4 * MIN_BUFFER_SIZE, 4 * MIN_BUFFER_SIZE);
+    kj::ArrayPtr<kj::byte> buffer[] = {
+      backing.first(bufferSize),
+      backing.slice(bufferSize),
+    };
+
+    // We will use an adaptive minBytes value to try to optimize read sizes based on
+    // observed stream behavior. We start with a minBytes set to half the buffer size.
+    // As the stream is read, we will adjust minBytes up or down depending on whether
+    // the stream is consistently filling the buffer or not.
+    size_t minBytes = bufferSize >> 1;
+
+    auto readPromise = readImpl(*stream, buffer[current], minBytes);
+    size_t iterationCount = 0;
+
+    while (true) {
+      // On each iteration, wait for the read to complete...
+      size_t amount = co_await readPromise;
+      iterationCount++;
+
+      // If we read less than minBytes, assume EOF.
+      if (amount < minBytes) {
+        // If any bytes were read...
+        if (amount > 0) {
+          // Write our final chunk...
+          co_await output.write(buffer[current].first(amount));
+        }
+        // Then break out of the loop.
+        break;
+      }
+
+      // Set the write buffer to the one we just filled.
+      auto writeBuf = buffer[current];
+
+      // Then switch to the other buffer and start the next read.
+      current = 1 - current;
+
+      // Before we perform the next read, let's adapt minBytes based on stream behavior
+      // we have observed on the previous read.
+      if (iterationCount <= 3 || iterationCount % 10 == 0) {
+        if (amount == bufferSize) {
+          // Stream is filling buffer completely... Use smaller minBytes to
+          // increase responsiveness, should produce more reads with less data.
+          minBytes = kj::max(bufferSize >> 2, kj::min(DEFAULT_BUFFER_SIZE, bufferSize >> 1));
+        } else {
+          // Stream is moving slower, increase minBytes to try to get larger chunks.
+          minBytes = (bufferSize >> 2) + (bufferSize >> 1);  // 75%
+        }
+      }
+
+      KJ_IF_SOME(remaining, maybeRemaining) {
+        if (amount > remaining) {
+          // The stream lied about its length. Ignore further length tracking.
+          maybeRemaining = kj::none;
+        } else {
+          // Otherwise, set minBytes to whatever is expected to remain.
+          remaining -= amount;
+          maybeRemaining = remaining;
+          if (remaining < minBytes && remaining > 0) {
+            minBytes = remaining;
+          }
+        }
+      }
+
+      // Start our next read operation.
+      readPromise = readImpl(*stream, buffer[current], minBytes);
+
+      // Write out the chunk we just read in parallel with the next read.
+      // If the write fails, the exception will propagate and cancel the pump,
+      // including the read operation. If the read fails, it will be picked
+      // up at the start of the next loop iteration.
+      co_await output.write(writeBuf.first(amount));
+    }
+
+    if (end) co_await output.end();
+  }
+
+  static kj::Promise<size_t> readImpl(
+      kj::AsyncInputStream& inner, kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
+    KJ_ASSERT(minBytes <= buffer.size());
+    try {
+      // The read() method on AsyncInputStream will throw an exception on short reads.
+      co_return co_await inner.tryRead(buffer.begin(), minBytes, buffer.size());
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+        // Treat disconnects as EOF.
+        co_return 0;
+      }
+      kj::throwFatalException(kj::mv(exception));
+    }
   }
 };
 
@@ -575,16 +602,19 @@ class NoDeferredProxySource final: public ReadableStreamSourceWrapper {
       : ReadableStreamSourceWrapper(kj::mv(inner)),
         ioctx(ioctx) {}
 
-  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
     auto pending = ioctx.registerPendingEvent();
     co_return co_await getInner().read(buffer, minBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(getInner().pumpTo(output, end)));
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, EndAfterPump end = EndAfterPump::YES) override {
+    auto pending = ioctx.registerPendingEvent();
+    return addNoopDeferredProxy(
+        ioctx.waitForDeferredProxy(getInner().pumpTo(output, end)).attach(kj::mv(pending)));
   }
 
-  Tee tee(kj::Maybe<size_t> limit) override {
+  Tee tee(size_t limit) override {
     auto tee = getInner().tee(limit);
     return Tee{
       .branch1 = kj::heap<NoDeferredProxySource>(kj::mv(tee.branch1), ioctx),
@@ -662,7 +692,7 @@ class WarnIfUnusedStream final: public ReadableStreamSourceWrapper {
     }
   }
 
-  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) override {
     wasRead = true;
     return ReadableStreamSourceWrapper::read(buffer, minBytes);
   }
@@ -677,7 +707,8 @@ class WarnIfUnusedStream final: public ReadableStreamSourceWrapper {
     return ReadableStreamSourceWrapper::readAllText(limit);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, EndAfterPump end = EndAfterPump::YES) override {
     wasRead = true;
     return ReadableStreamSourceWrapper::pumpTo(output, end);
   }
@@ -687,7 +718,7 @@ class WarnIfUnusedStream final: public ReadableStreamSourceWrapper {
     return ReadableStreamSourceWrapper::cancel(kj::mv(reason));
   }
 
-  Tee tee(kj::Maybe<size_t> limit) override {
+  Tee tee(size_t limit) override {
     wasRead = true;
     return ReadableStreamSourceWrapper::tee(limit);
   }
@@ -737,13 +768,12 @@ class EncodedAsyncInputStream final: public ReadableStreamSourceImpl {
     }
   }
 
-  kj::Maybe<Tee> tryTee(kj::Maybe<size_t> maybeLimit) override {
+  kj::Maybe<Tee> tryTee(size_t limit) override {
     // Note that if we haven't called read() yet, then the inner stream is still
     // in its original encoding. If read() has been called, however, then the inner
     // stream will be wrapped and will be in identity encoding.
-    static constexpr size_t kMax = kj::maxValue;
     auto& inner = KJ_ASSERT_NONNULL(getState().tryGet<kj::Own<kj::AsyncInputStream>>());
-    auto tee = kj::newTee(kj::mv(inner), maybeLimit.orDefault(kMax));
+    auto tee = kj::newTee(kj::mv(inner), limit);
     return Tee{
       .branch1 =
           kj::heap<EncodedAsyncInputStream>(wrapTeeBranch(kj::mv(tee.branches[0])), getEncoding()),
@@ -752,11 +782,14 @@ class EncodedAsyncInputStream final: public ReadableStreamSourceImpl {
     };
   }
 
-  kj::AsyncInputStream& ensureIdentityEncoding(kj::Own<kj::AsyncInputStream>& inner) override {
+  kj::Own<kj::AsyncInputStream> ensureIdentityEncoding(
+      kj::Own<kj::AsyncInputStream>&& inner) override {
     auto encoding = getEncoding();
-    if (encoding == rpc::StreamEncoding::IDENTITY) return *inner;
+    if (encoding == rpc::StreamEncoding::IDENTITY) {
+      return kj::mv(inner);
+    }
     setEncoding(rpc::StreamEncoding::IDENTITY);
-    return setStream(wrap(encoding, kj::mv(inner)));
+    return wrap(encoding, kj::mv(inner));
   }
 
  private:
@@ -782,24 +815,25 @@ class EncodedAsyncInputStream final: public ReadableStreamSourceImpl {
 kj::Own<ReadableStreamSource> newReadableStreamSourceFromBytes(
     kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> maybeBacking) {
   KJ_IF_SOME(backing, maybeBacking) {
-    auto inner = newMemoryInputStream(bytes);
-    return newReadableStreamSource(inner.attach(kj::mv(backing)));
+    return newReadableStreamSource(newMemoryInputStream(bytes, kj::mv(backing)));
   }
 
   auto backing = kj::heapArray<kj::byte>(bytes);
-  auto inner = newMemoryInputStream(backing.asPtr());
-  return newReadableStreamSource(inner.attach(kj::mv(backing)));
+  auto ptr = backing.asPtr();
+  auto inner = newMemoryInputStream(ptr, kj::heap(kj::mv(backing)));
+  return newReadableStreamSource(kj::mv(inner));
 }
 
-kj::Own<ReadableStreamSource> newReadableStreamSourceWithoutDeferredProxy(
+kj::Own<ReadableStreamSource> newIoContextWrappedReadableStreamSource(
     IoContext& ioctx, kj::Own<ReadableStreamSource> inner) {
   return kj::heap<NoDeferredProxySource>(kj::mv(inner), ioctx);
 }
 
-kj::Own<ReadableStreamSource> newReadableStreamSourceFromDelegate(
+kj::Own<ReadableStreamSource> newReadableStreamSourceFromProducer(
     kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)> producer,
     kj::Maybe<uint64_t> expectedLength) {
-  return newReadableStreamSource(kj::heap<DelegatingInputStream>(kj::mv(producer), expectedLength));
+  return newReadableStreamSource(
+      kj::heap<InputStreamFromProducer>(kj::mv(producer), expectedLength));
 }
 
 kj::Own<ReadableStreamSource> newClosedReadableStreamSource() {

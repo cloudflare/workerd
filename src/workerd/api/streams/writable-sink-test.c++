@@ -13,9 +13,10 @@ namespace workerd::api::streams {
 namespace {
 
 // Mock WritableStreamSink for testing wrapper functionality
-class MockWritableStreamSink: public WritableStreamSink {
+class MockWritableStreamSink final: public WritableStreamSink {
  public:
   MockWritableStreamSink() = default;
+  ~MockWritableStreamSink() = default;
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     writeCallCount++;
@@ -353,10 +354,16 @@ KJ_TEST("newClosedWritableStreamSink (write)") {
   auto sink = newClosedWritableStreamSink();
   kj::byte testData[] = {1, 2, 3};
 
-  fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    // Test write on closed sink
-    co_await sink->write(kj::ArrayPtr<const kj::byte>(testData, 3));
-  });
+  try {
+    fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
+      // Test write on closed sink
+      co_await sink->write(kj::ArrayPtr<const kj::byte>(testData, 3));
+    });
+    KJ_FAIL_REQUIRE("should have failed");
+  } catch (...) {
+    auto ex = kj::getCaughtExceptionAsKj();
+    KJ_ASSERT(ex.getDescription().contains("closed stream"));
+  }
 
   // Should not throw, write should be a no-op
 }
@@ -487,22 +494,29 @@ KJ_TEST("WritableStreamSink encoding responsibility transfer") {
 // Encoding-Aware WritableStreamSink Implementation
 
 KJ_TEST("Gzip-encoding sink") {
-  TestFixture fixture;
+  auto ctx = kj::setupAsyncIo();
+  TestFixture fixture({
+    .waitScope = ctx.waitScope,
+  });
   MemoryAsyncOutputStream inner;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
   auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
 
-  // The data shuld be gzip-compressed.
-
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     co_await sink->write("some data to gzip"_kjb);
     co_await sink->end();
+
+    auto mem = newMemoryInputStream(inner.data);
+    kj::GzipAsyncInputStream gunzip(*mem);
+    auto data = co_await gunzip.readAllText(kj::maxValue);
+    KJ_ASSERT(data == "some data to gzip"_kj);
   });
 
-  static const kj::byte check[] = {31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 43, 206, 207, 77, 85, 72, 73,
-    44, 73, 84, 40, 201, 87, 72, 175, 202, 44, 0, 0, 40, 58, 113, 128, 17, 0, 0, 0};
+  auto memInput = newMemoryInputStream(inner.data);
+  kj::GzipAsyncInputStream gunzip(*memInput);
+  auto decompressed = gunzip.readAllBytes().wait(ctx.waitScope);
 
-  KJ_ASSERT(inner.data == kj::arrayPtr(check, sizeof(check)));
+  KJ_ASSERT(decompressed.asBytes() == "some data to gzip"_kjb);
 }
 
 KJ_TEST("Gzip-encoding sink (identity)") {

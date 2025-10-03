@@ -333,13 +333,13 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // Per the contract of pumpTo, it is the caller's responsibility to ensure
   // that both the WritableStreamSink and this adapter remain alive until
   // the returned promise resolves!
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, EndAfterPump end) override;
 
   // If the stream is still active, tries to get the total length,
   // if known. If the length is not known, the encoding does not
   // match the encoding of the underlying stream, or the stream is closed
   // or errored, returns kj::none.
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+  kj::Maybe<size_t> tryGetLength(StreamEncoding encoding) override;
 
   // Cancels the underlying source if it is still active.
   void cancel(kj::Exception reason) override;
@@ -349,7 +349,7 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
     return StreamEncoding::IDENTITY;
   };
 
-  Tee tee(kj::Maybe<size_t> maybeLimit = kj::none) override;
+  Tee tee(size_t limit) override;
 
   struct ReadContext;
   KJ_DECLARE_NON_POLYMORPHIC(ReadContext);
@@ -363,7 +363,7 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
 
   kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
-  kj::Promise<void> pumpToImpl(WritableStreamSink& output, bool end);
+  kj::Promise<void> pumpToImpl(WritableStreamSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
       jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
 

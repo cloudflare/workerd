@@ -549,11 +549,11 @@ struct ReadableStreamSourceKjAdapter::ReadContext {
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> adapterRef;
 
   void reset() {
+    // Resetting is only allowed if we have the backing buffer.
+    buffer = KJ_ASSERT_NONNULL(backingBuffer);
     totalRead = 0;
     minBytes = 0;
     maybeLeftOver = kj::none;
-    // Resetting is only allowed if we have the backing buffer.
-    buffer = KJ_ASSERT_NONNULL(backingBuffer);
   }
 };
 
@@ -967,7 +967,7 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::read(
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<uint64_t> ReadableStreamSourceKjAdapter::tryGetLength(StreamEncoding encoding) {
+kj::Maybe<size_t> ReadableStreamSourceKjAdapter::tryGetLength(StreamEncoding encoding) {
   KJ_IF_SOME(active, state.tryGet<kj::Own<Active>>()) {
     if (active->state.is<Active::Done>()) {
       // If the previous read indicated that it was the last, then
@@ -980,7 +980,8 @@ kj::Maybe<uint64_t> ReadableStreamSourceKjAdapter::tryGetLength(StreamEncoding e
       state = kj::mv(exception);
       return kj::none;
     }
-    return active->stream->tryGetLength(encoding);
+    return active->stream->tryGetLength(encoding).map(
+        [](uint64_t len) { return static_cast<size_t>(len); });
   }
 
   // The stream is either closed or errored.
@@ -994,7 +995,8 @@ void ReadableStreamSourceKjAdapter::cancel(kj::Exception reason) {
   state = kj::mv(reason);
 }
 
-kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& output, bool end) {
+kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(
+    WritableStreamSink& output, EndAfterPump end) {
   static constexpr size_t kMinRead = 8192;
   static constexpr size_t kMaxRead = 16384;
   kj::FixedArray<kj::byte, kMaxRead> buffer;
@@ -1074,7 +1076,7 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& 
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
-    WritableStreamSink& output, bool end) {
+    WritableStreamSink& output, EndAfterPump end) {
   // The pumpTo operation continually reads from the stream and writes
   // to the output until the stream is closed or an error occurs. While
   // pumping, the adapter is considered active but read() calls will
@@ -1135,7 +1137,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
   KJ_UNREACHABLE;
 }
 
-ReadableStreamSource::Tee ReadableStreamSourceKjAdapter::tee(kj::Maybe<size_t> maybeLimit) {
+ReadableStreamSource::Tee ReadableStreamSourceKjAdapter::tee(size_t) {
   KJ_UNIMPLEMENTED("Teeing a ReadableStreamSourceKjAdapter is not supported.");
   // Explanation: Teeing a ReadableStream must be done under the isolate lock,
   // as does creating a new ReadableStreamSourceKjAdapter. However, when tee()

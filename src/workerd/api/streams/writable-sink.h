@@ -36,8 +36,6 @@ namespace api::streams {
 // canceled.
 class WritableStreamSink {
  public:
-  virtual ~WritableStreamSink() noexcept(false) = default;
-
   // Write the given buffer to the stream, returning a promise that resolves when the write
   // completes.
   virtual kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) KJ_WARN_UNUSED_RESULT = 0;

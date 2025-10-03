@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workerd/io/worker-interface.capnp.h>
+#include <workerd/util/strong-bool.h>
 
 #include <kj/debug.h>
 
@@ -24,24 +25,28 @@ namespace api::streams {
 
 class WritableStreamSink;
 
+WD_STRONG_BOOL(EndAfterPump);
+
 // A ReadableStreamSource is primarily intended to serve as a bridge between kj::AsyncInputStream
 // and the ReadableStream API. However, it can also be used directly by KJ-space code that needs
 // deferred proxying. While ReadableStreamSource should probably have been a more JS-friendly
 // API, it's a bit too late to change that now. Use the ReadableStreamSourceJsAdapter in the
 // readable-source-adapter.h file to wrap a ReadableStreamSource for use from JavaScript.
 //
-// Not all ReadableStreamSource implementations will be explicitly backed by a KJ stream;
-// some might be test implementations that generate data on the fly, for instance.
-//
 // A ReadableStreamSource must be treated like a KJ I/O object. Instances that are held
 // by any JS-heap objects must be held by an IoOwn.
 //
-// If the ReadableStreamSource is canceled or dropped, all pending read() and pumpTo()
-// promises will be canceled.
+// If the ReadableStreamSource is canceled or dropped, all pending read() reads will be
+// canceled.
 //
-// Only one read() or pumpTo() operation may be pending at a time. Attempting to
-// initiate a second read() or pumpTo() while one is already pending will result in
-// a rejected promise.
+// Only one read() may be pending at a time. Attempting to initiate a second read()
+// while one is already pending will result in a rejected promise.
+//
+// Calling pumpTo initiates a sequence of read() calls until the stream is fully consumed.
+// Ownership of the underlying AsyncInputStream is transferred to the pumpTo operation and
+// the ReadableStreamSource is put into a closed state. After calling pumpTo, no further
+// read() calls may be made directly on the ReadableStreamSource. Dropping the returned
+// promise before it resolves will cancel the pump operation.
 //
 // It is **NOT** intended that you should implement this interface for general use.
 // It is only intended to be implemented by specific classes within workerd for the
@@ -53,13 +58,11 @@ class WritableStreamSink;
 // that we implement to.
 class ReadableStreamSource {
  public:
-  virtual ~ReadableStreamSource() noexcept(false) = default;
-
   // Read into the given buffer, returning a promise that resolves to the number of bytes read.
   // The maximum number of bytes that will be read is the size of the buffer. The minimum number
   // of bytes that will be read is minBytes. If at least minBytes cannot be read, the promise
   // will be resolved with the number of bytes read and the stream will be closed.
-  virtual kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) = 0;
+  virtual kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes = 1) = 0;
 
   // If `end` is true, then `output.end()` will be called after pumping. Note that it's especially
   // important to take advantage of this when using deferred proxying since calling `end()`
@@ -74,12 +77,16 @@ class ReadableStreamSource {
   //
   // It is the caller's responsibility to ensure that WritableStreamSink and this
   // ReadableStreamSource remain alive until the wrapped deferred proxy task resolves.
-  virtual kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) = 0;
+  // The default implementation does arrange to make it safe to drop the source once
+  // the pump begins but that's only precautionary/defensive. It's still better/safer
+  // for the caller to keep the source alive until the pump completes.
+  virtual kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, EndAfterPump end = EndAfterPump::YES) = 0;
 
   // If the stream is still active, and the encoding matches an encoding that the stream
   // can provide, gets the total length, if known. If the length is not known, or the
   // encoding does not match the encoding of the underlying stream, or the stream is closed
-  // or errored, or the implementation just doesn't override this method, returns kj::none.
+  // or errored, returns kj::none.
   virtual kj::Maybe<size_t> tryGetLength(rpc::StreamEncoding encoding) = 0;
 
   // Fully consume the stream and return all of its data as a byte array. The limit
@@ -106,7 +113,8 @@ class ReadableStreamSource {
   // Tees the stream into two branches. The returned Tee contains two new ReadableStreamSource
   // instances that will each receive the same data. Once this is called, this instance is no
   // longer usable and will behave as if it has been closed.
-  virtual Tee tee(kj::Maybe<size_t> maybeLimit = kj::none) = 0;
+  // The limit parameter specifies the maximum buffer size to use when teeing.
+  virtual Tee tee(size_t limit) = 0;
 
   // Gets the encoding of the stream.
   virtual rpc::StreamEncoding getEncoding() = 0;
@@ -124,7 +132,8 @@ class ReadableStreamSourceWrapper: public ReadableStreamSource {
     return getInner().read(buffer, minBytes);
   }
 
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
+  kj::Promise<DeferredProxy<void>> pumpTo(
+      WritableStreamSink& output, EndAfterPump end = EndAfterPump::YES) override {
     return getInner().pumpTo(output, end);
   }
 
@@ -136,7 +145,7 @@ class ReadableStreamSourceWrapper: public ReadableStreamSource {
     return getInner().readAllText(limit);
   }
 
-  kj::Maybe<uint64_t> tryGetLength(rpc::StreamEncoding encoding) override {
+  kj::Maybe<size_t> tryGetLength(rpc::StreamEncoding encoding) override {
     return getInner().tryGetLength(encoding);
   }
 
@@ -144,7 +153,7 @@ class ReadableStreamSourceWrapper: public ReadableStreamSource {
     return getInner().cancel(kj::mv(reason));
   }
 
-  Tee tee(kj::Maybe<size_t> limit) override {
+  Tee tee(size_t limit) override {
     return getInner().tee(limit);
   }
 
@@ -187,12 +196,12 @@ kj::Own<ReadableStreamSource> newReadableStreamSourceFromBytes(
     kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
 
 // Creates a ReadableStreamSource that wraps the given source and prevents deferred proxying.
-kj::Own<ReadableStreamSource> newReadableStreamSourceWithoutDeferredProxy(
+kj::Own<ReadableStreamSource> newIoContextWrappedReadableStreamSource(
     IoContext& ioctx, kj::Own<ReadableStreamSource> inner);
 
 // Creates a ReadableStreamSource that calls the given producer function to produce data
 // on each read (useful primarily for testing).
-kj::Own<ReadableStreamSource> newReadableStreamSourceFromDelegate(
+kj::Own<ReadableStreamSource> newReadableStreamSourceFromProducer(
     kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)> producer,
     kj::Maybe<uint64_t> expectedLength = kj::none);
 
