@@ -1,0 +1,7 @@
+"shim to make a cc_library appear as a top-level repository"
+module(name = "workerd-v8")
+bazel_dep(name = "workerd")
+local_path_override(
+  module_name = "workerd",
+  path = "../.."
+)
