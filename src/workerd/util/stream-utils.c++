@@ -8,33 +8,6 @@
 namespace workerd {
 
 namespace {
-class NullIoStream final: public kj::AsyncIoStream {
- public:
-  void shutdownWrite() override {}
-
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return kj::READY_NOW;
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    return kj::READY_NOW;
-  }
-  kj::Promise<void> whenWriteDisconnected() override {
-    return kj::NEVER_DONE;
-  }
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return kj::constPromise<size_t, 0>();
-  }
-
-  kj::Maybe<uint64_t> tryGetLength() override {
-    return kj::Maybe<uint64_t>((uint64_t)0);
-  }
-
-  kj::Promise<uint64_t> pumpTo(AsyncOutputStream& output, uint64_t amount) override {
-    return kj::constPromise<uint64_t, 0>();
-  }
-};
-
 class MemoryInputStream final: public kj::AsyncInputStream {
  public:
   MemoryInputStream(kj::ArrayPtr<const kj::byte> data): data(data) {}
@@ -175,23 +148,27 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
   }
 };
 
+// The kj::NullStream instance is stateless, discards all writes, and returns
+// EOF on all reads. We can, therefore, safely share a single static global
+// instance instead of allocating a new one each time.
+static kj::NullStream nullStream{};
+
 }  // namespace
 
+kj::AsyncOutputStream& getGlobalNullOutputStream() {
+  return nullStream;
+}
+
 kj::Own<kj::AsyncIoStream> newNullIoStream() {
-  return kj::heap<NullIoStream>();
+  return kj::Own<kj::AsyncIoStream>(&nullStream, kj::NullDisposer::instance);
 }
 
 kj::Own<kj::AsyncInputStream> newNullInputStream() {
-  return kj::heap<NullIoStream>();
+  return kj::Own<kj::AsyncInputStream>(&nullStream, kj::NullDisposer::instance);
 }
 
 kj::Own<kj::AsyncOutputStream> newNullOutputStream() {
-  return kj::heap<NullIoStream>();
-}
-
-kj::AsyncOutputStream& getGlobalNullOutputStream() {
-  static NullIoStream globalNullStream;
-  return globalNullStream;
+  return kj::Own<kj::AsyncOutputStream>(&nullStream, kj::NullDisposer::instance);
 }
 
 kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::ArrayPtr<const kj::byte> data) {
