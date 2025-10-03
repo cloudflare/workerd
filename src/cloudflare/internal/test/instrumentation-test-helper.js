@@ -128,8 +128,12 @@ export async function runInstrumentationTest(
   // Log received spans for debugging/updating tests
   if (logReceived) {
     console.log(
-      `Received spans for ${testName}:`,
-      JSON.stringify(received, null, 2)
+      `Received spans for ${testName}:\n`,
+      JSON.stringify(
+        received,
+        (_, v) => (typeof v === 'bigint' ? v.toString() : v),
+        2
+      )
     );
   }
 
