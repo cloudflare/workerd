@@ -475,8 +475,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
-  // TODO(o11y): Check that we are always returning an object here
-  obj.set(js, MESSAGE_STR, jsg::JsValue(js.parseJson(log.message).getHandle(js)));
+  obj.set(js, MESSAGE_STR, js.str(log.message));
   return obj;
 }
 

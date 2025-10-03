@@ -130,7 +130,7 @@ export const test = {
       '{"type":"onset","executionModel":"durableObject","spanId":"0000000000000000","entrypoint":"MyActor","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"log","level":"log","message":["baz"]}{"type":"attributes","info":[{"name":"jsrpc.method","value":"functionProperty"}]}{"type":"return"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
       // Test for transient objects - getCounter returns an object with methods
       // All transient calls happen in a single trace event, with only the entrypoint method reported
-      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":["bar"]}{"type":"log","level":"log","message":["getCounter called"]}{"type":"log","level":"log","message":["increment called on transient"]}{"type":"log","level":"log","message":["getValue called on transient"]}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+      '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"MyService","scriptTags":[],"info":{"type":"jsrpc"}}{"type":"attributes","info":[{"name":"jsrpc.method","value":"getCounter"}]}{"type":"log","level":"log","message":"[\\"bar\\"]"}{"type":"log","level":"log","message":"[\\"getCounter called\\"]"}{"type":"log","level":"log","message":"[\\"increment called on transient\\"]"}{"type":"log","level":"log","message":"[\\"getValue called on transient\\"]"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
     ];
 
     assert.deepStrictEqual(response, expected);
