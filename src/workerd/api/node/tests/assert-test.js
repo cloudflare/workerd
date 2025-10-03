@@ -1010,8 +1010,6 @@ export const mocksAConstructor = {
     }
 
     class MockClazz {
-      #privateValue;
-
       constructor(z) {
         this.z = z;
       }

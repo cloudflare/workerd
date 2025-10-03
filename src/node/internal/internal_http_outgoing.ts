@@ -960,11 +960,6 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   }
 
   // @ts-expect-error TS2611 Property accessor.
-  get writableObjectMode(): boolean {
-    return false;
-  }
-
-  // @ts-expect-error TS2611 Property accessor.
   get errored(): Error | null {
     return this[kErrored];
   }
