@@ -12,13 +12,6 @@ load("@//build/deps:gen/deps.bzl", "deps_gen")
 
 deps_gen()
 
-# ========================================================================================
-# Rust bootstrap
-
-load("//:build/rust_toolchains.bzl", "rust_toolchains")
-
-rust_toolchains()
-
 # Tell workerd code where to find google-benchmark with CodSpeed.
 #
 # We indirect through `@workerd-google-benchmark` to allow dependents to override how and where
