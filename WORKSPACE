@@ -44,7 +44,3 @@ new_local_repository(
     build_file = "@workerd//deps/rust:BUILD.lolhtml",
     path = "empty",
 )
-
-load("//build/deps:dep_pyodide.bzl", "dep_pyodide")
-
-dep_pyodide()
