@@ -1,6 +1,5 @@
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file")
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO", "PYODIDE_VERSIONS", "PYTHON_LOCKFILES")
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
 def _pyodide_core(*, version, sha256, **_kwds):
     # Use @workerd prefix on build_file so we can use this from edgeworker too
@@ -74,16 +73,19 @@ def _snapshot_http_files(
     _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None)
     _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None)
 
+def _impl(mctx):
+    for info in PYODIDE_VERSIONS:
+        _pyodide_core(**info)
 
-for info in PYODIDE_VERSIONS:
-    _pyodide_core(**info)
+    for info in BUNDLE_VERSION_INFO.values():
+        for pkg in info["vendored_packages_for_tests"].values():
+            _py_vendor_test_deps(version = info["name"], **pkg)
 
-for info in BUNDLE_VERSION_INFO.values():
-    for pkg in info["vendored_packages_for_tests"].values():
-        _py_vendor_test_deps(version = info["name"], **pkg)
+    for info in PYTHON_LOCKFILES:
+        _pyodide_packages(**info)
+    for ver in BUNDLE_VERSION_INFO.values():
+        if ver["name"] == "development":
+            continue  # development is a copy of earlier bundle snapshots
+        _snapshot_http_files(**ver)
 
-for info in PYTHON_LOCKFILES:
-    _pyodide_packages(**info)
-
-for ver in BUNDLE_VERSION_INFO.values():
-    _snapshot_http_files(**ver)
+dep_pyodide = module_extension(implementation = _impl)

@@ -37,8 +37,30 @@ git_override(
 # downstream build.
 bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
 
+pyodide = use_extension("//build/deps:dep_pyodide.bzl", "dep_pyodide")
+use_repo(
+    pyodide,
+    "all_pyodide_wheels_20240829.4",
+    "all_pyodide_wheels_20250808",
+    "beautifulsoup4_src_0.26.0a2",
+    "beautifulsoup4_src_0.28.2",
+    "beautifulsoup4_src_development",
+    "fastapi_src_0.26.0a2",
+    "fastapi_src_0.28.2",
+    "fastapi_src_development",
+    "pyodide-0.26.0a2",
+    "pyodide-0.28.2",
+    "pyodide-lock_20240829.4.json",
+    "pyodide-lock_20250808.json",
+    "pyodide-snapshot-baseline-32a2de5f7.bin",
+    "pyodide-snapshot-baseline-d13ce2f4a.bin",
+    "pyodide-snapshot-ew-py-package-snapshot_fastapi-v2.bin",
+    "pyodide-snapshot-ew-py-package-snapshot_numpy-v2.bin",
+    "pyodide-snapshot-package_snapshot_fastapi-a6ccb56fe.bin",
+    "pyodide-snapshot-package_snapshot_numpy-60c9cb28e.bin",
+)
+
 include("//build/deps:deps.MODULE.bazel")
 include("//build/deps:nodejs.MODULE.bazel")
 include("//build/deps:python.MODULE.bazel")
-include("//build/deps:pyodide.MODULE.bazel")
 include("//build/deps:v8.MODULE.bazel")
