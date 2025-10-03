@@ -839,7 +839,7 @@ KJ_TEST("newReadableStreamSourceFromDelegate") {
     return toRead;
   };
 
-  auto source = newReadableStreamSourceFromDelegate(kj::mv(producer), 5);
+  auto source = newReadableStreamSourceFromProducer(kj::mv(producer), 5);
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     kj::FixedArray<kj::byte, 5> buffer;
@@ -874,7 +874,7 @@ KJ_TEST("newReadableStreamSourceFromDelegate (not enough bytes)") {
     return toRead;
   };
 
-  auto source = newReadableStreamSourceFromDelegate(kj::mv(producer), 10);
+  auto source = newReadableStreamSourceFromProducer(kj::mv(producer), 10);
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     kj::FixedArray<kj::byte, 5> buffer;

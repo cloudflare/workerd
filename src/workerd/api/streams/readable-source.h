@@ -187,12 +187,12 @@ kj::Own<ReadableStreamSource> newReadableStreamSourceFromBytes(
     kj::ArrayPtr<const kj::byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none);
 
 // Creates a ReadableStreamSource that wraps the given source and prevents deferred proxying.
-kj::Own<ReadableStreamSource> newReadableStreamSourceWithoutDeferredProxy(
+kj::Own<ReadableStreamSource> newIoContextWrappedReadableStreamSource(
     IoContext& ioctx, kj::Own<ReadableStreamSource> inner);
 
 // Creates a ReadableStreamSource that calls the given producer function to produce data
 // on each read (useful primarily for testing).
-kj::Own<ReadableStreamSource> newReadableStreamSourceFromDelegate(
+kj::Own<ReadableStreamSource> newReadableStreamSourceFromProducer(
     kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)> producer,
     kj::Maybe<uint64_t> expectedLength = kj::none);
 

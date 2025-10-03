@@ -245,14 +245,14 @@ class TeeErrorAdapter final: public kj::AsyncInputStream {
 
 // A kj::AsyncInputStream implementation that delegates to a provided function
 // to produce data on each read.
-class DelegatingInputStream final: public kj::AsyncInputStream {
+class InputStreamFromProducer final: public kj::AsyncInputStream {
  public:
   using Producer = kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)>;
-  DelegatingInputStream(Producer producer, kj::Maybe<uint64_t> expectedLength)
+  InputStreamFromProducer(Producer producer, kj::Maybe<uint64_t> expectedLength)
       : producer(kj::mv(producer)),
         expectedLength(expectedLength) {}
 
-  KJ_DISALLOW_COPY_AND_MOVE(DelegatingInputStream);
+  KJ_DISALLOW_COPY_AND_MOVE(InputStreamFromProducer);
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     KJ_IF_SOME(p, producer) {
@@ -581,7 +581,9 @@ class NoDeferredProxySource final: public ReadableStreamSourceWrapper {
   }
 
   kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override {
-    return addNoopDeferredProxy(ioctx.waitForDeferredProxy(getInner().pumpTo(output, end)));
+    auto pending = ioctx.registerPendingEvent();
+    return addNoopDeferredProxy(
+        ioctx.waitForDeferredProxy(getInner().pumpTo(output, end)).attach(kj::mv(pending)));
   }
 
   Tee tee(kj::Maybe<size_t> limit) override {
@@ -791,15 +793,16 @@ kj::Own<ReadableStreamSource> newReadableStreamSourceFromBytes(
   return newReadableStreamSource(inner.attach(kj::mv(backing)));
 }
 
-kj::Own<ReadableStreamSource> newReadableStreamSourceWithoutDeferredProxy(
+kj::Own<ReadableStreamSource> newIoContextWrappedReadableStreamSource(
     IoContext& ioctx, kj::Own<ReadableStreamSource> inner) {
   return kj::heap<NoDeferredProxySource>(kj::mv(inner), ioctx);
 }
 
-kj::Own<ReadableStreamSource> newReadableStreamSourceFromDelegate(
+kj::Own<ReadableStreamSource> newReadableStreamSourceFromProducer(
     kj::Function<kj::Promise<size_t>(kj::ArrayPtr<kj::byte>, size_t)> producer,
     kj::Maybe<uint64_t> expectedLength) {
-  return newReadableStreamSource(kj::heap<DelegatingInputStream>(kj::mv(producer), expectedLength));
+  return newReadableStreamSource(
+      kj::heap<InputStreamFromProducer>(kj::mv(producer), expectedLength));
 }
 
 kj::Own<ReadableStreamSource> newClosedReadableStreamSource() {
