@@ -6,7 +6,7 @@ import {
   createBase64DecoderTransformStream,
   createBase64EncoderTransformStream,
 } from 'cloudflare-internal:streaming-base64';
-import { withSpan } from 'cloudflare-internal:tracing-helpers';
+import { withSpan, type Span } from 'cloudflare-internal:tracing-helpers';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -122,40 +122,50 @@ class ImageTransformerImpl implements ImageTransformer {
   async output(
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
-    const formData = new StreamableFormData();
+    return await withSpan('images_output', async (span) => {
+      const formData = new StreamableFormData();
 
-    this.#consume();
-    formData.append('image', this.#stream, { type: 'file' });
+      this.#consume();
+      formData.append('image', this.#stream, { type: 'file' });
 
-    this.#serializeTransforms(formData);
+      this.#serializeTransforms(formData, span);
 
-    formData.append('output_format', options.format);
-    if (options.quality !== undefined) {
-      formData.append('output_quality', options.quality.toString());
-    }
+      span.setAttribute('cloudflare.images.options.format', options.format);
+      formData.append('output_format', options.format);
 
-    if (options.background !== undefined) {
-      formData.append('background', options.background);
-    }
-
-    if (options.anim !== undefined) {
-      formData.append('anim', options.anim.toString());
-    }
-
-    const response = await this.#fetcher.fetch(
-      'https://js.images.cloudflare.com/transform',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': formData.contentType(),
-        },
-        body: formData.stream(),
+      if (options.quality !== undefined) {
+        span.setAttribute('cloudflare.images.options.quality', options.quality);
+        formData.append('output_quality', options.quality.toString());
       }
-    );
 
-    await throwErrorIfErrorResponse('TRANSFORM', response);
+      if (options.background !== undefined) {
+        span.setAttribute(
+          'cloudflare.images.options.background',
+          options.background
+        );
+        formData.append('background', options.background);
+      }
 
-    return new TransformationResultImpl(response);
+      if (options.anim !== undefined) {
+        span.setAttribute('cloudflare.images.options.anim', options.anim);
+        formData.append('anim', options.anim.toString());
+      }
+
+      const response = await this.#fetcher.fetch(
+        'https://js.images.cloudflare.com/transform',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': formData.contentType(),
+          },
+          body: formData.stream(),
+        }
+      );
+
+      await throwErrorIfErrorResponse('TRANSFORM', response, span);
+
+      return new TransformationResultImpl(response);
+    });
   }
 
   #consume(): void {
@@ -169,7 +179,7 @@ class ImageTransformerImpl implements ImageTransformer {
     this.#consumed = true;
   }
 
-  #serializeTransforms(formData: StreamableFormData): void {
+  #serializeTransforms(formData: StreamableFormData, span: Span): void {
     const transforms: (TargetedTransform | DrawCommand)[] = [];
 
     // image 0 is the canvas, so the first draw_image has index 1
@@ -211,6 +221,13 @@ class ImageTransformerImpl implements ImageTransformer {
     }
 
     walkTransforms(0, this.#transforms);
+
+    if (transforms.length > 0) {
+      span.setAttribute(
+        'cloudflare.images.options.transforms',
+        JSON.stringify(transforms)
+      );
+    }
     formData.append('transforms', JSON.stringify(transforms));
   }
 }
@@ -237,12 +254,14 @@ class ImagesBindingImpl implements ImagesBinding {
     return await withSpan('images_info', async (span) => {
       const body = new StreamableFormData();
 
+      span.setAttribute(
+        'cloudflare.images.options.encoding',
+        options?.encoding ?? 'base64'
+      );
       const decodedStream =
         options?.encoding === 'base64'
           ? stream.pipeThrough(createBase64DecoderTransformStream())
           : stream;
-
-      span.setAttribute('cloudflare.images.info.encoding', options?.encoding);
 
       body.append('image', decodedStream, { type: 'file' });
 
@@ -257,22 +276,23 @@ class ImagesBindingImpl implements ImagesBinding {
         }
       );
 
-      await throwErrorIfErrorResponse('INFO', response);
+      await throwErrorIfErrorResponse('INFO', response, span);
 
       const r = (await response.json()) as RawInfoResponse;
 
-      span.setAttribute('cloudflare.images.info.format', r.format);
+      span.setAttribute('cloudflare.images.result.format', r.format);
 
       if ('file_size' in r) {
-        span.setAttribute('cloudflare.images.info.file_size', r.file_size);
-        span.setAttribute('cloudflare.images.info.width', r.width);
-        span.setAttribute('cloudflare.images.info.height', r.height);
-        return {
+        const ret = {
           fileSize: r.file_size,
           width: r.width,
           height: r.height,
           format: r.format,
         };
+        span.setAttribute('cloudflare.images.result.file_size', ret.fileSize);
+        span.setAttribute('cloudflare.images.result.width', ret.width);
+        span.setAttribute('cloudflare.images.result.height', ret.height);
+        return ret;
       }
 
       return r;
@@ -302,20 +322,29 @@ class ImagesErrorImpl extends Error implements ImagesError {
 
 async function throwErrorIfErrorResponse(
   operation: string,
-  response: Response
+  response: Response,
+  span: Span
 ): Promise<void> {
   const statusHeader = response.headers.get('cf-images-binding') || '';
 
   const match = /err=(\d+)/.exec(statusHeader);
 
   if (match && match[1]) {
+    const errorMessage = await response.text();
+    span.setAttribute('cloudflare.images.error.code', match[1]);
+    span.setAttribute('cloudflare.status', 'error');
+    span.setAttribute('error.type', errorMessage);
     throw new ImagesErrorImpl(
-      `IMAGES_${operation}_${await response.text()}`.trim(),
+      `IMAGES_${operation}_${errorMessage}`.trim(),
       Number.parseInt(match[1])
     );
   }
 
   if (response.status > 399) {
+    const errorMessage = await response.text();
+    span.setAttribute('cloudflare.images.error.code', '9523');
+    span.setAttribute('cloudflare.status', 'error');
+    span.setAttribute('error.type', errorMessage);
     throw new ImagesErrorImpl(
       `Unexpected error response ${response.status}: ${(
         await response.text()
