@@ -5,7 +5,6 @@ load("@//build/deps:gen/dep_cargo_bazel_linux_x64.bzl", "dep_cargo_bazel_linux_x
 load("@//build/deps:gen/dep_cargo_bazel_macos_arm64.bzl", "dep_cargo_bazel_macos_arm64")
 load("@//build/deps:gen/dep_cargo_bazel_macos_x64.bzl", "dep_cargo_bazel_macos_x64")
 load("@//build/deps:gen/dep_cargo_bazel_win_x64.bzl", "dep_cargo_bazel_win_x64")
-load("@//build/deps:gen/dep_codspeed.bzl", "dep_codspeed")
 load("@//build/deps:gen/dep_rules_rust.bzl", "dep_rules_rust")
 
 def deps_gen():
@@ -15,4 +14,4 @@ def deps_gen():
     dep_cargo_bazel_macos_x64()
     dep_cargo_bazel_macos_arm64()
     dep_cargo_bazel_win_x64()
-    dep_codspeed()
+
