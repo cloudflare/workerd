@@ -96,6 +96,7 @@ export function getFilteredSpans(
  * @param {Array} expectedSpans - The expected spans to compare against
  * @param {Object} options - Options for the test
  * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession)
+ * @param {Function} options.mapFn - Map function for spans (default: no mapping)
  * @param {Array} options.toleranceFields - Fields to apply bigint tolerance to (default: ['http.response.body.size'])
  * @param {bigint} options.tolerance - Tolerance for bigint fields (default: 5n)
  * @param {string} options.testName - Name for the test (default: 'instrumentation')
@@ -112,6 +113,7 @@ export async function runInstrumentationTest(
 ) {
   const {
     filterFn = (span) => span.name !== 'jsRpcSession',
+    mapFn = (span) => span,
     toleranceFields = ['http.response.body.size'],
     tolerance = 5n,
     testName = 'instrumentation',
@@ -123,18 +125,11 @@ export async function runInstrumentationTest(
 
   // Recorded streaming tail worker events, in insertion order,
   // filtering spans not associated with the test
-  let received = Array.from(state.spans.values()).filter(filterFn);
+  let received = Array.from(state.spans.values()).map(mapFn).filter(filterFn);
 
   // Log received spans for debugging/updating tests
   if (logReceived) {
-    console.log(
-      `Received spans for ${testName}:\n`,
-      JSON.stringify(
-        received,
-        (_, v) => (typeof v === 'bigint' ? v.toString() : v),
-        2
-      )
-    );
+    console.log(`Received spans for ${testName}:\n`, received);
   }
 
   let failed = 0;
