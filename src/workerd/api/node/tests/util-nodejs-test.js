@@ -618,10 +618,7 @@ export const utilInspect = {
         util.inspect(a, true),
         "[ 'foo', <1 empty item>, 'baz', [length]: 3 ]"
       );
-      assert.strictEqual(
-        util.inspect(Array.from({ length: 5 })),
-        '[ <5 empty items> ]'
-      );
+      assert.strictEqual(util.inspect(new Array(5)), '[ <5 empty items> ]');
       a[3] = 'bar';
       a[100] = 'qux';
       assert.strictEqual(

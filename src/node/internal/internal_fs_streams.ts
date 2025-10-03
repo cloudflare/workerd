@@ -973,8 +973,8 @@ function writevImpl(
   callback: ErrorOnlyCallback
 ) {
   let size = 0;
-  const chunks = Array.from({ length: data.length }, (_el, i) => {
-    const chunk = (data[i] as any).chunk;
+  const chunks = data.map((d) => {
+    const chunk = (d as any).chunk;
     size += chunk.length;
     return chunk;
   });
