@@ -12,7 +12,12 @@ then
 fi
 
 clang_format_check() {
-  git diff --cached --diff-filter=AM --name-only -z | xargs -0 -r bazel run format --
+  # --diff-filter=AM
+  #   Only format added or modified files
+  # -z
+  #    When --raw, --numstat, --name-only or --name-status has been given,
+  #    do not munge pathnames and use NULs as output field terminators.
+  git diff --cached --diff-filter=AM --name-only -z | xargs --null --no-run-if-empty bazel run //:format --
 }
 
 clang_format_check
