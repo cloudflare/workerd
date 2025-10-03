@@ -16,6 +16,7 @@ wd_cc_embed(
     strip_include_prefix = "",
     visibility = ["//visibility:public"],
 )
+
 # Also re-export the v8 ICU library for @workerd-v8
 alias(
     name = "v8_icu",
