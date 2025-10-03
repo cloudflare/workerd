@@ -123,6 +123,7 @@ class ImageTransformerImpl implements ImageTransformer {
     options: ImageOutputOptions
   ): Promise<ImageTransformationResult> {
     return await withSpan('images_output', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
       const formData = new StreamableFormData();
 
       this.#consume();
@@ -252,6 +253,7 @@ class ImagesBindingImpl implements ImagesBinding {
     options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
     return await withSpan('images_info', async (span) => {
+      span.setAttribute('cloudflare.binding.type', 'Images');
       const body = new StreamableFormData();
 
       span.setAttribute(
