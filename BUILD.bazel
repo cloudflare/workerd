@@ -24,6 +24,14 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# For convenience, less typing than the full label:
+# (assuming working directory is the root of the repository)
+#   bazel run format
+alias(
+    name = "format",
+    actual = "//build/deps/formatters:format",
+)
+
 npm_link_all_packages(name = "node_modules")
 
 npm_link_package(
