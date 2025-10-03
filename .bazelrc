@@ -165,6 +165,9 @@ build --cxxopt="-fbracket-depth=512" --host_cxxopt="-fbracket-depth=512"
 build --@rules_rust//:extra_rustc_flag=-Cdebug-assertions=n
 build --@rules_rust//:extra_exec_rustc_flags=-Cdebug-assertions=n
 build --@rules_rust//:rustfmt.toml=//src/rust:rustfmt.toml
+# We use nightly because of https://github.com/bazelbuild/rules_rust/issues/3459
+build --@rules_rust//rust/toolchain/channel=nightly
+build --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
 
 # We default to not enabling debug assertions and unwinding for Rust. For debug builds this is not
 # the right setting, but unfortunately we can't set that directly.
