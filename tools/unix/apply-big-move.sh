@@ -38,10 +38,7 @@ check_big_move_dependencies() {
 
 apply_big_move() {
   echo "Applying format..."
-
-  source "$(dirname -- $BASH_SOURCE)/find-python3.sh"
-  PYTHON_PATH=$(get_python3)
-  $PYTHON_PATH "$(dirname -- $BASH_SOURCE)/../cross/format.py"
+  bazel run //build/deps/formatters:format
 
   echo "Changes applied successfully."
 }
