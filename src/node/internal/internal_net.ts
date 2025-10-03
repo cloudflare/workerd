@@ -1818,7 +1818,7 @@ function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
       const left = parts[0]?.split(':') ?? [];
       const right = parts[1]?.split(':') ?? [];
       const missing = 8 - left.length - right.length;
-      const middle = Array.from({ length: missing }, () => '0');
+      const middle = Array.from({ length: missing }).fill('0');
       expanded = [...left, ...middle, ...right].join(':');
     }
   }
