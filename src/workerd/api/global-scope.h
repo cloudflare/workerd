@@ -510,19 +510,22 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   kj::Promise<void> setHibernatableEventTimeout(
       kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs);
 
-  void sendHibernatableWebSocketMessage(kj::OneOf<kj::String, kj::Array<byte>> message,
+  void sendHibernatableWebSocketMessage(IoContext& context,
+      kj::OneOf<kj::String, kj::Array<byte>> message,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketClose(HibernatableSocketParams::Close close,
+  void sendHibernatableWebSocketClose(IoContext& context,
+      HibernatableSocketParams::Close close,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  void sendHibernatableWebSocketError(kj::Exception e,
+  void sendHibernatableWebSocketError(IoContext& context,
+      kj::Exception e,
       kj::Maybe<uint32_t> eventTimeoutMs,
       kj::String websocketId,
       Worker::Lock& lock,

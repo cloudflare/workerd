@@ -470,6 +470,7 @@ struct StartQueueEventResponse {
 };
 
 StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
+    IoContext& context,
     kj::OneOf<rpc::EventDispatcher::QueueParams::Reader, QueueEvent::Params> params,
     IoPtr<QueueEventResult> result,
     Worker::Lock& lock,
@@ -493,8 +494,11 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
     KJ_IF_SOME(f, queueHandler.queue) {
       auto promise = f(lock, js.alloc<QueueController>(event.addRef()),
           jsg::JsValue(h.env.getHandle(js)).addRef(js), h.getCtx())
-                         .then([event = event.addRef()]() mutable {
+                         .then([event = event.addRef(), &context]() mutable {
         event->setCompletionStatus(QueueEvent::CompletedSuccessfully{});
+        KJ_IF_SOME(t, context.getWorkerTracer()) {
+          t.setReturn(context.now());
+        }
       }, [event = event.addRef()](kj::Exception&& e) mutable {
         event->setCompletionStatus(QueueEvent::CompletedWithError{kj::cp(e)});
         return kj::mv(e);
@@ -572,7 +576,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
 
     auto& typeHandler = lock.getWorker().getIsolate().getApi().getQueueTypeHandler(lock);
-    auto startResp = startQueueEvent(lock.getGlobalScope(), kj::mv(params),
+    auto startResp = startQueueEvent(lock.getGlobalScope(), context, kj::mv(params),
         context.addObject(result), lock,
         lock.getExportedHandler(entrypointName, kj::mv(props), context.getActor()), typeHandler);
     queueEvent->event = kj::mv(startResp.event);
