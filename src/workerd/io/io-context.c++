@@ -4,6 +4,8 @@
 
 #include "io-context.h"
 
+#include <workerd/api/events.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -481,6 +483,10 @@ void IoContext::addWaitUntil(kj::Promise<void> promise) {
   waitUntilTasks.add(kj::mv(promise));
 }
 
+void IoContext::addUnloadListener(jsg::Function<void(jsg::Ref<api::Event>)> handler) {
+  unloadListeners.add(kj::mv(handler));
+}
+
 // Mark ourselves so we know that we made a best effort attempt to wait for waitUntilTasks.
 kj::Promise<void> IoContext::IncomingRequest::drain() {
   waitedForWaitUntil = true;
@@ -552,6 +558,23 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  // Dispatch unload events if any were attached
+  if (!unloadListeners.empty()) {
+    runInContextScope(
+        Worker::Lock::TakeSynchronously(kj::none), kj::none, [&](Worker::Lock& workerLock) {
+      // Suppress IoContext to prevent unload handlers from scheduling new IO
+      SuppressIoContextScope suppressIo;
+      auto unloadEvent = jsg::alloc<api::Event>("unload");
+      for (auto& listener: unloadListeners) {
+        try {
+          listener(workerLock, unloadEvent.addRef());
+        } catch (...) {
+          // Dispose handler errors remain unhandled.
+        }
+      }
+    });
+  }
+
   if (!canceler.isEmpty()) {
     KJ_IF_SOME(e, abortException) {
       // Assume the abort exception is why we are canceling.

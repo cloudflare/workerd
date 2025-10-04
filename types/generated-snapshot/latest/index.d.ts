@@ -392,6 +392,7 @@ interface TestController {}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  addEventListener(type: "unload", handler: (event: Event) => void): void;
   readonly props: Props;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -548,6 +549,7 @@ interface DurableObjectClass<
 > {}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  addEventListener(type: "unload", handler: (event: Event) => void): void;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;

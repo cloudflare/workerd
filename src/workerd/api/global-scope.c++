@@ -94,6 +94,14 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
   js.terminateExecutionNow();
 }
 
+void ExecutionContext::addEventListener(
+    kj::String type, jsg::Function<void(jsg::Ref<api::Event>)> handler) {
+  if (type == "unload") {
+    // Store the listener in IoContext instead of ExecutionContext
+    IoContext::current().addUnloadListener(kj::mv(handler));
+  }
+}
+
 namespace {
 template <typename T>
 jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {

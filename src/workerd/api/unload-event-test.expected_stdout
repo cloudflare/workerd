@@ -1,0 +1,13 @@
+actor ok
+ACTOR UNLOAD FIRED
+worker:456: Uncaught Error: actor unload error
+ACTOR UNLOAD 2 FIRED
+ACTOR TEST UNLOAD FIRED
+Fetching
+Fetch
+Fetched
+FETCH UNLOAD FIRED
+Test end
+UNLOAD TEST UNLOAD FIRED
+worker:998: Uncaught Error: handler error
+UNLOAD TEST UNLOAD FIRED 2

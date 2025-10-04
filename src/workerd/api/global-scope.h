@@ -228,6 +228,8 @@ class ExecutionContext: public jsg::Object {
   // and throwing an error at the client.
   void abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason);
 
+  void addEventListener(kj::String type, jsg::Function<void(jsg::Ref<api::Event>)> handler);
+
   jsg::JsValue getExports(jsg::Lock& js) {
     return exports.getHandle(js);
   }
@@ -239,6 +241,7 @@ class ExecutionContext: public jsg::Object {
   JSG_RESOURCE_TYPE(ExecutionContext, CompatibilityFlags::Reader flags) {
     JSG_METHOD(waitUntil);
     JSG_METHOD(passThroughOnException);
+    JSG_METHOD(addEventListener);
     if (flags.getEnableCtxExports()) {
       JSG_LAZY_INSTANCE_PROPERTY(exports, getExports);
     }
@@ -262,10 +265,12 @@ class ExecutionContext: public jsg::Object {
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
         readonly exports: Cloudflare.Exports;
+        addEventListener(type: "unload", handler: (event: Event) => void): void;
       });
     } else {
       JSG_TS_OVERRIDE(<Props = unknown> {
         readonly props: Props;
+        addEventListener(type: "unload", handler: (event: Event) => void): void;
       });
     }
   }
