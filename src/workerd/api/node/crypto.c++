@@ -397,7 +397,7 @@ jsg::BackingStore convertSignatureToDER(
 
 const EVP_MD* maybeGetDigest(jsg::Optional<kj::String>& maybeAlgorithm) {
   KJ_IF_SOME(alg, maybeAlgorithm) {
-    auto md = ncrypto::getDigestByName(std::string_view(alg.begin(), alg.size()));
+    auto md = ncrypto::getDigestByName(alg.cStr());
     JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", alg));
     return md;
   }
@@ -411,7 +411,7 @@ CryptoImpl::SignHandle::SignHandle(ncrypto::EVPMDCtxPointer ctx)
 jsg::Ref<CryptoImpl::SignHandle> CryptoImpl::SignHandle::constructor(
     jsg::Lock& js, kj::String algorithm) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
-  auto md = ncrypto::getDigestByName(std::string_view(algorithm.begin(), algorithm.size()));
+  auto md = ncrypto::getDigestByName(algorithm.cStr());
   JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", algorithm));
 
   auto mdctx = ncrypto::EVPMDCtxPointer::New();
@@ -464,7 +464,7 @@ CryptoImpl::VerifyHandle::VerifyHandle(ncrypto::EVPMDCtxPointer ctx)
 jsg::Ref<CryptoImpl::VerifyHandle> CryptoImpl::VerifyHandle::constructor(
     jsg::Lock& js, kj::String algorithm) {
   ncrypto::ClearErrorOnReturn clear_error_on_return;
-  auto md = ncrypto::getDigestByName(std::string_view(algorithm.begin(), algorithm.size()));
+  auto md = ncrypto::getDigestByName(algorithm.cStr());
   JSG_REQUIRE(md != nullptr, Error, kj::str("Unknown digest: ", algorithm));
 
   auto mdctx = ncrypto::EVPMDCtxPointer::New();
@@ -700,8 +700,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::constructor(jsg::Lo
 
   JSG_REQUIRE(key->getType() == "secret"_kj, TypeError, "Invalid key type for cipher");
 
-  std::string_view name(algorithm.begin(), algorithm.size());
-  auto cipher = ncrypto::Cipher::FromName(name);
+  auto cipher = ncrypto::Cipher::FromName(algorithm.cStr());
   JSG_REQUIRE(cipher, Error, kj::str("Unknown or unsupported cipher: ", algorithm));
 
   auto keyData =
@@ -724,7 +723,7 @@ jsg::Ref<CryptoImpl::CipherHandle> CryptoImpl::CipherHandle::constructor(jsg::Lo
   JSG_REQUIRE(ctx, Error, "Failed to create cipher/decipher context");
 
   if (cipher.getMode() == EVP_CIPH_WRAP_MODE) {
-    ctx.setFlags(EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
+    ctx.setAllowWrap();
   }
 
   bool encrypt = mode == "cipher"_kj;
@@ -972,8 +971,7 @@ jsg::BufferSource Cipher(jsg::Lock& js,
 
   const EVP_MD* digest = nullptr;
   if (options.oaepHash.size() > 0) {
-    std::string_view name(options.oaepHash.begin(), options.oaepHash.size());
-    digest = ncrypto::getDigestByName(name);
+    digest = ncrypto::getDigestByName(options.oaepHash.cStr());
     JSG_REQUIRE(digest != nullptr, Error, "Unsupported hash digest");
   }
 
@@ -1080,8 +1078,7 @@ ncrypto::Cipher getCipher(kj::OneOf<kj::String, int>& nameOrNid) {
       return ncrypto::Cipher::FromNid(nid);
     }
     KJ_CASE_ONEOF(name, kj::String) {
-      std::string_view nameStr(name.cStr(), name.size());
-      return ncrypto::Cipher::FromName(nameStr);
+      return ncrypto::Cipher::FromName(name.cStr());
     }
   }
   return {};
@@ -1129,10 +1126,10 @@ jsg::Optional<CryptoImpl::CipherInfo> CryptoImpl::getCipherInfo(
       }
     }
 
-    auto nameView = cipher.getName();
+    auto nameCstr = cipher.getName();
     auto modeView = cipher.getModeLabel();
-    kj::String name = kj::str(kj::heapArray<char>(nameView.data(), nameView.size()));
-    kj::String mode = kj::str(kj::heapArray<char>(modeView.data(), modeView.size()));
+    kj::String name = kj::heapString(nameCstr);
+    kj::String mode = kj::str(modeView.begin(), modeView.size());
     return CipherInfo{
       .name = kj::mv(name),
       .nid = cipher.getNid(),
