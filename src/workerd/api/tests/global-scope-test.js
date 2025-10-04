@@ -797,7 +797,7 @@ export const structuredCloneError = {
         });
         return prop.constructor();
       },
-      get p1() {
+      get p2() {
         var gTCtor = globalThis.Intl.constructor;
         var returnVal;
         try {

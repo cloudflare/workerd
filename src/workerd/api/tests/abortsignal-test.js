@@ -428,7 +428,7 @@ export const rpcAbortSignalManyClients = {
     const signal = AbortSignal.timeout(200);
 
     const responses = await Promise.all(
-      Array(5).fill(env.RpcRemoteEnd.countToInfinity(signal))
+      Array.from({ length: 5 }, () => env.RpcRemoteEnd.countToInfinity(signal))
     );
     strictEqual(responses.length, 5);
 

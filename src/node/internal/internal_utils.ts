@@ -460,3 +460,24 @@ export function parseEnv(content: string): Record<string, string> {
   }
   return result;
 }
+
+export type NonEmptyArray<T> = [T, ...T[]];
+export type PositiveInteger<T extends number> = T extends 0
+  ? never
+  : `${T}` extends `${infer _}.${infer _}`
+    ? never
+    : `${T}` extends `-${infer _}`
+      ? never
+      : T;
+export type FixedLengthArray<
+  T,
+  Length extends number,
+  Accumulator extends NonEmptyArray<T> = [T],
+> =
+  Length extends PositiveInteger<Length>
+    ? number extends Length
+      ? NonEmptyArray<T>
+      : Length extends Accumulator['length']
+        ? Accumulator
+        : FixedLengthArray<T, Length, [T, ...Accumulator]>
+    : never;

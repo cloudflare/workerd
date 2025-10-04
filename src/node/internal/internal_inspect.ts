@@ -1878,12 +1878,12 @@ function groupArrayElements(
     outputLength--;
   }
   const separatorSpace = 2; // Add 1 for the space and 1 for the separator.
-  const dataLen = new Array(outputLength);
+  const dataLen = Array.from({ length: outputLength }) as number[];
   // Calculate the total length of all output entries and the individual max
   // entries length of all output entries. We have to remove colors first,
   // otherwise the length would not be calculated properly.
   for (; i < outputLength; i++) {
-    const len = getStringWidth(output[i]!, ctx.colors);
+    const len = getStringWidth(output[i] as string, ctx.colors);
     dataLen[i] = len;
     totalLength += len + separatorSpace;
     if (maxLength < len) maxLength = len;
@@ -1933,7 +1933,9 @@ function groupArrayElements(
     for (let i = 0; i < columns; i++) {
       let lineMaxLength = 0;
       for (let j = i; j < output.length; j += columns) {
-        if (dataLen[j] > lineMaxLength) lineMaxLength = dataLen[j];
+        if ((dataLen[j] as number) > lineMaxLength) {
+          lineMaxLength = dataLen[j] as number;
+        }
       }
       lineMaxLength += separatorSpace;
       maxLineLength[i] = lineMaxLength;
@@ -1957,14 +1959,15 @@ function groupArrayElements(
         // Calculate extra color padding in case it's active. This has to be
         // done line by line as some lines might contain more colors than
         // others.
-        const padding = maxLineLength[j - i]! + output[j]!.length - dataLen[j];
+        const padding =
+          maxLineLength[j - i]! + output[j]!.length - (dataLen[j] as number);
         str += order.call(`${output[j]}, `, padding, ' ');
       }
       if (order === String.prototype.padStart) {
         const padding =
           maxLineLength[j - i]! +
           output[j]!.length -
-          dataLen[j] -
+          (dataLen[j] as number) -
           separatorSpace;
         str += output[j]!.padStart(padding, ' ');
       } else {

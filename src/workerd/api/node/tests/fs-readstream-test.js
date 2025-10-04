@@ -708,7 +708,7 @@ export const readStreamTest27 = {
     stream.on('data', reject);
     stream.on('close', closeResolve);
     handle.close();
-    await Promise.all([[promise, closePromise]]);
+    await Promise.all([promise, closePromise]);
   },
 };
 
