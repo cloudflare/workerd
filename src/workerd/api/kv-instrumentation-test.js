@@ -2,73 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import {
+  invocationPromises,
+  spans,
+  testTailHandler,
+} from 'test:instumentation-tail';
 
-// tailStream is going to be invoked multiple times, but we want to wait
-// to run the test until all executions are done. Collect promises for
-// each
-let invocationPromises = [];
-let spans = new Map();
-
-export default {
-  tailStream(event, env, ctx) {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-
-    // Capture the top-level span ID from the onset event
-    const topLevelSpanId = event.event.spanId;
-
-    // Accumulate the span info for easier testing
-    return (event) => {
-      // For spanOpen events, the new span ID is in event.event.spanId
-      // For other events, they reference an existing span via event.spanContext.spanId
-      let spanKey = event.invocationId + event.spanContext.spanId;
-      switch (event.event.type) {
-        case 'spanOpen':
-          // spanOpen creates a new span with ID in event.event.spanId
-          spanKey = event.invocationId + event.event.spanId;
-          spans.set(spanKey, {
-            name: event.event.name,
-          });
-          break;
-        case 'attributes': {
-          // Filter out top-level attributes events (jsRpcSession span)
-          if (topLevelSpanId && event.spanContext.spanId === topLevelSpanId) {
-            // Ignore attributes for the top-level span
-            break;
-          }
-
-          // attributes references an existing span via spanContext.spanId
-          let span = spans.get(spanKey);
-          if (!span) {
-            throw new Error(`Attributes event for unknown span: ${spanKey}`);
-          }
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
-          }
-          break;
-        }
-        case 'spanClose': {
-          // spanClose references an existing span via spanContext.spanId
-          let span = spans.get(spanKey);
-          if (!span) {
-            throw new Error(`SpanClose event for unknown span: ${spanKey}`);
-          }
-          span['closed'] = true;
-          break;
-        }
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  },
-};
+// Use shared instrumentation test tail worker
+export default testTailHandler;
 
 export const test = {
   async test() {

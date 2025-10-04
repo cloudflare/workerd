@@ -12,12 +12,17 @@ const unitTests :Workerd.Config = (
           ( name = "SERVICE", service = "r2-test" ),
         ],
         compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker", "tail_worker_user_spans"],
+        compatibilityFlags = ["nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
         streamingTails = ["tail"],
       )
     ),
     (name = "tail", worker = .tailWorker, ),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const tailWorker :Workerd.Worker = (

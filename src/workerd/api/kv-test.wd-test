@@ -10,12 +10,17 @@ const unitTests :Workerd.Config = (
         bindings = [ ( name = "KV", kvNamespace = "kv-test" ), ],
         compatibilityDate = "2023-07-24",
         # "experimental" flag is needed to test deleteBulk
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker", "tail_worker_user_spans"],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
         streamingTails = ["tail"],
       )
     ),
     (name = "tail", worker = .tailWorker, ),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const tailWorker :Workerd.Worker = (
