@@ -77,3 +77,14 @@ copy_file(
     out = "buildifier",
     visibility = ["//visibility:public"],
 )
+
+# buildifier: disable=load-on-top
+# TODO(alexeagle): delete everything above this line
+load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
+
+format_multirun(
+    name = "format",
+    # TODO(alexeagle): add more formatters here
+    cc = "@llvm_toolchain_llvm//:bin/clang-format",
+    visibility = ["//:__pkg__"],
+)
