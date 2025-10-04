@@ -35,6 +35,7 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
@@ -93,7 +94,8 @@
   F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
   F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
   F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)                                               \
-  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)
+  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)                                                   \
+  F("tracing-module", EW_TRACING_MODULE_ISOLATE_TYPES)
 
 namespace workerd::api {
 
