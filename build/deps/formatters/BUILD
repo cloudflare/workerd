@@ -1,5 +1,6 @@
 load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
+load("@npm//:prettier/package_json.bzl", prettier = "bin")
 
 config_setting(
     name = "linux_amd64",
@@ -79,12 +80,25 @@ native_binary(
     visibility = ["//visibility:public"],
 )
 
-
+prettier.prettier_binary(
+    name = "prettier@rule",
+    # Include this js_library and its dependencies in the runfiles (runtime dependencies)
+    data = ["//:prettierrc"],
+    # Allow the binary to be run outside bazel
+    env = {"BAZEL_BINDIR": "."},
+    fixed_args = [
+        # `require` statements in the config file will be resolved relative to its location
+        # Therefore to make it hermetic, prettier must be pointed at the copy of the config file
+        # in the runfiles folder rather than the one in the source folder.
+        "--config=\"$$JS_BINARY__RUNFILES\"/$(rlocationpath //:prettierrc)",
+        "--log-level=warn",
+    ],
+)
 
 format_multirun(
     name = "format",
-    # TODO(alexeagle): add more formatters here
     cc = ":clang-format@rule",
+    javascript = ":prettier@rule",
     starlark = ":buildifier@rule",
     python = ":ruff@rule",
     visibility = ["//:__pkg__"],
