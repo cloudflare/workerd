@@ -127,10 +127,7 @@ export async function runInstrumentationTest(
 
   // Log received spans for debugging/updating tests
   if (logReceived) {
-    console.log(
-      `Received spans for ${testName}:`,
-      JSON.stringify(received, null, 2)
-    );
+    console.log(`Received spans for ${testName}:\n`, received);
   }
 
   let failed = 0;
