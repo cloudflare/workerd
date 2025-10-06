@@ -113,20 +113,21 @@ SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 # invoke workerd twice for snapshot tests.
 
 WINDOWS_RUNTEST_SNAPSHOT = """
-powershell -Command \"%* --python-save-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+$PYTHON_SAVE_SNAPSHOT_OPTIONS = $ENV:PYTHON_SAVE_SNAPSHOT_ARGS -split ' '
+powershell -Command \"%* --python-save-snapshot @PYTHON_SAVE_SNAPSHOT_OPTIONS\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
 set TEST_EXIT=!ERRORLEVEL!
 if !TEST_EXIT! EQU 0 (
-    powershell -Command \"%* --python-load-snapshot\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
+    powershell -Command \"%* --python-load-snapshot snapshot.bin\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR
     set TEST_EXIT=!ERRORLEVEL!
 )
 """
 
 SH_RUNTEST_SNAPSHOT = """
 echo Creating Python Snapshot
-"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-save-snapshot $PYTHON_SAVE_SNAPSHOT_ARGS
 echo ""
 echo Using Python Snapshot
-"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot
+"$@" -dTEST_TMPDIR=$TEST_TMPDIR --python-load-snapshot snapshot.bin
 """
 
 def _wd_test_impl(ctx):
@@ -191,11 +192,22 @@ def _wd_test_impl(ctx):
         # Include all file types that might contain testable code
         extensions = ["cc", "c++", "cpp", "cxx", "c", "h", "hh", "hpp", "hxx", "inc", "js", "ts", "mjs", "wd-test", "capnp"],
     )
+    environment = {}
+    if ctx.attr.python_snapshot_test:
+        environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = ""
+    if ctx.attr.load_snapshot:
+        if ctx.attr.python_snapshot_test:
+            environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
+        f = ctx.attr.load_snapshot.files.to_list()[0]
+        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": f}))
 
     return [
         DefaultInfo(
             executable = executable,
             runfiles = runfiles,
+        ),
+        RunEnvironmentInfo(
+            environment = environment,
         ),
         instrumented_files_info,
     ]
@@ -259,6 +271,7 @@ _wd_test = rule(
             default = "//src/workerd/api/node/tests:sidecar-supervisor",
         ),
         "python_snapshot_test": attr.bool(),
+        "load_snapshot": attr.label(allow_single_file = True),
         # A reference to the Windows platform label, needed for the implementation of wd_test
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },

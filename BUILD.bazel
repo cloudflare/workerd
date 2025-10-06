@@ -17,6 +17,13 @@ wd_cc_embed(
     visibility = ["//visibility:public"],
 )
 
+# Also re-export the v8 ICU library for @workerd-v8
+alias(
+    name = "v8_icu",
+    actual = "@v8//:v8_icu",
+    visibility = ["//visibility:public"],
+)
+
 npm_link_all_packages(name = "node_modules")
 
 npm_link_package(

@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "typenum",
+    name = "serde_core",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,21 +29,28 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "rc",
+        "result",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2018",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=typenum",
+        "crate-name=serde_core",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.18.0",
+    version = "1.0.228",
     deps = [
-        "@crates_vendor__typenum-1.18.0//:build_script_build",
+        "@crates_vendor__serde_core-1.0.228//:build_script_build",
     ],
 )
 
@@ -66,6 +73,13 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "rc",
+        "result",
+        "std",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -80,19 +94,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2018",
-    pkg_name = "typenum",
+    edition = "2021",
+    pkg_name = "serde_core",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=typenum",
+        "crate-name=serde_core",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.18.0",
+    version = "1.0.228",
     visibility = ["//visibility:private"],
 )
 

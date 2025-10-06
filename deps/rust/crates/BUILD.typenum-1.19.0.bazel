@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "camino",
+    name = "typenum",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,25 +29,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "serde1",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2018",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=camino",
+        "crate-name=typenum",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.0",
+    version = "1.19.0",
     deps = [
-        "@crates_vendor__camino-1.2.0//:build_script_build",
-        "@crates_vendor__serde_core-1.0.227//:serde_core",
+        "@crates_vendor__typenum-1.19.0//:build_script_build",
     ],
 )
 
@@ -70,9 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "serde1",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -87,19 +80,19 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "camino",
+    edition = "2018",
+    pkg_name = "typenum",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=camino",
+        "crate-name=typenum",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.2.0",
+    version = "1.19.0",
     visibility = ["//visibility:private"],
 )
 

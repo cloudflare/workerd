@@ -8,6 +8,7 @@ load("@workerd-cxx//third-party:cargo.bzl", WORKERD_CXX_PACKAGES = "PACKAGES")
 PACKAGES = WORKERD_CXX_PACKAGES | {
     # When adding packages here, please only enable features as needed to keep compile times and
     # binary sizes bounded.
+    "ada-url": crate.spec(version = "3"),
     "anyhow": crate.spec(version = "1"),
     "async-trait": crate.spec(version = "0", default_features = False),
     "capnp": crate.spec(version = "0"),

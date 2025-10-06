@@ -4,6 +4,7 @@ def wd_cc_binary(
         name,
         linkopts = [],
         visibility = None,
+        deps = [],
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
     """
@@ -29,6 +30,9 @@ def wd_cc_binary(
             "//conditions:default": [],
         }),
         visibility = visibility,
+        deps = deps + [
+            "//deps/rust:runtime",
+        ],
         **kwargs
     )
 

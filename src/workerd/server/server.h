@@ -78,8 +78,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void setPythonCreateBaselineSnapshot() {
     pythonConfig.createBaselineSnapshot = true;
   }
-  void setPythonLoadSnapshot() {
-    pythonConfig.loadSnapshotFromDisk = true;
+  void setPythonLoadSnapshot(kj::String snapshot) {
+    pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
   }
 
   // Runs the server using the given config.
@@ -126,7 +126,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
     .createBaselineSnapshot = false,
-    .loadSnapshotFromDisk = false};
+    .loadSnapshotFromDisk = kj::none};
 
   bool experimental = false;
 

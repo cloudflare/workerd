@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "find_msvc_tools",
+    name = "link_args",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,10 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=find-msvc-tools",
+        "crate-name=link_args",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.2",
+    version = "0.6.0",
 )

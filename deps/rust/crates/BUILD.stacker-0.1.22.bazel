@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "thiserror",
+    name = "stacker",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,29 +29,30 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__thiserror-impl-2.0.16//:thiserror_impl",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=stacker",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.16",
+    version = "0.1.22",
     deps = [
-        "@crates_vendor__thiserror-2.0.16//:build_script_build",
-    ],
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__libc-0.2.176//:libc",
+        "@crates_vendor__psm-0.1.27//:psm",
+        "@crates_vendor__stacker-0.1.22//:build_script_build",
+    ] + select({
+        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
+            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # cfg(all(windows, not(target_arch = "arm64ec")))
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 cargo_build_script(
@@ -73,10 +74,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -92,19 +89,22 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "thiserror",
+    pkg_name = "stacker",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=thiserror",
+        "crate-name=stacker",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.16",
+    version = "0.1.22",
     visibility = ["//visibility:private"],
+    deps = [
+        "@crates_vendor__cc-1.2.40//:cc",
+    ],
 )
 
 alias(

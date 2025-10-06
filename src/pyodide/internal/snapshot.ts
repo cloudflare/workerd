@@ -106,6 +106,15 @@ const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
 };
+if (LOADED_SNAPSHOT_META) {
+  // Make sure we include the soMemoryBases and loadOrder from the baseline snapshot when we are
+  // generating stacked snapshots.
+  Object.assign(
+    CREATED_SNAPSHOT_META.soMemoryBases,
+    LOADED_SNAPSHOT_META.soMemoryBases
+  );
+  CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
+}
 export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
 
 /**
@@ -635,16 +644,13 @@ export function isRestoringSnapshot(): boolean {
   return !!LOADED_SNAPSHOT_META;
 }
 
-export function maybeRestoreSnapshot(Module: Module): void {
-  if (!LOADED_SNAPSHOT_META) {
+function checkSnapshotType(snapshotType: string): void {
+  if (SHOULD_SNAPSHOT_TO_DISK) {
     return;
   }
-  const { snapshotSize, snapshotOffset, snapshotReader, settings } =
-    LOADED_SNAPSHOT_META;
-
   if (
     !IS_EW_VALIDATING &&
-    settings.snapshotType === 'dedicated' &&
+    snapshotType === 'dedicated' &&
     !IS_DEDICATED_SNAPSHOT_ENABLED
   ) {
     throw new PythonRuntimeError(
@@ -654,7 +660,7 @@ export function maybeRestoreSnapshot(Module: Module): void {
 
   if (
     !IS_EW_VALIDATING &&
-    settings.snapshotType !== 'dedicated' &&
+    snapshotType !== 'dedicated' &&
     IS_DEDICATED_SNAPSHOT_ENABLED
   ) {
     throw new PythonRuntimeError(
@@ -665,12 +671,21 @@ export function maybeRestoreSnapshot(Module: Module): void {
   // If we have a snapshot in the bundle and the dedicated snapshot flag is enabled, then we
   // should verify that the snapshot in the bundle is a dedicated snapshot. If it is not
   // we should fail with an error.
-  if (settings.snapshotType !== 'dedicated' && IS_SECOND_VALIDATION_PHASE) {
+  if (snapshotType !== 'dedicated' && IS_SECOND_VALIDATION_PHASE) {
     throw new PythonRuntimeError(
       'The second validation phase should receive a dedicated snapshot, got ' +
-        settings.snapshotType
+        snapshotType
     );
   }
+}
+
+export function maybeRestoreSnapshot(Module: Module): void {
+  if (!LOADED_SNAPSHOT_META) {
+    return;
+  }
+  const { snapshotSize, snapshotOffset, snapshotReader, settings } =
+    LOADED_SNAPSHOT_META;
+  checkSnapshotType(settings.snapshotType);
 
   Module.growMemory(snapshotSize);
   snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);

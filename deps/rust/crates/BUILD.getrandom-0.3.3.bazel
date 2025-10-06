@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "psm",
+    name = "getrandom",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,6 +29,9 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -36,15 +39,30 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=psm",
+        "crate-name=getrandom",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.26",
+    version = "0.3.3",
     deps = [
-        "@crates_vendor__psm-0.1.26//:build_script_build",
-    ],
+        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__getrandom-0.3.3//:build_script_build",
+    ] + select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": [
+            "@crates_vendor__libc-0.2.176//:libc",  # cfg(any(target_os = "macos", target_os = "openbsd", target_os = "vita", target_os = "emscripten"))
+        ],
+        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.176//:libc",  # cfg(all(any(target_os = "linux", target_os = "android"), not(any(all(target_os = "linux", target_env = ""), getrandom_backend = "custom", getrandom_backend = "linux_raw", getrandom_backend = "rdrand", getrandom_backend = "rndr"))))
+        ],
+        "@rules_rust//rust/platform:x86_64-apple-darwin": [
+            "@crates_vendor__libc-0.2.176//:libc",  # cfg(any(target_os = "macos", target_os = "openbsd", target_os = "vita", target_os = "emscripten"))
+        ],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
+            "@crates_vendor__libc-0.2.176//:libc",  # cfg(all(any(target_os = "linux", target_os = "android"), not(any(all(target_os = "linux", target_env = ""), getrandom_backend = "custom", getrandom_backend = "linux_raw", getrandom_backend = "rdrand", getrandom_backend = "rndr"))))
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 cargo_build_script(
@@ -66,6 +84,9 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "std",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -81,22 +102,19 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "psm",
+    pkg_name = "getrandom",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=psm",
+        "crate-name=getrandom",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.26",
+    version = "0.3.3",
     visibility = ["//visibility:private"],
-    deps = [
-        "@crates_vendor__cc-1.2.39//:cc",
-    ],
 )
 
 alias(

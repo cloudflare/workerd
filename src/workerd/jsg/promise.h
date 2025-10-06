@@ -374,6 +374,21 @@ class Promise {
     }
   }
 
+  // Ths is for testing/diagnostics purposes only.
+  enum class State {
+    PENDING = v8::Promise::kPending,
+    FULFILLED = v8::Promise::kFulfilled,
+    REJECTED = v8::Promise::kRejected,
+    CONSUMED = 3  // Not a real state; indicates the Promise has been consumed.
+  };
+  State getState(Lock& js) {
+    KJ_IF_SOME(promise, v8Promise) {
+      return static_cast<State>(promise.getHandle(js)->State());
+    } else {
+      return State::CONSUMED;
+    }
+  }
+
  private:
   kj::Maybe<V8Ref<v8::Promise>> v8Promise;
   bool markedAsHandled = false;

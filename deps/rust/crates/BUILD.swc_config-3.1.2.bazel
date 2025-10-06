@@ -48,7 +48,7 @@ rust_library(
         "@crates_vendor__anyhow-1.0.100//:anyhow",
         "@crates_vendor__bytes-str-0.2.7//:bytes_str",
         "@crates_vendor__indexmap-2.11.4//:indexmap",
-        "@crates_vendor__serde-1.0.227//:serde",
+        "@crates_vendor__serde-1.0.228//:serde",
         "@crates_vendor__serde_json-1.0.145//:serde_json",
     ],
 )

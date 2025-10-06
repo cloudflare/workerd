@@ -153,17 +153,13 @@ static const PythonConfig defaultConfig{
 
 kj::Maybe<kj::Array<kj::byte>> tryGetMetadataSnapshot(
     const PythonConfig& pythonConfig, api::pyodide::SnapshotToDisk snapshotToDisk) {
-  if (pythonConfig.loadSnapshotFromDisk && snapshotToDisk) {
-    KJ_FAIL_ASSERT(
-        "Doesn't make sense to pass both --python-save-snapshot and --python-load-snapshot");
-  }
   kj::Maybe<kj::Array<kj::byte>> memorySnapshot = kj::none;
-  if (pythonConfig.loadSnapshotFromDisk) {
+  KJ_IF_SOME(snapshot, pythonConfig.loadSnapshotFromDisk) {
     auto& root = KJ_REQUIRE_NONNULL(pythonConfig.packageDiskCacheRoot);
-    kj::Path path("snapshot.bin");
+    kj::Path path(snapshot);
     auto maybeFile = root->tryOpenFile(path);
     if (maybeFile == kj::none) {
-      KJ_FAIL_REQUIRE("Expected to find snapshot.bin in the package cache directory");
+      KJ_FAIL_REQUIRE("Expected to find", snapshot, "in the package cache directory");
     }
     memorySnapshot = KJ_REQUIRE_NONNULL(maybeFile)->readAllBytes();
   }
@@ -495,7 +491,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 
           if (output.success) {
             return Worker::Script::EsModule{
-              .body = ::kj_rs::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+              .body = ::kj::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
           }
 
           auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);
