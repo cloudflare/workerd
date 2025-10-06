@@ -29,6 +29,7 @@ class JsSpan: public jsg::Object {
   JSG_RESOURCE_TYPE(JsSpan) {
     JSG_METHOD(end);
     JSG_METHOD(setAttribute);
+    JSG_DISPOSE(end);
   }
 
  private:
