@@ -11,6 +11,7 @@
 namespace workerd::api {
 
 jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_get"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   kj::Maybe<jsg::JsValue> result;
@@ -24,6 +25,7 @@ jsg::JsValue SyncKvStorage::get(jsg::Lock& js, kj::String key) {
 
 jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_list"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   // Convert our options to DurableObjectStorageOperations::ListOptions (which also have the
@@ -58,7 +60,7 @@ kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::L
     return js.arr(js.str(pair.key), deserializeV8Value(js, pair.key, pair.value));
   } else if (stateRef.wasCanceled()) {
     JSG_FAIL_REQUIRE(Error,
-        "kv.list() iterator was invalidated because a new call to kv.list() was sarted. Only one "
+        "kv.list() iterator was invalidated because a new call to kv.list() was started. Only one "
         "kv.list() iterator can exist at a time.");
   } else {
     return kj::none;
@@ -66,12 +68,14 @@ kj::Maybe<jsg::JsArray> SyncKvStorage::listNext(jsg::Lock& js, IoOwn<SqliteKv::L
 }
 
 void SyncKvStorage::put(jsg::Lock& js, kj::String key, jsg::JsValue value) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_put"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   sqliteKv.put(key, serializeV8Value(js, value));
 }
 
 kj::OneOf<bool, int> SyncKvStorage::delete_(jsg::Lock& js, kj::String key) {
+  auto userSpan = IoContext::current().makeUserTraceSpan("durable_object_storage_kv_delete"_kjc);
   SqliteKv& sqliteKv = getSqliteKv(js);
 
   return sqliteKv.delete_(key);
