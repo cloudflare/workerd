@@ -134,7 +134,7 @@ coverage path="//...":
 
 profile path:
   bazel run //src/workerd/tests:bench-{{path}} --config=benchmark --run_under="perf record -F max --call-graph lbr"
-  PERF_FILE=$(fdfind perf.data bazel-bin | grep "{{path}}" | head -1); \
+  PERF_FILE=$(fdfind --hidden perf.data bazel-bin | grep "{{path}}" | head -1); \
   if [ -n "$PERF_FILE" ] && [ -s "$PERF_FILE" ]; then \
     cp $PERF_FILE perf.data; \
     perf report --input=$PERF_FILE; \
