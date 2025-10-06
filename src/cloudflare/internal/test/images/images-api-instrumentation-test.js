@@ -2,226 +2,471 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import {
+  createInstrumentationState,
+  createTailStreamHandler,
+  runInstrumentationTest,
+} from 'instrumentation-test-helper';
 
-// Images test uses a different keying strategy (traceId-based)
-// So we need a custom collector
-const invocationPromises = [];
-const spans = new Map();
+// Create module-level state using the helper
+const state = createInstrumentationState();
 
 export default {
-  tailStream(event, env, ctx) {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-
-    // Accumulate the span info for easier testing
-    return (event) => {
-      switch (event.event.type) {
-        case 'spanOpen':
-          // The span ids will change between tests, but Map preserves insertion order
-          spans.set(event.spanContext.traceId, { name: event.event.name });
-          break;
-        case 'attributes': {
-          let span = spans.get(event.spanContext.traceId);
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
-          }
-          spans.set(event.spanContext.traceId, span);
-          break;
-        }
-        case 'spanClose': {
-          let span = spans.get(event.spanContext.traceId);
-          span['closed'] = true;
-          spans.set(event.spanContext.traceId, span);
-          break;
-        }
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  },
+  tailStream: createTailStreamHandler(state),
 };
 
 export const test = {
   async test() {
-    // Wait for all the tailStream executions to finish
-    await Promise.allSettled(invocationPromises);
-
-    // Recorded streaming tail worker events, in insertion order,
-    // filtering spans not associated with Images
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
-
-    // spans emitted by images-api-test.js in execution order
-    let expected = [
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 63n,
-        closed: true,
+    await runInstrumentationTest(state, expectedSpans, {
+      testName: 'Images instrumentation',
+      mapFn: (span) => {
+        if (
+          span['http.request.header.content-type'] &&
+          span['http.request.header.content-type'].startsWith(
+            'multipart/form-data; boundary='
+          )
+        ) {
+          span['http.request.header.content-type'] =
+            'multipart/form-data; boundary=<dynamic>';
+        }
+        return span;
       },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 57n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 491605n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 655465n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 60n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 63n,
-        closed: true,
-      },
-      {
-        name: 'images_info',
-        'cloudflare.images.info.format': 'image/png',
-        'cloudflare.images.info.file_size': 123,
-        'cloudflare.images.info.width': 123,
-        'cloudflare.images.info.height': 123,
-        closed: true,
-      },
-      {
-        name: 'images_info',
-        'cloudflare.images.info.encoding': 'base64',
-        'cloudflare.images.info.format': 'image/png',
-        'cloudflare.images.info.file_size': 123,
-        'cloudflare.images.info.width': 123,
-        'cloudflare.images.info.height': 123,
-        closed: true,
-      },
-      { name: 'images_info', closed: true },
-      {
-        name: 'images_info',
-        'cloudflare.images.info.format': 'image/svg+xml',
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 359n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 102n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 409n,
-        'http.response.body.size': 22n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 88n,
-        closed: true,
-      },
-      {
-        name: 'fetch',
-        'network.protocol.name': 'http',
-        'network.protocol.version': 'HTTP/1.1',
-        'http.request.method': 'POST',
-        'url.full': 'https://js.images.cloudflare.com/transform',
-        'http.response.status_code': 200n,
-        'http.response.body.size': 60n,
-        closed: true,
-      },
-    ];
-
-    // Validate and normalize content-type headers (they contain dynamic boundaries)
-    for (const each of received) {
-      const contentType = each['http.request.header.content-type'];
-      if (contentType) {
-        // Verify it starts with the expected prefix
-        assert.ok(
-          contentType.startsWith('multipart/form-data; boundary='),
-          `Expected multipart/form-data content-type, got: ${contentType}`
-        );
-        // Normalize to a standard value for comparison
-        each['http.request.header.content-type'] =
-          'multipart/form-data; boundary=<dynamic>';
-      }
-    }
-
-    // Add normalized content-type to expected spans
-    for (const each of expected) {
-      if (
-        each.name === 'fetch' &&
-        each['url.full'] === 'https://js.images.cloudflare.com/transform'
-      ) {
-        each['http.request.header.content-type'] =
-          'multipart/form-data; boundary=<dynamic>';
-      }
-    }
-
-    assert.deepStrictEqual(received, expected);
+    });
   },
 };
+
+const expectedSpans = [
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 57n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 88n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 24661n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 24664n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 491605n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 86n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 32855n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 655465n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 58n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 59n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 60n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/info',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_info',
+    'cloudflare.images.options.encoding': 'base64',
+    'cloudflare.images.result.format': 'image/png',
+    'cloudflare.images.result.file_size': 123,
+    'cloudflare.images.result.width': 123,
+    'cloudflare.images.result.height': 123,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/info',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 63n,
+    closed: true,
+  },
+  {
+    name: 'images_info',
+    'cloudflare.images.options.encoding': 'base64',
+    'cloudflare.images.result.format': 'image/png',
+    'cloudflare.images.result.file_size': 123,
+    'cloudflare.images.result.width': 123,
+    'cloudflare.images.result.height': 123,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/info',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 409n,
+    'http.response.body.size': 22n,
+    closed: true,
+  },
+  {
+    name: 'images_info',
+    'cloudflare.images.options.encoding': 'base64',
+    'cloudflare.images.error.code': '123',
+    'cloudflare.status': 'error',
+    'error.type': 'ERROR 123: Bad request',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/info',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 26n,
+    closed: true,
+  },
+  {
+    name: 'images_info',
+    'cloudflare.images.options.encoding': 'base64',
+    'cloudflare.images.result.format': 'image/svg+xml',
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms':
+      '[{"imageIndex":0,"rotate":90},{"imageIndex":1,"rotate":180},{"drawImageIndex":1,"targetImageIndex":0},{"drawImageIndex":3,"targetImageIndex":2},{"imageIndex":2,"rotate":270},{"drawImageIndex":2,"targetImageIndex":0},{"drawImageIndex":4,"targetImageIndex":0}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 359n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    'cloudflare.images.options.anim': true,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 102n,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 409n,
+    'http.response.body.size': 22n,
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    'cloudflare.images.error.code': '123',
+    'cloudflare.status': 'error',
+    'error.type': 'ERROR 123: Bad request',
+    closed: true,
+  },
+  {
+    name: 'images_output',
+    'cloudflare.images.options.transforms': '[{"imageIndex":0,"rotate":90}]',
+    'cloudflare.images.options.format': 'image/avif',
+    closed: true,
+  },
+  { name: 'images_output', closed: true },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 88n,
+    closed: true,
+  },
+  { name: 'images_output', closed: true },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'https://js.images.cloudflare.com/transform',
+    'http.request.header.content-type':
+      'multipart/form-data; boundary=<dynamic>',
+    'http.response.status_code': 200n,
+    'http.response.body.size': 60n,
+    closed: true,
+  },
+];
