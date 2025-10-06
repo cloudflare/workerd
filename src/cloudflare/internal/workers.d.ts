@@ -19,6 +19,13 @@ export class WorkflowEntrypoint {
   env: unknown;
 }
 
+export class ContainerEntrypoint {
+  constructor(ctx: unknown, env: unknown);
+
+  ctx: unknown;
+  env: unknown;
+}
+
 export class RpcStub {
   constructor(server: object);
 }

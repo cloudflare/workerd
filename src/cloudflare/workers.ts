@@ -10,6 +10,16 @@ import innerEnv from 'cloudflare-internal:env';
 
 export const WorkerEntrypoint = entrypoints.WorkerEntrypoint;
 export const DurableObject = entrypoints.DurableObject;
+
+// Add ping method to ContainerEntrypoint prototype
+const ContainerEntrypointBase = entrypoints.ContainerEntrypoint;
+class ContainerEntrypointWithMethods extends ContainerEntrypointBase {
+  ping(): string {
+    return 'pong';
+  }
+}
+export const ContainerEntrypoint = ContainerEntrypointWithMethods;
+
 export const RpcStub = entrypoints.RpcStub;
 export const RpcPromise = entrypoints.RpcPromise;
 export const RpcProperty = entrypoints.RpcProperty;
