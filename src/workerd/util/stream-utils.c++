@@ -8,46 +8,80 @@
 namespace workerd {
 
 namespace {
-class NullIoStream final: public kj::AsyncIoStream {
- public:
-  void shutdownWrite() override {}
 
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return kj::READY_NOW;
+// An AsyncInputStream implementation that reads from an in-memory buffer.
+// This is optimized for the case where the entire contents are available
+// up-front, so it doesn't do any dynamic memory allocation or copying.
+// It also supports optimized teeing when the backing storage is provided.
+class MemoryInputStream final: public kj::AsyncInputStream {
+ private:
+  struct OwnedBacking: public kj::Refcounted {
+    kj::Own<void> backing;
+    OwnedBacking(kj::Own<void>&& backing): backing(kj::mv(backing)) {}
+  };
+
+ public:
+  MemoryInputStream(
+      kj::ArrayPtr<const kj::byte> data, kj::Maybe<kj::Own<void>> maybeBacking = kj::none)
+      : data(data),
+        // Note that we don't actually check that maybeBacking actually owns the
+        // memory that `data` points to. It is the caller's responsibility to ensure
+        // this is the case if they want teeing to be safely supported.
+        ownedBacking(maybeBacking.map(
+            [](kj::Own<void>& backing) mutable { return kj::rc<OwnedBacking>(kj::mv(backing)); })) {
   }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    return kj::READY_NOW;
-  }
-  kj::Promise<void> whenWriteDisconnected() override {
-    return kj::NEVER_DONE;
-  }
+  MemoryInputStream(kj::ArrayPtr<const kj::byte> data, kj::Rc<OwnedBacking> ownedBacking)
+      : data(data),
+        ownedBacking(kj::mv(ownedBacking)) {}
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return kj::constPromise<size_t, 0>();
+    auto ptr = kj::arrayPtr<kj::byte>(static_cast<kj::byte*>(buffer), maxBytes);
+    size_t toRead = kj::min(data.size(), ptr.size());
+    KJ_DEFER(advance(toRead));
+    if (toRead == 0) return toRead;
+    ptr.first(toRead).copyFrom(data.first(toRead));
+    return toRead;
   }
 
   kj::Maybe<uint64_t> tryGetLength() override {
-    return kj::Maybe<uint64_t>((uint64_t)0);
+    return data.size();
   }
 
-  kj::Promise<uint64_t> pumpTo(AsyncOutputStream& output, uint64_t amount) override {
-    return kj::constPromise<uint64_t, 0>();
+  kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
+    // An optimized pumpTo... we know we have all the data right here. We can
+    // just write it all at once up to `amount`.
+    uint64_t toRead = kj::min(data.size(), amount);
+    KJ_DEFER(advance(toRead));
+    co_await output.write(data.first(toRead));
+    co_return toRead;
   }
-};
 
-class MemoryInputStream final: public kj::AsyncInputStream {
- public:
-  MemoryInputStream(kj::ArrayPtr<const kj::byte> data): data(data) {}
-
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    size_t toRead = kj::min(data.size(), maxBytes);
-    memcpy(buffer, data.begin(), toRead);
-    data = data.slice(toRead, data.size());
-    return toRead;
+  kj::Maybe<kj::Own<AsyncInputStream>> tryTee(uint64_t limit = kj::maxValue) override {
+    // If a MemoryInputStream is holding onto backing storage, then we can safely
+    // tee it here, allowing us to avoid the default tee implementation which needs
+    // additional buffering. Tee'ing just becomes a matter of sharing the backing
+    // storage and the data slice directly. This allows us to avoid any additional
+    // buffering in unread stream branches since all of the data is already in memory
+    // anyway. If we're not holding onto the backing storage, then we cannot safely
+    // assume that the a tee branch will safely be able to read the data, so we'll
+    // fall back to the default kj::newTee implementation.
+    KJ_IF_SOME(owned, ownedBacking) {
+      return kj::heap<MemoryInputStream>(data, owned.addRef());
+    }
+    return kj::none;
   }
 
  private:
   kj::ArrayPtr<const kj::byte> data;
+  kj::Maybe<kj::Rc<OwnedBacking>> ownedBacking;
+
+  void advance(size_t amount) {
+    data = data.slice(amount);
+    // If we've consumed all the data, drop our reference to the backing storage eagerly.
+    if (data.size() == 0) {
+      ownedBacking = kj::none;
+    }
+  }
 };
 
 class NeuterableInputStreamImpl final: public NeuterableInputStream {
@@ -175,31 +209,37 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
   }
 };
 
+// The kj::NullStream instance is stateless, discards all writes, and returns
+// EOF on all reads. We can, therefore, safely share a single static global
+// instance instead of allocating a new one each time.
+static kj::NullStream nullStream{};
+
 }  // namespace
 
+kj::AsyncOutputStream& getGlobalNullOutputStream() {
+  return nullStream;
+}
+
 kj::Own<kj::AsyncIoStream> newNullIoStream() {
-  return kj::heap<NullIoStream>();
+  return kj::Own<kj::AsyncIoStream>(&nullStream, kj::NullDisposer::instance);
 }
 
 kj::Own<kj::AsyncInputStream> newNullInputStream() {
-  return kj::heap<NullIoStream>();
+  return kj::Own<kj::AsyncInputStream>(&nullStream, kj::NullDisposer::instance);
 }
 
 kj::Own<kj::AsyncOutputStream> newNullOutputStream() {
-  return kj::heap<NullIoStream>();
+  return kj::Own<kj::AsyncOutputStream>(&nullStream, kj::NullDisposer::instance);
 }
 
-kj::AsyncOutputStream& getGlobalNullOutputStream() {
-  static NullIoStream globalNullStream;
-  return globalNullStream;
+kj::Own<kj::AsyncInputStream> newMemoryInputStream(
+    kj::ArrayPtr<const kj::byte> data, kj::Maybe<kj::Own<void>> maybeBacking) {
+  return kj::heap<MemoryInputStream>(data, kj::mv(maybeBacking));
 }
 
-kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::ArrayPtr<const kj::byte> data) {
-  return kj::heap<MemoryInputStream>(data);
-}
-
-kj::Own<kj::AsyncInputStream> newMemoryInputStream(kj::StringPtr data) {
-  return kj::heap<MemoryInputStream>(data.asBytes());
+kj::Own<kj::AsyncInputStream> newMemoryInputStream(
+    kj::StringPtr data, kj::Maybe<kj::Own<void>> maybeBacking) {
+  return kj::heap<MemoryInputStream>(data.asBytes(), kj::mv(maybeBacking));
 }
 
 kj::Own<NeuterableInputStream> newNeuterableInputStream(kj::AsyncInputStream& inner) {
