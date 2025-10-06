@@ -342,7 +342,7 @@ kj::Promise<void> ContainerClient::killContainer(uint32_t signal) {
       network, kj::str(dockerPath), kj::HttpMethod::POST, kj::mv(endpoint));
   // statusCode 409 refers to "container is not running"
   // We should not throw an error when the container is already not running.
-  JSG_REQUIRE(response.statusCode == 200 || response.statusCode == 409, Error,
+  JSG_REQUIRE(response.statusCode == 204 || response.statusCode == 409, Error,
       "Stopping container failed with: ", response.body);
 }
 
