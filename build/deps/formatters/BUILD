@@ -1,4 +1,5 @@
-load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
+load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
 config_setting(
     name = "linux_amd64",
@@ -40,7 +41,7 @@ config_setting(
     ],
 )
 
-copy_file(
+native_binary(
     name = "clang-format@rule",
     src = select({
         ":linux_amd64": "@clang-format-linux-amd64//file:file",
@@ -52,7 +53,7 @@ copy_file(
     visibility = ["//visibility:public"],
 )
 
-copy_file(
+native_binary(
     name = "ruff@rule",
     src = select({
         ":linux_amd64": "@ruff-linux-amd64//:file",
@@ -64,7 +65,7 @@ copy_file(
     visibility = ["//visibility:public"],
 )
 
-copy_file(
+native_binary(
     name = "buildifier@rule",
     src = select({
         ":linux_amd64": "@buildifier-linux-amd64//file:file",
@@ -78,13 +79,13 @@ copy_file(
     visibility = ["//visibility:public"],
 )
 
-# buildifier: disable=load-on-top
-# TODO(alexeagle): delete everything above this line
-load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
+
 
 format_multirun(
     name = "format",
     # TODO(alexeagle): add more formatters here
-    cc = "@llvm_toolchain_llvm//:bin/clang-format",
+    cc = ":clang-format@rule",
+    starlark = ":buildifier@rule",
+    python = ":ruff@rule",
     visibility = ["//:__pkg__"],
 )

@@ -19,18 +19,6 @@ bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "apple_support", version = "1.23.1")
 bazel_dep(name = "rules_cc", version = "0.2.8")
 
-bazel_dep(name = "toolchains_llvm", version = "1.5.0")
-
-# Configure and register the toolchain.
-llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
-llvm.toolchain(
-    llvm_versions = {
-        # Empty string means the default platform.
-        "": "18.1.8",
-    },
-)
-use_repo(llvm, "llvm_toolchain", "llvm_toolchain_llvm")
-
 bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
 git_override(
     module_name = "zlib",
