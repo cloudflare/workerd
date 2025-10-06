@@ -952,7 +952,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonDedicatedSnapshot @110 :Bool
       $compatEnableFlag("python_dedicated_snapshot")
-      $compatDisableFlag("disable_python_dedicated_snapshot");
+      $compatDisableFlag("disable_python_dedicated_snapshot")
+      $impliedByAfterDate(name = "pythonWorkers20250116", date = "2025-10-16");
   # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
   # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
   # top-level execution of the Worker.
