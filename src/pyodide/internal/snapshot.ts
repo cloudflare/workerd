@@ -810,6 +810,11 @@ export function finalizeBootstrap(
       customHiwireStateDeserializer
     );
   });
+  // finalizeBootstrap overrides LD_LIBRARY_PATH. Restore it.
+  simpleRunPython(
+    Module,
+    `import os; os.environ["LD_LIBRARY_PATH"] += ":/session/metadata/python_modules/lib/"; del os`
+  );
   if (IS_CREATING_SNAPSHOT) {
     return;
   }

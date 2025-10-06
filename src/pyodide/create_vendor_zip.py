@@ -49,8 +49,6 @@ def run_pywrangler_sync(work_dir: Path, python: str | None) -> Path:
     # TODO: Make pywrangler understand how to use Python 3.13 correctly and
     # remove these extra commands
     run(["uv", "venv"], cwd=work_dir, env=env)
-    run(["uv", "pip", "install", "pyodide-build"], cwd=work_dir, env=env)
-    run(["uv", "run", "pyodide", "xbuildenv", "install"], cwd=work_dir, env=env)
     run(["uv", "run", "pywrangler", "sync"], cwd=work_dir, env=env)
     python_modules_dir = work_dir / "python_modules"
     if not python_modules_dir.exists():

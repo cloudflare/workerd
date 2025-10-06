@@ -125,4 +125,5 @@ interface Module {
   snapshotDebug?: boolean;
   getEmptyTableSlot(): number;
   freeTableIndexes: number[];
+  LD_LIBRARY_PATH: string;
 }
