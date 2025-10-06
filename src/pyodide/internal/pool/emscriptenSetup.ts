@@ -77,9 +77,12 @@ function getPrepareFileSystem(pythonStdlib: ArrayBuffer): PreRunHook {
     Module.API.pyVersionTuple = computeVersionTuple(Module);
     const [pymajor, pyminor] = Module.API.pyVersionTuple;
     Module.FS.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
-    // finalizeBootstrap() will set LD_LIBRARY_PATH to this same value in a bit, but it's too late
-    // for us when we preload dynamic libraries.
-    Module.ENV.LD_LIBRARY_PATH = ['/usr/lib', Module.FS.sitePackages].join(':');
+    Module.LD_LIBRARY_PATH = [
+      '/usr/lib',
+      Module.FS.sitePackages,
+      '/session/metadata/python_modules/lib/',
+    ].join(':');
+    Module.ENV.LD_LIBRARY_PATH = Module.LD_LIBRARY_PATH;
     Module.FS.sessionSitePackages = '/session' + Module.FS.sitePackages;
     Module.FS.mkdirTree(Module.FS.sitePackages);
     Module.FS.writeFile(

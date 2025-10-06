@@ -25,9 +25,10 @@ for f_path in file_paths:
     # On Windows, we replace windows-style path separators with standard posix path separators.
     components = Path(f_path).parts
     # without `external/` prefix
-    embed_path = ("../" * 7) + str(Path(*components[1:])).replace("\\", "\\\\")
+    embed_components = ("..",) * 7 + components[1:]
+    embed_path = str(Path(*embed_components)).replace("\\", "\\\\")
     # without `external/fastapi_src/` prefix
-    module_path = str(Path(*components[2:])).replace("\\", "/")
+    module_path = "/".join(["python_modules", *components[2:]])
 
     # Format as a Cap'n Proto module definition.
     if f_path.endswith(".py"):
