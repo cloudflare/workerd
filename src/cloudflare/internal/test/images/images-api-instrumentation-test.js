@@ -1,19 +1,21 @@
 // Copyright (c) 2017-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import * as assert from 'node:assert';
+import {
+  createInstrumentationState,
+  runInstrumentationTest,
+} from 'instrumentation-test-helper';
 
 // Images test uses a different keying strategy (traceId-based)
-// So we need a custom collector
-const invocationPromises = [];
-const spans = new Map();
+// So we need a custom tailStream handler
+const state = createInstrumentationState();
 
 export default {
   tailStream(event, env, ctx) {
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
     let resolveFn;
-    invocationPromises.push(
+    state.invocationPromises.push(
       new Promise((resolve, reject) => {
         resolveFn = resolve;
       })
@@ -24,20 +26,23 @@ export default {
       switch (event.event.type) {
         case 'spanOpen':
           // The span ids will change between tests, but Map preserves insertion order
-          spans.set(event.spanContext.traceId, { name: event.event.name });
+          // Note: Images uses traceId instead of spanId for keying
+          state.spans.set(event.spanContext.traceId, {
+            name: event.event.name,
+          });
           break;
         case 'attributes': {
-          let span = spans.get(event.spanContext.traceId);
+          let span = state.spans.get(event.spanContext.traceId);
           for (let { name, value } of event.event.info) {
             span[name] = value;
           }
-          spans.set(event.spanContext.traceId, span);
+          state.spans.set(event.spanContext.traceId, span);
           break;
         }
         case 'spanClose': {
-          let span = spans.get(event.spanContext.traceId);
+          let span = state.spans.get(event.spanContext.traceId);
           span['closed'] = true;
-          spans.set(event.spanContext.traceId, span);
+          state.spans.set(event.spanContext.traceId, span);
           break;
         }
         case 'outcome':
@@ -50,23 +55,16 @@ export default {
 
 export const test = {
   async test() {
-    // Wait for all the tailStream executions to finish
-    await Promise.allSettled(invocationPromises);
-
-    // Recorded streaming tail worker events, in insertion order,
-    // filtering spans not associated with Images
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
-
     // spans emitted by images-api-test.js in execution order
-    let expected = [
+    const expectedSpans = [
       {
         name: 'fetch',
         'network.protocol.name': 'http',
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
         closed: true,
@@ -77,6 +75,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 57n,
         closed: true,
@@ -87,6 +87,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 491605n,
         closed: true,
@@ -97,6 +99,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 655465n,
         closed: true,
@@ -107,6 +111,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
         closed: true,
@@ -117,6 +123,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 63n,
         closed: true,
@@ -150,6 +158,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 359n,
         closed: true,
@@ -160,6 +170,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 102n,
         closed: true,
@@ -170,6 +182,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 409n,
         'http.response.body.size': 22n,
         closed: true,
@@ -180,6 +194,8 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 88n,
         closed: true,
@@ -190,38 +206,28 @@ export const test = {
         'network.protocol.version': 'HTTP/1.1',
         'http.request.method': 'POST',
         'url.full': 'https://js.images.cloudflare.com/transform',
+        'http.request.header.content-type':
+          'multipart/form-data; boundary=<dynamic>',
         'http.response.status_code': 200n,
         'http.response.body.size': 60n,
         closed: true,
       },
     ];
 
-    // Validate and normalize content-type headers (they contain dynamic boundaries)
-    for (const each of received) {
-      const contentType = each['http.request.header.content-type'];
-      if (contentType) {
-        // Verify it starts with the expected prefix
-        assert.ok(
-          contentType.startsWith('multipart/form-data; boundary='),
-          `Expected multipart/form-data content-type, got: ${contentType}`
-        );
-        // Normalize to a standard value for comparison
-        each['http.request.header.content-type'] =
-          'multipart/form-data; boundary=<dynamic>';
-      }
-    }
-
-    // Add normalized content-type to expected spans
-    for (const each of expected) {
-      if (
-        each.name === 'fetch' &&
-        each['url.full'] === 'https://js.images.cloudflare.com/transform'
-      ) {
-        each['http.request.header.content-type'] =
-          'multipart/form-data; boundary=<dynamic>';
-      }
-    }
-
-    assert.deepStrictEqual(received, expected);
+    // Use the helper with mapFn to normalize dynamic multipart boundaries
+    await runInstrumentationTest(state, expectedSpans, {
+      testName: 'Images instrumentation',
+      mapFn: (span) => {
+        const contentType = span['http.request.header.content-type'];
+        if (contentType?.startsWith('multipart/form-data; boundary=')) {
+          return {
+            ...span,
+            'http.request.header.content-type':
+              'multipart/form-data; boundary=<dynamic>',
+          };
+        }
+        return span;
+      },
+    });
   },
 };

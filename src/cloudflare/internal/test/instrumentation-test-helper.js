@@ -95,6 +95,7 @@ export function getFilteredSpans(
  * @param {Object} state - The state object from createInstrumentationState
  * @param {Array} expectedSpans - The expected spans to compare against
  * @param {Object} options - Options for the test
+ * @param {Function} options.mapFn - Map function to transform spans before comparison (default: x => x)
  * @param {Function} options.filterFn - Filter function for spans (default: filters out jsRpcSession)
  * @param {Array} options.toleranceFields - Fields to apply bigint tolerance to (default: ['http.response.body.size'])
  * @param {bigint} options.tolerance - Tolerance for bigint fields (default: 5n)
@@ -111,6 +112,7 @@ export async function runInstrumentationTest(
   options = {}
 ) {
   const {
+    mapFn = (x) => x,
     filterFn = (span) => span.name !== 'jsRpcSession',
     toleranceFields = ['http.response.body.size'],
     tolerance = 5n,
@@ -122,8 +124,8 @@ export async function runInstrumentationTest(
   await Promise.allSettled(state.invocationPromises);
 
   // Recorded streaming tail worker events, in insertion order,
-  // filtering spans not associated with the test
-  let received = Array.from(state.spans.values()).filter(filterFn);
+  // mapping and filtering spans not associated with the test
+  let received = Array.from(state.spans.values()).map(mapFn).filter(filterFn);
 
   // Log received spans for debugging/updating tests
   if (logReceived) {
