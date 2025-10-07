@@ -58,19 +58,6 @@ jsg::JsValue createNodeException(
 }
 
 namespace {
-// Generates the error message.
-#define UV_STRERROR_GEN(name, msg)                                                                 \
-  case UV_##name:                                                                                  \
-    return js.error(msg##_kj);
-jsg::JsValue uv_strerror(jsg::Lock& js, int err, kj::StringPtr message) {
-  if (message != nullptr) {
-    return js.error(message);
-  }
-  switch (err) { UV_ERRNO_MAP(UV_STRERROR_GEN) }
-  return js.error(kj::str("Unknown error: ", err));
-}
-#undef UV_STRERROR_GEN
-
 // Generates the error name.
 #define UV_ERR_NAME_GEN(name, _)                                                                   \
   case UV_##name:                                                                                  \
@@ -89,8 +76,34 @@ jsg::JsValue createUVException(jsg::Lock& js,
     kj::StringPtr path,
     kj::StringPtr dest) {
   KJ_DASSERT(syscall != nullptr, "syscall must not be null");
-  jsg::JsObject obj = KJ_ASSERT_NONNULL(uv_strerror(js, errorno, message).tryCast<jsg::JsObject>());
 
+  // Format the message to match Node.js format: "ENOENT: no such file or directory, open 'path'"
+  kj::String formattedMessage;
+  if (message == nullptr) {
+    // Get the default error message
+    kj::String defaultMsg;
+    switch (errorno) {
+#define UV_MSG_GEN(name, msg)                                                                      \
+  case UV_##name:                                                                                  \
+    defaultMsg = kj::str(msg);                                                                     \
+    break;
+      UV_ERRNO_MAP(UV_MSG_GEN)
+#undef UV_MSG_GEN
+      default:
+        defaultMsg = kj::str("unknown error: ", errorno);
+        break;
+    }
+
+    if (path != nullptr) {
+      formattedMessage = kj::str(defaultMsg, ", ", syscall, " '", path, "'");
+    } else {
+      formattedMessage = kj::mv(defaultMsg);
+    }
+  } else {
+    formattedMessage = kj::str(message);
+  }
+
+  jsg::JsObject obj = KJ_ASSERT_NONNULL(js.error(formattedMessage).tryCast<jsg::JsObject>());
   obj.set(js, "syscall"_kj, js.str(syscall));
   obj.set(js, "code"_kj, uv_err_name(js, errorno));
 

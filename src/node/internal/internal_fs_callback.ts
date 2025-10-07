@@ -265,7 +265,10 @@ export function copyFile(
     throw new ERR_UNSUPPORTED_OPERATION();
   }
   if (mode & COPYFILE_EXCL && fssync.existsSync(dest)) {
-    throw new ERR_EEXIST({ syscall: 'copyFile' });
+    throw new ERR_EEXIST({
+      syscall: 'copyFile',
+      path: normalizedDest.pathname,
+    });
   }
 
   callWithErrorOnlyCallback(() => {
