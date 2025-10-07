@@ -152,8 +152,9 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // Make a TCP connection...
     auto pipe = kj::newTwoWayPipe();
-    auto connectionPromise =
-        connectImpl(*pipe.ends[1]).then([]() -> kj::Promise<void> { return kj::NEVER_DONE; });
+    kj::Maybe<kj::Exception> connectionException = kj::none;
+
+    auto connectionPromise = connectImpl(*pipe.ends[1]);
 
     // ... and then stack an HttpClient on it ...
     auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
@@ -162,8 +163,19 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     auto service = kj::newHttpService(*client);
 
     // ... and now we can just forward our call to that.
-    co_await connectionPromise.exclusiveJoin(
-        service->request(method, noHostUrl, newHeaders, requestBody, response));
+    try {
+      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      connectionException = kj::some(kj::mv(exception));
+    }
+
+    // we prefer an exception from the container service that might've caused
+    // the error in the first place, that's why we await for the connectionPromise
+    KJ_IF_SOME(exception, connectionException) {
+      co_await connectionPromise;
+      kj::throwFatalException(kj::mv(exception));
+    }
   }
 
   // Implements connect(), i.e., forms a raw socket.
