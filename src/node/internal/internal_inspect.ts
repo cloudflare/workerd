@@ -1878,7 +1878,7 @@ function groupArrayElements(
     outputLength--;
   }
   const separatorSpace = 2; // Add 1 for the space and 1 for the separator.
-  const dataLen = Array.from({ length: outputLength }) as number[];
+  const dataLen = Array.from<number>({ length: outputLength });
   // Calculate the total length of all output entries and the individual max
   // entries length of all output entries. We have to remove colors first,
   // otherwise the length would not be calculated properly.
