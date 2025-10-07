@@ -69,7 +69,6 @@ const kErrInvalidArgValue = { code: 'ERR_INVALID_ARG_VALUE' };
 const kErrEBadf = { code: 'EBADF' };
 const kErrEExist = { code: 'EEXIST' };
 const kErrOutOfRange = { code: 'ERR_OUT_OF_RANGE' };
-const kErrENoEntError = { code: 'ENOENT' };
 
 export const openCloseTest = {
   async test() {
@@ -231,7 +230,10 @@ export const truncateTest = {
     throws(() => truncateSync('/', 'hello'), kErrInvalidArgType);
 
     ok(!existsSync('/tmp/test.txt'));
-    throws(() => truncateSync('/tmp/test.txt', 10), kErrENoEntError);
+    throws(() => truncateSync('/tmp/test.txt', 10), {
+      code: 'ENOENT',
+      path: '/tmp/test.txt',
+    });
 
     // Create the file
     writeFileSync('/tmp/test.txt', 'Hello World');
@@ -1051,7 +1053,7 @@ export const fsCwdTest = {
       () => {
         readFileSync('test-cwd.txt');
       },
-      { code: 'ENOENT' }
+      { code: 'ENOENT', path: '/bundle/test-cwd.txt' }
     );
 
     unlinkSync('/tmp/test-cwd.txt');
