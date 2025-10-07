@@ -23,11 +23,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-/* TODO: the following is adopted code, enabling linting one day */
-/* eslint-disable */
-
-'use strict';
-
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
@@ -46,9 +41,11 @@ export const kHandle = Symbol('kHandle');
 export const kFinalized = Symbol('kFinalized');
 export const kState = Symbol('kFinalized');
 
-export function getStringOption(options: any, key: string): string {
-  let value;
-  if (options && (value = options[key]) != null)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getStringOption(options: any, key: string): string | undefined {
+  let value: string | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition,@typescript-eslint/no-unsafe-member-access
+  if (options && (value = options[key] as string) != null)
     validateString(value, `options.${key}`);
   return value;
 }
@@ -58,7 +55,7 @@ export function getArrayBufferOrView(
   name: string,
   encoding?: string
 ): Buffer | ArrayBuffer | ArrayBufferView {
-  if (isAnyArrayBuffer(buffer)) return buffer as ArrayBuffer;
+  if (isAnyArrayBuffer(buffer)) return buffer;
   if (typeof buffer === 'string') {
     if (encoding === undefined || encoding === 'buffer') {
       encoding = 'utf8';

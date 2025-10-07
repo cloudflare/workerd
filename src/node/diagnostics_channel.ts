@@ -23,6 +23,9 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+// unsubscribe and subscribe is deprecated on types/node.
+/* eslint-disable @typescript-eslint/no-deprecated */
+
 import { default as diagnosticsChannel } from 'node-internal:diagnostics_channel';
 
 import type {
