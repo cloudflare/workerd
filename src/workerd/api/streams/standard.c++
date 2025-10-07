@@ -2735,14 +2735,13 @@ class AllReader {
           }
 
           jsg::BufferSource bufferSource(js, handle);
-          jsg::BackingStore backing = bufferSource.detach(js);
 
-          if (backing.size() == 0) {
+          if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
             return loop(js);
           }
 
-          if ((runningTotal + backing.size()) > limit) {
+          if ((runningTotal + bufferSource.size()) > limit) {
             auto error = js.v8TypeError("Memory limit exceeded before EOF.");
             auto rs = kj::mv(readable);
             state.template init<StreamStates::Errored>(js.v8Ref(error));
@@ -2750,8 +2749,8 @@ class AllReader {
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
 
-          runningTotal += backing.size();
-          parts.add(jsg::BufferSource(js, kj::mv(backing)));
+          runningTotal += bufferSource.size();
+          parts.add(bufferSource.copy(js));
           return loop(js);
         };
 
