@@ -19,7 +19,7 @@ export const testPingMethod = {
     const id = env.MY_CONTAINER.idFromName('test-container');
     const stub = env.MY_CONTAINER.get(id);
 
-    // Call the built-in ping method
+  // Call the built-in ping method
     const pingResult = await stub.ping();
     assert.strictEqual(pingResult, 'pong', 'ping() should return "pong"');
   },
