@@ -37,7 +37,7 @@ export const test = {
       '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"trace","traces":[]}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}';
     assert.deepStrictEqual(
       Array.from(resposeMap.values()),
-      Array(numTraces).fill(basicTrace)
+      Array.from({ length: numTraces }, () => basicTrace)
     );
   },
 };

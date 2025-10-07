@@ -13,7 +13,9 @@ harmful: https://github.com/bazelbuild/bazel/issues/12857
 There is an official mirror for V8 itself on GitHub, but not for dependencies like zlib (Chromium
 fork), icu (Chromium fork), and trace_event, so we still have to use git for them.
 """
+
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
 VERSION = "14.1.146.1"
@@ -82,8 +84,8 @@ bazel_dep(name = "workerd-v8")
 
 archive_override(
     module_name = "perfetto",
-    patches = ["//:patches/perfetto.patch"],
     integrity = "sha256-T5F4h9xXdYfTGMa+AXmewHIkS1cgxu5ierfyJMOwqJA=",
+    patches = ["//:patches/perfetto.patch"],
     strip_prefix = "perfetto-51.2",
     url = "https://github.com/google/perfetto/archive/refs/tags/v51.2.tar.gz",
 )
@@ -100,4 +102,14 @@ archive_override(
 local_path_override(
     module_name = "workerd-v8",
     path = "build/workerd-v8",
+)
+
+# Tell workerd code where to find google-benchmark with CodSpeed.
+#
+# We indirect through `@workerd-google-benchmark` to allow dependents to override how and where
+# google-benchmark is built, similar to the v8 setup above.
+bazel_dep(name = "workerd-google-benchmark")
+local_path_override(
+    module_name = "workerd-google-benchmark",
+    path = "build/google-benchmark",
 )

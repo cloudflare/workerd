@@ -75,6 +75,8 @@ import type { Writable } from 'node:stream';
 import { JSStreamSocket } from 'node-internal:internal_tls_jsstream';
 
 import { inspect } from 'node-internal:internal_inspect';
+import type { FixedLengthArray } from 'node-internal:internal_utils';
+
 const kInspect = inspect.custom;
 
 const kLastWriteQueueSize = Symbol('kLastWriteQueueSize');
@@ -1768,27 +1770,13 @@ const kIpv4RangeRegex =
 const kIpv4AddressRegex = /Address: IPv4 (\d{1,3}(?:\.\d{1,3}){3})/;
 const kIpv4SubnetRegex = /Subnet: IPv4 (\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})/;
 
-type FourNumbers = [number, number, number, number];
-type EightNumbers = [
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-];
-
 // IPv4/IPv6 CIDR network utilities
-function parseIPv4(ip: string): FourNumbers | undefined {
+function parseIPv4(ip: string): FixedLengthArray<number, 4> | undefined {
   // When the input is not a valid IPv4 address, return an empty array.
   const parts = ip.split('.');
   if (parts.length !== 4) return undefined;
 
-  const nums: FourNumbers = Array.from({ length: parts.length }).fill(
-    0
-  ) as FourNumbers;
+  const nums = [0, 0, 0, 0] as FixedLengthArray<number, 4>;
 
   for (let n = 0; n < parts.length; n++) {
     const part = parts[n];
@@ -1801,7 +1789,7 @@ function parseIPv4(ip: string): FourNumbers | undefined {
   return nums;
 }
 
-function parseIPv6(ip: string): EightNumbers | undefined {
+function parseIPv6(ip: string): FixedLengthArray<number, 8> | undefined {
   // Handle IPv4-mapped IPv6 addresses
   if (ip.includes('.')) {
     const match = ip.match(kIpv6Regex);
@@ -1838,10 +1826,10 @@ function parseIPv6(ip: string): EightNumbers | undefined {
   const parts = expanded.split(':');
   if (parts.length !== 8) return undefined;
 
-  const nums: EightNumbers = parts.map((p) => {
+  const nums = parts.map((p) => {
     const num = parseInt(p || '0', 16);
     return num >= 0 && num <= 0xffff ? num : -1;
-  }) as EightNumbers;
+  }) as FixedLengthArray<number, 8>;
 
   return nums.includes(-1) ? undefined : nums;
 }

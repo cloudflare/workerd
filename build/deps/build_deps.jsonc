@@ -49,13 +49,6 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
-    },
-    // microbenchmark
-    {
-      "name": "codspeed",
-      "type": "github_release",
-      "owner": "CodSpeedHQ",
-      "repo": "codspeed-cpp"
     }
   ]
 }

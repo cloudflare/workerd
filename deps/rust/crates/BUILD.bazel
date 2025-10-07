@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.39",
-    actual = "@crates_vendor__cc-1.2.39//:cc",
+    name = "cc-1.2.40",
+    actual = "@crates_vendor__cc-1.2.40//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.39//:cc",
+    actual = "@crates_vendor__cc-1.2.40//:cc",
     tags = ["manual"],
 )
 

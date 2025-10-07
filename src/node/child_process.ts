@@ -20,7 +20,7 @@ import {
   validateString,
   validateArray,
 } from 'node-internal:validators';
-import type { Readable, Writable } from 'stream';
+import type { Readable, Writable } from 'node:stream';
 
 export class ChildProcess extends EventEmitter implements _ChildProcess {
   stdin: Writable | null = null;
