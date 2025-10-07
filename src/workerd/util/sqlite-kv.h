@@ -6,6 +6,9 @@
 
 #include "sqlite.h"
 
+#include <kj/debug.h>
+#include <kj/exception.h>
+
 namespace workerd {
 
 // Small class which is used to customize certain aspects of the underlying sql operations
@@ -61,6 +64,15 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // Store a value into the table.
   void put(KeyPtr key, ValuePtr value);
   void put(KeyPtr key, ValuePtr value, WriteOptions options);
+
+  // Atomically store multiple values into the table.
+  //
+  // ArrayOfKeyValuePair should be a type that allows iteration of a struct that has two members,
+  // key and value, that can be coerced into KeyPtr and ValuePtr, respectively.  I'm using a
+  // template so that we don't have to transform (by copy) the values passed in from higher levels
+  // while also preventing this module from taking a dependency on types from higher levels.
+  template <typename ArrayOfKeyValuePair>
+  void put(ArrayOfKeyValuePair& pairs, WriteOptions options);
 
   // Delete the key and return whether it was matched.
   bool delete_(KeyPtr key);
@@ -139,6 +151,12 @@ class SqliteKv: private SqliteDatabase::ResetListener {
     )");
     SqliteDatabase::Statement stmtCountKeys = db.prepare(regulator, R"(
       SELECT count(*) FROM _cf_KV
+    )");
+    SqliteDatabase::Statement stmtMultiPutSavepoint = db.prepare(regulator, R"(
+      SAVEPOINT _cf_put_multiple_savepoint
+    )");
+    SqliteDatabase::Statement stmtMultiPutRelease = db.prepare(regulator, R"(
+      RELEASE _cf_put_multiple_savepoint
     )");
 
     Initialized(SqliteDatabase& db): db(db) {}
@@ -246,6 +264,31 @@ template <typename Func>
 uint SqliteKv::list(
     KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order, Func&& callback) {
   return list(begin, end, limit, order)->forEach(kj::fwd<Func>(callback));
+}
+
+template <typename ArrayOfKeyValuePair>
+void SqliteKv::put(ArrayOfKeyValuePair& pairs, WriteOptions options) {
+  // TODO(cleanup): This code is very similar to DurableObjectStorage::transactionSync.  Perhaps the
+  // general structure can be shared somehow?
+  auto& stmts = ensureInitialized(options.allowUnconfirmed);
+  stmts.stmtMultiPutSavepoint.run({.allowUnconfirmed = options.allowUnconfirmed});
+  for (const auto& pair: pairs) {
+    try {
+      put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
+    } catch (...) {
+      try {
+        // This should be rare, so we don't prepare a statement for it.
+        stmts.db.run({.regulator = stmts.regulator, .allowUnconfirmed = options.allowUnconfirmed},
+            kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+        stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
+      } catch (...) {
+        auto e = kj::getCaughtExceptionAsKj();
+        KJ_LOG(WARNING, "silencing exception encountered while rolling back multi-put", e);
+      }
+      throw;
+    }
+  }
+  stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
 }
 
 }  // namespace workerd
