@@ -444,7 +444,8 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
     // expecting.  So we'll skip the deletion attempt, and let the caller detect the gate
     // brokenness through other means.
     if (broken == kj::none) {
-      metadata.setAlarm(kj::none);
+      // the safe thing to do is to require confirmation.
+      metadata.setAlarm(kj::none, /*allowUnconfirmed=*/false);
     }
     haveDeferredDelete = false;
   }
@@ -597,12 +598,10 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
 
-  disableAllowUnconfirmed(options, "setAlarm is not supported");
-
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
 
-  metadata.setAlarm(newAlarmTime);
+  metadata.setAlarm(newAlarmTime, options.allowUnconfirmed);
 
   KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
     exp->setAlarmDirty();
@@ -687,7 +686,7 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {
-    metadata.setAlarm(localAlarmState);
+    metadata.setAlarm(localAlarmState, options.allowUnconfirmed);
   }
 
   return {
