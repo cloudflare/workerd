@@ -38,3 +38,5 @@ MODULE.bazel.lock
 
 coverage
 perf.data
+
+.claude
