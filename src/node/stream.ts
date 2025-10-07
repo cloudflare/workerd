@@ -24,8 +24,11 @@ import { Duplex, duplexPair } from 'node-internal:streams_duplex';
 import { Transform, PassThrough } from 'node-internal:streams_transform';
 import { promises } from 'node-internal:streams_promises';
 
+// eslint-disable-next-line @typescript-eslint/unbound-method
 export const _isArrayBufferView = Stream._isArrayBufferView;
+// eslint-disable-next-line @typescript-eslint/unbound-method
 export const _isUint8Array = Stream._isUint8Array;
+// eslint-disable-next-line @typescript-eslint/unbound-method
 export const _uint8ArrayToBuffer = Stream._uint8ArrayToBuffer;
 const destroy = destroyer;
 const finished = eos;
@@ -54,8 +57,10 @@ export {
 };
 
 Stream.addAbortSignal = addAbortSignal;
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 Stream.compose = compose;
 Stream.destroy = destroy;
+// @ts-expect-error TS2741 __promisify__ is missing.
 Stream.finished = finished;
 Stream.isReadable = isReadable;
 Stream.isWritable = isWritable;
