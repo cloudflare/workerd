@@ -246,53 +246,57 @@ void ActorSqlite::onCriticalError(
   }
 }
 
+void ActorSqlite::startImplicitTxn() {
+  auto txn = kj::heap<ImplicitTxn>(*this);
+
+  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+  // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
+  // function on the next turn of the event loop
+  auto commitPromise =
+      kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    // Don't commit if shutdown() has been called.
+    requireNotBroken();
+
+    // Start the schedule request before commit(), for correctness in workerd.
+    auto precommitAlarmState = startPrecommitAlarmScheduling();
+
+    try {
+      txn->commit();
+    } catch (...) {
+      // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+      // instead of whatever SQLite threw.
+      requireNotBroken();
+
+      // No, we're not broken, so propagate the exception as-is.
+      throw;
+    }
+
+    // The callback is only expected to commit writes up until this point. Any new writes that
+    // occur while the callback is in progress are NOT included, therefore require a new commit
+    // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+    // rather than after the callback.
+    { auto drop = kj::mv(txn); }
+
+    return commitImpl(kj::mv(precommitAlarmState));
+  })
+          // Unconditionally break the output gate if commit threw an error, no matter whether the
+          // commit was confirmed or unconfirmed.
+          .catch_([this](kj::Exception&& e) {
+    return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
+  })
+          // We need to wait for this in commitTasks and in lastCommit.
+          .fork();
+
+  commitTasks.add(commitPromise.addBranch());
+
+  // Commits must be executed in order, so we only have to track the most recent commit promise.
+  lastCommit = kj::mv(commitPromise);
+}
+
 void ActorSqlite::onWrite(bool allowUnconfirmed) {
   requireNotBroken();
   if (currentTxn.is<NoTxn>()) {
-    auto txn = kj::heap<ImplicitTxn>(*this);
-
-    // We implement the magic of accumulating all of the writes between JavaScript awaits in one
-    // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
-    // function on the next turn of the event loop
-    auto commitPromise =
-        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
-      // Don't commit if shutdown() has been called.
-      requireNotBroken();
-
-      // Start the schedule request before commit(), for correctness in workerd.
-      auto precommitAlarmState = startPrecommitAlarmScheduling();
-
-      try {
-        txn->commit();
-      } catch (...) {
-        // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
-        // instead of whatever SQLite threw.
-        requireNotBroken();
-
-        // No, we're not broken, so propagate the exception as-is.
-        throw;
-      }
-
-      // The callback is only expected to commit writes up until this point. Any new writes that
-      // occur while the callback is in progress are NOT included, therefore require a new commit
-      // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
-      // rather than after the callback.
-      { auto drop = kj::mv(txn); }
-
-      return commitImpl(kj::mv(precommitAlarmState));
-    })
-            // Unconditionally break the output gate if commit threw an error, no matter whether the
-            // commit was confirmed or unconfirmed.
-            .catch_([this](kj::Exception&& e) {
-      return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
-    })
-            // We need to wait for this in commitTasks and in lastCommit.
-            .fork();
-
-    commitTasks.add(commitPromise.addBranch());
-
-    // Commits must be executed in order, so we only have to track the most recent commit promise.
-    lastCommit = kj::mv(commitPromise);
+    startImplicitTxn();
   }
 
   // Update the status of the current transaction.
