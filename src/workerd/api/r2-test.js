@@ -45,6 +45,17 @@ const md5Buffer = new Uint8Array([
   0x9a, 0x03, 0x64, 0xb9, 0xe9, 0x9b, 0xb4, 0x80, 0xdd, 0x25, 0xe1, 0xf0, 0x28,
   0x4c, 0x85, 0x55,
 ]);
+// Test SHA1 checksum
+const sha1Buffer = new Uint8Array([
+  0x2a, 0x03, 0x64, 0xb9, 0xe9, 0x9b, 0xb4, 0x80, 0xdd, 0x25, 0xe1, 0xf0, 0x28,
+  0x4c, 0x85, 0x55, 0x11, 0x22, 0x33, 0x44,
+]);
+// Test SHA256 checksum
+const sha256Buffer = new Uint8Array([
+  0x3a, 0x03, 0x64, 0xb9, 0xe9, 0x9b, 0xb4, 0x80, 0xdd, 0x25, 0xe1, 0xf0, 0x28,
+  0x4c, 0x85, 0x55, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa,
+  0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+]);
 const objResponse = {
   name: key,
   version: 'objectVersion',
@@ -359,10 +370,19 @@ export default {
               });
             }
           }
-          case 'md5checksum': {
+          case 'multipleChecksums': {
+            // Convert buffers to hex strings as expected by Cap'n Proto JSON codec
+            const toHex = (buffer) =>
+              Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join(
+                ''
+              );
             return Response.json({
               ...objResponse,
-              md5: md5Buffer,
+              checksums: {
+                0: toHex(md5Buffer), // md5
+                1: toHex(sha1Buffer), // sha1
+                2: toHex(sha256Buffer), // sha256
+              },
             });
           }
         }
@@ -552,6 +572,24 @@ export default {
                 },
               },
               body,
+            });
+          }
+          case 'multipleChecksums': {
+            // Return HEAD response with multiple checksums
+            // Convert buffers to hex strings as expected by Cap'n Proto JSON codec
+            const toHex = (buffer) =>
+              Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join(
+                ''
+              );
+            return buildGetResponse({
+              head: {
+                checksums: {
+                  0: toHex(md5Buffer), // md5
+                  1: toHex(sha1Buffer), // sha1
+                  2: toHex(sha256Buffer), // sha256
+                },
+              },
+              body: jsonRequest.method === 'get' ? body : undefined,
             });
           }
         }
@@ -893,11 +931,15 @@ export default {
     }
     // Checksums
     {
-      // This exists purely to test the instrumentation
-      let resp = await env.BUCKET.put('md5checksum', body, {
+      // This tests the instrumentation with multiple checksums to ensure proper tag handling
+      let resp = await env.BUCKET.put('multipleChecksums', body, {
         md5: md5Buffer,
       });
       assert.ok(resp);
+
+      // Also test HEAD operation to verify checksum tags
+      const headResp = await env.BUCKET.head('multipleChecksums');
+      assert.ok(headResp);
     }
   },
 };
