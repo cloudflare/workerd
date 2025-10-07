@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { Readable as _Readable } from 'node:stream';
+import { Readable as _Readable, Duplex } from 'node:stream';
 import type { BufferList } from 'node-internal:streams_util';
 
 export declare class Readable extends _Readable {
@@ -15,3 +15,9 @@ export declare class Readable extends _Readable {
     endEmitted: boolean;
   };
 }
+
+export { ReadableState } from 'node:stream';
+export const from: typeof Duplex.from;
+export const fromWeb: typeof Duplex.fromWeb;
+export const toWeb: typeof Duplex.toWeb;
+export const wrap: typeof Duplex.wrap;
