@@ -2349,10 +2349,7 @@ export const writable2Writable = {
         );
       }
     }
-    const chunks = new Array(50);
-    for (let i = 0; i < chunks.length; i++) {
-      chunks[i] = 'x'.repeat(i);
-    }
+    const chunks = Array.from({ length: 50 }, (_, i) => 'x'.repeat(i));
     {
       // Verify fast writing
       const tw = new TestWriter({
@@ -3730,13 +3727,12 @@ export const readable_wrap_destroy = {
 };
 
 export const readable_non_empty_end = {
-  async test(ctrl, env, ctx) {
+  async test(_ctrl, _env, _ctx) {
     let len = 0;
-    const chunks = new Array(10);
-    for (let i = 1; i <= 10; i++) {
-      chunks[i - 1] = Buffer.allocUnsafe(i);
-      len += i;
-    }
+    const chunks = Array.from({ length: 10 }, (_el, i) => {
+      len += i + 1;
+      return Buffer.allocUnsafe(i + 1);
+    });
     const test = new Readable();
     let n = 0;
     test._read = function (size) {
@@ -7898,9 +7894,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test);
@@ -7929,9 +7923,7 @@ export const toarray = {
           [],
           [1],
           [1, 2, 3],
-          Array(100)
-            .fill()
-            .map((_, i) => i),
+          Array.from({ length: 100 }, (_, i) => i),
         ];
         for (const test of tests) {
           const stream = Readable.from(test).map((x) => Promise.resolve(x));
@@ -8544,7 +8536,7 @@ export const readable_unshift = {
             highWaterMark,
           });
           // The error happened only when pushing above hwm
-          this.buffer = new Array(highWaterMark * 2).fill(0).map(String);
+          this.buffer = Array.from({ length: highWaterMark * 2 }, () => '0');
         }
         _read(size) {
           while (this.buffer.length) {
