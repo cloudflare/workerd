@@ -319,6 +319,12 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
     KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
   }
 
+  // Reset the transaction state by going async, which will cause the ImplicitTxn to commit.
+  {
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+  }
+
   // ExplicitTxn test
   {
     KJ_ASSERT(!test.actor.isCommitScheduled());

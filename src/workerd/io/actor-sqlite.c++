@@ -537,39 +537,34 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, Wri
   requireNotBroken();
   // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
   if (currentTxn.is<NoTxn>()) {
-    // If we are not in a transaction, let's use an ExplicitTxn, which should rollback automatically
-    // if some put fails.
-
-    // TODO(someday) this should really start an ImplicitTxn, which has the advantage of
-    // supporting allowUnconfirmed.
-    disableAllowUnconfirmed(options, "multi put will create an ExplicitTxn");
-
-    auto txn = startTransaction();
-    txn->put(kj::mv(pairs), options);
-    txn->commit();
-  } else {
-    if (currentTxn.is<ExplicitTxn*>()) {
-      disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
-    }
-
-    // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
-    db->run(
-        {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
-    for (const auto& pair: pairs) {
-      try {
-        kv.put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
-      } catch (kj::Exception& e) {
-        // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
-        db->run({.regulator = SqliteDatabase::TRUSTED},
-            kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-        db->run(
-            {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
-        kj::throwFatalException(kj::mv(e));
-      }
-    }
-    // We're done here. RELEASE the savepoint.
-    db->run({.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
+    // If we are not in a transaction, start an ImplicitTxn since that's what would happen on the
+    // first write anyway.
+    startImplicitTxn();
   }
+
+  KJ_ASSERT(!currentTxn.is<NoTxn>());
+
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
+  }
+
+  // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
+  db->run({.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
+  for (const auto& pair: pairs) {
+    try {
+      kv.put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
+    } catch (kj::Exception& e) {
+      // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
+      db->run({.regulator = SqliteDatabase::TRUSTED},
+          kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
+      db->run(
+          {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
+      kj::throwFatalException(kj::mv(e));
+    }
+  }
+  // We're done here. RELEASE the savepoint.
+  db->run({.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
+
   return kj::none;
 }
 
