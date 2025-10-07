@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-// prettier-ignore
 import {
   Readable,
   ReadableState,
@@ -13,13 +12,5 @@ import {
   wrap,
 } from 'node-internal:streams_readable';
 
-// prettier-ignore
-export {
-  Readable,
-  ReadableState,
-  toWeb,
-  fromWeb,
-  from,
-  wrap,
-};
+export { Readable, ReadableState, toWeb, fromWeb, from, wrap };
 export default Readable;

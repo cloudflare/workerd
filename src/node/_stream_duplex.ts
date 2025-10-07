@@ -3,19 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 
-// prettier-ignore
-import {
-  Duplex,
-  from,
-  fromWeb,
-  toWeb,
-} from 'node-internal:streams_duplex';
+import { Duplex, from, fromWeb, toWeb } from 'node-internal:streams_duplex';
 
-// prettier-ignore
-export {
-  Duplex,
-  from,
-  fromWeb,
-  toWeb,
-};
+export { Duplex, from, fromWeb, toWeb };
 export default Duplex;
