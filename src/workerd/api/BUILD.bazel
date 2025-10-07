@@ -799,6 +799,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/request-clone-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-clone-test.js"],
+)
+
+wd_test(
     src = "tests/request-signal-enabled.wd-test",
     args = ["--experimental"],
     data = ["tests/request-signal-enabled.js"],
