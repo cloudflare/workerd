@@ -1964,5 +1964,211 @@ KJ_TEST("multiple sync() calls for same commit") {
   syncPromise3.wait(test.ws);
 }
 
+KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed setAlarm
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked, because we set `allowUnconfirmed`.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - alarm scheduling happens before commit
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was set
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("confirmed setAlarm blocks output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do a confirmed setAlarm (default behavior)
+  test.setAlarm(oneMs, {.allowUnconfirmed = false});
+
+  // Gate should be blocked after scheduling starts
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was set
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm then confirmed put uses output gate") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do an unconfirmed setAlarm followed by a confirmed put in the same transaction batch
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+  test.put("foo", "bar", {.allowUnconfirmed = false});
+
+  // Since any write in the batch needs confirmation, the entire batch should use output gate
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  KJ_ASSERT(!test.gate.wait().poll(test.ws));
+
+  // Complete the transaction.
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should unblock after commit completes
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Both operations should be committed
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
+  ActorSqliteTest test;
+
+  // Gate is currently not blocked.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Do unconfirmed setAlarm with unconfirmed storage writes
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+  test.put("foo", "bar", {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked since both operations are unconfirmed
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify both alarm and storage writes committed
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
+}
+
+KJ_TEST("allowUnconfirmed setAlarm updating existing alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 2ms.
+  test.setAlarm(twoMs);
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Update alarm to earlier time with allowUnconfirmed
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - when moving alarm earlier, schedule happens first
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm to later time") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Update alarm to later time with allowUnconfirmed
+  test.setAlarm(twoMs, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction - when moving alarm later, commit happens first
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
+}
+
+KJ_TEST("allowUnconfirmed setAlarm to clear alarm") {
+  ActorSqliteTest test;
+
+  // Initialize alarm state to 1ms.
+  test.setAlarm(oneMs);
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({});
+  KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
+
+  // Gate should be unblocked after setup
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Clear alarm with allowUnconfirmed
+  test.setAlarm(kj::none, {.allowUnconfirmed = true});
+
+  // Gate still isn't blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Complete the transaction
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+
+  // Gate should still not be blocked
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+
+  // Verify alarm was cleared
+  KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
+}
+
+KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  auto promise = test.gate.onBroken();
+
+  // Do an unconfirmed setAlarm
+  test.setAlarm(oneMs, {.allowUnconfirmed = true});
+
+  // The output gate is not applied initially.
+  KJ_ASSERT(test.gate.wait().poll(test.ws));
+  KJ_ASSERT(!promise.poll(test.ws));
+
+  // Fulfill scheduleRun but reject the commit to simulate failure
+  test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "alarm commit failed"));
+
+  // Gate should be broken due to commit failure
+  KJ_EXPECT_THROW_MESSAGE("alarm commit failed", promise.wait(test.ws));
+}
+
 }  // namespace
 }  // namespace workerd
