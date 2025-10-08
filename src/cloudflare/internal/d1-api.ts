@@ -85,10 +85,7 @@ class D1Database {
   }
 
   prepare(query: string): D1PreparedStatement {
-    return withSpan('prepare', (span) => {
-      span.setAttribute('query', query);
-      return new D1PreparedStatement(this.alwaysPrimarySession, query);
-    });
+    return new D1PreparedStatement(this.alwaysPrimarySession, query);
   }
 
   async batch<T = unknown>(
@@ -98,10 +95,7 @@ class D1Database {
   }
 
   async exec(query: string): Promise<D1ExecResult> {
-    return withSpan('exec', async (span) => {
-      span.setAttribute('query', query);
-      return this.alwaysPrimarySession.exec(query);
-    });
+    return this.alwaysPrimarySession.exec(query);
   }
 
   withSession(
@@ -163,10 +157,7 @@ class D1DatabaseSession {
   }
 
   prepare(sql: string): D1PreparedStatement {
-    return withSpan('prepare', (span) => {
-      span.setAttribute('sql', sql);
-      return new D1PreparedStatement(this, sql);
-    });
+    return new D1PreparedStatement(this, sql);
   }
 
   async batch<T = unknown>(
@@ -319,33 +310,37 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   //
 
   async exec(query: string): Promise<D1ExecResult> {
-    const lines = query.trim().split('\n');
-    const _exec = await this._send('/execute', lines, [], 'NONE');
-    const exec = Array.isArray(_exec) ? _exec : [_exec];
-    const error = exec
-      .map((r) => {
-        return r.error ? 1 : 0;
-      })
-      .indexOf(1);
-    if (error !== -1) {
-      throw new Error(
-        `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
-          exec[error]?.error
-        }`,
-        {
-          cause: new Error(
-            `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
-          ),
-        }
-      );
-    } else {
-      return {
-        count: exec.length,
-        duration: exec.reduce((p, c) => {
-          return p + (c.meta['duration'] as number);
-        }, 0),
-      };
-    }
+    return withSpan('d1_exec', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+
+      const lines = query.trim().split('\n');
+      const _exec = await this._send('/execute', lines, [], 'NONE');
+      const exec = Array.isArray(_exec) ? _exec : [_exec];
+      const error = exec
+        .map((r) => {
+          return r.error ? 1 : 0;
+        })
+        .indexOf(1);
+      if (error !== -1) {
+        throw new Error(
+          `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
+            exec[error]?.error
+          }`,
+          {
+            cause: new Error(
+              `Error in line ${error + 1}: ${lines[error]}: ${exec[error]?.error}`
+            ),
+          }
+        );
+      } else {
+        return {
+          count: exec.length,
+          duration: exec.reduce((p, c) => {
+            return p + (c.meta['duration'] as number);
+          }, 0),
+        };
+      }
+    });
   }
 
   /**
@@ -469,14 +464,19 @@ class D1PreparedStatement {
 
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
   async run<T = Record<string, unknown>>(): Promise<D1Response> {
-    return firstIfArray(
-      await this.dbSession._sendOrThrow<T>(
-        '/execute',
-        this.statement,
-        this.params,
-        'NONE'
-      )
-    );
+    return withSpan('d1_run', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+
+      const result = firstIfArray(
+        await this.dbSession._sendOrThrow<T>(
+          '/execute',
+          this.statement,
+          this.params,
+          'NONE'
+        )
+      );
+      return result;
+    });
   }
 
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {

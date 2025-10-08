@@ -19,24 +19,12 @@ export const test = {
   async test() {
     await runInstrumentationTest(state, expectedSpans, {
       testName: 'D1 instrumentation',
+      logReceived: true,
     });
   },
 };
 
 const expectedSpans = [
-  {
-    name: 'prepare',
-    query:
-      ' CREATE TABLE users\n' +
-      '        (\n' +
-      '            user_id    INTEGER PRIMARY KEY,\n' +
-      '            name       TEXT,\n' +
-      '            home       TEXT,\n' +
-      '            features   TEXT,\n' +
-      '            land_based BOOLEAN\n' +
-      '        );',
-    closed: true,
-  },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -49,7 +37,7 @@ const expectedSpans = [
     'http.response.body.size': 187n,
     closed: true,
   },
-  { name: 'prepare', query: 'SELECT * FROM users;', closed: true },
+  { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -62,7 +50,6 @@ const expectedSpans = [
     'http.response.body.size': 257n,
     closed: true,
   },
-  { name: 'prepare', query: 'SELECT * FROM users;', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -75,7 +62,7 @@ const expectedSpans = [
     'http.response.body.size': 188n,
     closed: true,
   },
-  { name: 'prepare', query: 'DELETE FROM users;', closed: true },
+  { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -88,17 +75,7 @@ const expectedSpans = [
     'http.response.body.size': 188n,
     closed: true,
   },
-  {
-    name: 'prepare',
-    query:
-      '\n' +
-      '        INSERT INTO users (name, home, features, land_based) VALUES\n' +
-      "          ('Albert Ross', 'sky', 'wingspan', false),\n" +
-      "          ('Al Dente', 'bowl', 'mouthfeel', true)\n" +
-      '        RETURNING *\n' +
-      '    ',
-    closed: true,
-  },
+  { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -111,7 +88,6 @@ const expectedSpans = [
     'http.response.body.size': 329n,
     closed: true,
   },
-  { name: 'prepare', query: 'DELETE FROM users;', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -124,17 +100,7 @@ const expectedSpans = [
     'http.response.body.size': 187n,
     closed: true,
   },
-  {
-    name: 'prepare',
-    query:
-      '\n' +
-      '        INSERT INTO users (name, home, features, land_based) VALUES\n' +
-      "          ('Albert Ross', 'sky', 'wingspan', false),\n" +
-      "          ('Al Dente', 'bowl', 'mouthfeel', true)\n" +
-      '        RETURNING *\n' +
-      '    ',
-    closed: true,
-  },
+  { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -147,7 +113,19 @@ const expectedSpans = [
     'http.response.body.size': 355n,
     closed: true,
   },
-  { name: 'prepare', query: 'select 1;', closed: true },
+  { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
+    'http.request.header.content-type': 'application/json',
+    'http.request.body.size': 31n,
+    'http.response.status_code': 200n,
+    'http.response.body.size': 216n,
+    closed: true,
+  },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -191,19 +169,6 @@ const expectedSpans = [
     'http.request.method': 'POST',
     'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
     'http.request.header.content-type': 'application/json',
-    'http.request.body.size': 31n,
-    'http.response.status_code': 200n,
-    'http.response.body.size': 216n,
-    closed: true,
-  },
-  { name: 'prepare', query: 'SELECT * FROM users;', closed: true },
-  {
-    name: 'fetch',
-    'network.protocol.name': 'http',
-    'network.protocol.version': 'HTTP/1.1',
-    'http.request.method': 'POST',
-    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
-    'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 329n,
@@ -218,7 +183,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 329n,
+    'http.response.body.size': 327n,
     closed: true,
   },
   {
@@ -242,12 +207,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 329n,
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'SELECT * FROM users WHERE user_id = ?;',
+    'http.response.body.size': 330n,
     closed: true,
   },
   {
@@ -283,7 +243,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 293n,
+    'http.response.body.size': 294n,
     closed: true,
   },
   {
@@ -295,7 +255,19 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 293n,
+    'http.response.body.size': 294n,
+    closed: true,
+  },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
+    'http.request.header.content-type': 'application/json',
+    'http.request.body.size': 61n,
+    'http.response.status_code': 200n,
+    'http.response.body.size': 292n,
     closed: true,
   },
   {
@@ -332,18 +304,6 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 292n,
-    closed: true,
-  },
-  {
-    name: 'fetch',
-    'network.protocol.name': 'http',
-    'network.protocol.version': 'HTTP/1.1',
-    'http.request.method': 'POST',
-    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
-    'http.request.header.content-type': 'application/json',
-    'http.request.body.size': 61n,
-    'http.response.status_code': 200n,
-    'http.response.body.size': 291n,
     closed: true,
   },
   {
@@ -359,11 +319,6 @@ const expectedSpans = [
     closed: true,
   },
   {
-    name: 'prepare',
-    query: 'SELECT count(1) as count FROM users WHERE land_based = ?',
-    closed: true,
-  },
-  {
     name: 'fetch',
     'network.protocol.name': 'http',
     'network.protocol.version': 'HTTP/1.1',
@@ -372,12 +327,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 221n,
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'SELECT count(1) as count FROM users WHERE land_based = ?',
+    'http.response.body.size': 220n,
     closed: true,
   },
   {
@@ -393,8 +343,15 @@ const expectedSpans = [
     closed: true,
   },
   {
-    name: 'prepare',
-    query: 'SELECT count(1) as count FROM users WHERE land_based = ?',
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
+    'http.request.header.content-type': 'application/json',
+    'http.request.body.size': 79n,
+    'http.response.status_code': 200n,
+    'http.response.body.size': 218n,
     closed: true,
   },
   {
@@ -410,11 +367,6 @@ const expectedSpans = [
     closed: true,
   },
   {
-    name: 'prepare',
-    query: 'SELECT count(1) as count FROM users WHERE land_based = ?',
-    closed: true,
-  },
-  {
     name: 'fetch',
     'network.protocol.name': 'http',
     'network.protocol.version': 'HTTP/1.1',
@@ -424,44 +376,6 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 220n,
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'SELECT count(1) as count FROM users WHERE land_based = ?',
-    closed: true,
-  },
-  {
-    name: 'fetch',
-    'network.protocol.name': 'http',
-    'network.protocol.version': 'HTTP/1.1',
-    'http.request.method': 'POST',
-    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
-    'http.request.header.content-type': 'application/json',
-    'http.request.body.size': 79n,
-    'http.response.status_code': 200n,
-    'http.response.body.size': 220n,
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'CREATE TABLE abc (a INT, b INT, c INT);',
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'CREATE TABLE cde (c TEXT, d TEXT, e TEXT);',
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: 'INSERT INTO abc VALUES (1,2,3),(4,5,6);',
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query:
-      'INSERT INTO cde VALUES ("A", "B", "C"),("D","E","F"),("G","H","I");',
     closed: true,
   },
   {
@@ -473,10 +387,21 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 298n,
     'http.response.status_code': 200n,
-    'http.response.body.size': 844n,
+    'http.response.body.size': 846n,
     closed: true,
   },
-  { name: 'prepare', query: 'SELECT * FROM abc, cde;', closed: true },
+  {
+    name: 'fetch',
+    'network.protocol.name': 'http',
+    'network.protocol.version': 'HTTP/1.1',
+    'http.request.method': 'POST',
+    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
+    'http.request.header.content-type': 'application/json',
+    'http.request.body.size': 45n,
+    'http.response.status_code': 200n,
+    'http.response.body.size': 352n,
+    closed: true,
+  },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -489,7 +414,6 @@ const expectedSpans = [
     'http.response.body.size': 353n,
     closed: true,
   },
-  { name: 'prepare', query: 'SELECT * FROM abc, cde;', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -502,7 +426,6 @@ const expectedSpans = [
     'http.response.body.size': 353n,
     closed: true,
   },
-  { name: 'prepare', query: 'SELECT * FROM abc, cde;', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
@@ -513,24 +436,6 @@ const expectedSpans = [
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
     'http.response.body.size': 353n,
-    closed: true,
-  },
-  { name: 'prepare', query: 'SELECT * FROM abc, cde;', closed: true },
-  {
-    name: 'fetch',
-    'network.protocol.name': 'http',
-    'network.protocol.version': 'HTTP/1.1',
-    'http.request.method': 'POST',
-    'url.full': 'http://d1/query?resultsFormat=ROWS_AND_COLUMNS',
-    'http.request.header.content-type': 'application/json',
-    'http.request.body.size': 45n,
-    'http.response.status_code': 200n,
-    'http.response.body.size': 354n,
-    closed: true,
-  },
-  {
-    name: 'prepare',
-    query: "SELECT * from cde WHERE c IN ('A','B','C','X','Y','Z')",
     closed: true,
   },
   {
@@ -545,9 +450,6 @@ const expectedSpans = [
     'http.response.body.size': 235n,
     closed: true,
   },
-  { name: 'prepare', query: 'DROP TABLE users;', closed: true },
-  { name: 'prepare', query: 'DROP TABLE abc;', closed: true },
-  { name: 'prepare', query: 'DROP TABLE cde;', closed: true },
   {
     name: 'fetch',
     'network.protocol.name': 'http',
