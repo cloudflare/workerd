@@ -1782,7 +1782,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         KJ_REQUIRE_NONNULL(lock.getExportedHandler(entrypointName, kj::mv(props), ioCtx.getActor()),
             "Failed to get handler to worker.");
 
-    if (handler->missingSuperclass) {
+    if (handler->missingSuperclass && wrapperModule == kj::none) {
       // JS RPC is not enabled on the server side, we cannot call any methods.
       JSG_REQUIRE(FeatureFlags::get(js).getJsRpc(), TypeError,
           "The receiving Durable Object does not support RPC, because its class was not declared "
