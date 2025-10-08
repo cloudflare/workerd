@@ -165,6 +165,18 @@ class D1DatabaseSession {
   ): Promise<D1Result<T>[]> {
     return withSpan('d1_batch', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'batch');
+      span.setAttribute(
+        'db.query.text',
+        statements.map((s: D1PreparedStatement) => s.statement).join('\n')
+      );
+      span.setAttribute('db.operation.batch.size', statements.length);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.getBookmark() ?? undefined
+      );
+
       const exec = (await this._sendOrThrow(
         '/query',
         statements.map((s: D1PreparedStatement) => s.statement),
@@ -315,6 +327,12 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
   async exec(query: string): Promise<D1ExecResult> {
     return withSpan('d1_exec', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'exec');
+      // We need to trim the query here, since it is trimmed before passed to the D1 API
+      // and we receive a line number of the trimmed query. Without trimming, the line number
+      // may be incorrect, especially with indented multiline strings.
+      span.setAttribute('db.query.text', query.trim());
+      span.setAttribute('cloudflare.binding.type', 'D1');
 
       const lines = query.trim().split('\n');
       const _exec = await this._send('/execute', lines, [], 'NONE');
@@ -441,6 +459,14 @@ class D1PreparedStatement {
   ): Promise<Record<string, T> | T | null> {
     return withSpan('d1_first', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'first');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+
       const info = firstIfArray(
         await this.dbSession._sendOrThrow<Record<string, T>>(
           '/query',
@@ -472,6 +498,13 @@ class D1PreparedStatement {
   async run<T = Record<string, unknown>>(): Promise<D1Response> {
     return withSpan('d1_run', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'run');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
 
       const result = firstIfArray(
         await this.dbSession._sendOrThrow<T>(
@@ -488,6 +521,14 @@ class D1PreparedStatement {
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
     return withSpan('d1_all', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'all');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+
       return toArrayOfObjects(
         firstIfArray(
           await this.dbSession._sendOrThrow<T[]>(
@@ -504,6 +545,14 @@ class D1PreparedStatement {
   async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
     return withSpan('d1_all', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
+      span.setAttribute('db.operation.name', 'raw');
+      span.setAttribute('db.query.text', this.statement);
+      span.setAttribute('cloudflare.binding.type', 'D1');
+      span.setAttribute(
+        'cloudflare.d1.query.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+
       const s = firstIfArray(
         await this.dbSession._sendOrThrow<Record<string, unknown>>(
           '/query',
