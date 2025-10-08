@@ -163,13 +163,16 @@ class D1DatabaseSession {
   async batch<T = unknown>(
     statements: D1PreparedStatement[]
   ): Promise<D1Result<T>[]> {
-    const exec = (await this._sendOrThrow(
-      '/query',
-      statements.map((s: D1PreparedStatement) => s.statement),
-      statements.map((s: D1PreparedStatement) => s.params),
-      'ROWS_AND_COLUMNS'
-    )) as D1UpstreamSuccess<T>[];
-    return exec.map(toArrayOfObjects);
+    return withSpan('d1_batch', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      const exec = (await this._sendOrThrow(
+        '/query',
+        statements.map((s: D1PreparedStatement) => s.statement),
+        statements.map((s: D1PreparedStatement) => s.params),
+        'ROWS_AND_COLUMNS'
+      )) as D1UpstreamSuccess<T>[];
+      return exec.map(toArrayOfObjects);
+    });
   }
 
   // Returns the latest bookmark we received from all responses processed so far.
@@ -436,30 +439,33 @@ class D1PreparedStatement {
   async first<T = unknown>(
     colName?: string
   ): Promise<Record<string, T> | T | null> {
-    const info = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, T>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
+    return withSpan('d1_first', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      const info = firstIfArray(
+        await this.dbSession._sendOrThrow<Record<string, T>>(
+          '/query',
+          this.statement,
+          this.params,
+          'ROWS_AND_COLUMNS'
+        )
+      );
 
-    const results = toArrayOfObjects(info).results;
-    const hasResults = results.length > 0;
-    if (!hasResults) return null;
+      const results = toArrayOfObjects(info).results;
+      const hasResults = results.length > 0;
+      if (!hasResults) return null;
 
-    const firstResult = results.at(0);
-    if (colName !== undefined) {
-      if (firstResult?.[colName] === undefined) {
-        throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
-          cause: new Error('Column not found'),
-        });
+      const firstResult = results.at(0);
+      if (colName !== undefined) {
+        if (firstResult?.[colName] === undefined) {
+          throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
+            cause: new Error('Column not found'),
+          });
+        }
+        return firstResult[colName];
+      } else {
+        return firstResult as Record<string, T>;
       }
-      return firstResult[colName];
-    } else {
-      return firstResult as Record<string, T>;
-    }
+    });
   }
 
   /* eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters */
@@ -480,50 +486,56 @@ class D1PreparedStatement {
   }
 
   async all<T = Record<string, unknown>>(): Promise<D1Result<T[]>> {
-    return toArrayOfObjects(
-      firstIfArray(
-        await this.dbSession._sendOrThrow<T[]>(
+    return withSpan('d1_all', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      return toArrayOfObjects(
+        firstIfArray(
+          await this.dbSession._sendOrThrow<T[]>(
+            '/query',
+            this.statement,
+            this.params,
+            'ROWS_AND_COLUMNS'
+          )
+        )
+      );
+    });
+  }
+
+  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
+    return withSpan('d1_all', async (span) => {
+      span.setAttribute('db.system.name', 'cloudflare-d1');
+      const s = firstIfArray(
+        await this.dbSession._sendOrThrow<Record<string, unknown>>(
           '/query',
           this.statement,
           this.params,
           'ROWS_AND_COLUMNS'
         )
-      )
-    );
-  }
+      );
+      // If no results returned, return empty array
+      if (!('results' in s)) return [];
 
-  async raw<T = unknown[]>(options?: D1RawOptions): Promise<T[]> {
-    const s = firstIfArray(
-      await this.dbSession._sendOrThrow<Record<string, unknown>>(
-        '/query',
-        this.statement,
-        this.params,
-        'ROWS_AND_COLUMNS'
-      )
-    );
-    // If no results returned, return empty array
-    if (!('results' in s)) return [];
-
-    // If ARRAY_OF_OBJECTS returned, extract cells
-    if (Array.isArray(s.results)) {
-      const raw: T[] = [];
-      for (const row of s.results) {
-        if (options?.columnNames && raw.length === 0) {
-          raw.push(Array.from(Object.keys(row)) as T);
+      // If ARRAY_OF_OBJECTS returned, extract cells
+      if (Array.isArray(s.results)) {
+        const raw: T[] = [];
+        for (const row of s.results) {
+          if (options?.columnNames && raw.length === 0) {
+            raw.push(Array.from(Object.keys(row)) as T);
+          }
+          const entry = Object.keys(row).map((k) => {
+            return row[k];
+          });
+          raw.push(entry as T);
         }
-        const entry = Object.keys(row).map((k) => {
-          return row[k];
-        });
-        raw.push(entry as T);
+        return raw;
+      } else {
+        // Otherwise, data is already in the correct format
+        return [
+          ...(options?.columnNames ? [s.results.columns as T] : []),
+          ...(s.results.rows as T[]),
+        ];
       }
-      return raw;
-    } else {
-      // Otherwise, data is already in the correct format
-      return [
-        ...(options?.columnNames ? [s.results.columns as T] : []),
-        ...(s.results.rows as T[]),
-      ];
-    }
+    });
   }
 }
 
