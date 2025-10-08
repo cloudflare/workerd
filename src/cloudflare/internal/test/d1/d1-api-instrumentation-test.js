@@ -35,7 +35,7 @@ const expectedSpans = [
     'http.request.body.size': 231n,
     'http.response.status_code': 200n,
     'http.response.body.size': 187n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -48,7 +48,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 257n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -61,7 +61,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 189n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -74,7 +74,7 @@ const expectedSpans = [
     'http.request.body.size': 40n,
     'http.response.status_code': 200n,
     'http.response.body.size': 189n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -87,7 +87,7 @@ const expectedSpans = [
     'http.request.body.size': 223n,
     'http.response.status_code': 200n,
     'http.response.body.size': 327n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -100,7 +100,7 @@ const expectedSpans = [
     'http.request.body.size': 40n,
     'http.response.status_code': 200n,
     'http.response.body.size': 188n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -113,7 +113,7 @@ const expectedSpans = [
     'http.request.body.size': 223n,
     'http.response.status_code': 200n,
     'http.response.body.size': 355n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_run', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -126,7 +126,7 @@ const expectedSpans = [
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
     'http.response.body.size': 216n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -139,7 +139,7 @@ const expectedSpans = [
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
     'http.response.body.size': 216n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -152,7 +152,7 @@ const expectedSpans = [
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
     'http.response.body.size': 217n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -165,7 +165,7 @@ const expectedSpans = [
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
     'http.response.body.size': 217n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -178,7 +178,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 329n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -191,7 +191,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 329n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -204,7 +204,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 329n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -217,7 +217,7 @@ const expectedSpans = [
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
     'http.response.body.size': 330n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -230,7 +230,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 293n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -243,7 +243,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 294n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -256,7 +256,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 293n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -269,7 +269,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 293n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -282,7 +282,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 292n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -295,7 +295,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 292n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -308,7 +308,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 292n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -321,7 +321,7 @@ const expectedSpans = [
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
     'http.response.body.size': 292n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -334,7 +334,7 @@ const expectedSpans = [
     'http.request.body.size': 125n,
     'http.response.status_code': 200n,
     'http.response.body.size': 588n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_batch', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -347,7 +347,7 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 221n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -360,7 +360,7 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 221n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -373,7 +373,7 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 220n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -386,7 +386,7 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 221n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -399,7 +399,7 @@ const expectedSpans = [
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
     'http.response.body.size': 220n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_first', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -412,7 +412,7 @@ const expectedSpans = [
     'http.request.body.size': 298n,
     'http.response.status_code': 200n,
     'http.response.body.size': 847n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_batch', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -425,7 +425,7 @@ const expectedSpans = [
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
     'http.response.body.size': 353n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -438,7 +438,7 @@ const expectedSpans = [
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
     'http.response.body.size': 353n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -451,7 +451,7 @@ const expectedSpans = [
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
     'http.response.body.size': 352n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -464,7 +464,7 @@ const expectedSpans = [
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
     'http.response.body.size': 351n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -477,7 +477,7 @@ const expectedSpans = [
     'http.request.body.size': 76n,
     'http.response.status_code': 200n,
     'http.response.body.size': 235n,
-    closed: true
+    closed: true,
   },
   { name: 'd1_all', 'db.system.name': 'cloudflare-d1', closed: true },
   {
@@ -490,7 +490,7 @@ const expectedSpans = [
     'http.request.body.size': 117n,
     'http.response.status_code': 200n,
     'http.response.body.size': 631n,
-    closed: true
+    closed: true,
   },
-  { name: 'd1_batch', 'db.system.name': 'cloudflare-d1', closed: true }
+  { name: 'd1_batch', 'db.system.name': 'cloudflare-d1', closed: true },
 ];
