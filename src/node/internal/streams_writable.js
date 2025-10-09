@@ -1035,12 +1035,13 @@ export function newStreamWritableFromWritableStream(
         }
       }
 
-      writer.ready.then(() => {
-        return Promise.all(chunks.map((data) => writer.write(data))).then(
-          done,
-          done
-        );
-      }, done);
+      const writes = async () => {
+        for (let n = 0; n < chunks.length; n++) {
+          if (writer.desiredSize <= 0) await writer.ready;
+          writer.write(chunks[n].chunk);
+        }
+      };
+      writes().then(done, done);
     },
 
     write(chunk, encoding, callback) {
