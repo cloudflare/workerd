@@ -28,7 +28,6 @@ def wd_cc_benchmark(
         visibility = visibility,
         deps = deps + [
             "@workerd-google-benchmark//:benchmark_main",
-            "//deps/rust:runtime",
             "//src/workerd/tests:bench-tools",
         ],
         # use the same malloc we use for server
