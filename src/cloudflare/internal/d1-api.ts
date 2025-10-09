@@ -480,7 +480,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
         return {
           count: exec.length,
           duration: exec.reduce((p, c) => {
-            return p + (c.meta['duration'] as number);
+            return p + c.meta['duration'];
           }, 0),
         };
       }
