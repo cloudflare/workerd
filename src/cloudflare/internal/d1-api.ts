@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
+import type { Span } from './tracing';
 
 interface D1Meta {
   duration: number;
@@ -217,50 +218,13 @@ class D1DatabaseSession {
         'ROWS_AND_COLUMNS'
       )) as D1UpstreamSuccess<T>[];
 
-      const aggregatedMeta: D1Meta = aggregateD1Meta(exec.map((e) => e.meta));
       span.setAttribute(
         'cloudflare.d1.response.bookmark',
         this.getBookmark() ?? undefined
       );
-      span.setAttribute(
-        'cloudflare.d1.response.size_after',
-        aggregatedMeta.size_after
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_read',
-        aggregatedMeta.rows_read
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        aggregatedMeta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        aggregatedMeta.last_row_id
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changed_db',
-        aggregatedMeta.changed_db
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changes',
-        aggregatedMeta.changes
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        aggregatedMeta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        aggregatedMeta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        aggregatedMeta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        aggregatedMeta.total_attempts
+      addAggregatedD1MetaToSpan(
+        span,
+        exec.map((e) => e.meta)
       );
 
       return exec.map(toArrayOfObjects);
@@ -415,46 +379,9 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       const _exec = await this._send('/execute', lines, [], 'NONE');
       const exec = Array.isArray(_exec) ? _exec : [_exec];
 
-      const aggregatedMeta = aggregateD1Meta(exec.map((e) => e.meta));
-      span.setAttribute(
-        'cloudflare.d1.response.size_after',
-        aggregatedMeta.size_after
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_read',
-        aggregatedMeta.rows_read
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        aggregatedMeta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        aggregatedMeta.last_row_id
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changed_db',
-        aggregatedMeta.changed_db
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changes',
-        aggregatedMeta.changes
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        aggregatedMeta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        aggregatedMeta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        aggregatedMeta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        aggregatedMeta.total_attempts
+      addAggregatedD1MetaToSpan(
+        span,
+        exec.map((e) => e.meta)
       );
 
       const error = exec
@@ -601,43 +528,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.bookmark',
         this.dbSession.getBookmark() ?? undefined
       );
-      span.setAttribute(
-        'cloudflare.d1.response.size_after',
-        info.meta.size_after
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_read',
-        info.meta.rows_read
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        info.meta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        info.meta.last_row_id
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changed_db',
-        info.meta.changed_db
-      );
-      span.setAttribute('cloudflare.d1.response.changes', info.meta.changes);
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        info.meta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        info.meta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        info.meta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        info.meta.total_attempts
-      );
+      addD1MetaToSpan(span, info.meta);
 
       const results = toArrayOfObjects(info).results;
       const hasResults = results.length > 0;
@@ -683,43 +574,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.bookmark',
         this.dbSession.getBookmark() ?? undefined
       );
-      span.setAttribute(
-        'cloudflare.d1.response.size_after',
-        result.meta.size_after
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_read',
-        result.meta.rows_read
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        result.meta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        result.meta.last_row_id
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changed_db',
-        result.meta.changed_db
-      );
-      span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        result.meta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        result.meta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        result.meta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        result.meta.total_attempts
-      );
+      addD1MetaToSpan(span, result.meta);
       return result;
     });
   }
@@ -748,43 +603,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.bookmark',
         this.dbSession.getBookmark() ?? undefined
       );
-      span.setAttribute(
-        'cloudflare.d1.response.size_after',
-        result.meta.size_after
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_read',
-        result.meta.rows_read
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        result.meta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        result.meta.last_row_id
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.changed_db',
-        result.meta.changed_db
-      );
-      span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        result.meta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        result.meta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        result.meta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        result.meta.total_attempts
-      );
+      addD1MetaToSpan(span, result.meta);
 
       return toArrayOfObjects(result);
     });
@@ -814,34 +633,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.bookmark',
         this.dbSession.getBookmark() ?? undefined
       );
-      span.setAttribute('cloudflare.d1.response.size_after', s.meta.size_after);
-      span.setAttribute('cloudflare.d1.response.rows_read', s.meta.rows_read);
-      span.setAttribute(
-        'cloudflare.d1.response.rows_written',
-        s.meta.rows_written
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.last_row_id',
-        s.meta.last_row_id
-      );
-      span.setAttribute('cloudflare.d1.response.changed_db', s.meta.changed_db);
-      span.setAttribute('cloudflare.d1.response.changes', s.meta.changes);
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_region',
-        s.meta.served_by_region
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.served_by_primary',
-        s.meta.served_by_primary
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.sql_duration_ms',
-        s.meta.timings?.sql_duration_ms ?? undefined
-      );
-      span.setAttribute(
-        'cloudflare.d1.response.total_attempts',
-        s.meta.total_attempts
-      );
+      addD1MetaToSpan(span, s.meta);
 
       // If no results returned, return empty array
       if (!('results' in s)) return [];
@@ -922,6 +714,36 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   } catch {
     throw new Error(`Failed to parse body as JSON, got: ${body}`);
   }
+}
+
+function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
+  const aggregatedMeta = aggregateD1Meta(metas);
+  addD1MetaToSpan(span, aggregatedMeta);
+}
+
+function addD1MetaToSpan(span: Span, meta: D1Meta): void {
+  span.setAttribute('cloudflare.d1.response.size_after', meta.size_after);
+  span.setAttribute('cloudflare.d1.response.rows_read', meta.rows_read);
+  span.setAttribute('cloudflare.d1.response.rows_written', meta.rows_written);
+  span.setAttribute('cloudflare.d1.response.last_row_id', meta.last_row_id);
+  span.setAttribute('cloudflare.d1.response.changed_db', meta.changed_db);
+  span.setAttribute('cloudflare.d1.response.changes', meta.changes);
+  span.setAttribute(
+    'cloudflare.d1.response.served_by_region',
+    meta.served_by_region
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.served_by_primary',
+    meta.served_by_primary
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.sql_duration_ms',
+    meta.timings?.sql_duration_ms ?? undefined
+  );
+  span.setAttribute(
+    'cloudflare.d1.response.total_attempts',
+    meta.total_attempts
+  );
 }
 
 // When a query is executing multiple statements, and we receive a D1Meta
