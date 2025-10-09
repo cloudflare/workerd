@@ -304,7 +304,8 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   v8::HandleScope scope(isolate);
   auto& wrappable = *static_cast<Wrappable*>(
       handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
-          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
