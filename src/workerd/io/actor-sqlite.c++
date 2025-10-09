@@ -246,53 +246,57 @@ void ActorSqlite::onCriticalError(
   }
 }
 
+void ActorSqlite::startImplicitTxn() {
+  auto txn = kj::heap<ImplicitTxn>(*this);
+
+  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+  // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
+  // function on the next turn of the event loop
+  auto commitPromise =
+      kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    // Don't commit if shutdown() has been called.
+    requireNotBroken();
+
+    // Start the schedule request before commit(), for correctness in workerd.
+    auto precommitAlarmState = startPrecommitAlarmScheduling();
+
+    try {
+      txn->commit();
+    } catch (...) {
+      // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+      // instead of whatever SQLite threw.
+      requireNotBroken();
+
+      // No, we're not broken, so propagate the exception as-is.
+      throw;
+    }
+
+    // The callback is only expected to commit writes up until this point. Any new writes that
+    // occur while the callback is in progress are NOT included, therefore require a new commit
+    // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+    // rather than after the callback.
+    { auto drop = kj::mv(txn); }
+
+    return commitImpl(kj::mv(precommitAlarmState));
+  })
+          // Unconditionally break the output gate if commit threw an error, no matter whether the
+          // commit was confirmed or unconfirmed.
+          .catch_([this](kj::Exception&& e) {
+    return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
+  })
+          // We need to wait for this in commitTasks and in lastCommit.
+          .fork();
+
+  commitTasks.add(commitPromise.addBranch());
+
+  // Commits must be executed in order, so we only have to track the most recent commit promise.
+  lastCommit = kj::mv(commitPromise);
+}
+
 void ActorSqlite::onWrite(bool allowUnconfirmed) {
   requireNotBroken();
   if (currentTxn.is<NoTxn>()) {
-    auto txn = kj::heap<ImplicitTxn>(*this);
-
-    // We implement the magic of accumulating all of the writes between JavaScript awaits in one
-    // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
-    // function on the next turn of the event loop
-    auto commitPromise =
-        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
-      // Don't commit if shutdown() has been called.
-      requireNotBroken();
-
-      // Start the schedule request before commit(), for correctness in workerd.
-      auto precommitAlarmState = startPrecommitAlarmScheduling();
-
-      try {
-        txn->commit();
-      } catch (...) {
-        // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
-        // instead of whatever SQLite threw.
-        requireNotBroken();
-
-        // No, we're not broken, so propagate the exception as-is.
-        throw;
-      }
-
-      // The callback is only expected to commit writes up until this point. Any new writes that
-      // occur while the callback is in progress are NOT included, therefore require a new commit
-      // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
-      // rather than after the callback.
-      { auto drop = kj::mv(txn); }
-
-      return commitImpl(kj::mv(precommitAlarmState));
-    })
-            // Unconditionally break the output gate if commit threw an error, no matter whether the
-            // commit was confirmed or unconfirmed.
-            .catch_([this](kj::Exception&& e) {
-      return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
-    })
-            // We need to wait for this in commitTasks and in lastCommit.
-            .fork();
-
-    commitTasks.add(commitPromise.addBranch());
-
-    // Commits must be executed in order, so we only have to track the most recent commit promise.
-    lastCommit = kj::mv(commitPromise);
+    startImplicitTxn();
   }
 
   // Update the status of the current transaction.
@@ -532,41 +536,20 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
-  // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
   if (currentTxn.is<NoTxn>()) {
-    // If we are not in a transaction, let's use an ExplicitTxn, which should rollback automatically
-    // if some put fails.
-
-    // TODO(someday) this should really start an ImplicitTxn, which has the advantage of
-    // supporting allowUnconfirmed.
-    disableAllowUnconfirmed(options, "multi put will create an ExplicitTxn");
-
-    auto txn = startTransaction();
-    txn->put(kj::mv(pairs), options);
-    txn->commit();
-  } else {
-    if (currentTxn.is<ExplicitTxn*>()) {
-      disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
-    }
-
-    // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
-    db->run(
-        {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
-    for (const auto& pair: pairs) {
-      try {
-        kv.put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
-      } catch (kj::Exception& e) {
-        // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
-        db->run({.regulator = SqliteDatabase::TRUSTED},
-            kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-        db->run(
-            {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
-        kj::throwFatalException(kj::mv(e));
-      }
-    }
-    // We're done here. RELEASE the savepoint.
-    db->run({.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_put_multiple_savepoint"));
+    // If we are not in a transaction, start an ImplicitTxn since that's what would happen on the
+    // first write anyway.
+    startImplicitTxn();
   }
+
+  KJ_ASSERT(!currentTxn.is<NoTxn>());
+
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
+  }
+
+  kv.put(pairs, {.allowUnconfirmed = options.allowUnconfirmed});
+
   return kj::none;
 }
 

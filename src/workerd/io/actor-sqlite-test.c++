@@ -319,6 +319,12 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
     KJ_ASSERT(expectSync(test.get(kj::str("foo3"))) == nullptr);
   }
 
+  // Reset the transaction state by going async, which will cause the ImplicitTxn to commit.
+  {
+    auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+    commitFulfiller->fulfill();
+  }
+
   // ExplicitTxn test
   {
     KJ_ASSERT(!test.actor.isCommitScheduled());
@@ -1591,12 +1597,6 @@ KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
   // Gate should be unblocked at start
   KJ_ASSERT(test.gate.wait().poll(test.ws));
 
-  // Start an implicit transaction by doing a single put first
-  test.put("initial", "value", {.allowUnconfirmed = true});
-
-  // By now, we should check there's a commit scheduled in an ImplicitTxn.
-  KJ_ASSERT(test.actor.isCommitScheduled());
-
   // Create multiple key-value pairs for the test
   kj::Vector<ActorCache::KeyValuePair> putKVs;
   putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
@@ -1616,7 +1616,6 @@ KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
   KJ_ASSERT(test.gate.wait().poll(test.ws));
 
   // Verify all data was written correctly
-  KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("initial"))) == kj::str("value").asBytes());
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("foo"))) == kj::str("bar").asBytes());
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("baz"))) == kj::str("qux").asBytes());
   KJ_ASSERT(KJ_ASSERT_NONNULL(expectSync(test.get("key3"))) == kj::str("value3").asBytes());
