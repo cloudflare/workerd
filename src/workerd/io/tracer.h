@@ -116,7 +116,8 @@ class BaseTracer: public kj::Refcounted {
       kj::String channel,
       kj::Array<kj::byte> message) = 0;
 
-  // Adds info about the event that triggered the trace.  Must not be called more than once.
+  // Adds info about the event that triggered the trace. Must not be called more than once. Must
+  // be called before calling delivered() to ensure that no events are delivered before Onset.
   virtual void setEventInfo(
       IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) = 0;
 

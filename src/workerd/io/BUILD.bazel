@@ -265,7 +265,6 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
-        ":trace",
         ":worker-interface_capnp",
         "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",

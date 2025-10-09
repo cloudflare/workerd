@@ -604,6 +604,10 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
     Frankenvalue props,
     kj::ArrayPtr<kj::Own<Trace>> traces) {
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::TraceEventInfo(traces));
+  }
+
   // Mark the request as delivered because we're about to run some JS.
   incomingRequest->delivered();
 
@@ -648,10 +652,6 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
   co_await incomingRequest->drain();
 }
 }  // namespace
-
-kj::Maybe<tracing::EventInfo> TraceCustomEventImpl::getEventInfo() const {
-  return tracing::EventInfo(tracing::TraceEventInfo(traces));
-}
 
 auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,

@@ -1920,6 +1920,9 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) {
   IoContext& ioctx = incomingRequest->getContext();
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::JsRpcEventInfo(kj::str("")));
+  }
 
   incomingRequest->delivered();
 

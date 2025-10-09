@@ -526,7 +526,11 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
+    kj::Own<IoContext_IncomingRequest> incomingRequest,
+    kj::Maybe<kj::StringPtr> entrypointName,
+    Frankenvalue props,
+    kj::TaskSet& waitUntilTasks) {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -540,14 +544,10 @@ kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
     }
   }
 
-  return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
-}
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::QueueEventInfo(kj::str(queueName), batchSize));
+  }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
-    kj::Own<IoContext_IncomingRequest> incomingRequest,
-    kj::Maybe<kj::StringPtr> entrypointName,
-    Frankenvalue props,
-    kj::TaskSet& waitUntilTasks) {
   // This method has three main chunks of logic:
   // 1. Do all necessary setup work. This starts right below this comment.
   // 2. Call into the worker's queue event handler.
