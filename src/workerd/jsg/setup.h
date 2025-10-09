@@ -801,8 +801,15 @@ class Isolate: public IsolateBase {
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
+        // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
         return *reinterpret_cast<Object*>(
             instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+#else
+        return *reinterpret_cast<Object*>(
+            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+                static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
+#endif
       }
     }
 
