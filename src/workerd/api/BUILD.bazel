@@ -516,7 +516,10 @@ wd_test(
 wd_test(
     src = "sync-kv-test.wd-test",
     args = ["--experimental"],
-    data = ["sync-kv-test.js"],
+    data = [
+        "sync-kv-instrumentation-test.js",
+        "sync-kv-test.js",
+    ],
 )
 
 wd_test(
