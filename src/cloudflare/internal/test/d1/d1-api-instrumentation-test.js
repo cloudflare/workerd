@@ -20,6 +20,12 @@ export const test = {
     await runInstrumentationTest(state, expectedSpans, {
       testName: 'D1 instrumentation',
       logReceived: true,
+      mapFn: (span) => {
+        return {
+          ...span,
+          'http.response.body.size': 'varies-test-by-test',
+        };
+      },
     });
   },
 };
