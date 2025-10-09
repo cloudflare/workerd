@@ -211,23 +211,30 @@ class D1DatabaseSession {
         this.getBookmark() ?? undefined
       );
 
-      const exec = (await this._sendOrThrow(
-        '/query',
-        statements.map((s: D1PreparedStatement) => s.statement),
-        statements.map((s: D1PreparedStatement) => s.params),
-        'ROWS_AND_COLUMNS'
-      )) as D1UpstreamSuccess<T>[];
+      try {
+        const exec = (await this._sendOrThrow(
+          '/query',
+          statements.map((s: D1PreparedStatement) => s.statement),
+          statements.map((s: D1PreparedStatement) => s.params),
+          'ROWS_AND_COLUMNS'
+        )) as D1UpstreamSuccess<T>[];
 
-      span.setAttribute(
-        'cloudflare.d1.response.bookmark',
-        this.getBookmark() ?? undefined
-      );
-      addAggregatedD1MetaToSpan(
-        span,
-        exec.map((e) => e.meta)
-      );
+        span.setAttribute(
+          'cloudflare.d1.response.bookmark',
+          this.getBookmark() ?? undefined
+        );
+        addAggregatedD1MetaToSpan(
+          span,
+          exec.map((e) => e.meta)
+        );
 
-      return exec.map(toArrayOfObjects);
+        return exec.map(toArrayOfObjects);
+      } catch (e) {
+        if (e instanceof Error && e.cause instanceof Error) {
+          span.setAttribute('error.type', e.cause.message);
+        }
+        throw e;
+      }
     });
   }
 
