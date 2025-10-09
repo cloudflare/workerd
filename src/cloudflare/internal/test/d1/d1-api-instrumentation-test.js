@@ -19,13 +19,12 @@ export const test = {
   async test() {
     await runInstrumentationTest(state, expectedSpans, {
       testName: 'D1 instrumentation',
-      logReceived: true,
       mapFn: (span) => {
-        return {
-          ...span,
-          // varies test-by-test because random duration in d1-mock.js
-          'http.response.body.size': 0n,
-        };
+        // varies test-by-test because random duration in d1-mock.js
+        if (span['http.response.body.size']) {
+          span['http.response.body.size'] = 0n;
+        }
+        return span;
       },
     });
   },
@@ -65,7 +64,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -92,7 +90,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -119,7 +116,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -146,7 +142,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -179,7 +174,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -206,7 +200,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -239,7 +232,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -266,7 +258,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -293,7 +284,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -320,7 +310,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -347,7 +336,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -374,7 +362,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -401,7 +388,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -428,7 +414,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -455,7 +440,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -482,7 +466,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -509,7 +492,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -536,7 +518,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -563,7 +544,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -590,7 +570,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -617,7 +596,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -644,7 +622,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -671,7 +648,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -701,7 +677,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -728,7 +703,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -755,7 +729,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -782,7 +755,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -809,7 +781,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -836,7 +807,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -868,7 +838,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -895,7 +864,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -922,7 +890,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -949,7 +916,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -976,7 +942,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -1003,7 +968,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -1031,6 +995,5 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size': 0n,
   },
 ];
