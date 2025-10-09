@@ -23,8 +23,8 @@ export const test = {
       mapFn: (span) => {
         return {
           ...span,
-          'http.response.body.size':
-            'varies-test-by-test-because-random-duration-in-d1-mock.js',
+          // varies test-by-test because random duration in d1-mock.js
+          'http.response.body.size': 0n,
         };
       },
     });
@@ -41,8 +41,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 231n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -66,8 +65,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -78,8 +76,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -95,8 +92,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -107,8 +103,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -124,8 +119,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -136,8 +130,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 40n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -153,8 +146,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -165,8 +157,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 223n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -188,8 +179,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -200,8 +190,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 40n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -217,8 +206,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -229,8 +217,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 223n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -252,8 +239,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 2,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -264,8 +250,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -281,8 +266,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -293,8 +277,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -310,8 +293,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -322,8 +304,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -339,8 +320,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -351,8 +331,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 31n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -368,8 +347,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -380,8 +358,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -397,8 +374,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -409,8 +385,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -426,8 +401,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -438,8 +412,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -455,8 +428,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -467,8 +439,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 42n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -484,8 +455,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -496,8 +466,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -513,8 +482,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -525,8 +493,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -542,8 +509,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -554,8 +520,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -571,8 +536,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -583,8 +547,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -600,8 +563,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -612,8 +574,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -629,8 +590,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -641,8 +601,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -658,8 +617,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -670,8 +628,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -687,8 +644,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -699,8 +655,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 61n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -716,8 +671,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -728,8 +682,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 125n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -748,8 +701,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -760,8 +712,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -777,8 +728,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -789,8 +739,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -806,8 +755,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -818,8 +766,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -835,8 +782,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -847,8 +793,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -864,8 +809,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -876,8 +820,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 79n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -893,8 +836,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -905,8 +847,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 298n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -927,8 +868,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -939,8 +879,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -956,8 +895,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -968,8 +906,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -985,8 +922,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -997,8 +933,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -1014,8 +949,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -1026,8 +960,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 45n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -1043,8 +976,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -1055,8 +987,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 76n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -1072,8 +1003,7 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
   {
     name: 'fetch',
@@ -1084,8 +1014,7 @@ const expectedSpans = [
     'http.request.header.content-type': 'application/json',
     'http.request.body.size': 117n,
     'http.response.status_code': 200n,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
     closed: true,
   },
   {
@@ -1102,7 +1031,6 @@ const expectedSpans = [
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
     closed: true,
-    'http.response.body.size':
-      'varies-test-by-test-because-random-duration-in-d1-mock.js',
+    'http.response.body.size': 0n,
   },
 ];
