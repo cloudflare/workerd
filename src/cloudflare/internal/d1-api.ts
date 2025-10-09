@@ -408,10 +408,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
     return withSpan('d1_exec', async (span) => {
       span.setAttribute('db.system.name', 'cloudflare-d1');
       span.setAttribute('db.operation.name', 'exec');
-      // We need to trim the query here, since it is trimmed before passed to the D1 API
-      // and we receive a line number of the trimmed query. Without trimming, the line number
-      // may be incorrect, especially with indented multiline strings.
-      span.setAttribute('db.query.text', query.trim());
+      span.setAttribute('db.query.text', query);
       span.setAttribute('cloudflare.binding.type', 'D1');
 
       const lines = query.trim().split('\n');
@@ -466,6 +463,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
         })
         .indexOf(1);
       if (error !== -1) {
+        span.setAttribute('error.type', `Error in line ${error + 1}`);
         throw new Error(
           `D1_EXEC_ERROR: Error in line ${error + 1}: ${lines[error]}: ${
             exec[error]?.error
@@ -599,6 +597,48 @@ class D1PreparedStatement {
         )
       );
 
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.size_after',
+        info.meta.size_after
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_read',
+        info.meta.rows_read
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        info.meta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        info.meta.last_row_id
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changed_db',
+        info.meta.changed_db
+      );
+      span.setAttribute('cloudflare.d1.response.changes', info.meta.changes);
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        info.meta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        info.meta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        info.meta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        info.meta.total_attempts
+      );
+
       const results = toArrayOfObjects(info).results;
       const hasResults = results.length > 0;
       if (!hasResults) return null;
@@ -606,6 +646,7 @@ class D1PreparedStatement {
       const firstResult = results.at(0);
       if (colName !== undefined) {
         if (firstResult?.[colName] === undefined) {
+          span.setAttribute('error.type', "Column not found");
           throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
             cause: new Error('Column not found'),
           });
@@ -637,6 +678,51 @@ class D1PreparedStatement {
           'NONE'
         )
       );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.size_after',
+        result.meta.size_after
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_read',
+        result.meta.rows_read
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        result.meta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        result.meta.last_row_id
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changed_db',
+        result.meta.changed_db
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changes',
+        result.meta.changes
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        result.meta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        result.meta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        result.meta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        result.meta.total_attempts
+      );
       return result;
     });
   }
@@ -652,16 +738,61 @@ class D1PreparedStatement {
         this.dbSession.getBookmark() ?? undefined
       );
 
-      return toArrayOfObjects(
-        firstIfArray(
-          await this.dbSession._sendOrThrow<T[]>(
-            '/query',
-            this.statement,
-            this.params,
-            'ROWS_AND_COLUMNS'
-          )
+      const result = firstIfArray(
+        await this.dbSession._sendOrThrow<T[]>(
+          '/query',
+          this.statement,
+          this.params,
+          'ROWS_AND_COLUMNS'
         )
       );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.size_after',
+        result.meta.size_after
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_read',
+        result.meta.rows_read
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        result.meta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        result.meta.last_row_id
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changed_db',
+        result.meta.changed_db
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changes',
+        result.meta.changes
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        result.meta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        result.meta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        result.meta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        result.meta.total_attempts
+      );
+
+      return toArrayOfObjects(result);
     });
   }
 
@@ -684,6 +815,40 @@ class D1PreparedStatement {
           'ROWS_AND_COLUMNS'
         )
       );
+
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.dbSession.getBookmark() ?? undefined
+      );
+      span.setAttribute('cloudflare.d1.response.size_after', s.meta.size_after);
+      span.setAttribute('cloudflare.d1.response.rows_read', s.meta.rows_read);
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        s.meta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        s.meta.last_row_id
+      );
+      span.setAttribute('cloudflare.d1.response.changed_db', s.meta.changed_db);
+      span.setAttribute('cloudflare.d1.response.changes', s.meta.changes);
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        s.meta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        s.meta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        s.meta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        s.meta.total_attempts
+      );
+
       // If no results returned, return empty array
       if (!('results' in s)) return [];
 
