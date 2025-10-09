@@ -646,7 +646,7 @@ class D1PreparedStatement {
       const firstResult = results.at(0);
       if (colName !== undefined) {
         if (firstResult?.[colName] === undefined) {
-          span.setAttribute('error.type', "Column not found");
+          span.setAttribute('error.type', 'Column not found');
           throw new Error(`D1_COLUMN_NOTFOUND: Column not found (${colName})`, {
             cause: new Error('Column not found'),
           });
@@ -703,10 +703,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.changed_db',
         result.meta.changed_db
       );
-      span.setAttribute(
-        'cloudflare.d1.response.changes',
-        result.meta.changes
-      );
+      span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
       span.setAttribute(
         'cloudflare.d1.response.served_by_region',
         result.meta.served_by_region
@@ -771,10 +768,7 @@ class D1PreparedStatement {
         'cloudflare.d1.response.changed_db',
         result.meta.changed_db
       );
-      span.setAttribute(
-        'cloudflare.d1.response.changes',
-        result.meta.changes
-      );
+      span.setAttribute('cloudflare.d1.response.changes', result.meta.changes);
       span.setAttribute(
         'cloudflare.d1.response.served_by_region',
         result.meta.served_by_region
