@@ -4,13 +4,46 @@
 
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
 
+interface D1Meta {
+  duration: number;
+  size_after: number;
+  rows_read: number;
+  rows_written: number;
+  last_row_id: number;
+  changed_db: boolean;
+  changes: number;
+
+  /**
+   * The region of the database instance that executed the query.
+   */
+  served_by_region?: string;
+
+  /**
+   * True if-and-only-if the database instance that executed the query was the primary.
+   */
+  served_by_primary?: boolean;
+
+  timings?: {
+    /**
+     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
+     */
+    sql_duration_ms: number;
+  };
+
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
+}
+
 interface Fetcher {
   fetch: typeof fetch;
 }
 
 type D1Response = {
   success: true;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
   error?: never;
 };
 
@@ -26,7 +59,7 @@ type D1UpstreamFailure = {
   results?: never;
   error: string;
   success: false;
-  meta: Record<string, unknown>;
+  meta: D1Meta & Record<string, unknown>;
 };
 
 type D1RowsColumns<T = unknown> = D1Response & {
@@ -183,6 +216,53 @@ class D1DatabaseSession {
         statements.map((s: D1PreparedStatement) => s.params),
         'ROWS_AND_COLUMNS'
       )) as D1UpstreamSuccess<T>[];
+
+      const aggregatedMeta: D1Meta = aggregateD1Meta(exec.map((e) => e.meta));
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.getBookmark() ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.size_after',
+        aggregatedMeta.size_after
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_read',
+        aggregatedMeta.rows_read
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        aggregatedMeta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        aggregatedMeta.last_row_id
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changed_db',
+        aggregatedMeta.changed_db
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changes',
+        aggregatedMeta.changes
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        aggregatedMeta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        aggregatedMeta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        aggregatedMeta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        aggregatedMeta.total_attempts
+      );
+
       return exec.map(toArrayOfObjects);
     });
   }
@@ -337,6 +417,49 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       const lines = query.trim().split('\n');
       const _exec = await this._send('/execute', lines, [], 'NONE');
       const exec = Array.isArray(_exec) ? _exec : [_exec];
+
+      const aggregatedMeta = aggregateD1Meta(exec.map((e) => e.meta));
+      span.setAttribute(
+        'cloudflare.d1.response.size_after',
+        aggregatedMeta.size_after
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_read',
+        aggregatedMeta.rows_read
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.rows_written',
+        aggregatedMeta.rows_written
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.last_row_id',
+        aggregatedMeta.last_row_id
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changed_db',
+        aggregatedMeta.changed_db
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.changes',
+        aggregatedMeta.changes
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_region',
+        aggregatedMeta.served_by_region
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.served_by_primary',
+        aggregatedMeta.served_by_primary
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.sql_duration_ms',
+        aggregatedMeta.timings?.sql_duration_ms ?? undefined
+      );
+      span.setAttribute(
+        'cloudflare.d1.response.total_attempts',
+        aggregatedMeta.total_attempts
+      );
+
       const error = exec
         .map((r) => {
           return r.error ? 1 : 0;
@@ -640,6 +763,48 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
   } catch {
     throw new Error(`Failed to parse body as JSON, got: ${body}`);
   }
+}
+
+// When a query is executing multiple statements, and we receive a D1Meta
+// for each statement, we need to aggregate the meta data before we annotate
+// the telemetry, with different rules for each field.
+function aggregateD1Meta(metas: D1Meta[]): D1Meta {
+  const aggregatedMeta: D1Meta = {
+    duration: 0,
+    size_after: 0,
+    rows_read: 0,
+    rows_written: 0,
+    last_row_id: 0,
+    changed_db: false,
+    changes: 0,
+  };
+
+  for (const meta of metas) {
+    aggregatedMeta.duration += meta.duration;
+    aggregatedMeta.size_after += meta.size_after;
+    aggregatedMeta.rows_read += meta.rows_read;
+    aggregatedMeta.rows_written += meta.rows_written;
+    aggregatedMeta.last_row_id = meta.last_row_id;
+    if (meta.served_by_region) {
+      aggregatedMeta.served_by_region = meta.served_by_region;
+    }
+    if (meta.served_by_primary) {
+      aggregatedMeta.served_by_primary = meta.served_by_primary;
+    }
+    if (meta.timings?.sql_duration_ms) {
+      aggregatedMeta.timings = {
+        sql_duration_ms:
+          (aggregatedMeta.timings?.sql_duration_ms ?? 0) +
+          meta.timings.sql_duration_ms,
+      };
+    }
+    if (meta.total_attempts) {
+      aggregatedMeta.total_attempts =
+        (aggregatedMeta.total_attempts ?? 0) + meta.total_attempts;
+    }
+  }
+
+  return aggregatedMeta;
 }
 
 export default function makeBinding(env: { fetcher: Fetcher }): D1Database {
