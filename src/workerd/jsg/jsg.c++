@@ -195,11 +195,15 @@ bool Lock::isUsingEnhancedErrorSerialization() const {
   return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }
 
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+// JSPI was stabilized in V8 version 14.2, and this API removed.
+// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
 void Lock::installJspi() {
   IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
   v8Isolate->InstallConditionalFeatures(v8Context());
   IsolateBase::from(v8Isolate).setJspiEnabled({}, false);
 }
+#endif
 
 void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);

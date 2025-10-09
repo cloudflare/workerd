@@ -143,9 +143,14 @@ class IsolateBase {
     evalAllowed = true;
   }
 
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+  // JSPI was stabilized in V8 version 14.2, and this API removed.
+  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
   inline void setJspiEnabled(kj::Badge<Lock>, bool enabled) {
     jspiEnabled = enabled;
   }
+#endif
+
   inline void setCaptureThrowsAsRejections(kj::Badge<Lock>, bool capture) {
     captureThrowsAsRejections = capture;
   }
@@ -308,7 +313,11 @@ class IsolateBase {
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+  // JSPI was stabilized in V8 version 14.2, and this API removed.
+  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
   bool jspiEnabled = false;
+#endif
 
   // The Web Platform API specifications require that any API that returns a JavaScript Promise
   // should never throw errors synchronously. Rather, they are supposed to capture any synchronous
