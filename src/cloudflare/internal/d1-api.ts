@@ -211,30 +211,24 @@ class D1DatabaseSession {
         this.getBookmark() ?? undefined
       );
 
-      try {
-        const exec = (await this._sendOrThrow(
-          '/query',
-          statements.map((s: D1PreparedStatement) => s.statement),
-          statements.map((s: D1PreparedStatement) => s.params),
-          'ROWS_AND_COLUMNS'
-        )) as D1UpstreamSuccess<T>[];
+      const exec = (await this._sendOrThrow(
+        '/query',
+        statements.map((s: D1PreparedStatement) => s.statement),
+        statements.map((s: D1PreparedStatement) => s.params),
+        'ROWS_AND_COLUMNS',
+        span
+      )) as D1UpstreamSuccess<T>[];
 
-        span.setAttribute(
-          'cloudflare.d1.response.bookmark',
-          this.getBookmark() ?? undefined
-        );
-        addAggregatedD1MetaToSpan(
-          span,
-          exec.map((e) => e.meta)
-        );
+      span.setAttribute(
+        'cloudflare.d1.response.bookmark',
+        this.getBookmark() ?? undefined
+      );
+      addAggregatedD1MetaToSpan(
+        span,
+        exec.map((e) => e.meta)
+      );
 
-        return exec.map(toArrayOfObjects);
-      } catch (e) {
-        if (e instanceof Error && e.cause instanceof Error) {
-          span.setAttribute('error.type', e.cause.message);
-        }
-        throw e;
-      }
+      return exec.map(toArrayOfObjects);
     });
   }
 
@@ -286,11 +280,19 @@ class D1DatabaseSession {
     endpoint: string,
     query: string | string[],
     params: unknown[],
-    resultsFormat: ResultsFormat
+    resultsFormat: ResultsFormat,
+    span: Span
   ): Promise<D1UpstreamSuccess<T>[] | D1UpstreamSuccess<T>> {
-    const results = await this._send(endpoint, query, params, resultsFormat);
+    const results = await this._send(
+      endpoint,
+      query,
+      params,
+      resultsFormat,
+      span
+    );
     const firstResult = firstIfArray(results);
     if (!firstResult.success) {
+      span.setAttribute('error.type', firstResult.error);
       throw new Error(`D1_ERROR: ${firstResult.error}`, {
         cause: new Error(firstResult.error),
       });
@@ -303,7 +305,8 @@ class D1DatabaseSession {
     endpoint: string,
     query: string | string[],
     params: unknown[],
-    resultsFormat: ResultsFormat
+    resultsFormat: ResultsFormat,
+    span: Span
   ): Promise<D1UpstreamResponse<T>[] | D1UpstreamResponse<T>> {
     /* this needs work - we currently only support ordered ?n params */
     const body = JSON.stringify(
@@ -343,6 +346,7 @@ class D1DatabaseSession {
         (e.cause as Error | undefined)?.message ||
         e.message ||
         'Something went wrong';
+      span.setAttribute('error.type', message);
       throw new Error(`D1_ERROR: ${message}`, {
         cause: new Error(message),
       });
@@ -383,7 +387,7 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       span.setAttribute('cloudflare.binding.type', 'D1');
 
       const lines = query.trim().split('\n');
-      const _exec = await this._send('/execute', lines, [], 'NONE');
+      const _exec = await this._send('/execute', lines, [], 'NONE', span);
       const exec = Array.isArray(_exec) ? _exec : [_exec];
 
       addAggregatedD1MetaToSpan(
@@ -527,7 +531,8 @@ class D1PreparedStatement {
           '/query',
           this.statement,
           this.params,
-          'ROWS_AND_COLUMNS'
+          'ROWS_AND_COLUMNS',
+          span
         )
       );
 
@@ -573,7 +578,8 @@ class D1PreparedStatement {
           '/execute',
           this.statement,
           this.params,
-          'NONE'
+          'NONE',
+          span
         )
       );
 
@@ -602,7 +608,8 @@ class D1PreparedStatement {
           '/query',
           this.statement,
           this.params,
-          'ROWS_AND_COLUMNS'
+          'ROWS_AND_COLUMNS',
+          span
         )
       );
 
@@ -632,7 +639,8 @@ class D1PreparedStatement {
           '/query',
           this.statement,
           this.params,
-          'ROWS_AND_COLUMNS'
+          'ROWS_AND_COLUMNS',
+          span
         )
       );
 
