@@ -9,3 +9,7 @@ vendored_py_wd_test(
     "beautifulsoup4",
     skip_python_flags = ["0.28.2"],
 )
+
+vendored_py_wd_test(
+    "python-workers-runtime-sdk",
+)
