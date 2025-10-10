@@ -94,6 +94,83 @@ kj::String dbErrorMessage(int errorCode, sqlite3* db) {
   return msg.flatten();
 }
 
+/**
+ * Skips all whitespace from the start, and if the statement is empty apart from comments, skips them too.
+ * Adapted from sqlite tokenizer in sqlite3_complete_length().
+ */
+const char* skipWhitespaceAndCommentOnlyStatements(const char* start) {
+  auto sql = start;
+  // `bookmark` advances past whitespace until it reaches the first comment in each
+  // statement, but no further, so we can backtrack and restore all comments to help
+  // the user with debugging if anything goes wrong
+  bool seenCommentThisStatement = false;
+  auto bookmark = sql;
+  while (*sql) {
+    switch (sql[0]) {
+      case ' ':
+      case '\t':
+      case '\n':
+      case '\r':
+      case '\v':
+      case '\f': {
+        // whitespace
+        sql++;
+        if (!seenCommentThisStatement) {
+          bookmark = sql;
+        }
+
+        break;
+      }
+      case ';': {
+        sql++;
+        bookmark = sql;
+        seenCommentThisStatement = false;
+        break;
+      }
+      case '/': {
+        // C-style comments
+        if (sql[1] != '*') {
+          return bookmark;
+        }
+        if (!seenCommentThisStatement) {
+          bookmark = sql;
+          seenCommentThisStatement = true;
+        }
+        sql += 2;
+        while (sql[0] && (sql[0] != '*' || sql[1] != '/')) {
+          sql++;
+        }
+        if (sql[0] == 0) {
+          // Got to the end of the string without closing the comment. Backtrack.
+          return bookmark;
+        };
+        sql++;
+        break;
+      }
+      case '-': {
+        // SQL-style comments from "--" to end of line
+        if (sql[1] != '-') {
+          return bookmark;
+        }
+        if (!seenCommentThisStatement) {
+          bookmark = sql;
+          seenCommentThisStatement = true;
+        }
+        while (sql[0] && sql[0] != '\n') {
+          sql++;
+        }
+        break;
+      }
+      default: {
+        // non-whitespace
+        return bookmark;
+      }
+    }
+  }
+  // if we got here, this should be an empty string
+  return sql;
+}
+
 // If a VFS call throws an exception, and vfsErrorListener is non-null, the exception will
 // be placed there, otherwise it will be logged. This is used to implement pass-through of KJ
 // exceptions through SQLite.
@@ -739,9 +816,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
     SQLITE_REQUIRE(result != nullptr, kj::none, "SQL code did not contain a statement.", sqlCode);
     auto ownResult = ownSqlite(result);
 
-    while (*tail == ' ' || *tail == '\t' || *tail == '\n' || *tail == '\r' || *tail == '\v' ||
-        *tail == '\f')
-      ++tail;
+    tail = skipWhitespaceAndCommentOnlyStatements(tail);
 
     switch (multi) {
       case SINGLE:
@@ -846,6 +921,11 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
 
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.first(statementLength));
+
+    if (skipWhitespaceAndCommentOnlyStatements(nextStatement.begin()) == nextStatement.end()) {
+      sqlCode = sqlCode.slice(statementLength);
+      continue;
+    }
     // Create a Query object, which will prepare & execute it
     auto q = Query(*this, QueryOptions{.regulator = regulator}, nextStatement);
 
