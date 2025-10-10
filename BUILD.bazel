@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
@@ -24,6 +25,14 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# For convenience, less typing than the full label:
+# (assuming working directory is the root of the repository)
+#   bazel run format
+alias(
+    name = "format",
+    actual = "//build/deps/formatters:format",
+)
+
 npm_link_all_packages(name = "node_modules")
 
 npm_link_package(
@@ -42,6 +51,12 @@ capnp_es_bins.capnpc_js_binary(
 capnp_es_bins.capnpc_ts_binary(
     name = "capnpc_ts_plugin",
     visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "prettierrc",
+    srcs = [":.prettierrc.json"],
+    visibility = ["//build/deps/formatters:__pkg__"],
 )
 
 # Platform definition for using clang-cl on Windows
