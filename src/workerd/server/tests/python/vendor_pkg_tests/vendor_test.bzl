@@ -85,5 +85,5 @@ def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendore
 
     for info in BUNDLE_VERSION_INFO.values():
         if name not in info["vendored_packages_for_tests"]:
-            continue
+            fail("Not found", name, "in", info["vendored_packages_for_tests"])
         _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)

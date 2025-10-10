@@ -134,6 +134,11 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
             },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+            },
         ],
     },
     {
@@ -164,6 +169,11 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "name": "fastapi",
                 "abi": "3.13",
                 "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
+            },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
             },
         ],
     },
