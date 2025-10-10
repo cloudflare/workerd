@@ -76,6 +76,9 @@ struct EntrypointClasses {
   // Class constructor for DurableObject (aka api::DurableObjectBase).
   jsg::JsObject durableObject;
 
+  // Class constructor for ContainerEntrypoint
+  jsg::JsObject containerEntrypoint;
+
   // Class constructor for WorkflowEntrypoint
   jsg::JsObject workflowEntrypoint;
 };
