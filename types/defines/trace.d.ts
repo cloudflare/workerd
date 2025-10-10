@@ -95,6 +95,7 @@ interface Onset {
   readonly scriptName?: string;
   readonly scriptTags?: string[];
   readonly scriptVersion?: ScriptVersion;
+  readonly durableObjectId?: string;
   readonly info: FetchEventInfo | JsRpcEventInfo | ScheduledEventInfo |
                  AlarmEventInfo | QueueEventInfo | EmailEventInfo |
                  TraceEventInfo | HibernatableWebSocketEventInfo |
