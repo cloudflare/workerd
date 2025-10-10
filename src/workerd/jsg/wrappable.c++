@@ -417,7 +417,8 @@ kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(
             IsolateBase::getOpaqueTemplate(isolate));
     if (!instance.IsEmpty()) {
       return *reinterpret_cast<Wrappable*>(
-          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX));
+          instance->GetAlignedPointerFromInternalField(WRAPPED_OBJECT_FIELD_INDEX,
+              static_cast<v8::EmbedderDataTypeTag>(WRAPPED_OBJECT_FIELD_INDEX)));
     }
   }
 
