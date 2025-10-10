@@ -17,6 +17,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
+  CompatibilityFlags::Reader flags = js.getCompatibilityFlags();
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -50,6 +51,39 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+
+  if (flags.getWorkerdExperimental()) {
+    KJ_IF_SOME(hardTimeout, options.hardTimeout) {
+      int64_t timeoutMs = 0;
+      KJ_SWITCH_ONEOF(hardTimeout) {
+        KJ_CASE_ONEOF(ms, int64_t) {
+          timeoutMs = ms;
+        }
+        KJ_CASE_ONEOF(duration, kj::String) {
+          // Parse duration string like "30s", "5m", "2h"
+          JSG_REQUIRE(duration.size() >= 2, TypeError, "Invalid duration format: ", duration);
+          
+          auto unit = duration[duration.size() - 1];
+          auto numberStr = duration.slice(0, duration.size() - 1);
+          
+          char* endPtr;
+          int64_t value = strtoll(numberStr.cStr(), &endPtr, 10);
+          JSG_REQUIRE(*endPtr == '\0' && value > 0, TypeError, "Invalid duration number: ", numberStr);
+          
+          switch (unit) {
+            case 's': timeoutMs = value * 1000; break;
+            case 'm': timeoutMs = value * 60 * 1000; break;
+            case 'h': timeoutMs = value * 60 * 60 * 1000; break;
+            default:
+              JSG_FAIL_REQUIRE(TypeError, "Invalid duration unit '", kj::str(unit), "'. Use 's', 'm', or 'h'");
+          }
+        }
+      }
+      
+      JSG_REQUIRE(timeoutMs > 0, TypeError, "Hard timeout must be greater than 0");
+      req.setHardTimeoutMs(timeoutMs);
+    }
+  }
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
@@ -61,6 +95,7 @@ jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durati
   req.setDurationMs(durationMs);
   return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
+
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
