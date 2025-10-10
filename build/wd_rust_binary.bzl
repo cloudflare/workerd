@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("@workerd//:build/rust_toolchains.bzl", "RUSTC_FLAGS")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge")
 
 def wd_rust_binary(
@@ -62,6 +63,7 @@ def wd_rust_binary(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        rustc_flags = RUSTC_FLAGS,
     )
 
     rust_test(
@@ -83,4 +85,5 @@ def wd_rust_binary(
             "//conditions:default": [],
         }),
         size = test_size,
+        rustc_flags = RUSTC_FLAGS,
     )

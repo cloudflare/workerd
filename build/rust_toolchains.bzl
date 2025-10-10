@@ -3,9 +3,18 @@ load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_regi
 load("@rules_rust//tools/rust_analyzer:deps.bzl", "rust_analyzer_dependencies")
 load("//deps/rust/crates:crates.bzl", "crate_repositories")
 
-RUST_STABLE_VERSION = "1.86.0"  # LLVM 19
+# We use nightly because of https://github.com/bazelbuild/rules_rust/issues/3459
+RUST_VERSION = "nightly/2025-09-18"
 
-RUST_NIGHTLY_VERSION = "nightly/2025-02-20"
+# List of allowed unstable features
+ALLOWED_FEATURES = []
+
+# rustc flags applied to all workerd source code
+RUSTC_FLAGS = [
+    # We can't enable this in .bazelrc because 3rd-party crates don't like this.
+    # used manually everywhere instead.
+    "-Zallow-features=" + ",".join(ALLOWED_FEATURES),
+]
 
 # List of additional triples to be configured on top of the local platform triple
 RUST_TARGET_TRIPLES = [
@@ -29,17 +38,14 @@ def rust_toolchains():
             "aarch64-unknown-linux-gnu": ["-Ctarget-feature=+crc"],
             # No options needed for aarch64-apple-darwin: CRC feature is enabled by default.
         },
-        versions = [
-            RUST_STABLE_VERSION,
-            RUST_NIGHTLY_VERSION,
-        ],
+        versions = [RUST_VERSION],
     )
 
     for t in RUST_TARGET_TRIPLES:
         rustfmt_toolchain_repository(
             name = "rustfmt_toolchain_" + t,
             exec_triple = t,
-            version = RUST_NIGHTLY_VERSION,
+            version = RUST_VERSION,
         )
 
     crate_universe_dependencies()
