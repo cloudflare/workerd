@@ -28,10 +28,17 @@ class Container: public jsg::Object {
     jsg::Optional<kj::Array<kj::String>> entrypoint;
     bool enableInternet = false;
     jsg::Optional<jsg::Dict<kj::String>> env;
+    jsg::Optional<jsg::OneOf<kj::String, int64_t>> hardTimeout;
 
     // TODO(containers): Allow intercepting stdin/stdout/stderr by specifying streams here.
 
-    JSG_STRUCT(entrypoint, enableInternet, env);
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getWorkerdExperimental()) {
+        JSG_STRUCT(entrypoint, enableInternet, env, hardTimeout);
+      } else {
+        JSG_STRUCT(entrypoint, enableInternet, env);
+      }
+    }
   };
 
   bool getRunning() {
