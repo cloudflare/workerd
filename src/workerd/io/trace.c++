@@ -1469,7 +1469,7 @@ SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
   KJ_IF_SOME(obs, observer) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
+    span.emplace(kj::mv(operationName), startTime.orDefault([&obs]() { return obs->getTime(); }));
     this->observer = kj::mv(obs);
   }
 }
