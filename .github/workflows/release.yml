@@ -245,14 +245,6 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: Build type generating Worker
@@ -298,14 +290,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           show-progress: false
-      - name: Cache
-        id: cache
-        uses: actions/cache@v4
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
-        with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'WORKSPACE') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
       - name: build types
