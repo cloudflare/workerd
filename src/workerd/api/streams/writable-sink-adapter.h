@@ -1,4 +1,5 @@
 #include "common.h"
+#include "writable-sink.h"
 
 #include <workerd/util/weak-refs.h>
 
@@ -329,13 +330,12 @@ class WritableStreamSinkJsAdapter final {
 // as input instead of a kj::ArrayPtr but that's a larger refactor.
 //
 //     ┌───────────────────────────────────────────┐
-//     │         KJ Native Code                    │
+//     │         WritableStreamSink                │
 //     │                                           │
 //     │  • write(buffer)                          │
 //     │  • write(pieces[])                        │
 //     │  • end()                                  │
 //     │  • abort(reason)                          │
-//     │  • tryPumpFrom(source, end)               │
 //     └───────────────────────────────────────────┘
 //                            │
 //                            ▼
@@ -349,7 +349,6 @@ class WritableStreamSinkJsAdapter final {
 //     │  │  • write(ArrayPtr<ArrayPtr<byte>>)  │  │
 //     │  │  • end() → Promise<void>            │  │
 //     │  │  • abort(exception)                 │  │
-//     │  │  • tryPumpFrom(source, end)         │  │
 //     │  └─────────────────────────────────────┘  │
 //     │                   │                       │
 //     │                   ▼                       │
@@ -420,11 +419,6 @@ class WritableStreamSinkKjAdapter final: public WritableStreamSink {
   // with the failure reason.
   kj::Promise<void> end() override;
 
-  // Attempts to establish a data pipe where input's data is delivered
-  // to this WritableStreamSinkKjAdapter as efficiently as possible.
-  kj::Maybe<kj::Promise<DeferredProxy<void>>> tryPumpFrom(
-      ReadableStreamSource& input, bool end) override;
-
   // Immediately interrupts existing pending writes and errors the stream.
   // All pending or in-flight writes will be rejected with the given
   // exception. If we are already in the errored state, this is a no-op
@@ -432,14 +426,21 @@ class WritableStreamSinkKjAdapter final: public WritableStreamSink {
   // the errored state, no further writes or closes are allowed.
   void abort(kj::Exception reason) override;
 
+  // A WritableStreamSinkKjAdapter always (currently) uses identity encoding.
+  rpc::StreamEncoding disownEncodingResponsibility() override {
+    return rpc::StreamEncoding::IDENTITY;
+  }
+
+  rpc::StreamEncoding getEncoding() override {
+    return rpc::StreamEncoding::IDENTITY;
+  }
+
  private:
   struct Active;
   KJ_DECLARE_NON_POLYMORPHIC(Active);
   struct Closed {};
   kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
   kj::Rc<WeakRef<WritableStreamSinkKjAdapter>> selfRef;
-
-  kj::Promise<void> pumpFromImpl(ReadableStreamSource& input, bool end);
 };
 
 }  // namespace workerd::api::streams
