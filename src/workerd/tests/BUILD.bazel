@@ -90,6 +90,15 @@ wd_cc_benchmark(
     ],
 )
 
+wd_cc_benchmark(
+    name = "bench-vanilla",
+    srcs = ["bench-vanilla.c++"],
+    deps = [
+        ":test-fixture",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
@@ -120,6 +129,7 @@ filegroup(
         ":bench-mimetype",
         ":bench-regex",
         ":bench-util",
+        ":bench-vanilla",
     ],
     visibility = ["//visibility:public"],
 )
