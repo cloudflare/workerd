@@ -394,6 +394,7 @@ export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  onunload: () => void;
   readonly props: Props;
 }
 export type ExportedHandlerFetchHandler<
@@ -553,6 +554,7 @@ export interface DurableObjectClass<
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  onunload: () => void;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;

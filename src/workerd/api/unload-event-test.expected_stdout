@@ -1,0 +1,20 @@
+actor ok
+ACTOR UNLOAD FIRED
+ACTOR TEST UNLOAD FIRED
+Storage test: first request complete
+STORAGE UNLOAD HANDLER FIRED
+past ctx onunload check
+Fetching
+Fetch
+Fetched
+FETCH UNLOAD FIRED
+Test end
+UNLOAD TEST UNLOAD FIRED
+Fetch
+past worker ctx onunload check
+FETCH UNLOAD FIRED
+Worker test: first request complete
+Fetch
+past worker ctx onunload check
+FETCH UNLOAD FIRED
+Worker test: verified onunload not persisted

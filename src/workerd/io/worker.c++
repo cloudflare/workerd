@@ -5,6 +5,7 @@
 #include "actor-cache.h"
 
 #include <workerd/api/actor-state.h>
+#include <workerd/api/events.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams.h>  // for api::StreamEncoding
@@ -1832,6 +1833,33 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               impl->permanentException);
         }
       });
+    });
+  });
+}
+
+void Worker::runInUnloadScope(kj::Function<void(Lock&)> func) const {
+  runInLockScope(Lock::TakeSynchronously(kj::none), [&](Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock, lock.getContext(), [&](jsg::Lock& js) {
+      // Run the unload handler without an IoContext
+      {
+        SuppressIoContextScope suppressIo;
+        js.tryCatch([&] { func(lock); }, [&](jsg::Value exception) {
+          // Log the exception
+          js.reportError(jsg::JsValue(exception.getHandle(js)));
+        });
+      }
+
+      // Clear any microtasks that were queued during the unload handler.
+      // terminateNextExecution() causes runMicrotasks() to immediately dequeue and cancel
+      // all pending microtasks without executing them. We need a tryCatch to handle
+      // the termination exception state.
+      js.terminateNextExecution();
+      v8::TryCatch tryCatch(lock.getIsolate());
+      js.runMicrotasks();
+      if (tryCatch.HasCaught()) {
+        KJ_ASSERT(tryCatch.HasTerminated());
+        tryCatch.Reset();
+      }
     });
   });
 }
@@ -3736,6 +3764,11 @@ void Worker::Actor::shutdown(uint16_t reasonCode, kj::Maybe<const kj::Exception&
   // capability server should have triggered this (potentially indirectly) via its destructor.
   KJ_IF_SOME(r, impl->ioContext) {
     impl->metrics->shutdown(reasonCode, r.get()->getLimitEnforcer());
+
+    // Dispatch unload event for DurableObjectState if one was attached
+    KJ_IF_SOME(handler, onUnload) {
+      worker->runInUnloadScope(kj::mv(handler));
+    }
   } else {
     // The actor was shut down before the IoContext was even constructed, so no metrics are
     // written.

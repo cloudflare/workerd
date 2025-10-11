@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  actorInactivityTimeout = 100,  # 100ms for testing
+  services = [
+    ( name = "unload-event-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "unload-event-test.js")
+        ],
+        durableObjectNamespaces = [
+          (className = "TestActor", uniqueKey = "test_actor"),
+          (className = "StorageUnloadActor", uniqueKey = "storage_unload_actor"),
+        ],
+        durableObjectStorage = (inMemory = void),
+        bindings = [
+          (name = "TEST_ACTOR", durableObjectNamespace = "TestActor"),
+          (name = "STORAGE_UNLOAD_ACTOR", durableObjectNamespace = "StorageUnloadActor"),
+          ( name = "SERVICE", service = "unload-event-test"),
+        ],
+        compatibilityDate = "2025-05-01",
+        compatibilityFlags = ["experimental", "nodejs_compat"],
+      )
+    ),
+  ]
+);
