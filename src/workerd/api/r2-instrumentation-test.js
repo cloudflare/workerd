@@ -2,55 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import {
+  invocationPromises,
+  spans,
+  testTailHandler,
+} from 'test:instumentation-tail';
 
-// tailStream is going to be invoked multiple times, but we want to wait
-// to run the test until all executions are done. Collect promises for
-// each
-let invocationPromises = [];
-let spans = new Map();
-
-export default {
-  tailStream(event, env, ctx) {
-    // For each "onset" event, store a promise which we will resolve when
-    // we receive the equivalent "outcome" event
-    let resolveFn;
-    invocationPromises.push(
-      new Promise((resolve, reject) => {
-        resolveFn = resolve;
-      })
-    );
-
-    // Accumulate the span info for easier testing
-    return (event) => {
-      // span ids are simple counters for tests, but invocation ID allows us to differentiate them
-      let spanKey = event.invocationId + event.spanContext.spanId;
-      switch (event.event.type) {
-        case 'spanOpen':
-          spans.set(event.invocationId + event.event.spanId, {
-            name: event.event.name,
-          });
-          break;
-        case 'attributes': {
-          let span = spans.get(spanKey);
-          for (let { name, value } of event.event.info) {
-            span[name] = value;
-          }
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'spanClose': {
-          let span = spans.get(spanKey);
-          span['closed'] = true;
-          spans.set(spanKey, span);
-          break;
-        }
-        case 'outcome':
-          resolveFn();
-          break;
-      }
-    };
-  },
-};
+// Use shared instrumentation test tail worker
+export default testTailHandler;
 
 export const test = {
   async test() {

@@ -6,11 +6,16 @@ const config :Workerd.Config = (
     (name = "TEST_TMPDIR", disk = (writable = true)),
     (name = "tail", worker = .tailWorker),
   ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instumentation-tail", esModule = embed "tests/instrumentation-tail-worker.js" ),
+    ]
+  ) ]
 );
 
 const mainWorker :Workerd.Worker = (
   compatibilityDate = "2022-09-16",
-  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker", "tail_worker_user_spans"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker"],
 
   streamingTails = ["tail"],
 
