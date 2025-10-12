@@ -1,0 +1,9 @@
+exports_files(
+    ["instrumentation-test-helper.js"],
+    visibility = [
+        "//src/cloudflare/internal/test/d1:__pkg__",
+        "//src/cloudflare/internal/test/images:__pkg__",
+        "//src/cloudflare/internal/test/tracing:__pkg__",
+        "//src/workerd/api:__pkg__",
+    ],
+)
