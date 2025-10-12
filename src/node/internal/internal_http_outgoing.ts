@@ -394,7 +394,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
           let max = '';
           if (
             this._maxRequestsPerSocket != null &&
-            ~~this._maxRequestsPerSocket > 0 // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
+            ~~this._maxRequestsPerSocket > 0
           ) {
             max = `, max=${this._maxRequestsPerSocket}`;
           }
@@ -957,11 +957,6 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
     this[kErrored] = err as Error;
 
     return this;
-  }
-
-  // @ts-expect-error TS2611 Property accessor.
-  get writableObjectMode(): boolean {
-    return false;
   }
 
   // @ts-expect-error TS2611 Property accessor.

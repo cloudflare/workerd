@@ -383,22 +383,33 @@ static constexpr kj::StringPtr ALLOWED_SQLITE_FUNCTIONS[] = {
 
   // https://www.sqlite.org/json1.html
   "json"_kj,
+  "jsonb"_kj,
   "json_array"_kj,
+  "jsonb_array"_kj,
   "json_array_length"_kj,
   "json_extract"_kj,
+  "jsonb_extract"_kj,
   "->"_kj,
   "->>"_kj,
   "json_insert"_kj,
+  "jsonb_insert"_kj,
   "json_object"_kj,
+  "jsonb_object"_kj,
   "json_patch"_kj,
+  "jsonb_patch"_kj,
   "json_remove"_kj,
+  "jsonb_remove"_kj,
   "json_replace"_kj,
+  "jsonb_replace"_kj,
   "json_set"_kj,
+  "jsonb_set"_kj,
   "json_type"_kj,
   "json_valid"_kj,
   "json_quote"_kj,
   "json_group_array"_kj,
+  "jsonb_group_array"_kj,
   "json_group_object"_kj,
+  "jsonb_group_object"_kj,
   "json_each"_kj,
   "json_tree"_kj,
 
@@ -542,9 +553,13 @@ SqliteDatabase::operator sqlite3*() {
   return &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 }
 
-void SqliteDatabase::notifyWrite() {
+bool SqliteDatabase::observedCriticalError() {
+  return criticalErrorOccurred;
+}
+
+void SqliteDatabase::notifyWrite(bool allowUnconfirmed) {
   KJ_IF_SOME(cb, onWriteCallback) {
-    cb();
+    cb(allowUnconfirmed);
   }
 }
 
@@ -560,6 +575,7 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
       if (inTransaction || !savepoints.empty()) {
         // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
         if (sqlite3_get_autocommit(db) != 0) {
+          criticalErrorOccurred = true;
           KJ_IF_SOME(cb, onCriticalErrorCallback) {
             cb(errorMessage, maybeException);
           }
@@ -750,7 +766,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(const Regulator& r
               KJ_DEFER(currentRegulator = regulator);
               currentParseContext = kj::none;
               KJ_DEFER(currentParseContext = parseContext);
-              cb();
+              cb(false);  // prepareSql doesn't have access to allowUnconfirmed, use safe default
             }
           }
 
@@ -831,7 +847,7 @@ SqliteDatabase::IngestResult SqliteDatabase::ingestSql(
     // Slice off the next valid statement SQL
     auto nextStatement = kj::str(sqlCode.first(statementLength));
     // Create a Query object, which will prepare & execute it
-    auto q = Query(*this, regulator, nextStatement);
+    auto q = Query(*this, QueryOptions{.regulator = regulator}, nextStatement);
 
     rowsRead += q.getRowsRead();
     rowsWritten += q.getRowsWritten();
@@ -1324,11 +1340,11 @@ void SqliteDatabase::Statement::beforeSqliteReset() {
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     Statement& statement,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       maybeStatement(statement.prepareForExecution()),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
@@ -1337,11 +1353,11 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
 }
 
 SqliteDatabase::Query::Query(SqliteDatabase& db,
-    const Regulator& regulator,
+    QueryOptions options,
     kj::StringPtr sqlCode,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
-      regulator(regulator),
+      regulator(options.regulator),
       ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
@@ -1407,7 +1423,7 @@ void SqliteDatabase::Query::checkRequirements(size_t size) {
 
   KJ_IF_SOME(cb, db.onWriteCallback) {
     if (!sqlite3_stmt_readonly(statement)) {
-      cb();
+      cb(allowUnconfirmed);
     }
   }
 }

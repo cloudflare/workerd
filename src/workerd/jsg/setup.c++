@@ -155,6 +155,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   v8::V8::SetFlagsFromString("--js-explicit-resource-management");
   v8::V8::SetFlagsFromString("--js-float16array");
 
+  // Enable source phase imports for WebAssembly modules
+  v8::V8::SetFlagsFromString("--js-source-phase-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -390,7 +393,11 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+    // JSPI was stabilized in V8 version 14.2, and this API removed.
+    // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
     ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
+#endif
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -515,11 +522,15 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
   return self->evalAllowed;
 }
 
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+// JSPI was stabilized in V8 version 14.2, and this API removed.
+// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
 bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->jspiEnabled;
 }
+#endif
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source

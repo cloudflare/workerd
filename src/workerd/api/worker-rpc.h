@@ -15,6 +15,7 @@
 // See worker-interface.capnp for the underlying protocol.
 
 #include <workerd/io/io-context.h>
+#include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -450,6 +451,10 @@ class JsRpcSessionCustomEventImpl final: public WorkerInterface::CustomEvent {
 
   uint16_t getType() override {
     return typeId;
+  }
+
+  kj::Maybe<tracing::EventInfo> getEventInfo() const override {
+    return tracing::EventInfo(tracing::JsRpcEventInfo(kj::str("")));
   }
 
   rpc::JsRpcTarget::Client getCap() {

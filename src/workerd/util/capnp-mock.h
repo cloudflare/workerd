@@ -21,6 +21,7 @@ namespace workerd {
 //
 // TODO(cleanup): Move this to KJ!
 
+#ifndef KJ_REQUIRE_AT
 #define KJ_REQUIRE_AT(cond, location, ...)                                                         \
   if (auto _kjCondition = ::kj::_::MAGIC_ASSERT << cond) {                                         \
   } else                                                                                           \
@@ -28,12 +29,16 @@ namespace workerd {
              ::kj::Exception::Type::FAILED, #cond, "_kjCondition," #__VA_ARGS__, _kjCondition,     \
              ##__VA_ARGS__);                                                                       \
          ; f.fatal())
+#endif
 
+#ifndef KJ_FAIL_REQUIRE_AT
 #define KJ_FAIL_REQUIRE_AT(location, ...)                                                          \
   for (::kj::_::Debug::Fault f(location.fileName, location.lineNumber,                             \
            ::kj::Exception::Type::FAILED, nullptr, #__VA_ARGS__, ##__VA_ARGS__);                   \
        ; f.fatal())
+#endif
 
+#ifndef KJ_REQUIRE_NONNULL_AT
 #define KJ_REQUIRE_NONNULL_AT(value, location, ...)                                                \
   (*({                                                                                             \
     auto _kj_result = ::kj::_::readMaybe(value);                                                   \
@@ -44,16 +49,27 @@ namespace workerd {
     }                                                                                              \
     kj::mv(_kj_result);                                                                            \
   }))
+#endif
 
+#ifndef KJ_ASSERT_AT
 #define KJ_ASSERT_AT KJ_REQUIRE_AT
-#define KJ_FAIL_ASSERT_AT KJ_FAIL_REQUIRE_AT
-#define KJ_ASSERT_NONNULL_AT KJ_REQUIRE_NONNULL_AT
+#endif
 
+#ifndef KJ_FAIL_ASSERT_AT
+#define KJ_FAIL_ASSERT_AT KJ_FAIL_REQUIRE_AT
+#endif
+
+#ifndef KJ_ASSERT_NONNULL_AT
+#define KJ_ASSERT_NONNULL_AT KJ_REQUIRE_NONNULL_AT
+#endif
+
+#ifndef KJ_LOG_AT
 #define KJ_LOG_AT(severity, location, ...)                                                         \
   for (bool _kj_shouldLog = ::kj::_::Debug::shouldLog(::kj::LogSeverity::severity); _kj_shouldLog; \
        _kj_shouldLog = false)                                                                      \
   ::kj::_::Debug::log(location.fileName, location.lineNumber, ::kj::LogSeverity::severity,         \
       #__VA_ARGS__, ##__VA_ARGS__)
+#endif
 
 // =======================================================================================
 // Cap'n Proto mocking framework

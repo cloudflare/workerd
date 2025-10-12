@@ -1,5 +1,11 @@
-import { DurableObject } from 'cloudflare:workers';
+import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 import assert from 'node:assert';
+
+export class GreeterLoopback extends WorkerEntrypoint {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}!`;
+  }
+}
 
 export let basics = {
   async test(ctrl, env, ctx) {
@@ -9,11 +15,19 @@ export let basics = {
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
+            import {WorkerEntrypoint} from "cloudflare:workers";
             export default {
               greet(name) { return "Hello, " + name; }
             }
             export let alternate = {
-              greet(name) { return "Welcome, " + name; }
+              greet(name, env, ctx) { return \`\${ctx.props.greeting}, \${name}\`; }
+            }
+            export class FancyPropsEntrypoint extends WorkerEntrypoint {
+              async run() {
+                let greet1 = await this.ctx.props.greeter.greet("Dave");
+                let greet2 = await this.ctx.props.greeter2.greet("Eve");
+                return [greet1, greet2].join("\\n");
+              }
             }
           `,
         },
@@ -25,10 +39,69 @@ export let basics = {
       assert.strictEqual(result, 'Hello, Alice');
     }
 
+    let greeter = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Welcome' },
+    });
+    let greeter2 = worker.getEntrypoint('alternate', {
+      props: { greeting: 'Howdy' },
+    });
+
     {
-      let result = await worker.getEntrypoint('alternate').greet('Bob');
+      let result = await greeter.greet('Bob');
       assert.strictEqual(result, 'Welcome, Bob');
     }
+
+    {
+      let result = await greeter2.greet('Carol');
+      assert.strictEqual(result, 'Howdy, Carol');
+    }
+
+    let fancyProps = await worker.getEntrypoint('FancyPropsEntrypoint', {
+      props: {
+        greeter: ctx.exports.GreeterLoopback({ props: { greeting: "G'day" } }),
+        greeter2: ctx.exports.GreeterLoopback({ props: { greeting: 'Sup' } }),
+      },
+    });
+
+    {
+      let result = await fancyProps.run();
+      assert.strictEqual(result, "G'day, Dave!\nSup, Eve!");
+    }
+
+    // Note that we CANNOT transfer a dynamic worker entrypoint.
+    assert.rejects(
+      () =>
+        worker.getEntrypoint('FancyPropsEntrypoint', {
+          props: { greeter, greeter2 },
+        }),
+      {
+        name: 'DataCloneError',
+        message:
+          'Entrypoints to dynamically-loaded workers cannot be transferred to other Workers, ' +
+          'because the system does not know how to reload this Worker from scratch. Instead, ' +
+          'have the parent Worker expose an entrypoint which constructs the dynamic worker ' +
+          'and forwards to it.',
+      }
+    );
+
+    // Let's quickly verify that if we use ctx.exports.GreeterLoopback *without* invoking it, then
+    // we get an error that it isn't serializable. (This isn't really testing worker-loader, it's
+    // more testing LoopbackServiceStub and that serializability is not inherited.)
+    assert.rejects(
+      () =>
+        worker.getEntrypoint('FancyPropsEntrypoint', {
+          props: {
+            greeter: ctx.exports.GreeterLoopback,
+            greeter2: ctx.exports.GreeterLoopback,
+          },
+        }),
+      {
+        name: 'DataCloneError',
+        message:
+          'Could not serialize object of type "LoopbackServiceStub". This type does not support ' +
+          'serialization.',
+      }
+    );
   },
 };
 
@@ -89,6 +162,39 @@ export let passEnv = {
 
     let resp = await worker.getEntrypoint().fetch('https://example.com');
     assert.strictEqual(await resp.text(), 'env.hello = 123');
+  },
+};
+
+export let passEnvCaps = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('passEnvCaps', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              async fetch(req, env, ctx) {
+                let greet1 = await env.greeter.greet("Alice");
+                let greet2 = await env.greeter2.greet("Bob");
+                return new Response([greet1, greet2].join("\\n"));
+              },
+            }
+          `,
+        },
+        env: {
+          greeter: ctx.exports.GreeterLoopback({
+            props: { greeting: 'Hello' },
+          }),
+          greeter2: ctx.exports.GreeterLoopback({
+            props: { greeting: 'Welcome' },
+          }),
+        },
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'Hello, Alice!\nWelcome, Bob!');
   },
 };
 
@@ -188,11 +294,77 @@ export let nullGlobalOutbound = {
   },
 };
 
+// We need to bounce the tail event through an actor to receive it back in the execution context
+// that set up the dynamic tail. `RendezvousActor` helps with that.
+export class RendezvousActor extends DurableObject {
+  promiseAndResolvers = Promise.withResolvers();
+
+  resolve(value) {
+    this.promiseAndResolvers.resolve(value);
+  }
+
+  wait() {
+    return this.promiseAndResolvers.promise;
+  }
+}
+
+export class TestTail extends WorkerEntrypoint {
+  async tail(event) {
+    // HACK: Currently, tail events are not serializable over RPC. :(
+    event = JSON.parse(JSON.stringify(event));
+
+    await this.ctx.exports.RendezvousActor.getByName('tails').resolve({
+      props: this.ctx.props,
+      event,
+    });
+  }
+}
+
+// Test tail worker on dynamically-loaded worker.
+export let tails = {
+  async test(ctrl, env, ctx) {
+    let worker = env.loader.get('tails', () => {
+      return {
+        compatibilityDate: '2025-01-01',
+        mainModule: 'foo.js',
+        modules: {
+          'foo.js': `
+            export default {
+              fetch(req, env, ctx) {
+                console.log("hello, tail");
+                return new Response("OK");
+              },
+            }
+          `,
+        },
+
+        tails: [ctx.exports.TestTail({ props: { foo: 123 } })],
+      };
+    });
+
+    let resp = await worker.getEntrypoint().fetch('https://example.com');
+    assert.strictEqual(await resp.text(), 'OK');
+
+    let { props, event } =
+      await ctx.exports.RendezvousActor.getByName('tails').wait();
+    assert.deepEqual(props, { foo: 123 });
+    assert.strictEqual(event[0].logs[0].message[0], 'hello, tail');
+  },
+};
+
+export class GreeterFacet extends DurableObject {
+  async greet(name) {
+    return `${this.ctx.props.greeting}, ${name}?`;
+  }
+}
+
 export class FacetTestActor extends DurableObject {
   async doTest() {
     let worker = this.env.loader.get('facets', () => {
       return {
         compatibilityDate: '2025-01-01',
+        compatibilityFlags: ['experimental'],
+        allowExperimental: true,
         mainModule: 'foo.js',
         modules: {
           'foo.js': `
@@ -204,16 +376,46 @@ export class FacetTestActor extends DurableObject {
                 this.i += j;
                 return this.i;
               }
+              myProps() {
+                let result = {...this.ctx.props};
+                delete result.propsGreeter;
+                return result;
+              }
+              async greets() {
+                let greeter1 = this.ctx.facets.get("greeter1", () => {
+                  return { class: this.env.envGreeter };
+                });
+                let greeter2 = this.ctx.facets.get("greeter2", () => {
+                  return { class: this.ctx.props.propsGreeter };
+                });
+                let greet1 = await greeter1.greet("Alice");
+                let greet2 = await greeter2.greet("Bob");
+                return [greet1, greet2].join("\\n");
+              }
             }
           `,
         },
 
         // Set globalOutbound to redirect to our own `testOutbound` entrypoint.
         globalOutbound: this.ctx.exports.testOutbound,
+
+        env: {
+          envGreeter: this.ctx.exports.GreeterFacet({
+            props: { greeting: 'Hello' },
+          }),
+        },
       };
     });
 
-    let cls = worker.getDurableObjectClass('MyActor');
+    let cls = worker.getDurableObjectClass('MyActor', {
+      props: {
+        foo: 123,
+        bar: 456,
+        propsGreeter: this.ctx.exports.GreeterFacet({
+          props: { greeting: 'Welcome' },
+        }),
+      },
+    });
 
     let facet = this.ctx.facets.get('bar', () => {
       return { class: cls };
@@ -221,6 +423,10 @@ export class FacetTestActor extends DurableObject {
 
     assert.strictEqual(await facet.increment(), 1);
     assert.strictEqual(await facet.increment(4), 5);
+
+    assert.deepEqual(await facet.myProps(), { foo: 123, bar: 456 });
+
+    assert.strictEqual(await facet.greets(), 'Hello, Alice?\nWelcome, Bob?');
   }
 }
 
@@ -479,7 +685,7 @@ export let ctxExports = {
     let worker = env.loader.get('ctxExports', () => {
       return {
         compatibilityDate: '2025-01-01',
-        compatibilityFlags: ['experimental'],
+        compatibilityFlags: ['enable_ctx_exports'],
         mainModule: 'foo.js',
         allowExperimental: true,
         modules: {

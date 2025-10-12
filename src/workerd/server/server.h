@@ -38,7 +38,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::Timer& timer,
       kj::Network& network,
       kj::EntropySource& entropySource,
-      Worker::ConsoleMode consoleMode,
+      Worker::LoggingOptions loggingOptions,
       kj::Function<void(kj::String)> reportConfigError);
   ~Server() noexcept;
 
@@ -78,8 +78,8 @@ class Server final: private kj::TaskSet::ErrorHandler {
   void setPythonCreateBaselineSnapshot() {
     pythonConfig.createBaselineSnapshot = true;
   }
-  void setPythonLoadSnapshot() {
-    pythonConfig.loadSnapshotFromDisk = true;
+  void setPythonLoadSnapshot(kj::String snapshot) {
+    pythonConfig.loadSnapshotFromDisk = kj::mv(snapshot);
   }
 
   // Runs the server using the given config.
@@ -126,12 +126,11 @@ class Server final: private kj::TaskSet::ErrorHandler {
     .pyodideDiskCacheRoot = kj::none,
     .createSnapshot = false,
     .createBaselineSnapshot = false,
-    .loadSnapshotFromDisk = false};
+    .loadSnapshotFromDisk = kj::none};
 
   bool experimental = false;
 
-  Worker::ConsoleMode consoleMode;
-  StructuredLogging structuredLogging{StructuredLogging::NO};
+  Worker::LoggingOptions loggingOptions;
 
   kj::Own<api::MemoryCacheProvider> memoryCacheProvider;
 
@@ -285,6 +284,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
       kj::StringPtr workerName, const WorkerDef& workerDef, ErrorReporter& errorReporter);
 
   friend struct FutureSubrequestChannel;
+  friend struct FutureActorClassChannel;
 };
 
 // An ActorStorage implementation which will always respond to reads as if the state is empty,

@@ -10,6 +10,7 @@ const unitTests :Workerd.Config = (
            esModule = "export const test = await import('node-internal:internal_buffer');"),
           (name = "node:buffer",
            esModule = "import * as buf from 'node-internal:internal_buffer'; export default buf;"),
+          (name = "wasm", wasm = embed "test.wasm"),
         ],
         compatibilityDate = "2025-07-01",
         compatibilityFlags = [

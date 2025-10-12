@@ -203,4 +203,36 @@ kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoCo
   KJ_UNREACHABLE;
 }
 
+void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "DurableObjectClass cannot be serialized in this context.");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableBuilder*>(&handler);
+  JSG_REQUIRE(externalHandler != nullptr, DOMDataCloneError,
+      "DurableObjectClass cannot be serialized in this context.");
+
+  auto channel = getChannel(IoContext::current());
+  channel->requireAllowsTransfer();
+  serializer.writeRawUint32(externalHandler->add(kj::mv(channel)));
+}
+
+jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
+    jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer) {
+  auto& handler = KJ_REQUIRE_NONNULL(
+      deserializer.getExternalHandler(), "got DurableObjectClass in unexpected context?");
+  auto externalHandler = dynamic_cast<Frankenvalue::CapTableReader*>(&handler);
+  KJ_REQUIRE(externalHandler != nullptr, "got DurableObjectClass in unexpected context?");
+
+  auto& cap = KJ_REQUIRE_NONNULL(externalHandler->get(deserializer.readRawUint32()),
+      "serialized DurableObjectClass had invalid cap table index");
+
+  if (auto channel = dynamic_cast<IoChannelFactory::ActorClassChannel*>(&cap)) {
+    return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(*channel)));
+  } else if (auto channel = dynamic_cast<IoChannelCapTableEntry*>(&cap)) {
+    return js.alloc<DurableObjectClass>(
+        channel->getChannelNumber(IoChannelCapTableEntry::Type::ACTOR_CLASS));
+  } else {
+    KJ_FAIL_REQUIRE("DurableObjectClass capability in Frankenvalue is not an ActorClassChannel?");
+  }
+}
+
 }  // namespace workerd::api

@@ -150,8 +150,13 @@ class Default(WorkerEntrypoint):
             resp = await fetch("https://example.com/sub")
             return resp
 
+    async def scheduled(self, ctrl, env, ctx):
+        assert ctrl.scheduledTime == 1000
+        assert ctrl.cron == "* * * * 30"
+
     async def test(self):
         js_env = self.env._env
+        await can_support_scheduled_cron_trigger(js_env)
         await can_return_custom_fetch_response(js_env)
         await can_modify_response(js_env)
         await can_use_duplicate_headers(js_env)
@@ -377,6 +382,7 @@ async def can_use_cf_fetch_opts(env):
 async def request_unit_tests(env):
     req = Request("https://test.com", method=HTTPMethod.POST)
     assert req.method == HTTPMethod.POST
+    assert repr(req) == "Request(method='POST', url='https://test.com/')"
 
     # Verify that we can pass JS headers to Request
     js_headers = js.Headers.new()
@@ -437,6 +443,10 @@ async def can_use_event_decorator(env):
 async def response_unit_tests(env):
     response_json = Response.json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
+    assert (
+        repr(response_json)
+        == "Response(status=200, status_text='OK', content_type='application/json')"
+    )
 
     response_json = Response.from_json([1, 2, 3])
     assert await response_json.text() == "[1, 2, 3]"
@@ -492,7 +502,7 @@ async def response_unit_tests(env):
         assert str(err) == "Unsupported type in Response: Test"
 
     response_ws = Response(
-        "test", status=201, web_socket=js.WebSocket.new("ws://example.com")
+        "test", status=201, web_socket=js.WebSocket.new("ws://example.com/ignore")
     )
     # TODO: it doesn't seem possible to access webSocket even in JS
     assert response_ws.status == 201
@@ -504,3 +514,8 @@ async def can_fetch_python_request():
 
     async with _mock_fetch(fetch_check):
         await fetch(Request("https://example.com/redirect"))
+
+
+async def can_support_scheduled_cron_trigger(env):
+    result = await env.SELF.scheduled(scheduledTime=1000, cron="* * * * 30")
+    assert result.outcome == "ok"

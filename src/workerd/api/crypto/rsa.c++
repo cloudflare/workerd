@@ -182,8 +182,7 @@ jsg::BufferSource Rsa::cipher(jsg::Lock& js,
 
     JSG_REQUIRE(labelCopy != nullptr, DOMOperationError,
         "Failed to allocate space for RSA-OAEP label copy", tryDescribeOpensslErrors());
-    auto ptr = l.asArrayPtr();
-    std::copy(ptr.begin(), ptr.end(), labelCopy);
+    kj::arrayPtr(labelCopy, l.size()).copyFrom(l.asArrayPtr());
 
     // EVP_PKEY_CTX_set0_rsa_oaep_label below takes ownership of the buffer passed in (must have
     // been OPENSSL_malloc-allocated).
@@ -888,47 +887,43 @@ kj::Own<CryptoKey::Impl> CryptoKey::Impl::importRsa(jsg::Lock& js,
     KJ_IF_SOME(alg, keyDataJwk.alg) {
       // If this JWK specifies an algorithm, make sure it jives with the hash we were passed via
       // importKey().
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaShaAlgorithms{
+      static const std::map<kj::StringPtr, const EVP_MD*> knownRsaAlgorithms{
         {"RS1", EVP_sha1()},
         {"RS256", EVP_sha256()},
         {"RS384", EVP_sha384()},
         {"RS512", EVP_sha512()},
-      };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaPssAlgorithms{
         {"PS1", EVP_sha1()},
         {"PS256", EVP_sha256()},
         {"PS384", EVP_sha384()},
         {"PS512", EVP_sha512()},
-      };
-      static const std::map<kj::StringPtr, const EVP_MD*> rsaOaepAlgorithms{
         {"RSA-OAEP", EVP_sha1()},
         {"RSA-OAEP-256", EVP_sha256()},
         {"RSA-OAEP-384", EVP_sha384()},
         {"RSA-OAEP-512", EVP_sha512()},
       };
-      const auto& validAlgorithms = [&] {
-        if (algorithm.name == "RSASSA-PKCS1-v1_5") {
-          return rsaShaAlgorithms;
-        } else if (algorithm.name == "RSA-PSS") {
-          return rsaPssAlgorithms;
-        } else if (algorithm.name == "RSA-OAEP") {
-          return rsaOaepAlgorithms;
+      const auto tryFindAlgorithm = [&](kj::StringPtr alg) -> kj::Maybe<const EVP_MD*> {
+        if (algorithm.name == "RSASSA-PKCS1-v1_5" || algorithm.name == "RSA-PSS" ||
+            algorithm.name == "RSA-OAEP") {
+          auto ret = knownRsaAlgorithms.find(alg);
+          if (ret != knownRsaAlgorithms.end()) {
+            return ret->second;
+          }
+          return kj::none;
         } else {
           JSG_FAIL_REQUIRE(
               DOMNotSupportedError, "Unrecognized RSA variant \"", algorithm.name, "\".");
         }
-      }();
-      auto jwkHash = validAlgorithms.find(alg);
-      JSG_REQUIRE(jwkHash != rsaPssAlgorithms.end(), DOMNotSupportedError,
+      };
+      auto jwkHash = JSG_REQUIRE_NONNULL(tryFindAlgorithm(alg), DOMNotSupportedError,
           "Unrecognized or unimplemented algorithm \"", alg,
           "\" listed in JSON Web Key Algorithm "
           "parameter.");
 
-      JSG_REQUIRE(jwkHash->second == hashEvpMd, DOMDataError,
+      JSG_REQUIRE(jwkHash == hashEvpMd, DOMDataError,
           "JSON Web Key Algorithm parameter \"alg\" (\"", alg,
           "\") does not match requested hash "
           "algorithm \"",
-          jwkHash->first, "\".");
+          alg, "\".");
     }
 
     return rsaJwkReader(kj::mv(keyDataJwk));

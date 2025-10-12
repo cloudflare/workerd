@@ -461,8 +461,20 @@ public:
   explicit Fetcher(uint channel, RequiresHostAndProtocol requiresHost, bool isInHouse = false)
       : channelOrClientFactory(channel), requiresHost(requiresHost), isInHouse(isInHouse) {}
 
+  // Create a Fetcher bound to an IoChannelFactory::SubrequestChannel object rather than a numeric
+  // channel. This Fetcher will inherently be bound to the current I/O context.
+  explicit Fetcher(IoOwn<IoChannelFactory::SubrequestChannel> subrequestChannel,
+      RequiresHostAndProtocol requiresHost = RequiresHostAndProtocol::YES,
+      bool isInHouse = false)
+      : channelOrClientFactory(kj::mv(subrequestChannel)),
+        requiresHost(requiresHost),
+        isInHouse(isInHouse) {}
+
   // Used by Fetchers that use ad-hoc, single-use WorkerInterface instances, such as ones
   // created for Actors.
+  //
+  // TODO(cleanup): Consider removing this in favor of `IoChannelFactory::SubrequestChannel`, which
+  //   is almost the same thing.
   class OutgoingFactory {
   public:
     virtual kj::Own<WorkerInterface> newSingleUseClient(kj::Maybe<kj::String> cfStr) = 0;
@@ -688,8 +700,18 @@ public:
     }
   }
 
-private:
-  kj::OneOf<uint, kj::Own<CrossContextOutgoingFactory>, IoOwn<OutgoingFactory>> channelOrClientFactory;
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Fetcher> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
+
+ private:
+  kj::OneOf<uint,
+      IoOwn<IoChannelFactory::SubrequestChannel>,
+      kj::Own<CrossContextOutgoingFactory>,
+      IoOwn<OutgoingFactory>>
+      channelOrClientFactory;
   RequiresHostAndProtocol requiresHost;
   bool isInHouse;
 };
@@ -1259,8 +1281,6 @@ private:
   // If this response is already encoded and the user don't want to encode the
   // body twice, they can specify encodeBody: "manual".
   Response::BodyEncoding bodyEncoding;
-
-  bool hasEnabledWebSocketCompression = false;
 
   // Capturing the AsyncContextFrame when the Response is created is necessary because there's
   // a natural separation that occurs between the moment the Response is created and when we

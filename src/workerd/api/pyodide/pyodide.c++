@@ -6,10 +6,13 @@
 #include "requirements.h"
 
 #include <workerd/api/pyodide/setup-emscripten.h>
+#include <workerd/io/compatibility-date.h>
+#include <workerd/io/features.h>
 #include <workerd/util/strings.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 
+#include <capnp/dynamic.h>
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
@@ -399,6 +402,28 @@ kj::Array<kj::StringPtr> PyodideMetadataReader::getBaselineSnapshotImports() {
   return kj::heapArray(snapshotImports.begin(), snapshotImports.size());
 }
 
+jsg::JsObject PyodideMetadataReader::getCompatibilityFlags(jsg::Lock& js) {
+  auto flags = FeatureFlags::get(js);
+  auto obj = js.objNoProto();
+  auto dynamic = capnp::toDynamic(flags);
+  auto schema = dynamic.getSchema();
+
+  for (auto field: schema.getFields()) {
+    auto annotations = field.getProto().getAnnotations();
+
+    // Note that disable flags are not exposed.
+    for (auto annotation: annotations) {
+      if (annotation.getId() == COMPAT_ENABLE_FLAG_ANNOTATION_ID) {
+        obj.setReadOnly(
+            js, annotation.getValue().getText(), js.boolean(dynamic.get(field).as<bool>()));
+      }
+    }
+  }
+
+  obj.seal(js);
+  return obj;
+}
+
 PyodideMetadataReader::State::State(const State& other)
     : mainModule(kj::str(other.mainModule)),
       moduleInfo(other.moduleInfo.clone()),
@@ -539,7 +564,11 @@ void DiskCache::put(jsg::Lock& js, kj::String key, kj::Array<kj::byte> data) {
 }
 
 jsg::JsValue SetupEmscripten::getModule(jsg::Lock& js) {
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+  // JSPI was stabilized in V8 version 14.2, and this API removed.
+  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
   js.installJspi();
+#endif
   return emscriptenRuntime.emscriptenRuntime.getHandle(js);
 }
 

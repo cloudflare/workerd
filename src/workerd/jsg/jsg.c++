@@ -195,11 +195,15 @@ bool Lock::isUsingEnhancedErrorSerialization() const {
   return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }
 
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
+// JSPI was stabilized in V8 version 14.2, and this API removed.
+// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
 void Lock::installJspi() {
   IsolateBase::from(v8Isolate).setJspiEnabled({}, true);
   v8Isolate->InstallConditionalFeatures(v8Context());
   IsolateBase::from(v8Isolate).setJspiEnabled({}, false);
 }
+#endif
 
 void Lock::setCaptureThrowsAsRejections(bool capture) {
   IsolateBase::from(v8Isolate).setCaptureThrowsAsRejections({}, capture);
@@ -415,38 +419,6 @@ kj::Arc<const ExternalMemoryTarget> Lock::getExternalMemoryTarget() {
   return IsolateBase::from(v8Isolate).getExternalMemoryTarget();
 }
 
-kj::String Lock::accountedKjString(kj::Array<char>&& str) {
-  // TODO(Cleanup): The memory accounting that was attached to these strings
-  // has been removed because it was too expensive. We should rethink how
-  // to handle it. Making this non-ops for now and will remove the actual
-  // methods separately.
-  return kj::String(kj::mv(str));
-}
-
-ByteString Lock::accountedByteString(kj::Array<char>&& str) {
-  // TODO(Cleanup): The memory accounting that was attached to these strings
-  // has been removed because it was too expensive. We should rethink how
-  // to handle it. Making this non-ops for now and will remove the actual
-  // methods separately.
-  return ByteString(kj::mv(str));
-}
-
-DOMString Lock::accountedDOMString(kj::Array<char>&& str) {
-  // TODO(Cleanup): The memory accounting that was attached to these strings
-  // has been removed because it was too expensive. We should rethink how
-  // to handle it. Making this non-ops for now and will remove the actual
-  // methods separately.
-  return DOMString(kj::mv(str));
-}
-
-USVString Lock::accountedUSVString(kj::Array<char>&& str) {
-  // TODO(Cleanup): The memory accounting that was attached to these strings
-  // has been removed because it was too expensive. We should rethink how
-  // to handle it. Making this non-ops for now and will remove the actual
-  // methods separately.
-  return USVString(kj::mv(str));
-}
-
 void ExternalMemoryAdjustment::maybeDeferAdjustment(ssize_t amount) {
   KJ_ASSERT(amount >= -static_cast<ssize_t>(this->amount),
       "Memory usage may not be decreased below zero");
@@ -578,16 +550,11 @@ std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOpti
 }
 
 const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
-  KJ_IF_SOME(loader, maybeSchemaLoader) {
-    return *loader;
-  }
-  auto loader = kj::heap<capnp::SchemaLoader>();
-  auto& ret = *loader;
-  setSchemaLoader(kj::mv(loader));
-  return ret;
+  return KJ_ASSERT_NONNULL(schemaLoader);
 }
 
-void ContextGlobal::setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader) {
-  maybeSchemaLoader = kj::mv(schemaLoader);
+void ContextGlobal::setSchemaLoader(const capnp::SchemaLoader& schemaLoader) {
+  this->schemaLoader = schemaLoader;
 }
+
 }  // namespace workerd::jsg

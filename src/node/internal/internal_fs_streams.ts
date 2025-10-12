@@ -812,6 +812,7 @@ function writeAll(
   if (this.fd == null) {
     return cb(new ERR_INVALID_ARG_VALUE('fd', 'null'));
   }
+
   this[kFs].write(
     this.fd,
     data,
@@ -971,15 +972,12 @@ function writevImpl(
   data: WriteVChunk[],
   callback: ErrorOnlyCallback
 ) {
-  const len = data.length;
-  const chunks = new Array(len);
   let size = 0;
-
-  for (let i = 0; i < len; i++) {
-    const chunk = (data[i] as any).chunk;
-    chunks[i] = chunk;
+  const chunks = data.map((d) => {
+    const chunk = (d as any).chunk;
     size += chunk.length;
-  }
+    return chunk;
+  });
 
   this[kIsPerformingIO] = true;
   writevAll.call(this, chunks, size, this.pos, (er: unknown) => {

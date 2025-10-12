@@ -8,13 +8,16 @@ load("@workerd-cxx//third-party:cargo.bzl", WORKERD_CXX_PACKAGES = "PACKAGES")
 PACKAGES = WORKERD_CXX_PACKAGES | {
     # When adding packages here, please only enable features as needed to keep compile times and
     # binary sizes bounded.
+    "ada-url": crate.spec(version = "3"),
     "anyhow": crate.spec(version = "1"),
+    "async-trait": crate.spec(version = "0", default_features = False),
     "capnp": crate.spec(version = "0"),
     "capnpc": crate.spec(version = "0"),
     "clang-ast": crate.spec(version = "0"),
     "clap": crate.spec(version = "4", default_features = False, features = ["derive", "std", "help"]),
     "codespan-reporting": crate.spec(version = "0"),
     "flate2": crate.spec(version = "1"),
+    "futures": crate.spec(version = "0"),
     "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.6.0"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),

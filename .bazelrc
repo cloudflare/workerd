@@ -8,7 +8,7 @@ build --test_size_filters=-enormous
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
 # corresponds to small,medium,large,enormous tests (medium is default)
-build --test_timeout=1,15,60,240
+build --test_timeout=3,15,60,240
 
 # We're only using bzlmod in a nominal capacity so far
 common --enable_workspace
@@ -36,41 +36,34 @@ import %workspace%/build/rust_lint.bazelrc
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
 
-# Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them. Depending
-# on the clang version, zlib either produces warnings for -Wdeprecated-non-prototype or does not
-# have that option, so disable -Wunknown-warning-option there too.
+# Use compat repo mapping to avoid O(n^2) repo mapping size, speeding up bazel repo mapping phase
+# and conserving space
+build --incompatible_compact_repo_mapping_manifest
+
+# Our dependencies (ICU, zlib, etc.) produce a lot of these warnings, so we disable them.
 build --per_file_copt='external@-Wno-error'
+build --per_file_copt='external@-Wno-suggest-override'
 build --per_file_copt='external/v8@-Wno-unused-function'
-build --per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wno-deprecated-non-prototype'
-build --host_per_file_copt='external/zlib@-Wno-unknown-warning-option,-Wnodeprecated-non-prototype'
+build --per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
+build --host_per_file_copt='external/zlib@-Wno-deprecated-non-prototype'
 build --per_file_copt=external/protobuf@-Wno-deprecated-declarations
 build --host_per_file_copt=external/protobuf@-Wno-deprecated-declarations
-
-## simdutf
-build --per_file_copt=external/simdutf@-Wno-unused-const-variable
 
 # TODO(cleanup): Causes warnings with LLVM20, fix and enable again
 build --copt=-Wno-nontrivial-memaccess
 
-# Increasing the optimization level of some portions of V8 significantly speeds up Python tests in
-# GitHub Actions. This is an optional performance hack intended for CI, although it might also be
-# useful for local development.
-build:v8-codegen-opt --per_file_copt=v8/src/api@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/base@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/builtins@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/codegen@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/common@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/compiler@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/execution@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/heap@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/objects@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/parsing@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/roots@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/runtime@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/snapshot@-O2
-build:v8-codegen-opt --per_file_copt=v8/src/wasm@-O2
+# Increasing the optimization level of V8 significantly speeds up Python tests in GitHub Actions.
+# This is an optional performance hack intended for CI, although it might also be useful for local
+# development.
+build:v8-codegen-opt --per_file_copt=v8/src@-O2
 # V8 is heavily using absl for hashing now, optimize it too.
 build:v8-codegen-opt --per_file_copt=external/abseil-cpp@-O2
+# zlib and tcmalloc (for Linux) are also CPU-intensive, optimize them too.
+build:v8-codegen-opt --per_file_copt=external/tcmalloc@-O2
+build:v8-codegen-opt --per_file_copt=external/zlib@-O2
+build:v8-codegen-opt-windows --per_file_copt=v8/src@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/abseil-cpp@/O2
+build:v8-codegen-opt-windows --per_file_copt=external/zlib@/O2
 
 # In Google projects, exceptions are not used as a rule. Disabling them is more consistent with the
 # canonical V8 build and improves code size.
@@ -83,19 +76,19 @@ build:unix --per_file_copt=external/ssl@-fno-exceptions
 build:unix --per_file_copt=external/v8@-fno-exceptions
 build:unix --per_file_copt=external/ada-url@-fno-exceptions
 build:unix --per_file_copt=external/simdutf@-fno-exceptions
-build:windows --per_file_copt=external/abseil-cpp@/GX-
-build:windows --per_file_copt=external/protobuf@/GX-
-build:windows --per_file_copt=external/com_google_tcmalloc@/GX-
-build:windows --per_file_copt=external/com_googlesource_chromium_icu@/GX-
-build:windows --per_file_copt=external/perfetto@/GX-
-build:windows --per_file_copt=external/ssl@/GX-
-build:windows --per_file_copt=external/v8@/GX-
-build:windows --per_file_copt=external/ada-url@/GX-
-build:windows --per_file_copt=external/simdutf@/GX-
+build:windows --per_file_copt=external/abseil-cpp@/clang:-fno-exceptions
+build:windows --per_file_copt=external/protobuf@/clang:-fno-exceptions
+build:windows --per_file_copt=external/com_google_tcmalloc@/clang:-fno-exceptions
+build:windows --per_file_copt=external/com_googlesource_chromium_icu@/clang:-fno-exceptions
+build:windows --per_file_copt=external/perfetto@/clang:-fno-exceptions
+build:windows --per_file_copt=external/ssl@/clang:-fno-exceptions
+build:windows --per_file_copt=external/v8@/clang:-fno-exceptions
+build:windows --per_file_copt=external/ada-url@/clang:-fno-exceptions
+build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
 
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
 build:unix --per_file_copt=external/v8/src/torque@-fexceptions
-build:windows --per_file_copt=external/v8/src/torque@/GX
+build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
 
 # Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
 # performance improvements but makes code size worse. This will be the default in LLVM19.
@@ -206,7 +199,7 @@ build:asan --per_file_copt='external/v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
 #
 build:unix --workspace_status_command=./tools/unix/workspace-status.sh
 
-build:unix --cxxopt='-std=c++20' --host_cxxopt='-std=c++20'
+build:unix --cxxopt='-std=c++23' --host_cxxopt='-std=c++23'
 build:unix --@capnp-cpp//src/kj:libdl=True
 
 # Bazel uses CC to compile C and C++ actions, no need to define CXX.
@@ -221,11 +214,10 @@ build:unix --cxxopt='-Wextra' --host_cxxopt='-Wextra'
 build:unix --cxxopt='-Wunused-function' --host_cxxopt='-Wunused-function'
 build:unix --cxxopt='-Wunused-lambda-capture' --host_cxxopt='-Wunused-lambda-capture'
 build:unix --cxxopt='-Wunused-variable' --host_cxxopt='-Wunused-variable'
-build:unix --cxxopt='-Wno-strict-aliasing' --host_cxxopt='-Wno-strict-aliasing'
 build:unix --cxxopt='-Wno-sign-compare' --host_cxxopt='-Wno-sign-compare'
 build:unix --cxxopt='-Wno-unused-parameter' --host_cxxopt='-Wno-unused-parameter'
 build:unix --cxxopt='-Wno-missing-field-initializers' --host_cxxopt='-Wno-missing-field-initializers'
-build:unix --cxxopt='-Wno-ignored-qualifiers' --host_cxxopt='-Wno-ignored-qualifiers'
+build:unix --cxxopt='-Wsuggest-override'
 
 build:linux --config=unix
 build:macos --config=unix
@@ -282,9 +274,6 @@ build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 # On Linux, use clang lld.
 build:linux --linkopt="-fuse-ld=lld"
 
-# Disable LLVM 20 warning about unused cli argument "-c".
-build:linux --copt='-Wno-unused-command-line-argument' --copt='-Wno-unknown-warning-option' --host_copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unknown-warning-option'
-
 #
 # Windows
 #
@@ -313,7 +302,6 @@ build:windows --extra_execution_platforms=//:x64_windows-clang-cl
 # workaround.
 
 build:windows_no_dbg -c opt
-build:windows_no_dbg --copt='-O0'
 build:windows_no_dbg --copt='/Od'
 build:windows_no_dbg --linkopt='/INCREMENTAL:NO'
 build:windows_no_dbg --features=-smaller_binary
@@ -330,6 +318,13 @@ build:windows_dbg --linkopt='/OPT:LLDTAILMERGE' --linkopt='/OPT:SAFEICF'
 # Currently this only reduces object sizes slightly, larger gains are possible if we compile V8 as
 # a shared library.
 build:windows --copt='/Zc:dllexportInlines-'
+
+# Configuration for header parsing. Requires bazel toolchain support (available for macOS, Linux).
+build:parse_headers --features=parse_headers --process_headers_in_dependencies
+# Silence some capnproto warnings/errors that are not relevant for header parsing
+build:parse_headers --per_file_copt='.*\.h@-Wno-unused-function,-Wno-pragma-system-header-outside-header'
+build:parse_headers --per_file_copt=external/capnp-cpp/src/kj/common.h@-Wno-unreachable-code
+build:parse_headers --per_file_copt=external/capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
 
 # optimized configuration
 build:opt -c opt
@@ -383,13 +378,12 @@ build:release_windows --copt="-fstrict-aliasing"
 # Ref: https://github.com/llvm/llvm-project/issues/136481
 build:release_windows --per_file_copt=.*capnp/rpc\.c++@/clang:-O1
 
-build:windows --cxxopt='/std:c++20' --host_cxxopt='/std:c++20'
+build:windows --cxxopt='/std:c++23preview' --host_cxxopt='/std:c++23preview'
 build:windows --copt='/D_CRT_USE_BUILTIN_OFFSETOF' --host_copt='/D_CRT_USE_BUILTIN_OFFSETOF'
 build:windows --copt='/DWIN32_LEAN_AND_MEAN' --host_copt='/DWIN32_LEAN_AND_MEAN'
-build:windows --copt='-Wno-microsoft-unqualified-friend' --host_copt='-Wno-microsoft-unqualified-friend'
-# The `/std:c++20` argument is unused during BoringSSL compilation and we don't
+# The `/std:c++23preview` argument is unused during BoringSSL compilation and we don't
 # want a warning when compiling each file.
-build:windows --copt='-Wno-unused-command-line-argument' --host_copt='-Wno-unused-command-line-argument'
+build:windows --per_file_copt=external/ssl@-Wno-unused-command-line-argument --host_per_file_copt=external/ssl@-Wno-unused-command-line-argument
 
 # MSVC disappointingly sets __cplusplus to 199711L by default. Defining /Zc:__cplusplus makes it
 # set the correct value. We currently don't check __cplusplus, but some dependencies do.
@@ -399,16 +393,11 @@ build:coverage --action_env=GCOV=llvm-profdata-19
 build:coverage --action_env=BAZEL_USE_LLVM_NATIVE_COVERAGE=1
 build:coverage --copt=-DNDEBUG
 build:coverage --combined_report=lcov
-build:coverage --strategy=TestRunner=remote,sandboxed,local
-build:coverage --strategy=CoverageReport=sandboxed,local
 build:coverage --experimental_use_llvm_covmap
 build:coverage --experimental_generate_llvm_lcov
 build:coverage --experimental_fetch_all_coverage_outputs
 build:coverage --collect_code_coverage
 build:coverage --instrumentation_filter="^//,-//external"
-build:coverage --remote_download_minimal
-build:coverage --define=tcmalloc=gperftools
-build:coverage --test_timeout=120,120,120,120
 build:coverage --instrument_test_targets
 
 # This config is defined internally and enabled on many machines.

@@ -1,0 +1,20 @@
+bazel_dep(name = "rules_python", version = "1.6.1")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(python_version = "3.13")
+use_repo(python, "python_3_13")
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "v8_python_deps",
+    python_version = "3.13",
+    # TODO(alexeagle): switch back to upstream when v8 comes via bzlmod
+    # requirements_lock = "@v8//:bazel/requirements.txt",
+    requirements_lock = "//build/deps:v8.requirements.txt",
+)
+pip.parse(
+    hub_name = "py_deps",
+    python_version = "3.13",
+    requirements_lock = "//build/deps:requirements.txt",
+)
+use_repo(pip, "py_deps", "v8_python_deps")

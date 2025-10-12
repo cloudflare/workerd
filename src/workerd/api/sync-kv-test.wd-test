@@ -1,0 +1,26 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2025-08-01",
+
+  compatibilityFlags = ["enable_ctx_exports", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "sync-kv-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "MyActor",
+      uniqueKey = "c4ca24b6066547c9a3c847b6f6bf169a",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+);

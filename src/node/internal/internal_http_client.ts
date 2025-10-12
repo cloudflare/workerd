@@ -19,6 +19,7 @@ import {
   ERR_INVALID_PROTOCOL,
   ERR_INVALID_ARG_VALUE,
   ERR_HTTP_HEADERS_SENT,
+  ERR_METHOD_NOT_IMPLEMENTED,
 } from 'node-internal:internal_errors';
 import {
   validateInteger,
@@ -42,8 +43,11 @@ import {
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
+import type { Socket } from 'net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
+
+type WriteCallback = (err?: Error) => void;
 
 function validateHost(host: unknown, name: string): string {
   if (host != null && typeof host !== 'string') {
@@ -56,11 +60,17 @@ function validateHost(host: unknown, name: string): string {
   return host as string;
 }
 
+// @ts-expect-error TS2720 Complaining due to "override req" being undefined.
 export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #abortController = new AbortController();
-  #body: Buffer[] = [];
+  #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
+  // TODO(soon): Types/node is wrong. RequestOptions should contain search and hash fields.
+  #options: RequestOptions & {
+    search?: string | undefined;
+    hash?: string | undefined;
+  };
 
   _ended: boolean = false;
 
@@ -72,6 +82,13 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   port: string = '80';
   joinDuplicateHeaders: boolean | undefined;
   agent: Agent | undefined;
+
+  // Unused fields required to be Node.js compatible.
+  aborted: boolean = false;
+  reusedSocket: boolean = false;
+  maxHeadersCount: number = Infinity;
+  connection: Socket | null = null;
+  socket: Socket | null = null;
 
   [kUniqueHeaders]: Set<string> | null = null;
 
@@ -279,6 +296,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     });
 
     this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
+    this.#options = options;
   }
 
   #onFinish(): void {
@@ -286,10 +304,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     let body: BodyInit | null = null;
     if (this.method !== 'GET' && this.method !== 'HEAD') {
-      const value = this.getHeader('content-type') ?? '';
-      body = new Blob(this.#body, {
-        type: Array.isArray(value) ? value.join(', ') : `${value}`,
-      });
+      if (this.#body.length > 0) {
+        const value = this.getHeader('content-type') ?? '';
+        body = new Blob(this.#body, {
+          type: Array.isArray(value) ? value.join(', ') : `${value}`,
+        });
+      }
     }
 
     const headers: [string, string][] = [];
@@ -344,6 +364,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     url.protocol = this.protocol;
     url.port = this.port;
     url.pathname = this.path;
+    if (this.#options.search != null) {
+      url.search = this.#options.search;
+    }
+    if (this.#options.hash != null) {
+      url.hash = this.#options.hash;
+    }
 
     // Our fetch implementation has the following limitations.
     //
@@ -392,6 +418,17 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
     this.destroyed = true;
     this._ended = true;
+  }
+
+  onSocket(_socket: Socket): void {
+    // Do nothing. Our implementation does not depend on socket class.
+  }
+
+  addTrailers(
+    _headers: OutgoingHttpHeaders | ReadonlyArray<[string, string]>
+  ): void {
+    // We don't support trailers.
+    throw new ERR_METHOD_NOT_IMPLEMENTED('addTrailers');
   }
 
   abort(error?: Error | null): void {
@@ -445,10 +482,29 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     return this;
   }
 
-  // @ts-expect-error TS2416 Type mismatch.
+  override write(
+    chunk: string | Buffer | Uint8Array,
+    encoding?: BufferEncoding | WriteCallback | null,
+    callback?: WriteCallback
+  ): boolean {
+    // Capture the data for the request body
+    if (this.method !== 'GET' && this.method !== 'HEAD' && chunk) {
+      if (typeof chunk === 'string') {
+        this.#body.push(
+          Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8')
+        );
+      } else {
+        this.#body.push(chunk);
+      }
+    }
+
+    // Call the parent write method
+    return super.write(chunk, encoding, callback);
+  }
+
   override end(
     data?: Buffer | string | VoidFunction,
-    encoding?: NodeJS.BufferEncoding,
+    encoding?: BufferEncoding | VoidFunction,
     callback?: VoidFunction
   ): this {
     this._ended = true;
@@ -458,6 +514,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       data = undefined;
     }
 
+    // Don't duplicate data here - let the parent's end() call write() which will handle it
     Writable.prototype.end.call(
       this,
       data,

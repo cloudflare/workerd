@@ -6,10 +6,10 @@ Subject: Allow Windows builds under Bazel
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index f7da8ea9b5773a04240898e2a097421f1f7a672f..1a5780d8b081cf299c20e3e94122fe4c4ddd1a3d 100644
+index 3bbb5fd48f8a833621141fa70f304d4f72dac43b..cd3b8de463e7dc811886bd18f509656ed2cd3807 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -3960,6 +3960,8 @@ filegroup(
+@@ -3969,6 +3969,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],

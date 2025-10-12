@@ -39,13 +39,13 @@ class MockCacheClient final: public CacheClient {
 };
 
 class MockTimer final: public kj::Timer {
-  kj::TimePoint now() const {
+  kj::TimePoint now() const override {
     return kj::systemCoarseMonotonicClock().now();
   }
-  kj::Promise<void> atTime(kj::TimePoint time) {
+  kj::Promise<void> atTime(kj::TimePoint time) override {
     return kj::NEVER_DONE;
   }
-  kj::Promise<void> afterDelay(kj::Duration delay) {
+  kj::Promise<void> afterDelay(kj::Duration delay) override {
     return kj::NEVER_DONE;
   }
 };
@@ -74,6 +74,11 @@ struct DummyIoChannelFactory final: public IoChannelFactory {
   DummyIoChannelFactory(TimerChannel& timer): timer(timer) {}
 
   kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
+    KJ_FAIL_ASSERT("no subrequests");
+  }
+
+  kj::Own<SubrequestChannel> getSubrequestChannel(
+      uint channel, kj::Maybe<Frankenvalue> props) override {
     KJ_FAIL_ASSERT("no subrequests");
   }
 
@@ -288,11 +293,11 @@ struct MockResponse final: public kj::HttpService::Response {
 
 class MockActorLoopback: public Worker::Actor::Loopback, public kj::Refcounted {
  public:
-  virtual kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) {
+  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
     return kj::Own<WorkerInterface>();
   };
 
-  virtual kj::Own<Worker::Actor::Loopback> addRef() {
+  kj::Own<Worker::Actor::Loopback> addRef() override {
     return kj::addRef(*this);
   };
 };
@@ -334,8 +339,7 @@ TestFixture::TestFixture(SetupParams&& params)
           isolateGroup,
           kj::atomicRefcounted<JsgIsolateObserver>(),
           *memoryCacheProvider,
-          defaultPythonConfig,
-          kj::none /* new module registry */)),
+          defaultPythonConfig)),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
           kj::atomicRefcounted<IsolateObserver>(),
           scriptId,
@@ -352,7 +356,8 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::none,
           kj::none,
           SpanParent(nullptr),
-          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()))),
+          newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
+          kj::none /* new module registry */)),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
@@ -377,8 +382,9 @@ TestFixture::TestFixture(SetupParams&& params)
     };
     actor = kj::refcounted<Worker::Actor>(*worker, /*tracker=*/kj::none, kj::mv(id),
         /*hasTransient=*/false, makeActorCache,
-        /*classname=*/kj::none, makeStorage, kj::refcounted<MockActorLoopback>(), *timerChannel,
-        kj::refcounted<ActorObserver>(), kj::none, kj::none);
+        /*classname=*/kj::none, /*props=*/Frankenvalue(), makeStorage,
+        kj::refcounted<MockActorLoopback>(), *timerChannel, kj::refcounted<ActorObserver>(),
+        kj::none, kj::none);
   }
 }
 

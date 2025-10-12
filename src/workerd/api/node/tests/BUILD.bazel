@@ -16,6 +16,24 @@ wd_test(
 )
 
 wd_test(
+    src = "cluster-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["cluster-nodejs-test.js"],
+)
+
+wd_test(
+    src = "child_process-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["child_process-nodejs-test.js"],
+)
+
+wd_test(
+    src = "console-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["console-nodejs-test.js"],
+)
+
+wd_test(
     size = "enormous",
     src = "crypto_dh-test.wd-test",
     args = ["--experimental"],
@@ -143,9 +161,21 @@ wd_test(
 )
 
 wd_test(
+    src = "perf-hooks-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["perf-hooks-nodejs-test.js"],
+)
+
+wd_test(
     src = "path-test.wd-test",
     args = ["--experimental"],
     data = ["path-test.js"],
+)
+
+wd_test(
+    src = "punycode-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["punycode-nodejs-test.js"],
 )
 
 wd_test(
@@ -206,7 +236,6 @@ wd_test(
 
 wd_test(
     src = "process-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-nodejs-test.js"],
 )
 
@@ -218,8 +247,12 @@ wd_test(
 
 wd_test(
     src = "process-stdio-nodejs-test.wd-test",
-    args = ["--experimental"],
     data = ["process-stdio-nodejs-test.js"],
+)
+
+wd_test(
+    src = "process-stdio-fs-nodejs-test.wd-test",
+    data = ["process-stdio-fs-nodejs-test.js"],
 )
 
 sh_test(
@@ -240,10 +273,46 @@ sh_test(
     ],
 )
 
+sh_test(
+    name = "process-stdio-fs-sh-test",
+    srcs = ["test_process_stdio.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "$(location process-stdio-fs-nodejs-test.wd-test)",
+        "$(location process-stdio-fs-nodejs-test.expected_stdout)",
+        "$(location process-stdio-fs-nodejs-test.expected_stderr)",
+    ],
+    data = [
+        "process-stdio-fs-nodejs-test.expected_stderr",
+        "process-stdio-fs-nodejs-test.expected_stdout",
+        "process-stdio-fs-nodejs-test.js",
+        "process-stdio-fs-nodejs-test.wd-test",
+        "//src/workerd/server:workerd_cross",
+    ],
+)
+
 wd_test(
     src = "querystring-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["querystring-nodejs-test.js"],
+)
+
+wd_test(
+    src = "readline-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["readline-nodejs-test.js"],
+)
+
+wd_test(
+    src = "repl-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["repl-nodejs-test.js"],
+)
+
+wd_test(
+    src = "sqlite-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["sqlite-nodejs-test.js"],
 )
 
 config_setting(
@@ -456,9 +525,9 @@ wd_test(
 )
 
 wd_test(
-    src = "fs-test.wd-test",
+    src = "fs-nodejs-test.wd-test",
     args = ["--experimental"],
-    data = ["fs-test.js"],
+    data = ["fs-nodejs-test.js"],
 )
 
 wd_test(
@@ -557,8 +626,62 @@ wd_test(
     data = ["http2-test.js"],
 )
 
+wd_test(
+    src = "inspector-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["inspector-nodejs-test.js"],
+)
+
+wd_test(
+    src = "vm-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-test.js"],
+)
+
+wd_test(
+    src = "domain-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["domain-nodejs-test.js"],
+)
+
+wd_test(
+    src = "v8-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["v8-nodejs-test.js"],
+)
+
+wd_test(
+    src = "tty-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["tty-nodejs-test.js"],
+)
+
 js_binary(
     name = "sidecar-supervisor",
     entry_point = "sidecar-supervisor.mjs",
     visibility = ["//visibility:public"],
+)
+
+wd_test(
+    src = "worker_threads-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker_threads-nodejs-test.js"],
+)
+
+wd_test(
+    src = "wasi-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["wasi-nodejs-test.js"],
+)
+
+wd_test(
+    src = "dgram-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["dgram-nodejs-test.js"],
+)
+
+wd_test(
+    src = "trace-events-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["trace-events-nodejs-test.js"],
 )

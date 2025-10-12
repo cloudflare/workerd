@@ -78,8 +78,8 @@ const helloWorldServer = http.createServer((req, res) => {
   res.removeHeader('Date');
   res.setHeader('Keep-Alive', 'timeout=1');
 
-  switch (req.url.slice(1)) {
-    case 'join-duplicate-headers':
+  switch (req.url.slice(1).split('?').at(0)) {
+    case 'join-duplicate-headers': {
       res.writeHead(200, [
         'authorization',
         '3',
@@ -92,8 +92,30 @@ const helloWorldServer = http.createServer((req, res) => {
       ]);
       res.end();
       break;
-    default:
+    }
+
+    case 'search-path': {
+      res.writeHead(200, { 'Content-Type': 'text/plain', url: req.url });
+      res.end('Hello, World!');
+      break;
+    }
+
+    case 'echo': {
+      // Echo the request body back as the response
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(body);
+      });
+      break;
+    }
+
+    default: {
       res.end();
+    }
   }
 });
 

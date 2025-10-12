@@ -308,14 +308,14 @@ size_t JsString::utf8Length(jsg::Lock& js) const {
 kj::String JsString::toString(jsg::Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return js.accountedKjString(kj::mv(buf));
+  return kj::String(kj::mv(buf));
 }
 
 jsg::USVString JsString::toUSVString(Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(),
       v8::String::WriteFlags::kNullTerminate | v8::String::WriteFlags::kReplaceInvalidUtf8);
-  return js.accountedUSVString(kj::mv(buf));
+  return jsg::USVString(kj::mv(buf));
 }
 
 jsg::ByteString JsString::toByteString(Lock& js) const {
@@ -341,7 +341,7 @@ jsg::ByteString JsString::toByteString(Lock& js) const {
 jsg::DOMString JsString::toDOMString(Lock& js) const {
   auto buf = kj::heapArray<char>(inner->Utf8LengthV2(js.v8Isolate) + 1);
   inner->WriteUtf8V2(js.v8Isolate, buf.begin(), buf.size(), v8::String::WriteFlags::kNullTerminate);
-  return js.accountedDOMString(kj::mv(buf));
+  return jsg::DOMString(kj::mv(buf));
 }
 
 int JsString::hashCode() const {
@@ -416,6 +416,11 @@ bool JsRegExp::match(Lock& js, kj::StringPtr input) {
 
 jsg::ByteString JsDate::toUTCString(jsg::Lock& js) const {
   JsString str(inner->ToUTCString());
+  return jsg::ByteString(str.toString(js));
+}
+
+jsg::ByteString JsDate::toISOString(jsg::Lock& js) const {
+  JsString str(inner->ToISOString());
   return jsg::ByteString(str.toString(js));
 }
 
@@ -531,16 +536,23 @@ JsObject Lock::obj() {
 
 JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
   KJ_DASSERT(keys.size() == values.size());
-  v8::LocalVector<v8::Name> keys_(v8Isolate);
-  v8::LocalVector<v8::Value> values_(v8Isolate);
-  keys_.reserve(keys.size());
-  values_.reserve(keys.size());
-  for (auto& k: keys) {
-    v8::Local<v8::String> key = str(k);
-    keys_.push_back(key);
+  v8::LocalVector<v8::Name> keys_(v8Isolate, keys.size());
+  v8::LocalVector<v8::Value> values_(v8Isolate, keys.size());
+  for (size_t i = 0; i < keys.size(); i++) {
+    keys_[i] = strIntern(keys[i]).inner;
+    values_[i] = values[i];
   }
-  for (auto& v: values) {
-    values_.push_back(v);
+  return JsObject(v8::Object::New(
+      v8Isolate, v8::Object::New(v8Isolate), keys_.data(), values_.data(), keys.size()));
+}
+
+JsObject Lock::objNoProto(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
+  KJ_DASSERT(keys.size() == values.size());
+  v8::LocalVector<v8::Name> keys_(v8Isolate, keys.size());
+  v8::LocalVector<v8::Value> values_(v8Isolate, keys.size());
+  for (size_t i = 0; i < keys.size(); i++) {
+    keys_[i] = strIntern(keys[i]).inner;
+    values_[i] = values[i];
   }
   return JsObject(
       v8::Object::New(v8Isolate, v8::Null(v8Isolate), keys_.data(), values_.data(), keys.size()));

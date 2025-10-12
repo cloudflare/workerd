@@ -29,6 +29,8 @@ rust_library(
         ],
     ),
     crate_features = [
+        "simd",
+        "simd-adler32",
         "with-alloc",
     ],
     crate_root = "src/lib.rs",
@@ -46,5 +48,6 @@ rust_library(
     version = "0.8.9",
     deps = [
         "@crates_vendor__adler2-2.0.1//:adler2",
+        "@crates_vendor__simd-adler32-0.3.7//:simd_adler32",
     ],
 )

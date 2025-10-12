@@ -159,15 +159,16 @@ Serializer::Serializer(Lock& js, Options options)
 
 v8::Maybe<uint32_t> Serializer::GetSharedArrayBufferId(
     v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) {
+  auto& js = jsg::Lock::from(isolate);
   uint32_t n;
   auto value = JsValue(sab);
   for (n = 0; n < sharedArrayBuffers.size(); n++) {
     // If the SharedArrayBuffer has already been added, return the existing ID for it.
-    if (sharedArrayBuffers[n] == value) {
+    if (sharedArrayBuffers[n].getHandle(js) == value) {
       return v8::Just(n);
     }
   }
-  sharedArrayBuffers.add(value);
+  sharedArrayBuffers.add(jsg::JsRef(js, value));
   sharedBackingStores.add(sab->GetBackingStore());
   return v8::Just(n);
 }
@@ -352,11 +353,11 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   uint32_t n;
   for (n = 0; n < arrayBuffers.size(); n++) {
     // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n] == value) {
+    if (arrayBuffers[n].getHandle(js) == value) {
       return;
     }
   }
-  arrayBuffers.add(value);
+  arrayBuffers.add(jsg::JsRef(js, value));
 
   backingStores.add(arrayBuffer->GetBackingStore());
   check(arrayBuffer->Detach(v8::Local<v8::Value>()));

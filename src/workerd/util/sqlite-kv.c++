@@ -42,9 +42,22 @@ SqliteKv::SqliteKv(SqliteDatabase& db): ResetListener(db) {
   }
 }
 
-SqliteKv::Initialized& SqliteKv::ensureInitialized() {
+SqliteKv::~SqliteKv() noexcept(false) {
+  cancelCurrentCursor();
+}
+
+void SqliteKv::cancelCurrentCursor() {
+  KJ_IF_SOME(c, currentCursor) {
+    c.state = kj::none;
+    c.canceled = true;
+  }
+}
+
+SqliteKv::Initialized& SqliteKv::ensureInitialized(bool allowUnconfirmed) {
   if (!tableCreated) {
-    db.run(R"(
+    db.run(SqliteDatabase::QueryOptions{.regulator = SqliteDatabase::TRUSTED,
+             .allowUnconfirmed = allowUnconfirmed},
+        R"(
       CREATE TABLE IF NOT EXISTS _cf_KV (
         key TEXT PRIMARY KEY,
         value BLOB
@@ -69,12 +82,78 @@ SqliteKv::Initialized& SqliteKv::ensureInitialized() {
   KJ_UNREACHABLE;
 }
 
+kj::Own<SqliteKv::ListCursor> SqliteKv::list(
+    KeyPtr begin, kj::Maybe<KeyPtr> end, kj::Maybe<uint> limit, Order order) {
+  if (!tableCreated) return kj::heap<ListCursor>(nullptr);
+  auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr));
+
+  if (order == Order::FORWARD) {
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
+      }
+    } else {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
+      }
+    }
+  } else {
+    KJ_IF_SOME(e, end) {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse, begin, e, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
+      }
+    } else {
+      KJ_IF_SOME(l, limit) {
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin, (int64_t)l);
+      } else {
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
+      }
+    }
+  }
+}
+
+kj::Maybe<SqliteKv::ListCursor::KeyValuePair> SqliteKv::ListCursor::next() {
+  auto& state = KJ_UNWRAP_OR(this->state, return kj::none);
+  if (first) {
+    first = false;
+  } else {
+    state.query.nextRow();
+  }
+  if (state.query.isDone()) {
+    this->state = kj::none;
+    return kj::none;
+  }
+
+  return KeyValuePair{state.query.getText(0), state.query.getBlob(1)};
+}
+
 void SqliteKv::put(KeyPtr key, ValuePtr value) {
-  ensureInitialized().stmtPut.run(key, value);
+  return put(key, value, {});
+}
+
+void SqliteKv::put(KeyPtr key, ValuePtr value, WriteOptions options) {
+  ensureInitialized(options.allowUnconfirmed)
+      .stmtPut.run({.allowUnconfirmed = options.allowUnconfirmed}, key, value);
 }
 
 bool SqliteKv::delete_(KeyPtr key) {
-  auto query = ensureInitialized().stmtDelete.run(key);
+  return delete_(key, {});
+}
+
+bool SqliteKv::delete_(KeyPtr key, WriteOptions options) {
+  auto query = ensureInitialized(options.allowUnconfirmed)
+                   .stmtDelete.run({.allowUnconfirmed = options.allowUnconfirmed}, key);
   return query.changeCount() > 0;
 }
 
@@ -82,7 +161,7 @@ uint SqliteKv::deleteAll() {
   // TODO(perf): Consider introducing a compatibility flag that causes deleteAll() to always return
   //   1. Apps almost certainly don't care about the return value but historically we returned the
   //   count of keys deleted, so now we're stuck counting the table size for no good reason.
-  uint count = tableCreated ? ensureInitialized().stmtCountKeys.run().getInt(0) : 0;
+  uint count = tableCreated ? ensureInitialized(false).stmtCountKeys.run().getInt(0) : 0;
   db.reset();
   return count;
 }

@@ -301,6 +301,13 @@ export interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
   FixedLengthStream: typeof FixedLengthStream;
   IdentityTransformStream: typeof IdentityTransformStream;
   HTMLRewriter: typeof HTMLRewriter;
+  Performance: typeof Performance;
+  PerformanceEntry: typeof PerformanceEntry;
+  PerformanceMark: typeof PerformanceMark;
+  PerformanceMeasure: typeof PerformanceMeasure;
+  PerformanceResourceTiming: typeof PerformanceResourceTiming;
+  PerformanceObserver: typeof PerformanceObserver;
+  PerformanceObserverEntryList: typeof PerformanceObserverEntryList;
 }
 export declare function addEventListener<
   Type extends keyof WorkerGlobalScopeEventMap,
@@ -396,11 +403,11 @@ export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
 export declare const navigator: Navigator;
 export interface TestController {}
-export interface ExecutionContext {
+export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
-  exports: any;
-  props: any;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
   abort(reason?: any): void;
 }
 export type ExportedHandlerFetchHandler<
@@ -483,24 +490,15 @@ export declare abstract class Navigator {
   readonly languages: string[];
   readonly storage: StorageManager;
 }
-/**
- * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
- * as well as timing of subrequests and other operations.
- *
- * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
- */
-export interface Performance {
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
-  readonly timeOrigin: number;
-  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
-  now(): number;
-}
 export interface AlarmInvocationInfo {
   readonly isRetry: boolean;
   readonly retryCount: number;
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
+}
+export declare abstract class ColoLocalActorNamespace {
+  get(actorId: string): Fetcher;
 }
 export interface DurableObject {
   fetch(request: Request): Response | Promise<Response>;
@@ -532,7 +530,7 @@ export interface DurableObjectId {
   readonly name?: string;
   readonly jurisdiction?: string;
 }
-export interface DurableObjectNamespace<
+export declare abstract class DurableObjectNamespace<
   T extends Rpc.DurableObjectBranded | undefined = undefined,
 > {
   newUniqueId(
@@ -573,10 +571,13 @@ export type DurableObjectLocationHint =
 export interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: DurableObjectLocationHint;
 }
-export interface DurableObjectClass {}
-export interface DurableObjectState {
+export interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
-  exports: any;
+  readonly exports: Cloudflare.Exports;
+  readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
@@ -658,6 +659,7 @@ export interface DurableObjectStorage {
   deleteAlarm(options?: DurableObjectSetAlarmOptions): Promise<void>;
   sync(): Promise<void>;
   sql: SqlStorage;
+  kv: SyncKvStorage;
   transactionSync<T>(closure: () => T): T;
   getCurrentBookmark(): Promise<string>;
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
@@ -699,18 +701,20 @@ export declare class WebSocketRequestResponsePair {
   get response(): string;
 }
 export interface DurableObjectFacets {
-  get(
+  get<T extends Rpc.DurableObjectBranded | undefined = undefined>(
     name: string,
     getStartupOptions: () =>
-      | DurableObjectFacetsStartupOptions
-      | Promise<DurableObjectFacetsStartupOptions>,
-  ): Fetcher;
+      | FacetStartupOptions<T>
+      | Promise<FacetStartupOptions<T>>,
+  ): Fetcher<T>;
   abort(name: string, reason: any): void;
   delete(name: string): void;
 }
-export interface DurableObjectFacetsStartupOptions {
-  $class: DurableObjectClass;
+export interface FacetStartupOptions<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {
   id?: DurableObjectId | string;
+  class: DurableObjectClass<T>;
 }
 export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
@@ -2663,7 +2667,6 @@ export interface TraceItem {
     | null;
   readonly eventTimestamp: number | null;
   readonly logs: TraceLog[];
-  readonly spans: OTelSpan[];
   readonly exceptions: TraceException[];
   readonly diagnosticsChannelEvents: TraceDiagnosticChannelEvent[];
   readonly scriptName: string | null;
@@ -2671,6 +2674,7 @@ export interface TraceItem {
   readonly scriptVersion?: ScriptVersion;
   readonly dispatchNamespace?: string;
   readonly scriptTags?: string[];
+  readonly durableObjectId?: string;
   readonly outcome: string;
   readonly executionModel: string;
   readonly truncated: boolean;
@@ -2738,18 +2742,6 @@ export interface TraceLog {
   readonly timestamp: number;
   readonly level: string;
   readonly message: any;
-}
-export interface OTelSpan {
-  readonly spanId: string;
-  readonly parentSpanId: string;
-  readonly operation: string;
-  readonly tags: OTelSpanTag[];
-  readonly startTime: Date;
-  readonly endTime: Date;
-}
-export interface OTelSpanTag {
-  key: string;
-  value: string | boolean | number | (number | bigint);
 }
 export interface TraceException {
   readonly timestamp: number;
@@ -3175,6 +3167,7 @@ export interface Container {
   destroy(error?: any): Promise<void>;
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
+  setInactivityTimeout(durationMs: number | bigint): Promise<void>;
 }
 export interface ContainerStartupOptions {
   entrypoint?: string[];
@@ -3349,6 +3342,254 @@ export declare class MessageChannel {
 export interface MessagePortPostMessageOptions {
   transfer?: any[];
 }
+export type LoopbackForExport<
+  T extends
+    | (new (...args: any[]) => Rpc.EntrypointBranded)
+    | ExportedHandler<any, any, any>
+    | undefined = undefined,
+> = T extends new (...args: any[]) => Rpc.WorkerEntrypointBranded
+  ? LoopbackServiceStub<InstanceType<T>>
+  : T extends new (...args: any[]) => Rpc.DurableObjectBranded
+    ? LoopbackDurableObjectClass<InstanceType<T>>
+    : T extends ExportedHandler<any, any, any>
+      ? LoopbackServiceStub<undefined>
+      : undefined;
+export type LoopbackServiceStub<
+  T extends Rpc.WorkerEntrypointBranded | undefined = undefined,
+> = Fetcher<T> &
+  (T extends CloudflareWorkersModule.WorkerEntrypoint<any, infer Props>
+    ? (opts: { props?: Props }) => Fetcher<T>
+    : (opts: { props?: any }) => Fetcher<T>);
+export type LoopbackDurableObjectClass<
+  T extends Rpc.DurableObjectBranded | undefined = undefined,
+> = DurableObjectClass<T> &
+  (T extends CloudflareWorkersModule.DurableObject<any, infer Props>
+    ? (opts: { props?: Props }) => DurableObjectClass<T>
+    : (opts: { props?: any }) => DurableObjectClass<T>);
+export interface LoopbackDurableObjectNamespace
+  extends DurableObjectNamespace {}
+export interface LoopbackColoLocalActorNamespace
+  extends ColoLocalActorNamespace {}
+export interface SyncKvStorage {
+  get<T = unknown>(key: string): T | undefined;
+  list<T = unknown>(options?: SyncKvListOptions): Iterable<[string, T]>;
+  put<T>(key: string, value: T): void;
+  delete(key: string): boolean;
+}
+export interface SyncKvListOptions {
+  start?: string;
+  startAfter?: string;
+  end?: string;
+  prefix?: string;
+  reverse?: boolean;
+  limit?: number;
+}
+export interface WorkerStub {
+  getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): Fetcher<T>;
+  getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+    name?: string,
+    options?: WorkerStubEntrypointOptions,
+  ): DurableObjectClass<T>;
+}
+export interface WorkerStubEntrypointOptions {
+  props?: any;
+}
+export interface WorkerLoader {
+  get(
+    name: string,
+    getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
+  ): WorkerStub;
+}
+export interface WorkerLoaderModule {
+  js?: string;
+  cjs?: string;
+  text?: string;
+  data?: ArrayBuffer;
+  json?: any;
+  py?: string;
+}
+export interface WorkerLoaderWorkerCode {
+  compatibilityDate: string;
+  compatibilityFlags?: string[];
+  allowExperimental?: boolean;
+  mainModule: string;
+  modules: Record<string, WorkerLoaderModule | string>;
+  env?: any;
+  globalOutbound?: Fetcher | null;
+  tails?: Fetcher[];
+  streamingTails?: Fetcher[];
+}
+/**
+ * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,
+ * as well as timing of subrequests and other operations.
+ *
+ * [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/)
+ */
+export declare abstract class Performance extends EventTarget {
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancetimeorigin) */
+  get timeOrigin(): number;
+  /* [Cloudflare Docs Reference](https://developers.cloudflare.com/workers/runtime-apis/performance/#performancenow) */
+  now(): number;
+  get eventCounts(): EventCounts;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMarks) */
+  clearMarks(name?: string): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearMeasures) */
+  clearMeasures(name?: string): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/clearResourceTimings) */
+  clearResourceTimings(): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntries) */
+  getEntries(): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByName) */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/getEntriesByType) */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/mark) */
+  mark(name: string, options?: PerformanceMarkOptions): PerformanceMark;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/measure) */
+  measure(
+    measureName: string,
+    measureOptionsOrStartMark: PerformanceMeasureOptions | string,
+    maybeEndMark?: string,
+  ): PerformanceMeasure;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/Performance/setResourceTimingBufferSize) */
+  setResourceTimingBufferSize(size: number): void;
+  eventLoopUtilization(): void;
+  markResourceTiming(): void;
+  timerify(fn: () => void): () => void;
+}
+/**
+ * PerformanceMark is an abstract interface for PerformanceEntry objects with an entryType of "mark". Entries of this type are created by calling performance.mark() to add a named DOMHighResTimeStamp (the mark) to the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark)
+ */
+export declare class PerformanceMark extends PerformanceEntry {
+  constructor(name: string, maybeOptions?: PerformanceMarkOptions);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMark/detail) */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+/**
+ * PerformanceMeasure is an abstract interface for PerformanceEntry objects with an entryType of "measure". Entries of this type are created by calling performance.measure() to add a named DOMHighResTimeStamp (the measure) between two marks to the browser's performance timeline.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure)
+ */
+export declare abstract class PerformanceMeasure extends PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceMeasure/detail) */
+  get detail(): any | undefined;
+  toJSON(): any;
+}
+export interface PerformanceMarkOptions {
+  detail?: any;
+  startTime?: number;
+}
+export interface PerformanceMeasureOptions {
+  detail?: any;
+  start?: number;
+  duration?: number;
+  end?: number;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList) */
+export declare abstract class PerformanceObserverEntryList {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntries) */
+  getEntries(): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByType) */
+  getEntriesByType(type: string): PerformanceEntry[];
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserverEntryList/getEntriesByName) */
+  getEntriesByName(name: string, type?: string): PerformanceEntry[];
+}
+/**
+ * Encapsulates a single performance metric that is part of the performance timeline. A performance entry can be directly created by making a performance mark or measure (for example by calling the mark() method) at an explicit point in an application. Performance entries are also created in indirect ways such as loading a resource (such as an image).
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry)
+ */
+export declare abstract class PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/name) */
+  get name(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/entryType) */
+  get entryType(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/startTime) */
+  get startTime(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/duration) */
+  get duration(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceEntry/toJSON) */
+  toJSON(): any;
+}
+/**
+ * Enables retrieval and analysis of detailed network timing data regarding the loading of an application's resources. An application can use the timing metrics to determine, for example, the length of time it takes to fetch a specific resource, such as an XMLHttpRequest, <SVG>, image, or script.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming)
+ */
+export declare abstract class PerformanceResourceTiming extends PerformanceEntry {
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectEnd) */
+  get connectEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/connectStart) */
+  get connectStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/decodedBodySize) */
+  get decodedBodySize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupEnd) */
+  get domainLookupEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/domainLookupStart) */
+  get domainLookupStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/encodedBodySize) */
+  get encodedBodySize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/fetchStart) */
+  get fetchStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/initiatorType) */
+  get initiatorType(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/nextHopProtocol) */
+  get nextHopProtocol(): string;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectEnd) */
+  get redirectEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/redirectStart) */
+  get redirectStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/requestStart) */
+  get requestStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseEnd) */
+  get responseEnd(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStart) */
+  get responseStart(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/responseStatus) */
+  get responseStatus(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/secureConnectionStart) */
+  get secureConnectionStart(): number | undefined;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/transferSize) */
+  get transferSize(): number;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceResourceTiming/workerStart) */
+  get workerStart(): number;
+}
+/* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver) */
+export declare class PerformanceObserver {
+  constructor(callback: any);
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/disconnect) */
+  disconnect(): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/observe) */
+  observe(options?: PerformanceObserverObserveOptions): void;
+  /* [MDN Reference](https://developer.mozilla.org/docs/Web/API/PerformanceObserver/takeRecords) */
+  takeRecords(): PerformanceEntry[];
+  readonly supportedEntryTypes: string[];
+}
+export interface PerformanceObserverObserveOptions {
+  buffered?: boolean;
+  durationThreshold?: number;
+  entryTypes?: string[];
+  type?: string;
+}
+export interface EventCounts {
+  get size(): number;
+  get(eventType: string): number | undefined;
+  has(eventType: string): boolean;
+  entries(): IterableIterator<string[]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<number>;
+  forEach(
+    param1: (param0: number, param1: string, param2: EventCounts) => void,
+    param2?: any,
+  ): void;
+  [Symbol.iterator](): IterableIterator<string[]>;
+}
 export type AiImageClassificationInput = {
   image: number[];
 };
@@ -3400,6 +3641,18 @@ export type AiImageTextToTextOutput = {
   description: string;
 };
 export declare abstract class BaseAiImageTextToText {
+  inputs: AiImageTextToTextInput;
+  postProcessedOutputs: AiImageTextToTextOutput;
+}
+export type AiMultimodalEmbeddingsInput = {
+  image: string;
+  text: string[];
+};
+export type AiIMultimodalEmbeddingsOutput = {
+  data: number[][];
+  shape: number[];
+};
+export declare abstract class BaseAiMultimodalEmbeddings {
   inputs: AiImageTextToTextInput;
   postProcessedOutputs: AiImageTextToTextOutput;
 }
@@ -3541,12 +3794,28 @@ export type AiTextGenerationInput = {
     | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
+export type AiTextGenerationToolLegacyOutput = {
+  name: string;
+  arguments: unknown;
+};
+export type AiTextGenerationToolOutput = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+export type UsageTags = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
 export type AiTextGenerationOutput = {
   response?: string;
-  tool_calls?: {
-    name: string;
-    arguments: unknown;
-  }[];
+  tool_calls?: AiTextGenerationToolLegacyOutput[] &
+    AiTextGenerationToolOutput[];
+  usage?: UsageTags;
 };
 export declare abstract class BaseAiTextGeneration {
   inputs: AiTextGenerationInput;
@@ -4635,6 +4904,7 @@ export type Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Output =
         name?: string;
       }[];
     }
+  | string
   | AsyncResponse;
 export declare abstract class Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast {
   inputs: Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Input;
@@ -4711,7 +4981,6 @@ export interface Ai_Cf_Baai_Bge_Reranker_Base_Input {
   /**
    * A query you wish to perform against the provided contexts.
    */
-  query: string;
   /**
    * Number of returned results starting with the best score.
    */
@@ -5806,7 +6075,8 @@ export declare abstract class Base_Ai_Cf_Google_Gemma_3_12B_It {
 }
 export type Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input =
   | Ai_Cf_Meta_Llama_4_Prompt
-  | Ai_Cf_Meta_Llama_4_Messages;
+  | Ai_Cf_Meta_Llama_4_Messages
+  | Ai_Cf_Meta_Llama_4_Async_Batch;
 export interface Ai_Cf_Meta_Llama_4_Prompt {
   /**
    * The input text prompt for the model to generate a response.
@@ -5859,6 +6129,245 @@ export interface Ai_Cf_Meta_Llama_4_Prompt {
   presence_penalty?: number;
 }
 export interface Ai_Cf_Meta_Llama_4_Messages {
+  /**
+   * An array of message objects representing the conversation history.
+   */
+  messages: {
+    /**
+     * The role of the message sender (e.g., 'user', 'assistant', 'system', 'tool').
+     */
+    role?: string;
+    /**
+     * The tool call id. If you don't know what to put here you can fall back to 000000001
+     */
+    tool_call_id?: string;
+    content?:
+      | string
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        }[]
+      | {
+          /**
+           * Type of the content provided
+           */
+          type?: string;
+          text?: string;
+          image_url?: {
+            /**
+             * image uri with data (e.g. data:image/jpeg;base64,/9j/...). HTTP URL will not be accepted
+             */
+            url?: string;
+          };
+        };
+  }[];
+  functions?: {
+    name: string;
+    code: string;
+  }[];
+  /**
+   * A list of tools available for the assistant to use.
+   */
+  tools?: (
+    | {
+        /**
+         * The name of the tool. More descriptive the better.
+         */
+        name: string;
+        /**
+         * A brief description of what the tool does.
+         */
+        description: string;
+        /**
+         * Schema defining the parameters accepted by the tool.
+         */
+        parameters: {
+          /**
+           * The type of the parameters object (usually 'object').
+           */
+          type: string;
+          /**
+           * List of required parameter names.
+           */
+          required?: string[];
+          /**
+           * Definitions of each parameter.
+           */
+          properties: {
+            [k: string]: {
+              /**
+               * The data type of the parameter.
+               */
+              type: string;
+              /**
+               * A description of the expected parameter.
+               */
+              description: string;
+            };
+          };
+        };
+      }
+    | {
+        /**
+         * Specifies the type of tool (e.g., 'function').
+         */
+        type: string;
+        /**
+         * Details of the function tool.
+         */
+        function: {
+          /**
+           * The name of the function.
+           */
+          name: string;
+          /**
+           * A brief description of what the function does.
+           */
+          description: string;
+          /**
+           * Schema defining the parameters accepted by the function.
+           */
+          parameters: {
+            /**
+             * The type of the parameters object (usually 'object').
+             */
+            type: string;
+            /**
+             * List of required parameter names.
+             */
+            required?: string[];
+            /**
+             * Definitions of each parameter.
+             */
+            properties: {
+              [k: string]: {
+                /**
+                 * The data type of the parameter.
+                 */
+                type: string;
+                /**
+                 * A description of the expected parameter.
+                 */
+                description: string;
+              };
+            };
+          };
+        };
+      }
+  )[];
+  response_format?: JSONMode;
+  /**
+   * JSON schema that should be fufilled for the response.
+   */
+  guided_json?: object;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Async_Batch {
+  requests: (
+    | Ai_Cf_Meta_Llama_4_Prompt_Inner
+    | Ai_Cf_Meta_Llama_4_Messages_Inner
+  )[];
+}
+export interface Ai_Cf_Meta_Llama_4_Prompt_Inner {
+  /**
+   * The input text prompt for the model to generate a response.
+   */
+  prompt: string;
+  /**
+   * JSON schema that should be fulfilled for the response.
+   */
+  guided_json?: object;
+  response_format?: JSONMode;
+  /**
+   * If true, a chat template is not applied and you must adhere to the specific model's expected formatting.
+   */
+  raw?: boolean;
+  /**
+   * If true, the response will be streamed back incrementally using SSE, Server Sent Events.
+   */
+  stream?: boolean;
+  /**
+   * The maximum number of tokens to generate in the response.
+   */
+  max_tokens?: number;
+  /**
+   * Controls the randomness of the output; higher values produce more random results.
+   */
+  temperature?: number;
+  /**
+   * Adjusts the creativity of the AI's responses by controlling how many possible words it considers. Lower values make outputs more predictable; higher values allow for more varied and creative responses.
+   */
+  top_p?: number;
+  /**
+   * Limits the AI to choose from the top 'k' most probable words. Lower values make responses more focused; higher values introduce more variety and potential surprises.
+   */
+  top_k?: number;
+  /**
+   * Random seed for reproducibility of the generation.
+   */
+  seed?: number;
+  /**
+   * Penalty for repeated tokens; higher values discourage repetition.
+   */
+  repetition_penalty?: number;
+  /**
+   * Decreases the likelihood of the model repeating the same lines verbatim.
+   */
+  frequency_penalty?: number;
+  /**
+   * Increases the likelihood of the model introducing new topics.
+   */
+  presence_penalty?: number;
+}
+export interface Ai_Cf_Meta_Llama_4_Messages_Inner {
   /**
    * An array of message objects representing the conversation history.
    */
@@ -6093,6 +6602,447 @@ export declare abstract class Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct {
   inputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct_Output;
 }
+export interface Ai_Cf_Deepgram_Nova_3_Input {
+  audio: {
+    body: object;
+    contentType: string;
+  };
+  /**
+   * Sets how the model will interpret strings submitted to the custom_topic param. When strict, the model will only return topics submitted using the custom_topic param. When extended, the model will return its own detected topics in addition to those submitted using the custom_topic param.
+   */
+  custom_topic_mode?: "extended" | "strict";
+  /**
+   * Custom topics you want the model to detect within your input audio or text if present Submit up to 100
+   */
+  custom_topic?: string;
+  /**
+   * Sets how the model will interpret intents submitted to the custom_intent param. When strict, the model will only return intents submitted using the custom_intent param. When extended, the model will return its own detected intents in addition those submitted using the custom_intents param
+   */
+  custom_intent_mode?: "extended" | "strict";
+  /**
+   * Custom intents you want the model to detect within your input audio if present
+   */
+  custom_intent?: string;
+  /**
+   * Identifies and extracts key entities from content in submitted audio
+   */
+  detect_entities?: boolean;
+  /**
+   * Identifies the dominant language spoken in submitted audio
+   */
+  detect_language?: boolean;
+  /**
+   * Recognize speaker changes. Each word in the transcript will be assigned a speaker number starting at 0
+   */
+  diarize?: boolean;
+  /**
+   * Identify and extract key entities from content in submitted audio
+   */
+  dictation?: boolean;
+  /**
+   * Specify the expected encoding of your submitted audio
+   */
+  encoding?:
+    | "linear16"
+    | "flac"
+    | "mulaw"
+    | "amr-nb"
+    | "amr-wb"
+    | "opus"
+    | "speex"
+    | "g729";
+  /**
+   * Arbitrary key-value pairs that are attached to the API response for usage in downstream processing
+   */
+  extra?: string;
+  /**
+   * Filler Words can help transcribe interruptions in your audio, like 'uh' and 'um'
+   */
+  filler_words?: boolean;
+  /**
+   * Key term prompting can boost or suppress specialized terminology and brands.
+   */
+  keyterm?: string;
+  /**
+   * Keywords can boost or suppress specialized terminology and brands.
+   */
+  keywords?: string;
+  /**
+   * The BCP-47 language tag that hints at the primary spoken language. Depending on the Model and API endpoint you choose only certain languages are available.
+   */
+  language?: string;
+  /**
+   * Spoken measurements will be converted to their corresponding abbreviations.
+   */
+  measurements?: boolean;
+  /**
+   * Opts out requests from the Deepgram Model Improvement Program. Refer to our Docs for pricing impacts before setting this to true. https://dpgr.am/deepgram-mip.
+   */
+  mip_opt_out?: boolean;
+  /**
+   * Mode of operation for the model representing broad area of topic that will be talked about in the supplied audio
+   */
+  mode?: "general" | "medical" | "finance";
+  /**
+   * Transcribe each audio channel independently.
+   */
+  multichannel?: boolean;
+  /**
+   * Numerals converts numbers from written format to numerical format.
+   */
+  numerals?: boolean;
+  /**
+   * Splits audio into paragraphs to improve transcript readability.
+   */
+  paragraphs?: boolean;
+  /**
+   * Profanity Filter looks for recognized profanity and converts it to the nearest recognized non-profane word or removes it from the transcript completely.
+   */
+  profanity_filter?: boolean;
+  /**
+   * Add punctuation and capitalization to the transcript.
+   */
+  punctuate?: boolean;
+  /**
+   * Redaction removes sensitive information from your transcripts.
+   */
+  redact?: string;
+  /**
+   * Search for terms or phrases in submitted audio and replaces them.
+   */
+  replace?: string;
+  /**
+   * Search for terms or phrases in submitted audio.
+   */
+  search?: string;
+  /**
+   * Recognizes the sentiment throughout a transcript or text.
+   */
+  sentiment?: boolean;
+  /**
+   * Apply formatting to transcript output. When set to true, additional formatting will be applied to transcripts to improve readability.
+   */
+  smart_format?: boolean;
+  /**
+   * Detect topics throughout a transcript or text.
+   */
+  topics?: boolean;
+  /**
+   * Segments speech into meaningful semantic units.
+   */
+  utterances?: boolean;
+  /**
+   * Seconds to wait before detecting a pause between words in submitted audio.
+   */
+  utt_split?: number;
+  /**
+   * The number of channels in the submitted audio
+   */
+  channels?: number;
+  /**
+   * Specifies whether the streaming endpoint should provide ongoing transcription updates as more audio is received. When set to true, the endpoint sends continuous updates, meaning transcription results may evolve over time. Note: Supported only for webosockets.
+   */
+  interim_results?: boolean;
+  /**
+   * Indicates how long model will wait to detect whether a speaker has finished speaking or pauses for a significant period of time. When set to a value, the streaming endpoint immediately finalizes the transcription for the processed time range and returns the transcript with a speech_final parameter set to true. Can also be set to false to disable endpointing
+   */
+  endpointing?: string;
+  /**
+   * Indicates that speech has started. You'll begin receiving Speech Started messages upon speech starting. Note: Supported only for webosockets.
+   */
+  vad_events?: boolean;
+  /**
+   * Indicates how long model will wait to send an UtteranceEnd message after a word has been transcribed. Use with interim_results. Note: Supported only for webosockets.
+   */
+  utterance_end_ms?: boolean;
+}
+export interface Ai_Cf_Deepgram_Nova_3_Output {
+  results?: {
+    channels?: {
+      alternatives?: {
+        confidence?: number;
+        transcript?: string;
+        words?: {
+          confidence?: number;
+          end?: number;
+          start?: number;
+          word?: string;
+        }[];
+      }[];
+    }[];
+    summary?: {
+      result?: string;
+      short?: string;
+    };
+    sentiments?: {
+      segments?: {
+        text?: string;
+        start_word?: number;
+        end_word?: number;
+        sentiment?: string;
+        sentiment_score?: number;
+      }[];
+      average?: {
+        sentiment?: string;
+        sentiment_score?: number;
+      };
+    };
+  };
+}
+export declare abstract class Base_Ai_Cf_Deepgram_Nova_3 {
+  inputs: Ai_Cf_Deepgram_Nova_3_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Nova_3_Output;
+}
+export type Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input =
+  | {
+      /**
+       * readable stream with audio data and content-type specified for that data
+       */
+      audio: {
+        body: object;
+        contentType: string;
+      };
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    }
+  | {
+      /**
+       * base64 encoded audio data
+       */
+      audio: string;
+      /**
+       * type of data PCM data that's sent to the inference server as raw array
+       */
+      dtype?: "uint8" | "float32" | "float64";
+    };
+export interface Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output {
+  /**
+   * if true, end-of-turn was detected
+   */
+  is_complete?: boolean;
+  /**
+   * probability of the end-of-turn detection
+   */
+  probability?: number;
+}
+export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
+  inputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input;
+  postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
+}
+export type Ai_Cf_Openai_Gpt_Oss_120B_Input =
+  | GPT_OSS_120B_Responses
+  | GPT_OSS_120B_Responses_Async;
+export interface GPT_OSS_120B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+export interface GPT_OSS_120B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+export type Ai_Cf_Openai_Gpt_Oss_120B_Output =
+  | {}
+  | (string & NonNullable<unknown>);
+export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_120B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_120B_Output;
+}
+export type Ai_Cf_Openai_Gpt_Oss_20B_Input =
+  | GPT_OSS_20B_Responses
+  | GPT_OSS_20B_Responses_Async;
+export interface GPT_OSS_20B_Responses {
+  /**
+   * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+   */
+  input: string | unknown[];
+  reasoning?: {
+    /**
+     * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+     */
+    effort?: "low" | "medium" | "high";
+    /**
+     * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+     */
+    summary?: "auto" | "concise" | "detailed";
+  };
+}
+export interface GPT_OSS_20B_Responses_Async {
+  requests: {
+    /**
+     * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
+     */
+    input: string | unknown[];
+    reasoning?: {
+      /**
+       * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
+       */
+      effort?: "low" | "medium" | "high";
+      /**
+       * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
+       */
+      summary?: "auto" | "concise" | "detailed";
+    };
+  }[];
+}
+export type Ai_Cf_Openai_Gpt_Oss_20B_Output =
+  | {}
+  | (string & NonNullable<unknown>);
+export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
+  inputs: Ai_Cf_Openai_Gpt_Oss_20B_Input;
+  postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_20B_Output;
+}
+export interface Ai_Cf_Leonardo_Phoenix_1_0_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * Specify what to exclude from the generated images
+   */
+  negative_prompt?: string;
+}
+/**
+ * The generated image in JPEG format
+ */
+export type Ai_Cf_Leonardo_Phoenix_1_0_Output = string;
+export declare abstract class Base_Ai_Cf_Leonardo_Phoenix_1_0 {
+  inputs: Ai_Cf_Leonardo_Phoenix_1_0_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Phoenix_1_0_Output;
+}
+export interface Ai_Cf_Leonardo_Lucid_Origin_Input {
+  /**
+   * A text description of the image you want to generate.
+   */
+  prompt: string;
+  /**
+   * Controls how closely the generated image should adhere to the prompt; higher values make the image more aligned with the prompt
+   */
+  guidance?: number;
+  /**
+   * Random seed for reproducibility of the image generation
+   */
+  seed?: number;
+  /**
+   * The height of the generated image in pixels
+   */
+  height?: number;
+  /**
+   * The width of the generated image in pixels
+   */
+  width?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  num_steps?: number;
+  /**
+   * The number of diffusion steps; higher values can improve quality but take longer
+   */
+  steps?: number;
+}
+export interface Ai_Cf_Leonardo_Lucid_Origin_Output {
+  /**
+   * The generated image in Base64 format.
+   */
+  image?: string;
+}
+export declare abstract class Base_Ai_Cf_Leonardo_Lucid_Origin {
+  inputs: Ai_Cf_Leonardo_Lucid_Origin_Input;
+  postProcessedOutputs: Ai_Cf_Leonardo_Lucid_Origin_Output;
+}
+export interface Ai_Cf_Deepgram_Aura_1_Input {
+  /**
+   * Speaker used to produce the audio.
+   */
+  speaker?:
+    | "angus"
+    | "asteria"
+    | "arcas"
+    | "orion"
+    | "orpheus"
+    | "athena"
+    | "luna"
+    | "zeus"
+    | "perseus"
+    | "helios"
+    | "hera"
+    | "stella";
+  /**
+   * Encoding of the output audio.
+   */
+  encoding?: "linear16" | "flac" | "mulaw" | "alaw" | "mp3" | "opus" | "aac";
+  /**
+   * Container specifies the file format wrapper for the output audio. The available options depend on the encoding type..
+   */
+  container?: "none" | "wav" | "ogg";
+  /**
+   * The text content to be converted to speech
+   */
+  text: string;
+  /**
+   * Sample Rate specifies the sample rate for the output audio. Based on the encoding, different sample rates are supported. For some encodings, the sample rate is not configurable
+   */
+  sample_rate?: number;
+  /**
+   * The bitrate of the audio in bits per second. Choose from predefined ranges or specific values based on the encoding type.
+   */
+  bit_rate?: number;
+}
+/**
+ * The generated audio in MP3 format
+ */
+export type Ai_Cf_Deepgram_Aura_1_Output = string;
+export declare abstract class Base_Ai_Cf_Deepgram_Aura_1 {
+  inputs: Ai_Cf_Deepgram_Aura_1_Input;
+  postProcessedOutputs: Ai_Cf_Deepgram_Aura_1_Output;
+}
 export interface AiModels {
   "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
   "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
@@ -6101,8 +7051,8 @@ export interface AiModels {
   "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
   "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
   "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
+  "@cf/google/embeddinggemma-300m": BaseAiTextEmbeddings;
   "@cf/microsoft/resnet-50": BaseAiImageClassification;
-  "@cf/facebook/detr-resnet-50": BaseAiObjectDetection;
   "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
   "@cf/mistral/mistral-7b-instruct-v0.1": BaseAiTextGeneration;
   "@cf/meta/llama-2-7b-chat-fp16": BaseAiTextGeneration;
@@ -6137,7 +7087,6 @@ export interface AiModels {
   "@cf/fblgit/una-cybertron-7b-v2-bf16": BaseAiTextGeneration;
   "@cf/meta/llama-3-8b-instruct-awq": BaseAiTextGeneration;
   "@hf/meta-llama/meta-llama-3-8b-instruct": BaseAiTextGeneration;
-  "@cf/meta/llama-3.1-8b-instruct": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-fp8": BaseAiTextGeneration;
   "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
   "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
@@ -6164,6 +7113,13 @@ export interface AiModels {
   "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
   "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
   "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
+  "@cf/deepgram/nova-3": Base_Ai_Cf_Deepgram_Nova_3;
+  "@cf/pipecat-ai/smart-turn-v2": Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2;
+  "@cf/openai/gpt-oss-120b": Base_Ai_Cf_Openai_Gpt_Oss_120B;
+  "@cf/openai/gpt-oss-20b": Base_Ai_Cf_Openai_Gpt_Oss_20B;
+  "@cf/leonardo/phoenix-1.0": Base_Ai_Cf_Leonardo_Phoenix_1_0;
+  "@cf/leonardo/lucid-origin": Base_Ai_Cf_Leonardo_Lucid_Origin;
+  "@cf/deepgram/aura-1": Base_Ai_Cf_Deepgram_Aura_1;
 }
 export type AiOptions = {
   /**
@@ -6171,17 +7127,14 @@ export type AiOptions = {
    * https://developers.cloudflare.com/workers-ai/features/batch-api
    */
   queueRequest?: boolean;
+  /**
+   * Establish websocket connections, only works for supported models
+   */
+  websocket?: boolean;
   gateway?: GatewayOptions;
   returnRawResponse?: boolean;
   prefix?: string;
   extraHeaders?: object;
-};
-export type ConversionResponse = {
-  name: string;
-  mimeType: string;
-  format: "markdown";
-  tokens: number;
-  data: string;
 };
 export type AiModelsSearchParams = {
   author?: string;
@@ -6216,7 +7169,7 @@ export declare abstract class Ai<
 > {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
-  autorag(autoragId?: string): AutoRAG;
+  autorag(autoragId: string): AutoRAG;
   run<
     Name extends keyof AiModelList,
     Options extends AiOptions,
@@ -6226,9 +7179,13 @@ export declare abstract class Ai<
     inputs: InputOptions,
     options?: Options,
   ): Promise<
-    Options extends {
-      returnRawResponse: true;
-    }
+    Options extends
+      | {
+          returnRawResponse: true;
+        }
+      | {
+          websocket: true;
+        }
       ? Response
       : InputOptions extends {
             stream: true;
@@ -6237,6 +7194,7 @@ export declare abstract class Ai<
         : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
+  toMarkdown(): ToMarkdownService;
   toMarkdown(
     files: {
       name: string;
@@ -7507,6 +8465,11 @@ export interface D1Meta {
      */
     sql_duration_ms: number;
   };
+  /**
+   * Number of total attempts to execute the query, due to automatic retries.
+   * Note: All other fields in the response like `timings` only apply to the last attempt.
+   */
+  total_attempts?: number;
 }
 export interface D1Response {
   success: true;
@@ -7794,6 +8757,7 @@ export type ImageOutputOptions = {
     | "rgba";
   quality?: number;
   background?: string;
+  anim?: boolean;
 };
 export interface ImagesBinding {
   /**
@@ -7857,6 +8821,114 @@ export interface ImageTransformationResult {
   image(options?: ImageTransformationOutputOptions): ReadableStream<Uint8Array>;
 }
 export interface ImagesError extends Error {
+  readonly code: number;
+  readonly message: string;
+  readonly stack?: string;
+}
+/**
+ * Media binding for transforming media streams.
+ * Provides the entry point for media transformation operations.
+ */
+export interface MediaBinding {
+  /**
+   * Creates a media transformer from an input stream.
+   * @param media - The input media bytes
+   * @returns A MediaTransformer instance for applying transformations
+   */
+  input(media: ReadableStream<Uint8Array>): MediaTransformer;
+}
+/**
+ * Media transformer for applying transformation operations to media content.
+ * Handles sizing, fitting, and other input transformation parameters.
+ */
+export interface MediaTransformer {
+  /**
+   * Applies transformation options to the media content.
+   * @param transform - Configuration for how the media should be transformed
+   * @returns A generator for producing the transformed media output
+   */
+  transform(
+    transform: MediaTransformationInputOptions,
+  ): MediaTransformationGenerator;
+}
+/**
+ * Generator for producing media transformation results.
+ * Configures the output format and parameters for the transformed media.
+ */
+export interface MediaTransformationGenerator {
+  /**
+   * Generates the final media output with specified options.
+   * @param output - Configuration for the output format and parameters
+   * @returns The final transformation result containing the transformed media
+   */
+  output(output: MediaTransformationOutputOptions): MediaTransformationResult;
+}
+/**
+ * Result of a media transformation operation.
+ * Provides multiple ways to access the transformed media content.
+ */
+export interface MediaTransformationResult {
+  /**
+   * Returns the transformed media as a readable stream of bytes.
+   * @returns A stream containing the transformed media data
+   */
+  media(): ReadableStream<Uint8Array>;
+  /**
+   * Returns the transformed media as an HTTP response object.
+   * @returns The transformed media as a Response, ready to store in cache or return to users
+   */
+  response(): Response;
+  /**
+   * Returns the MIME type of the transformed media.
+   * @returns The content type string (e.g., 'image/jpeg', 'video/mp4')
+   */
+  contentType(): string;
+}
+/**
+ * Configuration options for transforming media input.
+ * Controls how the media should be resized and fitted.
+ */
+export type MediaTransformationInputOptions = {
+  /** How the media should be resized to fit the specified dimensions */
+  fit?: "contain" | "cover" | "scale-down";
+  /** Target width in pixels */
+  width?: number;
+  /** Target height in pixels */
+  height?: number;
+};
+/**
+ * Configuration options for Media Transformations output.
+ * Controls the format, timing, and type of the generated output.
+ */
+export type MediaTransformationOutputOptions = {
+  /**
+   * Output mode determining the type of media to generate
+   */
+  mode?: "video" | "spritesheet" | "frame" | "audio";
+  /** Whether to include audio in the output */
+  audio?: boolean;
+  /**
+   * Starting timestamp for frame extraction or start time for clips. (e.g. '2s').
+   */
+  time?: string;
+  /**
+   * Duration for video clips, audio extraction, and spritesheet generation (e.g. '5s').
+   */
+  duration?: string;
+  /**
+   * Number of frames in the spritesheet.
+   */
+  imageCount?: number;
+  /**
+   * Output format for the generated media.
+   */
+  format?: "jpg" | "png" | "m4a";
+};
+/**
+ * Error object for media transformation operations.
+ * Extends the standard Error interface with additional media-specific information.
+ */
+export interface MediaError extends Error {
   readonly code: number;
   readonly message: string;
   readonly stack?: string;
@@ -8120,7 +9192,167 @@ export declare namespace Rpc {
   };
 }
 export declare namespace Cloudflare {
+  // Type of `env`.
+  //
+  // The specific project can extend `Env` by redeclaring it in project-specific files. Typescript
+  // will merge all declarations.
+  //
+  // You can use `wrangler types` to generate the `Env` type automatically.
   interface Env {}
+  // Project-specific parameters used to inform types.
+  //
+  // This interface is, again, intended to be declared in project-specific files, and then that
+  // declaration will be merged with this one.
+  //
+  // A project should have a declaration like this:
+  //
+  //     interface GlobalProps {
+  //       // Declares the main module's exports. Used to populate Cloudflare.Exports aka the type
+  //       // of `ctx.exports`.
+  //       mainModule: typeof import("my-main-module");
+  //
+  //       // Declares which of the main module's exports are configured with durable storage, and
+  //       // thus should behave as Durable Object namsepace bindings.
+  //       durableNamespaces: "MyDurableObject" | "AnotherDurableObject";
+  //     }
+  //
+  // You can use `wrangler types` to generate `GlobalProps` automatically.
+  interface GlobalProps {}
+  // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
+  // present.
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
+  // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
+  // `mainModule` property.
+  type MainModule = GlobalProp<"mainModule", {}>;
+  // The type of ctx.exports, which contains loopback bindings for all top-level exports.
+  type Exports = {
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<"durableNamespaces", never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
+  };
+}
+export declare namespace CloudflareWorkersModule {
+  export type RpcStub<T extends Rpc.Stubable> = Rpc.Stub<T>;
+  export const RpcStub: {
+    new <T extends Rpc.Stubable>(value: T): Rpc.Stub<T>;
+  };
+  export abstract class RpcTarget implements Rpc.RpcTargetBranded {
+    [Rpc.__RPC_TARGET_BRAND]: never;
+  }
+  // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.WorkerEntrypointBranded
+  {
+    [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext<Props>;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    tail?(events: TraceItem[]): void | Promise<void>;
+    trace?(traces: TraceItem[]): void | Promise<void>;
+    scheduled?(controller: ScheduledController): void | Promise<void>;
+    queue?(batch: MessageBatch<unknown>): void | Promise<void>;
+    test?(controller: TestController): void | Promise<void>;
+  }
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.DurableObjectBranded
+  {
+    [Rpc.__DURABLE_OBJECT_BRAND]: never;
+    protected ctx: DurableObjectState<Props>;
+    protected env: Env;
+    constructor(ctx: DurableObjectState, env: Env);
+    fetch?(request: Request): Response | Promise<Response>;
+    alarm?(alarmInfo?: AlarmInvocationInfo): void | Promise<void>;
+    webSocketMessage?(
+      ws: WebSocket,
+      message: string | ArrayBuffer,
+    ): void | Promise<void>;
+    webSocketClose?(
+      ws: WebSocket,
+      code: number,
+      reason: string,
+      wasClean: boolean,
+    ): void | Promise<void>;
+    webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
+  }
+  export type WorkflowDurationLabel =
+    | "second"
+    | "minute"
+    | "hour"
+    | "day"
+    | "week"
+    | "month"
+    | "year";
+  export type WorkflowSleepDuration =
+    | `${number} ${WorkflowDurationLabel}${"s" | ""}`
+    | number;
+  export type WorkflowDelayDuration = WorkflowSleepDuration;
+  export type WorkflowTimeoutDuration = WorkflowSleepDuration;
+  export type WorkflowRetentionDuration = WorkflowSleepDuration;
+  export type WorkflowBackoff = "constant" | "linear" | "exponential";
+  export type WorkflowStepConfig = {
+    retries?: {
+      limit: number;
+      delay: WorkflowDelayDuration | number;
+      backoff?: WorkflowBackoff;
+    };
+    timeout?: WorkflowTimeoutDuration | number;
+  };
+  export type WorkflowEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    instanceId: string;
+  };
+  export type WorkflowStepEvent<T> = {
+    payload: Readonly<T>;
+    timestamp: Date;
+    type: string;
+  };
+  export abstract class WorkflowStep {
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    do<T extends Rpc.Serializable<T>>(
+      name: string,
+      config: WorkflowStepConfig,
+      callback: () => Promise<T>,
+    ): Promise<T>;
+    sleep: (name: string, duration: WorkflowSleepDuration) => Promise<void>;
+    sleepUntil: (name: string, timestamp: Date | number) => Promise<void>;
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+      },
+    ): Promise<WorkflowStepEvent<T>>;
+  }
+  export abstract class WorkflowEntrypoint<
+    Env = unknown,
+    T extends Rpc.Serializable<T> | unknown = unknown,
+  > implements Rpc.WorkflowEntrypointBranded
+  {
+    [Rpc.__WORKFLOW_ENTRYPOINT_BRAND]: never;
+    protected ctx: ExecutionContext;
+    protected env: Env;
+    constructor(ctx: ExecutionContext, env: Env);
+    run(
+      event: Readonly<WorkflowEvent<T>>,
+      step: WorkflowStep,
+    ): Promise<unknown>;
+  }
+  export function waitUntil(promise: Promise<unknown>): void;
+  export const env: Cloudflare.Env;
 }
 export interface SecretsStoreSecret {
   /**
@@ -8128,6 +9360,47 @@ export interface SecretsStoreSecret {
    * if it exists, or throws an error if it does not exist
    */
   get(): Promise<string>;
+}
+export type ConversionResponse = {
+  name: string;
+  mimeType: string;
+} & (
+  | {
+      format: "markdown";
+      tokens: number;
+      data: string;
+    }
+  | {
+      format: "error";
+      error: string;
+    }
+);
+export type SupportedFileFormat = {
+  mimeType: string;
+  extension: string;
+};
+export declare abstract class ToMarkdownService {
+  transform(
+    files: {
+      name: string;
+      blob: Blob;
+    }[],
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse[]>;
+  transform(
+    files: {
+      name: string;
+      blob: Blob;
+    },
+    options?: {
+      gateway?: GatewayOptions;
+      extraHeaders?: object;
+    },
+  ): Promise<ConversionResponse>;
+  supported(): Promise<SupportedFileFormat[]>;
 }
 export declare namespace TailStream {
   interface Header {
@@ -8143,7 +9416,6 @@ export declare namespace TailStream {
   }
   interface JsRpcEventInfo {
     readonly type: "jsrpc";
-    readonly methodName: string;
   }
   interface ScheduledEventInfo {
     readonly type: "scheduled";
@@ -8211,21 +9483,17 @@ export declare namespace TailStream {
     readonly tag?: string;
     readonly message?: string;
   }
-  interface Trigger {
-    readonly traceId: string;
-    readonly invocationId: string;
-    readonly spanId: string;
-  }
   interface Onset {
     readonly type: "onset";
     readonly attributes: Attribute[];
+    // id for the span being opened by this Onset event.
+    readonly spanId: string;
     readonly dispatchNamespace?: string;
     readonly entrypoint?: string;
     readonly executionModel: string;
     readonly scriptName?: string;
     readonly scriptTags?: string[];
     readonly scriptVersion?: ScriptVersion;
-    readonly trigger?: Trigger;
     readonly info:
       | FetchEventInfo
       | JsRpcEventInfo
@@ -8246,6 +9514,8 @@ export declare namespace TailStream {
   interface SpanOpen {
     readonly type: "spanOpen";
     readonly name: string;
+    // id for the span being opened by this SpanOpen event.
+    readonly spanId: string;
     readonly info?: FetchEventInfo | JsRpcEventInfo | Attributes;
   }
   interface SpanClose {
@@ -8268,6 +9538,10 @@ export declare namespace TailStream {
     readonly level: "debug" | "error" | "info" | "log" | "warn";
     readonly message: object;
   }
+  // This marks the worker handler return information.
+  // This is separate from Outcome because the worker invocation can live for a long time after
+  // returning. For example - Websockets that return an http upgrade response but then continue
+  // streaming information or SSE http connections.
   interface Return {
     readonly type: "return";
     readonly info?: FetchResponseInfo;
@@ -8298,9 +9572,28 @@ export declare namespace TailStream {
     | Log
     | Return
     | Attributes;
+  // Context in which this trace event lives.
+  interface SpanContext {
+    // Single id for the entire top-level invocation
+    // This should be a new traceId for the first worker stage invoked in the eyeball request and then
+    // same-account service-bindings should reuse the same traceId but cross-account service-bindings
+    // should use a new traceId.
+    readonly traceId: string;
+    // spanId in which this event is handled
+    // for Onset and SpanOpen events this would be the parent span id
+    // for Outcome and SpanClose these this would be the span id of the opening Onset and SpanOpen events
+    // For Hibernate and Mark this would be the span under which they were emitted.
+    // spanId is not set ONLY if:
+    //  1. This is an Onset event
+    //  2. We are not inherting any SpanContext. (e.g. this is a cross-account service binding or a new top-level invocation)
+    readonly spanId?: string;
+  }
   interface TailEvent<Event extends EventType> {
+    // invocation id of the currently invoked worker stage.
+    // invocation id will always be unique to every Onset event and will be the same until the Outcome event.
     readonly invocationId: string;
-    readonly spanId: string;
+    // Inherited spanContext for this event.
+    readonly spanContext: SpanContext;
     readonly timestamp: Date;
     readonly sequence: number;
     readonly event: Event;

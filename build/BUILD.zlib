@@ -72,6 +72,7 @@ cc_library(
         "zlib.h",
         "zutil.h",
     ],
+    features = ["-parse_headers"],
     # For zlib to be found using <zlib.h> before system zlib, use this flag for the include to also be added using isystem.
     includes = ["."],
     local_defines = ["ZLIB_IMPLEMENTATION"],
@@ -136,6 +137,7 @@ cc_library(
         "contrib/optimizations/inflate.c",
     ],
     copts = zlib_warnings,
+    features = ["-parse_headers"],
     local_defines = [
         "INFLATE_CHUNK_READ_64LE",
         "ZLIB_IMPLEMENTATION",
@@ -225,6 +227,7 @@ cc_library(
     name = "zlib",
     srcs = [":zlib_files"],
     copts = zlib_warnings,
+    features = ["-parse_headers"],
     # Duplicate definitions here since we want to avoid non-local defines, some of them are needed
     # here. This excludes INFLATE_CHUNK_* which is only needed in zlib_inflate_chunk_simd.
     local_defines = ["ZLIB_IMPLEMENTATION"] + select({

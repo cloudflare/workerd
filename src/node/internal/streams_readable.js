@@ -41,6 +41,8 @@ import {
   errorOrDestroy,
   finished,
   kOnConstructed,
+  isDestroyed,
+  isReadable,
 } from 'node-internal:streams_util';
 import { nextTick } from 'node-internal:internal_process';
 
@@ -48,17 +50,14 @@ import { EventEmitter } from 'node-internal:events';
 
 import { Stream } from 'node-internal:streams_legacy';
 
-import {
-  newStreamReadableFromReadableStream,
-  newReadableStreamFromStreamReadable,
-} from 'node-internal:streams_adapters';
-
 import { Buffer } from 'node-internal:internal_buffer';
 
 import {
   AbortError,
   aggregateTwoErrors,
   ERR_INVALID_ARG_TYPE,
+  ERR_INVALID_ARG_VALUE,
+  ERR_STREAM_PREMATURE_CLOSE,
   ERR_METHOD_NOT_IMPLEMENTED,
   ERR_MISSING_ARGS,
   ERR_OUT_OF_RANGE,
@@ -70,6 +69,7 @@ import {
 import {
   validateObject,
   validateAbortSignal,
+  validateBoolean,
   validateInteger,
 } from 'node-internal:validators';
 
@@ -1848,3 +1848,194 @@ Readable.prototype.reduce = reduce;
 Readable.prototype.toArray = toArray;
 Readable.prototype.some = some;
 Readable.prototype.find = find;
+
+/**
+ * @typedef {import('./queuingstrategies').QueuingStrategy} QueuingStrategy
+ * @param {Readable} streamReadable
+ * @param {{
+ *  strategy : QueuingStrategy
+ * }} [options]
+ * @returns {ReadableStream}
+ */
+export function newReadableStreamFromStreamReadable(
+  streamReadable,
+  options = {},
+  createTypeBytes = false
+) {
+  // Not using the internal/streams/utils isReadableNodeStream utility
+  // here because it will return false if streamReadable is a Duplex
+  // whose readable option is false. For a Duplex that is not readable,
+  // we want it to pass this check but return a closed ReadableStream.
+  if (typeof streamReadable?._readableState !== 'object') {
+    throw new ERR_INVALID_ARG_TYPE(
+      'streamReadable',
+      'stream.Readable',
+      streamReadable
+    );
+  }
+
+  if (isDestroyed(streamReadable) || !isReadable(streamReadable)) {
+    const readable = new ReadableStream();
+    readable.cancel();
+    return readable;
+  }
+
+  const objectMode = streamReadable.readableObjectMode;
+  const highWaterMark = streamReadable.readableHighWaterMark;
+
+  const evaluateStrategyOrFallback = (strategy) => {
+    // If there is a strategy available, use it
+    if (strategy) return strategy;
+
+    if (objectMode) {
+      // When running in objectMode explicitly but no strategy, we just fall
+      // back to CountQueuingStrategy
+      return new CountQueuingStrategy({ highWaterMark });
+    }
+
+    // When not running in objectMode explicitly, we just fall
+    // back to a minimal strategy that just specifies the highWaterMark
+    // and no size algorithm. Using a ByteLengthQueuingStrategy here
+    // is unnecessary.
+    return { highWaterMark };
+  };
+
+  const strategy = evaluateStrategyOrFallback(options?.strategy);
+
+  let controller;
+
+  function onData(chunk) {
+    // Copy the Buffer to detach it from the pool.
+    if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
+    controller.enqueue(chunk);
+    if (controller.desiredSize <= 0) streamReadable.pause();
+  }
+
+  streamReadable.pause();
+
+  const cleanup = eos(streamReadable, (error) => {
+    if (error?.code === 'ERR_STREAM_PREMATURE_CLOSE') {
+      const err = new AbortError(undefined, { cause: error });
+      error = err;
+    }
+
+    cleanup();
+    // This is a protection against non-standard, legacy streams
+    // that happen to emit an error event again after finished is called.
+    streamReadable.on('error', () => {});
+    if (error) return controller.error(error);
+    controller.close();
+  });
+
+  streamReadable.on('data', onData);
+
+  return new ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+
+      pull() {
+        streamReadable.resume();
+      },
+
+      cancel(reason) {
+        ERR_STREAM_PREMATURE_CLOSE;
+        destroy.call(streamReadable, reason);
+      },
+      type: createTypeBytes ? 'bytes' : undefined,
+    },
+    strategy
+  );
+}
+
+/**
+ * @param {ReadableStream} readableStream
+ * @param {{
+ *   highWaterMark? : number,
+ *   encoding? : string,
+ *   objectMode? : boolean,
+ *   signal? : AbortSignal,
+ * }} [options]
+ * @returns {Readable}
+ */
+export function newStreamReadableFromReadableStream(
+  readableStream,
+  options = {}
+) {
+  if (!(readableStream instanceof ReadableStream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'readableStream',
+      'ReadableStream',
+      readableStream
+    );
+  }
+
+  validateObject(options, 'options');
+  const { highWaterMark, encoding, objectMode = false, signal } = options;
+
+  if (encoding !== undefined && !Buffer.isEncoding(encoding))
+    throw new ERR_INVALID_ARG_VALUE(encoding, 'options.encoding');
+  validateBoolean(objectMode, 'options.objectMode');
+
+  const reader = readableStream.getReader();
+  let closed = false;
+
+  const readable = new Readable({
+    objectMode,
+    highWaterMark,
+    encoding,
+    signal,
+
+    read() {
+      reader.read().then(
+        (chunk) => {
+          if (chunk.done) {
+            // Value should always be undefined here.
+            readable.push(null);
+          } else {
+            readable.push(chunk.value);
+          }
+        },
+        (error) => {
+          destroy.call(readable, error);
+        }
+      );
+    },
+
+    destroy(error, callback) {
+      function done() {
+        try {
+          callback(error);
+        } catch (error) {
+          // In a next tick because this is happening within
+          // a promise context, and if there are any errors
+          // thrown we don't want those to cause an unhandled
+          // rejection. Let's just escape the promise and
+          // handle it separately.
+          nextTick(() => {
+            throw error;
+          });
+        }
+      }
+
+      if (!closed) {
+        reader.cancel(error).then(done, done);
+        return;
+      }
+      done();
+    },
+  });
+
+  reader.closed.then(
+    () => {
+      closed = true;
+    },
+    (error) => {
+      closed = true;
+      destroy.call(readable, error);
+    }
+  );
+
+  return readable;
+}

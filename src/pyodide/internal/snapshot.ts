@@ -12,7 +12,9 @@ import {
   IS_CREATING_SNAPSHOT,
   IS_EW_VALIDATING,
   IS_DEDICATED_SNAPSHOT_ENABLED,
-  compatibilityFlags,
+  COMPATIBILITY_FLAGS,
+  type CompatibilityFlags,
+  IS_SECOND_VALIDATION_PHASE,
 } from 'pyodide-internal:metadata';
 import {
   PythonRuntimeError,
@@ -47,6 +49,15 @@ type OldSnapshotMeta = DsoHandles & {
   readonly version?: undefined;
 };
 
+type LoadedSnapshotSettings = {
+  readonly snapshotType: ArtifactBundler.SnapshotType;
+  readonly compatFlags: CompatibilityFlags;
+};
+
+type SnapshotSettings = {
+  readonly baselineSnapshot?: boolean;
+} & Partial<LoadedSnapshotSettings>;
+
 // The new wire format, with additional information about the hiwire state, the order that dsos were
 // loaded in, and their memory bases. We also moved settings out of the dsoHandles.
 type SnapshotMeta = {
@@ -54,7 +65,7 @@ type SnapshotMeta = {
   readonly importedModulesList: ReadonlyArray<string> | undefined;
   readonly hiwire: SnapshotConfig | undefined;
   readonly dsoHandles: DsoHandles;
-  readonly settings: { readonly baselineSnapshot: boolean };
+  readonly settings: SnapshotSettings;
   readonly version: 1;
 } & DsoLoadInfo;
 
@@ -74,7 +85,8 @@ type LoadedSnapshotExtras = {
   snapshotReader: SnapshotReader;
 };
 
-type LoadedSnapshotMeta = SnapshotMeta & LoadedSnapshotExtras;
+type LoadedSnapshotMeta = SnapshotMeta &
+  LoadedSnapshotExtras & { readonly settings: LoadedSnapshotSettings };
 
 /**
  * Constants
@@ -94,6 +106,16 @@ const CREATED_SNAPSHOT_META: DsoLoadInfo = {
   soMemoryBases: {},
   loadOrder: [],
 };
+if (LOADED_SNAPSHOT_META) {
+  // Make sure we include the soMemoryBases and loadOrder from the baseline snapshot when we are
+  // generating stacked snapshots.
+  Object.assign(
+    CREATED_SNAPSHOT_META.soMemoryBases,
+    LOADED_SNAPSHOT_META.soMemoryBases
+  );
+  CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
+}
+export const LOADED_SNAPSHOT_TYPE = LOADED_SNAPSHOT_META?.settings.snapshotType;
 
 /**
  * Preload a dynamic library.
@@ -500,7 +522,8 @@ ${describeValue(obj)}
 function makeLinearMemorySnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  snapshotType: ArtifactBundler.SnapshotType
 ): Uint8Array {
   const customHiwireStateSerializer = (obj: any): Record<string, boolean> => {
     if (obj === pyodide_entrypoint_helper) {
@@ -514,9 +537,10 @@ function makeLinearMemorySnapshot(
     Module.API.version === '0.26.0a2'
       ? undefined
       : Module.API.serializeHiwireState(customHiwireStateSerializer);
-  const settings = {
+  const settings: SnapshotSettings = {
     baselineSnapshot: IS_CREATING_BASELINE_SNAPSHOT,
-    compatFlags: compatibilityFlags,
+    snapshotType,
+    compatFlags: COMPATIBILITY_FLAGS,
   };
   return encodeSnapshot(Module.HEAP8, {
     version: 1,
@@ -595,22 +619,74 @@ function decodeSnapshot(
       hiwire: undefined,
       loadOrder: [],
       soMemoryBases: {},
-      settings: { baselineSnapshot: false, ...meta.settings },
+      settings: {
+        snapshotType: meta.settings?.baselineSnapshot ? 'baseline' : 'package',
+        compatFlags: {},
+        ...meta.settings,
+      },
       ...extras,
     };
   }
-  return { ...meta, ...extras };
+  return {
+    ...meta,
+    ...extras,
+    settings: {
+      ...meta.settings,
+      snapshotType:
+        meta.settings.snapshotType ??
+        (meta.settings.baselineSnapshot ? 'baseline' : 'package'),
+      compatFlags: meta.settings.compatFlags ?? {},
+    },
+  };
 }
 
 export function isRestoringSnapshot(): boolean {
   return !!LOADED_SNAPSHOT_META;
 }
 
+function checkSnapshotType(snapshotType: string): void {
+  if (SHOULD_SNAPSHOT_TO_DISK) {
+    return;
+  }
+  if (
+    !IS_EW_VALIDATING &&
+    snapshotType === 'dedicated' &&
+    !IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
+    throw new PythonRuntimeError(
+      'Received dedicated snapshot but compat flag for dedicated snapshots is not enabled'
+    );
+  }
+
+  if (
+    !IS_EW_VALIDATING &&
+    snapshotType !== 'dedicated' &&
+    IS_DEDICATED_SNAPSHOT_ENABLED
+  ) {
+    throw new PythonRuntimeError(
+      'Received non-dedicated snapshot but compat flag for dedicated snapshots is enabled'
+    );
+  }
+
+  // If we have a snapshot in the bundle and the dedicated snapshot flag is enabled, then we
+  // should verify that the snapshot in the bundle is a dedicated snapshot. If it is not
+  // we should fail with an error.
+  if (snapshotType !== 'dedicated' && IS_SECOND_VALIDATION_PHASE) {
+    throw new PythonRuntimeError(
+      'The second validation phase should receive a dedicated snapshot, got ' +
+        snapshotType
+    );
+  }
+}
+
 export function maybeRestoreSnapshot(Module: Module): void {
   if (!LOADED_SNAPSHOT_META) {
     return;
   }
-  const { snapshotSize, snapshotOffset, snapshotReader } = LOADED_SNAPSHOT_META;
+  const { snapshotSize, snapshotOffset, snapshotReader, settings } =
+    LOADED_SNAPSHOT_META;
+  checkSnapshotType(settings.snapshotType);
+
   Module.growMemory(snapshotSize);
   snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
   snapshotReader.disposeMemorySnapshot();
@@ -625,20 +701,27 @@ export function maybeRestoreSnapshot(Module: Module): void {
 function collectSnapshot(
   Module: Module,
   importedModulesList: string[],
-  pyodide_entrypoint_helper: PyodideEntrypointHelper | null
+  pyodide_entrypoint_helper: PyodideEntrypointHelper | null,
+  snapshotType: ArtifactBundler.SnapshotType
 ): void {
   if (IS_EW_VALIDATING) {
     const snapshot = makeLinearMemorySnapshot(
       Module,
       importedModulesList,
-      pyodide_entrypoint_helper
+      pyodide_entrypoint_helper,
+      snapshotType
     );
-    ArtifactBundler.storeMemorySnapshot({ snapshot, importedModulesList });
+    ArtifactBundler.storeMemorySnapshot({
+      snapshot,
+      importedModulesList,
+      snapshotType,
+    });
   } else if (SHOULD_SNAPSHOT_TO_DISK) {
     const snapshot = makeLinearMemorySnapshot(
       Module,
       importedModulesList,
-      pyodide_entrypoint_helper
+      pyodide_entrypoint_helper,
+      snapshotType
     );
     DiskCache.put('snapshot.bin', snapshot);
   } else {
@@ -677,7 +760,7 @@ export function maybeCollectDedicatedSnapshot(
       'pyodide_entrypoint_helper is required for dedicated snapshot'
     );
   }
-  collectSnapshot(Module, [], pyodide_entrypoint_helper);
+  collectSnapshot(Module, [], pyodide_entrypoint_helper, 'dedicated');
 }
 
 /**
@@ -700,7 +783,12 @@ export function maybeCollectSnapshot(Module: Module): void {
     return;
   }
 
-  collectSnapshot(Module, importedModulesList, null);
+  collectSnapshot(
+    Module,
+    importedModulesList,
+    null,
+    IS_CREATING_BASELINE_SNAPSHOT ? 'baseline' : 'package'
+  );
 }
 
 export function finalizeBootstrap(

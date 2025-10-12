@@ -20,6 +20,17 @@
 
 namespace workerd::api::public_beta {
 
+static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
+  traceContext.userSpan.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
+  KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
+    traceContext.userSpan.setTag("error.type"_kjc, kj::str(e));
+    traceContext.userSpan.setTag("cloudflare.r2.error.message"_kjc, kj::str(e));
+  }
+  KJ_IF_SOME(v4, r2Result.v4ErrorCode()) {
+    traceContext.userSpan.setTag("cloudflare.r2.error.code"_kjc, kj::str(v4));
+  }
+}
+
 jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg::Lock& js,
     int partNumber,
     R2PutValue value,
@@ -30,9 +41,23 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_uploadPart"_kjc, {"rpc.method"_kjc, "UploadPart"_kjc}, this->bucket->adminBucketName(),
-          {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_uploadPart"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_uploadPart"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.operation"_kjc, kj::str("UploadPart"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.part_number"_kjc, kj::str(partNumber));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -57,13 +82,36 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
                 Error, "SSE-C Key has invalid format");
             JSG_REQUIRE(keyString.size() == 64, Error, "SSE-C Key must be 32 bytes in length");
             ssecBuilder.setKey(kj::str(keyString));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
           }
           KJ_CASE_ONEOF(keyBuff, kj::Array<byte>) {
             JSG_REQUIRE(keyBuff.size() == 32, Error, "SSE-C Key must be 32 bytes in length");
             ssecBuilder.setKey(kj::encodeHex(keyBuff));
+            traceContext.userSpan.setTag("cloudflare.r2.request.ssec_key"_kjc, true);
           }
         }
       }
+    }
+
+    kj::Maybe<int64_t> requestSize = kj::none;
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
+        KJ_IF_SOME(size, stream->tryGetLength(StreamEncoding::IDENTITY)) {
+          requestSize = size;
+        }
+      }
+      KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+        requestSize = text.value.size();
+      }
+      KJ_CASE_ONEOF(data, kj::Array<byte>) {
+        requestSize = data.size();
+      }
+      KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+        requestSize = blob->getSize();
+      }
+    }
+    KJ_IF_SOME(size, requestSize) {
+      traceContext.userSpan.setTag("cloudflare.r2.request.size"_kjc, size);
     }
 
     auto requestJson = json.encode(requestBuilder);
@@ -74,8 +122,10 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     auto promise = doR2HTTPPutRequest(
         kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(
-        js, kj::mv(promise), [&errorType, partNumber](jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, partNumber, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("uploadPart", errorType);
 
       capnp::MallocMessageBuilder responseMessage;
@@ -85,6 +135,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
 
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::String etag = kj::str(responseBuilder.getEtag());
+      traceContext.userSpan.setTag("cloudflare.r2.response.etag"_kjc, kj::str(etag));
       UploadedPart uploadedPart = {partNumber, kj::mv(etag)};
       return uploadedPart;
     });
@@ -96,9 +147,26 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_completeMultipartUpload"_kjc, {"rpc.method"_kjc, "CompleteMultipartUpload"_kjc},
-          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_completeMultipartUpload"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_completeMultipartUpload"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("CompleteMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
+    kj::String partIds =
+        kj::strArray(KJ_MAP(part, uploadedParts) { return kj::str(part.partNumber); }, ", ");
+    traceContext.userSpan.setTag("cloudflare.r2.request.uploaded_parts"_kjc, kj::mv(partIds));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -130,11 +198,14 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(
-        js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
       auto parsedObject =
           parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
       KJ_IF_SOME(obj, parsedObject) {
+        addHeadResultSpanTags(js, traceContext, *obj.get());
         return obj.addRef();
       } else {
         KJ_FAIL_ASSERT(
@@ -148,9 +219,23 @@ jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    auto client = r2GetClient(context, this->bucket->clientIndex,
-        {"r2_abortMultipartUpload"_kjc, {"rpc.method"_kjc, "AbortMultipartUpload"_kjc},
-          this->bucket->adminBucketName(), {{"cloudflare.r2.upload_id"_kjc, uploadId.asPtr()}}});
+
+    auto traceSpan = context.makeTraceSpan("r2_abortMultipartUpload"_kjc);
+    auto userSpan = context.makeUserTraceSpan("r2_abortMultipartUpload"_kjc);
+    TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+    auto client = context.getHttpClient(this->bucket->clientIndex, true, kj::none, traceContext);
+
+    traceContext.userSpan.setTag("cloudflare.binding.type"_kjc, kj::str("r2"_kjc));
+    KJ_IF_SOME(b, this->bucket->bindingName()) {
+      traceContext.userSpan.setTag("cloudflare.binding.name"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag(
+        "cloudflare.r2.operation"_kjc, kj::str("AbortMultipartUpload"_kjc));
+    KJ_IF_SOME(b, this->bucket->bucketName()) {
+      traceContext.userSpan.setTag("cloudflare.r2.bucket"_kjc, kj::str(b));
+    }
+    traceContext.userSpan.setTag("cloudflare.r2.request.upload_id"_kjc, kj::str(uploadId));
+    traceContext.userSpan.setTag("cloudflare.r2.request.key"_kjc, kj::str(key));
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -170,12 +255,15 @@ jsg::Promise<void> R2MultipartUpload::abort(
     auto promise =
         doR2HTTPPutRequest(kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(js, kj::mv(promise), [&errorType](jsg::Lock& js, R2Result r) {
-      if (r.objectNotFound()) {
+    return context.awaitIo(js, kj::mv(promise),
+        [&errorType, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js, R2Result r2Result) mutable {
+      addR2ResponseSpanTags(traceContext, r2Result);
+      if (r2Result.objectNotFound()) {
         return;
       }
 
-      r.throwIfError("abortMultipartUpload", errorType);
+      r2Result.throwIfError("abortMultipartUpload", errorType);
     });
   });
 }

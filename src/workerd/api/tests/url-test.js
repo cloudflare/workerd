@@ -7219,3 +7219,12 @@ export const urlSearchParamsPipe = {
     strictEqual(url.searchParams.toString(), 'a=b%7Cc');
   },
 };
+
+export const urlPatternFun = {
+  test() {
+    const v3 = new Uint16Array(57578);
+    const v4 = {};
+    v4.username = v3;
+    new URLPattern(v4);
+  },
+};

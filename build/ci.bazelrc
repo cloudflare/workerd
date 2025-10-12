@@ -17,20 +17,22 @@ build:ci --noexperimental_check_external_repository_files
 # so avoid doing so where we can. https://github.com/bazelbuild/bazel/commit/03246077f948f2790a83520e7dccc2625650e6df
 build:ci --nobuild_runfile_links
 # Rate limit progress updates for smaller logs, default is 0.2 which leads to very frequent updates.
-build:ci --show_progress_rate_limit=1
+build:ci --show_progress_rate_limit=3
 # Enable color output
 build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
-test:ci --test_output=errors
+test:ci --test_output=errors --test_summary=terse
 build:ci --disk_cache=~/bazel-disk-cache
 
 # test CI jobs don't need any top-level artifacts and just verify things
-build:ci-test --remote_download_outputs=minimal
+build:ci-test --remote_download_minimal
 # Enable v8-codegen-opt for test so that python tests run in an acceptable time frame but not for
-# release builds – this sets -O2 and release should keep -O3.
+# release builds – this sets -O2 and release should keep -O3. For Windows, we can enable /O2
+# unconditionally, release already uses that and just adds "/clang:-O3" on top of it.
 build:ci-test --config=v8-codegen-opt
+build:ci-windows --config=v8-codegen-opt-windows
 
 # limit storage usage on ci
 # Exclude large benchmarking binaries created in debug and asan configurations to avoid

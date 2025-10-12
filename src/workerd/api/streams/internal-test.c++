@@ -21,7 +21,7 @@ class FooStream: public ReadableStreamSource {
   FooStream(): ptr(&data[0]), remaining_(size) {
     KJ_ASSERT(RAND_bytes(data, size) == 1);
   }
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) {
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     maxMaxBytesSeen_ = kj::max(maxMaxBytesSeen_, maxBytes);
     numreads_++;
     if (remaining_ == 0) return (size_t)0;
@@ -61,7 +61,7 @@ class FooStream: public ReadableStreamSource {
 template <int size>
 class BarStream: public FooStream<size> {
  public:
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
     return size;
   }
 };
@@ -144,10 +144,10 @@ KJ_TEST("zero-length stream") {
 
   class Zero: public ReadableStreamSource {
    public:
-    kj::Promise<size_t> tryRead(void*, size_t, size_t) {
+    kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
       return (size_t)0;
     }
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
       return (size_t)0;
     }
   };
@@ -164,7 +164,7 @@ KJ_TEST("lying stream") {
 
   class Dishonest: public FooStream<10000> {
    public:
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
       return (size_t)10;
     }
   };
@@ -187,7 +187,7 @@ KJ_TEST("honest small stream") {
 
   class HonestSmall: public FooStream<100> {
    public:
-    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) {
+    kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
       return (size_t)100;
     }
   };
@@ -307,11 +307,11 @@ KJ_TEST("WritableStreamInternalController observability") {
 
   class MyObserver final: public ByteStreamObserver {
    public:
-    virtual void onChunkEnqueued(size_t bytes) {
+    void onChunkEnqueued(size_t bytes) override {
       ++queueSize;
       queueSizeBytes += bytes;
     };
-    virtual void onChunkDequeued(size_t bytes) {
+    void onChunkDequeued(size_t bytes) override {
       queueSizeBytes -= bytes;
       --queueSize;
     };

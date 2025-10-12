@@ -10,6 +10,7 @@
 namespace workerd::api {
 
 class ReadableStream;
+class File;
 
 // An implementation of the Web Platform Standard Blob API
 class Blob: public jsg::Object {
@@ -112,7 +113,8 @@ class Blob: public jsg::Object {
   }
 
   class BlobInputStream;
-  friend class File;
+  // this could just be "friend File;", but clang-cl wants to see the qualified name here.
+  friend class ::workerd::api::File;
 };
 
 // An implementation of the Web Platform Standard File API

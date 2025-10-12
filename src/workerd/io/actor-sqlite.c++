@@ -5,13 +5,15 @@
 #include "actor-sqlite.h"
 
 #include "io-gate.h"
-#include "kj/function.h"
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 
 #include <sqlite3.h>
+
+#include <kj/exception.h>
+#include <kj/function.h>
 
 #include <algorithm>
 
@@ -23,6 +25,14 @@ namespace {
 static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
   // Intuitively, an unset alarm is effectively indistinguishable from an alarm set at infinity.
   return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
+}
+
+// Set options.allowUnconfirmed to false and log a reason why.
+void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr reason) {
+  if (options.allowUnconfirmed) {
+    KJ_LOG(WARNING, "NOSENTRY allowUnconfirmed disabled", reason);
+    options.allowUnconfirmed = false;
+  }
 }
 
 }  // namespace
@@ -90,6 +100,14 @@ void ActorSqlite::ImplicitTxn::rollback() {
   }
 }
 
+void ActorSqlite::ImplicitTxn::setSomeWriteConfirmed(bool someWriteConfirmed) {
+  this->someWriteConfirmed = someWriteConfirmed;
+}
+
+bool ActorSqlite::ImplicitTxn::isSomeWriteConfirmed() const {
+  return someWriteConfirmed;
+}
+
 ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(actorSqlite) {
   KJ_SWITCH_ONEOF(actorSqlite.currentTxn) {
     KJ_CASE_ONEOF(_, NoTxn) {}
@@ -115,7 +133,8 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
   // Unfortunately this means we cannot prepare the statement, unless we prepare a series of
   // statements for each depth. (Actually, it could be reasonable to prepare statements for
   // depth 0 specifically, but I'm not going to try it for now.)
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
   [&]() noexcept {
@@ -158,7 +177,8 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
     precommitAlarmState = actorSqlite.startPrecommitAlarmScheduling();
   }
 
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_savepoint_", depth));
   committed = true;
 
   KJ_IF_SOME(p, parent) {
@@ -172,8 +192,16 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
 
     // We committed the root transaction, so it's time to signal any replication layer and lock
     // the output gate in the meantime.
-    actorSqlite.commitTasks.add(actorSqlite.outputGate.lockWhile(
-        actorSqlite.commitImpl(kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)))));
+
+    // Unlike ImplicitTxn, which locks the output gate at the start of the first write that requires
+    // confirmation, ExplicitTxn only locks when we're going to confirm the commit.  I think this
+    // makes since given the explicit commit call.
+    auto commitPromise = actorSqlite.outputGate
+                             .lockWhile(kj::evalNow([this, &precommitAlarmState]() {
+      return actorSqlite.commitImpl(kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)));
+    })).fork();
+    actorSqlite.commitTasks.add(commitPromise.addBranch());
+    actorSqlite.lastCommit = kj::mv(commitPromise);
   }
 
   // No backpressure for SQLite.
@@ -181,6 +209,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
 }
 
 kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
+  actorSqlite.requireNotBroken();
   JSG_REQUIRE(!hasChild, Error,
       "Cannot roll back an outer transaction while a nested transaction is still running.");
   if (!committed) {
@@ -191,8 +220,10 @@ kj::Promise<void> ActorSqlite::ExplicitTxn::rollback() {
 }
 
 void ActorSqlite::ExplicitTxn::rollbackImpl() noexcept(false) {
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_savepoint_", depth));
-  actorSqlite.db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("ROLLBACK TO _cf_savepoint_", depth));
+  actorSqlite.db->run(
+      {.regulator = SqliteDatabase::TRUSTED}, kj::str("RELEASE _cf_savepoint_", depth));
   KJ_IF_SOME(p, parent) {
     alarmDirty = p->alarmDirty;
   } else {
@@ -204,51 +235,78 @@ void ActorSqlite::onCriticalError(
     kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
   // If we have already experienced a terminal exception, no need to replace it
   if (broken == kj::none) {
-    // TODO(someday): If we are setting the broken exception, do we also need to explicitly break
-    // the output gate?
-    KJ_IF_SOME(e, maybeException) {
-      e.setDescription(kj::str("broken.outputGateBroken; ", e.getDescription()));
-      broken.emplace(kj::mv(e));
-    } else {
-      kj::Exception exception = JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
-      exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
-      broken.emplace(kj::mv(exception));
-    }
+    kj::Exception exception = kj::mv(maybeException).orDefault([&]() {
+      return JSG_KJ_EXCEPTION(FAILED, Error, errorMessage);
+    });
+    exception.setDescription(kj::str("broken.outputGateBroken; ", exception.getDescription()));
+    broken.emplace(kj::cp(exception));
+
+    // Also ensure output gate is explicitly broken.
+    commitTasks.add(outputGate.lockWhile(kj::Promise<void>(kj::mv(exception))));
   }
 }
 
-void ActorSqlite::onWrite() {
-  requireNotBroken();
-  if (currentTxn.is<NoTxn>()) {
-    auto txn = kj::heap<ImplicitTxn>(*this);
+void ActorSqlite::startImplicitTxn() {
+  auto txn = kj::heap<ImplicitTxn>(*this);
 
-    commitTasks.add(outputGate.lockWhile(
-        kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
-      // Don't commit if shutdown() has been called.
+  // We implement the magic of accumulating all of the writes between JavaScript awaits in one
+  // transaction by evaluating by wrapping the commit function with kj::evalLater, which runs the
+  // function on the next turn of the event loop
+  auto commitPromise =
+      kj::evalLater([this, txn = kj::mv(txn)]() mutable -> kj::Promise<void> {
+    // Don't commit if shutdown() has been called.
+    requireNotBroken();
+
+    // Start the schedule request before commit(), for correctness in workerd.
+    auto precommitAlarmState = startPrecommitAlarmScheduling();
+
+    try {
+      txn->commit();
+    } catch (...) {
+      // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
+      // instead of whatever SQLite threw.
       requireNotBroken();
 
-      // Start the schedule request before commit(), for correctness in workerd.
-      auto precommitAlarmState = startPrecommitAlarmScheduling();
+      // No, we're not broken, so propagate the exception as-is.
+      throw;
+    }
 
-      try {
-        txn->commit();
-      } catch (...) {
-        // HACK: If we became broken during `COMMIT TRANSACTION` then throw the broken exception
-        // instead of whatever SQLite threw.
-        requireNotBroken();
+    // The callback is only expected to commit writes up until this point. Any new writes that
+    // occur while the callback is in progress are NOT included, therefore require a new commit
+    // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
+    // rather than after the callback.
+    { auto drop = kj::mv(txn); }
 
-        // No, we're not broken, so propagate the exception as-is.
-        throw;
-      }
+    return commitImpl(kj::mv(precommitAlarmState));
+  })
+          // Unconditionally break the output gate if commit threw an error, no matter whether the
+          // commit was confirmed or unconfirmed.
+          .catch_([this](kj::Exception&& e) {
+    return outputGate.lockWhile(kj::Promise<void>(kj::mv(e)));
+  })
+          // We need to wait for this in commitTasks and in lastCommit.
+          .fork();
 
-      // The callback is only expected to commit writes up until this point. Any new writes that
-      // occur while the callback is in progress are NOT included, therefore require a new commit
-      // to be scheduled. So, we should drop `txn` to cause `currentTxn` to become NoTxn now,
-      // rather than after the callback.
-      { auto drop = kj::mv(txn); }
+  commitTasks.add(commitPromise.addBranch());
 
-      return commitImpl(kj::mv(precommitAlarmState));
-    })));
+  // Commits must be executed in order, so we only have to track the most recent commit promise.
+  lastCommit = kj::mv(commitPromise);
+}
+
+void ActorSqlite::onWrite(bool allowUnconfirmed) {
+  requireNotBroken();
+  if (currentTxn.is<NoTxn>()) {
+    startImplicitTxn();
+  }
+
+  // Update the status of the current transaction.
+  KJ_IF_SOME(implicitTxn, currentTxn.tryGet<ImplicitTxn*>()) {
+    if (!implicitTxn->isSomeWriteConfirmed() && !allowUnconfirmed) {
+      // This is adding a must-confirm write to the transaction, so we must ensure the outputGate
+      // locks for remainder of this transaction.
+      implicitTxn->setSomeWriteConfirmed(!allowUnconfirmed);
+      commitTasks.add(outputGate.lockWhile(lastCommit.addBranch()));
+    }
   }
 }
 
@@ -390,7 +448,8 @@ void ActorSqlite::maybeDeleteDeferredAlarm() {
     // expecting.  So we'll skip the deletion attempt, and let the caller detect the gate
     // brokenness through other means.
     if (broken == kj::none) {
-      metadata.setAlarm(kj::none);
+      // the safe thing to do is to require confirmation.
+      metadata.setAlarm(kj::none, /*allowUnconfirmed=*/false);
     }
     haveDeferredDelete = false;
   }
@@ -468,56 +527,52 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(Key key, Value value, WriteOptions options) {
   requireNotBroken();
-  kv.put(key, value);
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "single put is using an already-existing ExplicitTxn");
+  }
+  kv.put(key, value, {.allowUnconfirmed = options.allowUnconfirmed});
   return kj::none;
 }
 
 kj::Maybe<kj::Promise<void>> ActorSqlite::put(kj::Array<KeyValuePair> pairs, WriteOptions options) {
   requireNotBroken();
-  // TODO(cleanup): Most of this code comes from DurableObjectStorage::transactionSync and could be re-used.
-  if (util::Autogate::isEnabled(util::AutogateKey::SQL_KV_PUT_MULTIPLE_TRANSACTION)) {
-    if (currentTxn.is<NoTxn>()) {
-      // If we are not in a transcation, let's use an ExplicitTxn, which should rollback automatically
-      // if some put fails.
-      auto txn = startTransaction();
-      txn->put(kj::mv(pairs), options);
-      txn->commit();
-    } else {
-      // If we are in a transaction, let's just set a SAVEPOINT that we can rollback to if needed.
-      db->run(SqliteDatabase::TRUSTED, kj::str("SAVEPOINT _cf_put_multiple_savepoint"));
-      for (const auto& pair: pairs) {
-        try {
-          kv.put(pair.key, pair.value);
-        } catch (kj::Exception e) {
-          // We need to rollback to the putMultiple SAVEPOINT. Do it, and then release the SAVEPOINT.
-          db->run(SqliteDatabase::TRUSTED, kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-          db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
-          kj::throwFatalException(kj::mv(e));
-        }
-      }
-      // We're done here. RELEASE the savepoint.
-      db->run(SqliteDatabase::TRUSTED, kj::str("RELEASE _cf_put_multiple_savepoint"));
-    }
-  } else {
-    for (auto& pair: pairs) {
-      kv.put(pair.key, pair.value);
-    }
+  if (currentTxn.is<NoTxn>()) {
+    // If we are not in a transaction, start an ImplicitTxn since that's what would happen on the
+    // first write anyway.
+    startImplicitTxn();
   }
+
+  KJ_ASSERT(!currentTxn.is<NoTxn>());
+
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "multi put is using an already-existing ExplicitTxn");
+  }
+
+  kv.put(pairs, {.allowUnconfirmed = options.allowUnconfirmed});
+
   return kj::none;
 }
 
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::delete_(Key key, WriteOptions options) {
   requireNotBroken();
 
-  return kv.delete_(key);
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "single delete is using an already-existing ExplicitTxn");
+  }
+
+  return kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
 }
 
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, WriteOptions options) {
   requireNotBroken();
 
+  if (currentTxn.is<ExplicitTxn*>()) {
+    disableAllowUnconfirmed(options, "multi delete put is using an already-existing ExplicitTxn");
+  }
+
   uint count = 0;
   for (auto& key: keys) {
-    count += kv.delete_(key);
+    count += kv.delete_(key, {.allowUnconfirmed = options.allowUnconfirmed});
   }
   return count;
 }
@@ -529,7 +584,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
 
-  metadata.setAlarm(newAlarmTime);
+  metadata.setAlarm(newAlarmTime, options.allowUnconfirmed);
 
   KJ_IF_SOME(exp, currentTxn.tryGet<ExplicitTxn*>()) {
     exp->setAlarmDirty();
@@ -548,6 +603,8 @@ kj::Own<ActorCacheInterface::Transaction> ActorSqlite::startTransaction() {
 
 ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions options) {
   requireNotBroken();
+
+  disableAllowUnconfirmed(options, "deleteAll is not supported");
 
   // kv.deleteAll() clears the database, so we need to save and possibly restore alarm state in
   // the metadata table, to try to match the behavior of ActorCache, which preserves the set alarm
@@ -612,7 +669,7 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(WriteOptions option
   // Reset alarm state, if necessary.  If no alarm is set, OK to just leave metadata table
   // uninitialized.
   if (localAlarmState != kj::none) {
-    metadata.setAlarm(localAlarmState);
+    metadata.setAlarm(localAlarmState, options.allowUnconfirmed);
   }
 
   return {
@@ -725,11 +782,10 @@ void ActorSqlite::cancelDeferredAlarmDeletion() {
 kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   // This implements sync().
   //
-  // TODO(sqlite): When we implement `allowUnconfirmed`, this implementation becomes incorrect
-  //   because sync() should wait on all writes, even ones with that flag, whereas the output
-  //   gate is not blocked by `allowUnconfirmed` writes. At present we haven't actually
-  //   implemented `allowUnconfirmed` yet.
-  return outputGate.wait();
+  // sync() should wait for ALL writes (both confirmed and unconfirmed) that are outstanding at the
+  // time sync() is called. We use lastCommit which keeps track of the most recent commit to be
+  // formed.
+  return lastCommit.addBranch();
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark() {
@@ -820,22 +876,27 @@ kj::OneOf<ActorCacheOps::GetResultList, kj::Promise<ActorCacheOps::GetResultList
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     Key key, Value value, WriteOptions options) {
+  disableAllowUnconfirmed(options, "single put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(key), kj::mv(value), options);
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::put(
     kj::Array<KeyValuePair> pairs, WriteOptions options) {
+  disableAllowUnconfirmed(options, "multi put in ExplicitTxn not supported");
   return actorSqlite.put(kj::mv(pairs), options);
 }
 kj::OneOf<bool, kj::Promise<bool>> ActorSqlite::ExplicitTxn::delete_(
     Key key, WriteOptions options) {
+  disableAllowUnconfirmed(options, "single delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(key), options);
 }
 kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::ExplicitTxn::delete_(
     kj::Array<Key> keys, WriteOptions options) {
+  disableAllowUnconfirmed(options, "multi delete in ExplicitTxn not supported");
   return actorSqlite.delete_(kj::mv(keys), options);
 }
 kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
+  disableAllowUnconfirmed(options, "setAlarm in ExplicitTxn not supported");
   return actorSqlite.setAlarm(newAlarmTime, options);
 }
 

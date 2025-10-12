@@ -378,7 +378,7 @@ bool WritableLockImpl<Controller>::lockWriter(jsg::Lock& js, Controller& self, W
   }
 
   state = kj::mv(lock);
-  writer.attach(self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
+  writer.attach(js, self, kj::mv(closedPrp.promise), kj::mv(readyPrp.promise));
   return true;
 }
 
@@ -2735,14 +2735,13 @@ class AllReader {
           }
 
           jsg::BufferSource bufferSource(js, handle);
-          jsg::BackingStore backing = bufferSource.detach(js);
 
-          if (backing.size() == 0) {
+          if (bufferSource.size() == 0) {
             // Weird but allowed, we'll skip it.
             return loop(js);
           }
 
-          if ((runningTotal + backing.size()) > limit) {
+          if ((runningTotal + bufferSource.size()) > limit) {
             auto error = js.v8TypeError("Memory limit exceeded before EOF.");
             auto rs = kj::mv(readable);
             state.template init<StreamStates::Errored>(js.v8Ref(error));
@@ -2750,8 +2749,8 @@ class AllReader {
                 js, [&](jsg::Lock& js) { return loop(js); });
           }
 
-          runningTotal += backing.size();
-          parts.add(jsg::BufferSource(js, kj::mv(backing)));
+          runningTotal += bufferSource.size();
+          parts.add(bufferSource.copy(js));
           return loop(js);
         };
 
@@ -2769,14 +2768,10 @@ class AllReader {
   }
 
   void copyInto(kj::ArrayPtr<byte> out, PartList in) {
-    size_t pos = 0;
-    auto dest = out.begin();
     for (auto& part: in) {
-      KJ_ASSERT(part.size() <= out.size() - pos);
-      auto ptr = part.begin();
-      std::copy(ptr, ptr + part.size(), dest);
-      pos += part.size();
-      dest += part.size();
+      KJ_ASSERT(part.size() <= out.size());
+      out.first(part.size()).copyFrom(part);
+      out = out.slice(part.size());
     }
   }
 };
@@ -3121,6 +3116,7 @@ kj::Own<ReadableStreamController> ReadableStreamJsController::detach(
   KJ_ASSERT(!isDisturbed());
   KJ_ASSERT(!isReadPending(), "Unable to detach with read pending");
   auto controller = kj::heap<ReadableStreamJsController>();
+  controller->expectedLength = expectedLength;
   disturbed = true;
 
   // Clones this streams state into a new ReadableStreamController, leaving this stream
@@ -3426,7 +3422,7 @@ void WritableStreamJsController::maybeRejectReadyPromise(
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
       prp.resolver.reject(js, reason);
-      writerLock.setReadyFulfiller(prp);
+      writerLock.setReadyFulfiller(js, prp);
     }
   }
 }
@@ -3633,7 +3629,7 @@ void WritableStreamJsController::updateBackpressure(jsg::Lock& js, bool backpres
       // the existing one is resolved or not.
       auto prp = js.newPromiseAndResolver<void>();
       prp.promise.markAsHandled(js);
-      return writerLock.setReadyFulfiller(prp);
+      return writerLock.setReadyFulfiller(js, prp);
     }
 
     // When backpressure is updated and is false, we resolve the ready promise on the writer

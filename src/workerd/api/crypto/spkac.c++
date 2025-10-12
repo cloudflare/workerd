@@ -29,10 +29,22 @@ bool verifySpkac(kj::ArrayPtr<const kj::byte> input) {
         "return false even if the SPKAC signature is valid. This is a known limitation.");
   }
 
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return false;
+  }
+
   return ncrypto::VerifySpkac(ToNcryptoBuffer(input.asChars()));
 }
 
 kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return kj::none;
+  }
+
   if (auto bio = ncrypto::ExportPublicKey(ToNcryptoBuffer(input.asChars()))) {
     BUF_MEM* bptr = bio;
     auto buf = jsg::BackingStore::alloc(js, bptr->length);
@@ -44,6 +56,13 @@ kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::ArrayPtr<const k
 }
 
 kj::Maybe<jsg::BufferSource> exportChallenge(jsg::Lock& js, kj::ArrayPtr<const kj::byte> input) {
+
+  // Works around a bug in ncrypto...
+  auto pos = std::string_view(input.asChars().begin(), input.size()).find_last_not_of(" \n\r\t");
+  if (pos == std::string_view::npos) {
+    return kj::none;
+  }
+
   if (auto dp = ncrypto::ExportChallenge(ToNcryptoBuffer(input.asChars()))) {
     auto dest = jsg::BackingStore::alloc(js, dp.size());
     auto src = kj::arrayPtr(dp.get<kj::byte>(), dp.size());

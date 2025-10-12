@@ -46,6 +46,6 @@ rust_library(
     ],
     version = "0.2.24",
     deps = [
-        "@crates_vendor__unicode-width-0.2.1//:unicode_width",
+        "@crates_vendor__unicode-width-0.2.2//:unicode_width",
     ],
 )

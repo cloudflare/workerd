@@ -13,6 +13,7 @@
 #include <workerd/api/encoding.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#include <workerd/api/export-loopback.h>
 #include <workerd/api/filesystem.h>
 #include <workerd/api/global-scope.h>
 #include <workerd/api/html-rewriter.h>
@@ -22,6 +23,7 @@
 #include <workerd/api/messagechannel.h>
 #include <workerd/api/modules.h>
 #include <workerd/api/node/node.h>
+#include <workerd/api/performance.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/api/queue.h>
 #include <workerd/api/r2-admin.h>
@@ -31,11 +33,13 @@
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
 #include <workerd/api/streams/standard.h>
+#include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
 #include <workerd/api/urlpattern.h>
+#include <workerd/api/worker-loader.h>
 #include <workerd/api/worker-rpc.h>
 #include <workerd/api/workers-module.h>
 #include <workerd/io/compatibility-date.h>
@@ -85,7 +89,11 @@
   F("container", EW_CONTAINER_ISOLATE_TYPES)                                                       \
   F("webfs", EW_WEB_FILESYSTEM_ISOLATE_TYPE)                                                       \
   F("messagechannel", EW_MESSAGECHANNEL_ISOLATE_TYPES)                                             \
-  F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)
+  F("workers-module", EW_WORKERS_MODULE_ISOLATE_TYPES)                                             \
+  F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
+  F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
+  F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)                                               \
+  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)
 
 namespace workerd::api {
 

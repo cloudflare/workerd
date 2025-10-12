@@ -18,8 +18,8 @@ def eslint_test(
         data = srcs + data + [
             eslintrc_json,
             tsconfig_json,
-            "//tools:base-tsconfig",
-            "//tools:base-eslint",
+            "@workerd//tools:base-tsconfig",
+            "@workerd//tools:base-eslint",
         ],
         tags = ["lint"],
         target_compatible_with = select({

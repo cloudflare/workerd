@@ -1,13 +1,6 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
-    {
-      "name": "rules_python",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_python",
-      "file_regex": "^rules_python-.*\\.tar\\.gz$"
-    },
     // rust
     {
       "name": "rules_rust",
@@ -56,50 +49,6 @@
       "file_regex": "^cargo-bazel-x86_64-pc-windows-msvc.exe$",
       "file_type": "executable",
       "downloaded_file_path": "downloaded.exe"
-    },
-    {
-      "name": "rules_shell",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "rules_shell",
-      "file_regex": "^rules_shell-"
-    },
-    {
-      "name": "aspect_rules_esbuild",
-      "type": "github_release",
-      "owner": "aspect-build",
-      "repo": "rules_esbuild",
-      "file_regex": "^rules_esbuild-.*\\.tar\\.gz$"
-    },
-    {
-      // Needed for running the latest Node.js due to aspect_rules_js using older
-      // version by default
-      "name": "rules_nodejs",
-      "type": "github_release",
-      "owner": "bazel-contrib",
-      "repo": "rules_nodejs",
-      "file_regex": "^rules_nodejs-.*\\.tar\\.gz$"
-    },
-    {
-      "name": "aspect_rules_js",
-      "type": "github_release",
-      "owner": "aspect-build",
-      "repo": "rules_js",
-      "file_regex": "^rules_js-.*\\.tar\\.gz$"
-    },
-    {
-      "name": "aspect_rules_ts",
-      "type": "github_release",
-      "owner": "aspect-build",
-      "repo": "rules_ts",
-      "file_regex": "^rules_ts-.*\\.tar\\.gz$"
-    },
-    // microbenchmark
-    {
-      "name": "codspeed",
-      "type": "github_release",
-      "owner": "CodSpeedHQ",
-      "repo": "codspeed-cpp"
     }
   ]
 }

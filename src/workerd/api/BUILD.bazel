@@ -289,22 +289,6 @@ wd_cc_library(
     ]
 ]
 
-# TODO(cleanup): Reenable test when we reenable string accounting
-# kj_test(
-#     src = "form-data-memory-test.c++",
-#     deps = [
-#         "//src/workerd/io",
-#     ],
-# )
-
-# TODO(cleanup): Reenable test when we reenable string accounting
-# kj_test(
-#     src = "headers-test.c++",
-#     deps = [
-#         "//src/workerd/io",
-#     ],
-# )
-
 kj_test(
     src = "data-url-test.c++",
     deps = [
@@ -361,6 +345,24 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "streams/writable-sink-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-adapter-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 wd_test(
@@ -444,7 +446,10 @@ wd_test(
 wd_test(
     src = "r2-test.wd-test",
     args = ["--experimental"],
-    data = ["r2-test.js"],
+    data = [
+        "r2-instrumentation-test.js",
+        "r2-test.js",
+    ],
 )
 
 wd_test(
@@ -457,7 +462,16 @@ wd_test(
     size = "large",
     src = "sql-test.wd-test",
     args = ["--experimental"],
-    data = ["sql-test.js"],
+    data = [
+        "sql-test.js",
+        "sql-test-tail.js",
+    ],
+)
+
+wd_test(
+    src = "sync-kv-test.wd-test",
+    args = ["--experimental"],
+    data = ["sync-kv-test.js"],
 )
 
 wd_test(
@@ -785,6 +799,12 @@ wd_test(
 )
 
 wd_test(
+    src = "tests/request-clone-test.wd-test",
+    args = ["--experimental"],
+    data = ["tests/request-clone-test.js"],
+)
+
+wd_test(
     src = "tests/request-signal-enabled.wd-test",
     args = ["--experimental"],
     data = ["tests/request-signal-enabled.js"],
@@ -863,5 +883,14 @@ wd_test(
     data = [
         "tests/rpc-error-test.js",
         "tests/rpc-error-test.rpc.js",
+    ],
+)
+
+wd_test(
+    src = "actor-kv-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "actor-kv-test.js",
+        "actor-kv-test-tail.js",
     ],
 )

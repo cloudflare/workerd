@@ -385,7 +385,7 @@ class DirectoryBase final: public Directory {
       jsg::Lock& js, kj::PathPtr path, OpenOptions opts = {}) override {
     if (path.size() == 0) {
       // An empty path ends up just returning this directory.
-      return kj::Maybe<FsNodeWithError>(addRefToThis());
+      return kj::Maybe<FsNodeWithError>(kj::Rc<Directory>(addRefToThis()));
     }
 
     KJ_IF_SOME(found, entries.find(path[0])) {
@@ -1449,7 +1449,7 @@ namespace {
 
 // /dev/null is a special file that discards all data written to it and returns
 // EOF on reads.
-class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile> {
+class DevNullFile final: public File {
  public:
   DevNullFile() = default;
 
@@ -1522,7 +1522,7 @@ class DevNullFile final: public File, public kj::EnableAddRefToThis<DevNullFile>
 
 // /dev/zero is a special file that returns zeroes when read from and
 // ignores writes.
-class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile> {
+class DevZeroFile final: public File {
  public:
   DevZeroFile() = default;
 
@@ -1596,7 +1596,7 @@ class DevZeroFile final: public File, public kj::EnableAddRefToThis<DevZeroFile>
 
 // /dev/full is a special file that returns zeroes when read from and
 // returns an error when written to.
-class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile> {
+class DevFullFile final: public File {
  public:
   DevFullFile() = default;
 
@@ -1668,7 +1668,7 @@ class DevFullFile final: public File, public kj::EnableAddRefToThis<DevFullFile>
   mutable kj::Maybe<kj::String> maybeUniqueId;
 };
 
-class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomFile> {
+class DevRandomFile final: public File {
  public:
   DevRandomFile() = default;
 
@@ -1755,23 +1755,35 @@ class DevRandomFile final: public File, public kj::EnableAddRefToThis<DevRandomF
 void writeStdio(jsg::Lock& js, VirtualFileSystem::Stdio type, kj::ArrayPtr<const kj::byte> bytes) {
   auto chars = bytes.asChars();
   size_t endPos = chars.size();
-  if (chars[endPos - 1] == '\n') endPos--;
+  if (endPos > 0 && chars[endPos - 1] == '\n') endPos--;
 
   KJ_IF_SOME(console, js.global().get(js, "console"_kj).tryCast<jsg::JsObject>()) {
-    auto method = console.get(js, type == VirtualFileSystem::Stdio::OUT ? "log"_kj : "error"_kj);
+    auto method = console.get(js, "log"_kj);
     if (method.isFunction()) {
       v8::Local<v8::Value> methodVal(method);
-      auto methodFunc = methodVal.As<v8::Function>();
-      v8::Local<v8::Value> args[] = {js.str(chars.first(endPos))};
-      jsg::check(methodFunc->Call(js.v8Context(), console, 1, args));
+      auto methodFunc = jsg::JsFunction(methodVal.As<v8::Function>());
+
+      kj::String outputStr;
+      auto isolate = &Worker::Isolate::from(js);
+      auto prefix = type == VirtualFileSystem::Stdio::OUT ? isolate->getStdoutPrefix()
+                                                          : isolate->getStderrPrefix();
+      if (endPos == 0) {
+        methodFunc.call(js, console, js.str(prefix));
+      } else if (prefix.size() > 0) {
+        methodFunc.call(js, console, js.str(kj::str(prefix, " "_kj, chars.first(endPos))));
+      } else {
+        methodFunc.call(js, console, js.str(chars.first(endPos)));
+      }
+      return;
     }
   }
+  KJ_LOG(WARNING, "No console.log implementation available for stdio logging");
 }
 
 // An StdioFile is a special file implementation used to represent stdin,
 // stdout, and stderr outputs. Writes are always forwarded to the underlying
 // logging mechanisms. Reads always return EOF (0-byte reads).
-class StdioFile final: public File, public kj::EnableAddRefToThis<StdioFile> {
+class StdioFile final: public File {
  public:
   StdioFile(VirtualFileSystem::Stdio type)
       : type(type),

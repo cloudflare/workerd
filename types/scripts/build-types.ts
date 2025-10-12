@@ -4,7 +4,6 @@ import events from "node:events";
 import { readFileSync, readdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import prettier from "prettier";
 import ts from "typescript";
 import { SourcesMap, createMemoryProgram } from "../src/program";
 import { getFilePath } from "../src/utils";
@@ -41,7 +40,12 @@ const ENTRYPOINTS = [
  * easier to add them all and let TS figure out which ones it actually needs to load.
  * This function uses the current local installation of TS as a source for lib files
  */
+let cachedLibFiles: SourcesMap | null = null;
 function loadLibFiles(): SourcesMap {
+  if (cachedLibFiles != null) {
+    return cachedLibFiles;
+  }
+
   const libLocation = path.dirname(require.resolve("typescript"));
   const libFiles = readdirSync(libLocation).filter(
     (file) => file.startsWith("lib.") && file.endsWith(".d.ts")
@@ -53,6 +57,8 @@ function loadLibFiles(): SourcesMap {
       readFileSync(path.join(libLocation, file), "utf-8")
     );
   }
+
+  cachedLibFiles = lib;
   return lib;
 }
 
@@ -64,6 +70,7 @@ function checkDiagnostics(sources: SourcesMap): void {
       noEmit: true,
       lib: ["lib.esnext.d.ts"],
       types: [],
+      noUnusedParameters: true,
     },
     loadLibFiles()
   );
@@ -127,7 +134,7 @@ function spawnWorkerd(
 async function buildEntrypoint(
   entrypoint: (typeof ENTRYPOINTS)[number],
   workerUrl: URL
-): Promise<void> {
+): Promise<{ name: string; files: Array<{ fileName: string; content: string }> }> {
   const url = new URL(`/${entrypoint.compatDate}.bundle`, workerUrl);
   const response = await fetch(url);
   if (!response.ok) throw new Error(await response.text());
@@ -136,24 +143,45 @@ async function buildEntrypoint(
   const name = entrypoint.name ?? entrypoint.compatDate;
   const entrypointPath = path.join(OUTPUT_PATH, name);
   await fs.mkdir(entrypointPath, { recursive: true });
-  for (const [name, definitions] of bundle) {
+
+  const files: Array<{ fileName: string; content: string }> = [];
+
+  const filePromises: Promise<void>[] = [];
+
+  for (const [fileName, definitions] of bundle) {
     assert(typeof definitions === "string");
     const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
-    let typings = definitions.replaceAll(prettierIgnoreRegexp, "");
+    const typings = definitions.replaceAll(prettierIgnoreRegexp, "");
 
-    typings = await prettier.format(typings, {
-      parser: "typescript",
-    });
-
-    checkDiagnostics(new SourcesMap([["/$virtual/source.ts", typings]]));
-
-    await fs.writeFile(path.join(entrypointPath, name), typings);
+    files.push({ fileName, content: typings });
+    filePromises.push(fs.writeFile(path.join(entrypointPath, fileName), typings));
   }
+
+  // Write all files in parallel (without prettier formatting)
+  await Promise.all(filePromises);
+
+  return { name, files };
 }
 
 async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
-  for (const entrypoint of ENTRYPOINTS)
-    await buildEntrypoint(entrypoint, workerUrl);
+  const allEntrypoints = await Promise.all(
+    ENTRYPOINTS.map(entrypoint => buildEntrypoint(entrypoint, workerUrl))
+  );
+
+  // Format all TypeScript files with a single Prettier CLI call using exact same defaults as API
+  const prettierPath = require.resolve("prettier/bin/prettier.cjs");
+  childProcess.execSync(`${prettierPath} "${OUTPUT_PATH}/**/*.ts" --write --parser=typescript`);
+
+  for (const { files } of allEntrypoints) {
+    const entrypointFiles = new SourcesMap();
+    for (const { fileName, content } of files) {
+      entrypointFiles.set(`/$virtual/${fileName}`, content);
+    }
+
+    if (entrypointFiles.size > 0) {
+      checkDiagnostics(entrypointFiles);
+    }
+  }
 }
 export async function main(): Promise<void> {
   const worker = await spawnWorkerd(getFilePath("types/scripts/config.capnp"));

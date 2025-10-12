@@ -2,10 +2,10 @@
 
 load("@//:build/http.bzl", "http_archive")
 
-TAG_NAME = "v3.2.7"
-URL = "https://github.com/ada-url/ada/releases/download/v3.2.7/singleheader.zip"
+TAG_NAME = "v3.3.0"
+URL = "https://github.com/ada-url/ada/releases/download/v3.3.0/singleheader.zip"
 STRIP_PREFIX = ""
-SHA256 = "464b59be356c2cb176e3582d1ebf3d353c076ae5821a299e87b9ae8f691cddbe"
+SHA256 = "127994be3ce79a0416fd5bcdbb4b10cee84839c4ec8251e9c52aa8e6c6e16762"
 TYPE = "zip"
 
 def dep_ada_url():

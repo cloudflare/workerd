@@ -415,6 +415,34 @@ namespace workerd::jsg {
     registry.template registerInspectProperty<NAME, decltype(&Self::getter), &Self::getter>();     \
   } while (false)
 
+// Use inside a JSG_RESOURCE_TYPE to expose a static property on the JavaScript constructor.
+// The property will be read-only and will call the specified static function when accessed.
+// The function should take no parameters or take jsg::Lock& as the first parameter.
+// Example:
+//   static int getVersion() { return 42; }
+//   JSG_RESOURCE_TYPE(MyClass) {
+//     JSG_STATIC_READONLY_PROPERTY(getVersion);  // Exposes as MyClass.getVersion
+//   }
+#define JSG_STATIC_READONLY_PROPERTY(name)                                                         \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerStaticProperty<NAME, decltype(Self::name), &Self::name>();           \
+  } while (false)
+
+// Use inside a JSG_RESOURCE_TYPE to expose a static property with a different name than the
+// underlying C++ function. The property will be read-only and will call the specified static
+// getter function when accessed. The getter can optionally take jsg::Lock& as the first parameter.
+// Example:
+//   static kj::Array<kj::String> getSupportedTypes() { ... }
+//   JSG_RESOURCE_TYPE(MyClass) {
+//     JSG_STATIC_READONLY_PROPERTY_NAMED(supportedTypes, getSupportedTypes);  // MyClass.supportedTypes
+//   }
+#define JSG_STATIC_READONLY_PROPERTY_NAMED(name, getter)                                           \
+  do {                                                                                             \
+    static const char NAME[] = #name;                                                              \
+    registry.template registerStaticProperty<NAME, decltype(Self::getter), &Self::getter>();       \
+  } while (false)
+
 // Use inside a JSG_RESOURCE_TYPE to create a static constant member on the constructor and
 // prototype of this object. Only primitive data types (booleans, strings, numbers) are allowed.
 // Unlike the JSG_INSTANCE_PROPERTY and JSG_READONLY_PROPERTY macros, this does not use a getter
@@ -1690,11 +1718,6 @@ using ReturnType = typename ReturnType_<Func, T, passLock>::Type;
 template <typename Func, typename Param, bool passLock>
 using PromiseForResult = Promise<RemovePromise<ReturnType<Func, Param, passLock>>>;
 
-class ModuleRegistry;
-namespace modules {
-class ModuleRegistry;
-};
-
 // All types declared with JSG_RESOURCE_TYPE which are intended to be used as the global object
 // must inherit jsg::ContextGlobal, in addition to inheriting jsg::Object
 // (or a subclass of jsg::Object).
@@ -1713,12 +1736,12 @@ class ContextGlobal {
   // object is alive. This may be the legacy or new module registry, depending which one is
   // in use. We don't care about the actual type here, just that it is kept alive.
   kj::Own<void> moduleRegistryBackingOwner;
-  kj::Maybe<kj::Own<const capnp::SchemaLoader>> maybeSchemaLoader;
+  kj::Maybe<const capnp::SchemaLoader&> schemaLoader;
 
   void setModuleRegistryBackingOwner(kj::Own<void> registry) {
     moduleRegistryBackingOwner = kj::mv(registry);
   }
-  void setSchemaLoader(kj::Own<const capnp::SchemaLoader> schemaLoader);
+  void setSchemaLoader(const capnp::SchemaLoader& schemaLoader);
 
   template <typename, typename>
   friend class ResourceWrapper;
@@ -2212,8 +2235,7 @@ class ExternalMemoryAdjustment;
 // Each isolate has a singleton `ExternalMemoryTarget`, which all `ExternalMemoryAdjustment`s
 // point to. The only purpose of this object is to hold a weak reference back to the isolate; the
 // reference is nulled out when the isolate is destroyed.
-class ExternalMemoryTarget: public kj::AtomicRefcounted,
-                            public kj::EnableAddRefToThis<ExternalMemoryTarget> {
+class ExternalMemoryTarget: public kj::AtomicRefcounted {
  public:
   ExternalMemoryTarget(v8::Isolate* isolate): isolate(isolate) {}
 
@@ -2327,42 +2349,6 @@ class Lock {
   Ref<T> allocAccounted(size_t accountedSize, Params&&... params) {
     return Ref<T>(kj::refcounted<T>(kj::fwd<Params>(params)...)
                       .attach(getExternalMemoryAdjustment(accountedSize)));
-  }
-
-  // Returns a kj::String with an external memory adjustment attached.
-  kj::String accountedKjString(kj::Array<char>&& str);
-  kj::String accountedKjString(kj::String&& str) {
-    return accountedKjString(str.releaseArray());
-  }
-  kj::String accountedKjString(kj::StringPtr str) {
-    return accountedKjString(kj::str(str));
-  }
-
-  // Returns a ByteString with an external memory adjustment attached.
-  ByteString accountedByteString(kj::Array<char>&& str);
-  ByteString accountedByteString(kj::String&& str) {
-    return accountedByteString(str.releaseArray());
-  }
-  ByteString accountedByteString(kj::StringPtr str) {
-    return accountedByteString(kj::str(str));
-  }
-
-  // Returns a DOMString with an external memory adjustment attached.
-  DOMString accountedDOMString(kj::Array<char>&& str);
-  DOMString accountedDOMString(kj::String&& str) {
-    return accountedDOMString(str.releaseArray());
-  }
-  DOMString accountedDOMString(kj::StringPtr str) {
-    return accountedDOMString(kj::str(str));
-  }
-
-  // Returns a USVString with an external memory adjustment attached.
-  USVString accountedUSVString(kj::Array<char>&& str);
-  USVString accountedUSVString(kj::String&& str) {
-    return accountedUSVString(str.releaseArray());
-  }
-  USVString accountedUSVString(kj::StringPtr str) {
-    return accountedUSVString(kj::str(str));
   }
 
   v8::Local<v8::Context> v8Context() {
@@ -2638,8 +2624,13 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
+#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
   // Install JSPI on the current context. Currently used only for Python workers.
+  //
+  // JSPI was stabilized in V8 version 14.2, and this API removed.
+  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
   void installJspi();
+#endif
 
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
@@ -2728,6 +2719,8 @@ class Lock {
   JsObject obj(
       kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsObject objNoProto() KJ_WARN_UNUSED_RESULT;
+  JsObject objNoProto(
+      kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<jsg::JsValue> values) KJ_WARN_UNUSED_RESULT;
   JsMap map() KJ_WARN_UNUSED_RESULT;
   JsValue external(void*) KJ_WARN_UNUSED_RESULT;
   JsValue error(kj::StringPtr message) KJ_WARN_UNUSED_RESULT;

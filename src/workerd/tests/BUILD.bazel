@@ -99,7 +99,15 @@ wd_test(
 wd_test(
     src = "module-imports-test.wd-test",
     args = ["--experimental"],
-    data = ["module-imports-test.js"],
+    data = [
+        "module-imports-test.js",
+        "test.wasm",
+    ],
+)
+
+wd_test(
+    src = "performance-test.wd-test",
+    data = ["performance-test.js"],
 )
 
 filegroup(

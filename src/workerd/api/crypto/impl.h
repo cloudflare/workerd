@@ -299,7 +299,7 @@ class SslArrayDisposer: public kj::ArrayDisposer {
       size_t elementSize,
       size_t elementCount,
       size_t capacity,
-      void (*destroyElement)(void*)) const;
+      void (*destroyElement)(void*)) const override;
 };
 
 template <typename T, void (*sslFree)(T*)>

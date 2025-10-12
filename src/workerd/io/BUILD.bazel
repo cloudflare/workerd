@@ -50,6 +50,7 @@ wd_cc_library(
         "compatibility-date.c++",
         "features.c++",
         "hibernation-manager.c++",
+        "io-channels.c++",
         "io-context.c++",
         "io-own.c++",
         "io-util.c++",
@@ -129,6 +130,22 @@ wd_cc_library(
         "@capnp-cpp//src/kj:kj-async",
         "@ncrypto",
         "@ssl",
+    ],
+)
+
+wd_cc_library(
+    name = "worker-modules",
+    srcs = ["worker-modules.c++"],
+    hdrs = ["worker-modules.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/pyodide:pyodide_static",
+        "//src/pyodide:python-entrypoint",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/api:rtti",
+        "//src/workerd/api/node",
+        "//src/workerd/jsg",
     ],
 )
 
@@ -248,6 +265,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":frankenvalue_capnp",
+        ":trace",
         ":worker-interface_capnp",
         "//src/workerd/util",
         "@capnp-cpp//src/capnp:capnp-rpc",

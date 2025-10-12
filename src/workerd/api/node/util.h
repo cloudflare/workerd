@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 #pragma once
 
+#include <workerd/api/performance.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/mimetype.h>
 
@@ -239,6 +240,14 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(previewEntries);
     JSG_METHOD(getConstructorName);
     JSG_METHOD(getCallSites);
+
+    JSG_NESTED_TYPE(Performance);
+    JSG_NESTED_TYPE(PerformanceEntry);
+    JSG_NESTED_TYPE(PerformanceMeasure);
+    JSG_NESTED_TYPE(PerformanceMark);
+    JSG_NESTED_TYPE(PerformanceObserver);
+    JSG_NESTED_TYPE(PerformanceObserverEntryList);
+    JSG_NESTED_TYPE(PerformanceResourceTiming);
 
 #define V(Type) JSG_METHOD(is##Type);
     JS_UTIL_IS_TYPES(V)

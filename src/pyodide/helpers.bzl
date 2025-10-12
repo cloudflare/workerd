@@ -118,6 +118,8 @@ def _python_bundle_helper(info, overrides):
 def pyodide_static():
     internal_data_modules = native.glob([
         "internal/*.py",
+        "internal/workers-api/src/*.py",
+        "internal/workers-api/src/workers/*.py",
         "internal/patches/*.py",
         "internal/topLevelEntropy/*.py",
     ])

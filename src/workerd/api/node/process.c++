@@ -110,11 +110,11 @@ namespace {
 }  // namespace
 
 jsg::JsObject ProcessModule::getVersions(jsg::Lock& js) const {
-  auto versions = js.obj();
   // Node.js version - represents the most current Node.js version supported
   // by the platform, as defined in node-version.h
-  versions.set(js, "node"_kj, js.str(nodeVersion));
-  return versions;
+  static kj::StringPtr keys[] = {"node"_kj};
+  jsg::JsValue values[] = {js.str(nodeVersion)};
+  return js.obj(kj::arrayPtr(keys), kj::arrayPtr(values));
 }
 
 kj::StringPtr ProcessModule::getPlatform(jsg::Lock& js) const {
@@ -150,11 +150,11 @@ kj::String ProcessModule::getCwd(jsg::Lock& js) {
 void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   static constexpr size_t MAX_PATH_LENGTH = 4096;
   if (path.size() > MAX_PATH_LENGTH) {
-    node::THROW_ERR_UV_ENAMETOOLONG(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENAMETOOLONG(js, "chdir"_kj, nullptr, path);
   }
 
   if (path.size() == 0) {
-    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, path);
   }
 
   auto& vfs = VirtualFileSystem::current(js);
@@ -176,19 +176,19 @@ void ProcessModule::setCwd(jsg::Lock& js, kj::String path) {
   KJ_IF_SOME(stat, vfs.getRoot(js)->stat(js, resolvedPath)) {
     KJ_SWITCH_ONEOF(stat) {
       KJ_CASE_ONEOF(fsError, FsError) {
-        node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+        node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
       }
       KJ_CASE_ONEOF(statInfo, workerd::Stat) {
         if (statInfo.type != FsType::DIRECTORY) {
-          node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj);
+          node::THROW_ERR_UV_ENOTDIR(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
         if (!setCurrentWorkingDirectory(kj::mv(resolvedPath))) {
-          node::THROW_ERR_UV_EPERM(js, "chdir"_kj);
+          node::THROW_ERR_UV_EPERM(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
         }
       }
     }
   } else {
-    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj);
+    node::THROW_ERR_UV_ENOENT(js, "chdir"_kj, nullptr, kj::str(resolvedPath));
   }
 }
 

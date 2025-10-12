@@ -43,7 +43,7 @@ rust_library(
     version = "1.4.1",
     deps = select({
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__winapi-util-0.1.10//:winapi_util",  # cfg(windows)
+            "@crates_vendor__winapi-util-0.1.11//:winapi_util",  # cfg(windows)
         ],
         "//conditions:default": [],
     }),

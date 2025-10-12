@@ -62,6 +62,13 @@ class R2Bucket: public jsg::Object {
         adminBucket(kj::mv(bucket)) {}
 
   explicit R2Bucket(
+      FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String binding)
+      : featureFlags(featureFlags),
+        clientIndex(clientIndex),
+        bucket(kj::mv(bucket)),
+        binding(kj::mv(binding)) {}
+
+  explicit R2Bucket(
       FeatureFlags featureFlags, uint clientIndex, kj::String bucket, kj::String jwt, friend_tag_t)
       : featureFlags(featureFlags),
         clientIndex(clientIndex),
@@ -548,10 +555,20 @@ class R2Bucket: public jsg::Object {
     return adminBucket;
   }
 
+  kj::Maybe<kj::StringPtr> bucketName() const {
+    return bucket;
+  }
+
+  kj::Maybe<kj::StringPtr> bindingName() const {
+    return binding;
+  }
+
  private:
   FeatureFlags featureFlags;
   uint clientIndex;
   kj::Maybe<kj::String> adminBucket;
+  kj::Maybe<kj::String> bucket;
+  kj::Maybe<kj::String> binding;
   kj::Maybe<kj::String> jwt;
 
   friend class R2Admin;
@@ -564,5 +581,7 @@ kj::Maybe<jsg::Ref<R2Bucket::HeadResult>> parseHeadResultWrapper(jsg::Lock& js,
     kj::StringPtr action,
     R2Result& r2Result,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
+
+void addHeadResultSpanTags(jsg::Lock& js, TraceContext& traceContext, R2Bucket::HeadResult& result);
 
 }  // namespace workerd::api::public_beta

@@ -4,7 +4,7 @@
 
 #include "transform.h"
 
-#include "internal.h"
+#include "identity-transform-stream.h"
 #include "standard.h"
 
 #include <workerd/io/features.h>
@@ -111,50 +111,6 @@ jsg::Ref<TransformStream> TransformStream::constructor(jsg::Lock& js,
   }
 
   return IdentityTransformStream::constructor(js);
-}
-
-jsg::Ref<IdentityTransformStream> IdentityTransformStream::constructor(
-    jsg::Lock& js, jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
-
-  auto& ioContext = IoContext::current();
-  auto pipe = newIdentityPipe();
-
-  kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
-  KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
-    maybeHighWaterMark = queuingStrategy.highWaterMark;
-  }
-  return js.alloc<IdentityTransformStream>(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      js.alloc<WritableStream>(ioContext, kj::mv(pipe.out),
-          ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
-}
-
-jsg::Ref<FixedLengthStream> FixedLengthStream::constructor(jsg::Lock& js,
-    uint64_t expectedLength,
-    jsg::Optional<IdentityTransformStream::QueuingStrategy> maybeQueuingStrategy) {
-  constexpr uint64_t MAX_SAFE_INTEGER = (1ull << 53) - 1;
-
-  JSG_REQUIRE(expectedLength <= MAX_SAFE_INTEGER, TypeError,
-      "FixedLengthStream requires an integer expected length less than 2^53.");
-
-  auto& ioContext = IoContext::current();
-  auto pipe = newIdentityPipe(uint64_t(expectedLength));
-
-  kj::Maybe<uint64_t> maybeHighWaterMark = kj::none;
-  // For a FixedLengthStream we do not want a highWaterMark higher than the expectedLength.
-  KJ_IF_SOME(queuingStrategy, maybeQueuingStrategy) {
-    maybeHighWaterMark = queuingStrategy.highWaterMark.map(
-        [&](uint64_t highWaterMark) { return kj::min(expectedLength, highWaterMark); });
-  }
-
-  return js.alloc<FixedLengthStream>(js.alloc<ReadableStream>(ioContext, kj::mv(pipe.in)),
-      js.alloc<WritableStream>(ioContext, kj::mv(pipe.out),
-          ioContext.getMetrics().tryCreateWritableByteStreamObserver(), maybeHighWaterMark));
-}
-
-OneWayPipe newIdentityPipe(kj::Maybe<uint64_t> expectedLength) {
-  auto readableSide = kj::refcounted<IdentityTransformStreamImpl>(expectedLength);
-  auto writableSide = kj::addRef(*readableSide);
-  return OneWayPipe{.in = kj::mv(readableSide), .out = kj::mv(writableSide)};
 }
 
 }  // namespace workerd::api

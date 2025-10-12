@@ -11,4 +11,5 @@ export {
   TransformOptions,
   TransformCallback,
   DuplexOptions,
+  PassThrough,
 } from 'node:stream';

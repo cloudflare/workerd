@@ -11,6 +11,7 @@
       "node:path/*": ["./*"],
       "node:stream/*": ["./*"],
       "node:timers/*": ["./*"],
+      "node:sqlite/*": ["./*"],
       "node-internal:*": ["./internal/*"],
       "cloudflare-internal:http": ["./internal/http.d.ts"],
       "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],

@@ -41,7 +41,33 @@ const unitTests :Workerd.Config = (
           (name = "json", json = "{ \"foo\": 1 }"),
           (name = "invalid-json", json = "1n"),
 
-          (name = "wasm", wasm = embed "test.wasm")
+          (name = "wasm", wasm = embed "test.wasm"),
+
+          (name = "complex", esModule = "import * as abc from '././././././complex/complex2'; export { abc };"),
+          (name = "complex/complex2", esModule = "import * as def from '/bundle/complex/complex3'; export { def }; export const foo = 1;"),
+          (name = "complex/complex3", esModule = "export const bar = 2;"),
+
+          # When the user bundle name begins with a slash, it is stripped before
+          # processing, ensuring that the module is still processed relative to
+          # the bundle base URL. Query strings and fragments are ignored.
+          (name = "/%61bc?abc#123", esModule = "export default import.meta.url"),
+
+          # A module name should not be able to escape the bundle base URL,
+          # and leading/trailing whitespace should be trimmed.
+          (name = "    ..//////outside    ", esModule = "export default 1;"),
+
+          # Should resolve to "abc123" after normalization.
+          (name = "/foo/../bar/../../../../////abc123", esModule = "export default 1;"),
+
+          # It should be possible to have a module whose name is a valid URL.
+          (name = "https://example.com/mod", esModule = "export default 'example';"),
+
+          # Percent-encoded characters in the path should be normalized, and absolute
+          # file URLs are accepted as long as they are under the bundle base URL.
+          (name = "file:///bundl%65/should/b%65/ok", esModule = "export default 1;"),
+
+          # Unicode characters in the path should be handled as UTF-8 and supported.
+          (name = "部品", esModule = "export default 1;"),
         ],
         compatibilityDate = "2025-05-01",
         compatibilityFlags = [

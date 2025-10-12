@@ -34,4 +34,18 @@ struct Frankenvalue {
   # Property name. Used only when this `Frankenvalue` represents a property, that is, it is an
   # element within the `properties` list of some other `Frankenvalue`. If this is the root value,
   # then `name` must be null.
+
+  capTableSize @5 :UInt32 = 0;
+  # How large is this value's cap table, not counting `properties`.
+  #
+  # The final cap table contains this many base caps (referenced by the union above), followed by
+  # the caps for each property, in order.
+
+  capTable @6 :AnyPointer;
+  # Some sort of representation of the cap table. The exact format is different for different
+  # contexts. Frankenvalue::toCapnp() and fromCapnp() don't handle this at all -- the caller is
+  # expected to deal with it.
+  #
+  # TODO(cleanup): Consider making `Frankenvalue` a generic over the capTable type? Maybe even make
+  #   the C++ class a template over the CapTableEntry type?
 }

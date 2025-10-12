@@ -240,8 +240,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   nodeJsCompat @21 :Bool
       $compatEnableFlag("nodejs_compat")
-      $compatDisableFlag("no_nodejs_compat")
-      $impliedByAfterDate(name = "enableNodeJsProcessV2", date = "2000-01-01");
+      $compatDisableFlag("no_nodejs_compat");
   # Enables nodejs compat imports in the application.
 
   obsolete22 @22 :Bool
@@ -466,7 +465,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   nodeJsCompatV2 @50 :Bool
       $compatEnableFlag("nodejs_compat_v2")
       $compatDisableFlag("no_nodejs_compat_v2")
-      $impliedByAfterDate(names = ["nodeJsCompat", "enableNodeJsProcessV2"], date = "2024-09-23");
+      $impliedByAfterDate(name = "nodeJsCompat", date = "2024-09-23");
   # Implies nodeJSCompat with the following additional modifications:
   # * Node.js Compat built-ins may be imported/required with or without the node: prefix
   # * Node.js Compat the globals Buffer and process are available everywhere
@@ -636,7 +635,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # for the bug so we need to put the fix behind a compat flag.
 
   # Experimental support for exporting user spans to tail worker.
-  tailWorkerUserSpans @69 :Bool
+  obsolete69 @69 :Bool
       $compatEnableFlag("tail_worker_user_spans")
       $experimental;
 
@@ -648,7 +647,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   pythonWorkers20250116 @71 :Bool
       $compatEnableFlag("python_workers_20250116")
-      $experimental
+      $compatDisableFlag("no_python_workers_20250116")
+      $impliedByAfterDate(name = "pythonWorkers", date = "2025-09-29")
       $pythonSnapshotRelease;
 
   requestCfOverridesCacheRules @72 :Bool
@@ -851,11 +851,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   enableNodeJsProcessV2 @97 :Bool
       $compatEnableFlag("enable_nodejs_process_v2")
-      $experimental;
+      $compatDisableFlag("disable_nodejs_process_v2")
+      $impliedByAfterDate(name = "nodeJsCompat", date="2025-09-15");
   # Switches from the partial process implementation with only "nextTick", "env", "exit",
   # "getBuiltinModule", "platform" and "features" property implementations, to the full-featured
   # Node.js-compatibile process implementation with all process properties either stubbed or
-  # implemented. Implies nodejs_compat + nodejs_compat_v2 (which sets the process global).
+  # implemented. It is required to use this flag with nodejs_compat (or nodejs_compat_v2).
 
   setEventTargetThis @98 :Bool
       $compatEnableFlag("set_event_target_this")
@@ -952,7 +953,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   pythonDedicatedSnapshot @110 :Bool
       $compatEnableFlag("python_dedicated_snapshot")
       $compatDisableFlag("disable_python_dedicated_snapshot")
-      $experimental;
+      $impliedByAfterDate(name = "pythonWorkers20250116", date = "2025-10-16");
   # Enables the generation of dedicated snapshots on Python Worker upload. The snapshot will be
   # stored inside the resulting WorkerBundle of the Worker. The snapshot will be taken after the
   # top-level execution of the Worker.
@@ -1046,4 +1047,145 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
       $impliedByAfterDate(name = "removeNodejsCompatEOL", date = "2028-04-30");
   # Removes APIs that reached end-of-life in Node.js 24.x. When using the
 	# removeNodejsCompatEOL flag, this will default enable on/after 2028-04-30.
+
+  enableNodeJsConsoleModule @120 :Bool
+    $compatEnableFlag("enable_nodejs_console_module")
+    $compatDisableFlag("disable_nodejs_console_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-09-21");
+  # Enables the Node.js console module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsVmModule @121 :Bool
+    $compatEnableFlag("enable_nodejs_vm_module")
+    $compatDisableFlag("disable_nodejs_vm_module")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
+  # Enables the Node.js non-functional stub vm module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsPerfHooksModule @122 :Bool
+     $compatEnableFlag("enable_nodejs_perf_hooks_module")
+     $compatDisableFlag("disable_nodejs_perf_hooks_module")
+     $experimental;
+     # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-01");
+   # Enables the Node.js perf_hooks module. It is required to use this flag with
+   # nodejs_compat (or nodejs_compat_v2).
+
+  enableGlobalPerformanceClasses @123 :Bool
+     $compatEnableFlag("enable_global_performance_classes")
+     $compatDisableFlag("disable_global_performance_classes")
+     $experimental;
+   # Enables PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
+   # PerformanceObserver and PerformanceObserverEntryList global classes.
+
+  enableNodeJsDomainModule @124 :Bool
+    $compatEnableFlag("enable_nodejs_domain_module")
+    $compatDisableFlag("disable_nodejs_domain_module")
+    $experimental;
+    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+  # Enables the Node.js non-functional stub domain module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsV8Module @125 :Bool
+    $compatEnableFlag("enable_nodejs_v8_module")
+    $compatDisableFlag("disable_nodejs_v8_module")
+    $experimental;
+    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+  # Enables the Node.js non-functional stub v8 module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsTtyModule @126 :Bool
+    $compatEnableFlag("enable_nodejs_tty_module")
+    $compatDisableFlag("disable_nodejs_tty_module")
+    $experimental;
+    # $impliedByAfterDate(name = "nodeJsCompat", date = "2025-10-15");
+  # Enables the Node.js non-functional stub tty module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsPunycodeModule @127 :Bool
+    $compatEnableFlag("enable_nodejs_punycode_module")
+    $compatDisableFlag("disable_nodejs_punycode_module")
+    $experimental;
+  # Enables the Node.js deprecated punycode module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsClusterModule @128 :Bool
+    $compatEnableFlag("enable_nodejs_cluster_module")
+    $compatDisableFlag("disable_nodejs_cluster_module")
+    $experimental;
+  # Enables the Node.js non-functional stub cluster module. It is required to use this flag with
+  # nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsChildProcessModule @129 :Bool
+    $compatEnableFlag("enable_nodejs_child_process_module")
+    $compatDisableFlag("disable_nodejs_child_process_module")
+    $experimental;
+  # Enables the Node.js non-functional stub child_process module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsWorkerThreadsModule @130 :Bool
+    $compatEnableFlag("enable_nodejs_worker_threads_module")
+    $compatDisableFlag("disable_nodejs_worker_threads_module")
+    $experimental;
+  # Enables the Node.js non-functional stub worker_threads module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsStreamWrapModule @131 :Bool
+    $compatEnableFlag("enable_nodejs_stream_wrap_module")
+    $compatDisableFlag("disable_nodejs_stream_wrap_module")
+    $experimental;
+  # Enables the Node.js non-functional stub _stream_wrap module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsWasiModule @132 :Bool
+    $compatEnableFlag("enable_nodejs_wasi_module")
+    $compatDisableFlag("disable_nodejs_wasi_module")
+    $experimental;
+  # Enables the Node.js non-functional stub wasi module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsDgramModule @133 :Bool
+    $compatEnableFlag("enable_nodejs_dgram_module")
+    $compatDisableFlag("disable_nodejs_dgram_module")
+    $experimental;
+  # Enables the Node.js non-functional stub dgram module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsInspectorModule @134 :Bool
+    $compatEnableFlag("enable_nodejs_inspector_module")
+    $compatDisableFlag("disable_nodejs_inspector_module")
+    $experimental;
+  # Enables the Node.js non-functional stub inspector module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsTraceEventsModule @135 :Bool
+    $compatEnableFlag("enable_nodejs_trace_events_module")
+    $compatDisableFlag("disable_nodejs_trace_events_module")
+    $experimental;
+  # Enables the Node.js non-functional stub trace_events module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsReadlineModule @136 :Bool
+    $compatEnableFlag("enable_nodejs_readline_module")
+    $compatDisableFlag("disable_nodejs_readline_module")
+    $experimental;
+  # Enables the Node.js non-functional stub readline module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsReplModule @137 :Bool
+    $compatEnableFlag("enable_nodejs_repl_module")
+    $compatDisableFlag("disable_nodejs_repl_module")
+    $experimental;
+  # Enables the Node.js non-functional stub repl module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableNodeJsSqliteModule @138 :Bool
+    $compatEnableFlag("enable_nodejs_sqlite_module")
+    $compatDisableFlag("disable_nodejs_sqlite_module")
+    $experimental;
+  # Enables the Node.js non-functional stub sqlite module. It is required to use this
+  # flag with nodejs_compat (or nodejs_compat_v2).
+
+  enableCtxExports @139 :Bool
+    $compatEnableFlag("enable_ctx_exports");
+  # Enable the ctx.exports API.
 }

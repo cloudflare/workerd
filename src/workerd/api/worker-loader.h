@@ -32,9 +32,25 @@ class WorkerStub: public jsg::Object {
       jsg::Optional<kj::Maybe<kj::String>> name,
       jsg::Optional<EntrypointOptions> options);
 
-  JSG_RESOURCE_TYPE(WorkerStub) {
+  JSG_RESOURCE_TYPE(WorkerStub, CompatibilityFlags::Reader flags) {
     JSG_METHOD(getEntrypoint);
-    JSG_METHOD(getDurableObjectClass);
+
+    if (flags.getWorkerdExperimental()) {
+      // Facets are experimental.
+      JSG_METHOD(getDurableObjectClass);
+
+      JSG_TS_OVERRIDE({
+        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+        getDurableObjectClass<T extends Rpc.DurableObjectBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): DurableObjectClass<T>;
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        getEntrypoint<T extends Rpc.WorkerEntrypointBranded | undefined>(
+            name?: string, options?: WorkerStubEntrypointOptions): Fetcher<T>;
+      });
+    }
   }
 
  private:
@@ -90,10 +106,11 @@ class WorkerLoader: public jsg::Object {
     // If `null`, block the global outbound (all requests throw errors).
     jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> globalOutbound;
 
-    // TODO(someday): cache API outbound?
+    // Specify tail workers.
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> tails;
+    jsg::Optional<kj::Array<jsg::Ref<Fetcher>>> streamingTails;
 
-    // TODO(someday): Support specifying a list of tail workers. These should work similarly to
-    //   globalOutbound.
+    // TODO(someday): cache API outbound?
 
     JSG_STRUCT(compatibilityDate,
         compatibilityFlags,
@@ -101,7 +118,9 @@ class WorkerLoader: public jsg::Object {
         mainModule,
         modules,
         env,
-        globalOutbound);
+        globalOutbound,
+        tails,
+        streamingTails);
   };
 
   jsg::Ref<WorkerStub> get(
@@ -109,6 +128,8 @@ class WorkerLoader: public jsg::Object {
 
   JSG_RESOURCE_TYPE(WorkerLoader) {
     JSG_METHOD(get);
+
+    JSG_TS_ROOT();
   }
 
  private:

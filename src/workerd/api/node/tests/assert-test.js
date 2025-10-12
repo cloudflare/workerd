@@ -38,6 +38,7 @@ import {
   notEqual,
   notStrictEqual,
   ok,
+  partialDeepStrictEqual,
   rejects,
   strictEqual,
   throws,
@@ -238,6 +239,133 @@ export const test_deep_equal_errors = {
         }
       );
     }
+  },
+};
+
+export const test_partial_deep_strict_equal = {
+  test(ctrl, env, ctx) {
+    // Test basic object partial equality
+    const actual = { a: 1, b: 2, c: 3 };
+    const expected = { a: 1, b: 2 };
+    partialDeepStrictEqual(actual, expected);
+
+    // Test nested object partial equality
+    const actualNested = {
+      x: { y: { z: 1 } },
+      a: 'hello',
+      extra: 'should be ignored',
+    };
+    const expectedNested = { x: { y: { z: 1 } } };
+    partialDeepStrictEqual(actualNested, expectedNested);
+
+    // Test array partial equality
+    const actualArray = [1, 2, 3, 4, 5];
+    const expectedArray = [1, 2, 3];
+    partialDeepStrictEqual(actualArray, expectedArray);
+
+    // Test Set partial equality
+    const actualSet = new Set([1, 2, 3, 4]);
+    const expectedSet = new Set([1, 2]);
+    partialDeepStrictEqual(actualSet, expectedSet);
+
+    // Test Map partial equality
+    const actualMap = new Map([
+      ['a', 1],
+      ['b', 2],
+      ['c', 3],
+    ]);
+    const expectedMap = new Map([
+      ['a', 1],
+      ['b', 2],
+    ]);
+    partialDeepStrictEqual(actualMap, expectedMap);
+
+    // Test Date objects
+    const date1 = new Date('2023-01-01');
+    const date2 = new Date('2023-01-01');
+    partialDeepStrictEqual(date1, date2);
+
+    // Test RegExp objects
+    const regex1 = /test/gi;
+    const regex2 = /test/gi;
+    partialDeepStrictEqual(regex1, regex2);
+
+    // Test Error objects
+    const error1 = new Error('Test error');
+    const error2 = new Error('Test error');
+    partialDeepStrictEqual(error1, error2);
+
+    // Test circular references - simple self-reference
+    const circularObj1 = { a: 1, b: 2 };
+    circularObj1.self = circularObj1;
+    const circularObj2 = { a: 1 };
+    circularObj2.self = circularObj2;
+    partialDeepStrictEqual(circularObj1, circularObj2);
+
+    // Test circular references - mutual references
+    const objA = { name: 'A', value: 1 };
+    const objB = { name: 'B', ref: objA };
+    objA.ref = objB;
+    const objC = { name: 'A' };
+    const objD = { name: 'B', ref: objC };
+    objC.ref = objD;
+    partialDeepStrictEqual(objA, objC);
+
+    // Test mixed circular/non-circular (should still work)
+    const mixedCircular = { a: 1, b: { c: 2 } };
+    mixedCircular.self = mixedCircular;
+    const mixedExpected = { a: 1, b: { c: 2 } };
+    partialDeepStrictEqual(mixedCircular, mixedExpected);
+
+    // Test primitive equality
+    partialDeepStrictEqual(42, 42);
+    partialDeepStrictEqual('hello', 'hello');
+    partialDeepStrictEqual(null, null);
+    partialDeepStrictEqual(undefined, undefined);
+
+    // Test failure cases
+    throws(() => partialDeepStrictEqual({ a: 1 }, { a: 2 }), AssertionError);
+    throws(
+      () => partialDeepStrictEqual({ a: 1 }, { a: 1, b: 2 }),
+      AssertionError
+    );
+    throws(() => partialDeepStrictEqual([1, 2], [1, 2, 3]), AssertionError);
+    throws(
+      () => partialDeepStrictEqual(new Set([1, 2]), new Set([1, 2, 3])),
+      AssertionError
+    );
+    throws(
+      () =>
+        partialDeepStrictEqual(new Date('2023-01-01'), new Date('2023-01-02')),
+      AssertionError
+    );
+
+    // Test complex nested case
+    const complexActual = {
+      users: [
+        { id: 1, name: 'Alice', age: 30, email: 'alice@example.com' },
+        { id: 2, name: 'Bob', age: 25, email: 'bob@example.com' },
+      ],
+      config: {
+        theme: 'dark',
+        notifications: true,
+        advanced: { debug: false, verbose: true },
+      },
+      metadata: { version: '1.0.0', timestamp: Date.now() },
+    };
+
+    const complexExpected = {
+      users: [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+      ],
+      config: {
+        theme: 'dark',
+        advanced: { debug: false },
+      },
+    };
+
+    partialDeepStrictEqual(complexActual, complexExpected);
   },
 };
 
@@ -882,8 +1010,6 @@ export const mocksAConstructor = {
     }
 
     class MockClazz {
-      #privateValue;
-
       constructor(z) {
         this.z = z;
       }

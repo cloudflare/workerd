@@ -7,6 +7,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
+#include <workerd/util/strong-bool.h>
 
 #include <pyodide/generated/pyodide_extra.capnp.h>
 #include <pyodide/pyodide_static.capnp.h>
@@ -22,6 +23,12 @@
 #include <kj/timer.h>
 
 namespace workerd::api::pyodide {
+
+WD_STRONG_BOOL(CreateBaselineSnapshot);
+WD_STRONG_BOOL(IsTracing);
+WD_STRONG_BOOL(IsValidating);
+WD_STRONG_BOOL(IsWorkerd);
+WD_STRONG_BOOL(SnapshotToDisk);
 
 const auto PYTHON_PACKAGES_URL =
     "https://storage.googleapis.com/cloudflare-edgeworker-python-packages/";
@@ -54,7 +61,7 @@ struct PythonConfig {
   const PyodidePackageManager pyodidePackageManager;
   bool createSnapshot;
   bool createBaselineSnapshot;
-  bool loadSnapshotFromDisk;
+  kj::Maybe<kj::String> loadSnapshotFromDisk;
 };
 
 // A function to read a segment of the tar file into a buffer
@@ -139,10 +146,10 @@ class PyodideMetadataReader: public jsg::Object {
         kj::String pyodideVersion,
         kj::String packagesVersion,
         kj::String packagesLock,
-        bool isWorkerd,
-        bool isTracing,
-        bool snapshotToDisk,
-        bool createBaselineSnapshot,
+        IsWorkerd isWorkerd,
+        IsTracing isTracing,
+        SnapshotToDisk snapshotToDisk,
+        CreateBaselineSnapshot createBaselineSnapshot,
         kj::Maybe<kj::Array<kj::byte>> memorySnapshot)
         : mainModule(kj::mv(mainModule)),
           moduleInfo(kj::mv(names), kj::mv(contents)),
@@ -231,6 +238,13 @@ class PyodideMetadataReader: public jsg::Object {
 
   static kj::Array<kj::StringPtr> getBaselineSnapshotImports();
 
+  // Similar to Cloudflare::::getCompatibilityFlags in global-scope.c++, but the key difference is
+  // that it returns experimental flags even if `experimental` is not enabled. This avoids a gotcha
+  // where an experimental compat flag is enabled in our C++ code, but not in our JS code.
+  //
+  // This is only for use by our Python runtime.
+  jsg::JsObject getCompatibilityFlags(jsg::Lock& js);
+
   JSG_RESOURCE_TYPE(PyodideMetadataReader) {
     JSG_METHOD(isWorkerd);
     JSG_METHOD(isTracing);
@@ -250,6 +264,7 @@ class PyodideMetadataReader: public jsg::Object {
     JSG_METHOD(getPackagesLock);
     JSG_METHOD(isCreatingBaselineSnapshot);
     JSG_METHOD(getTransitiveRequirements);
+    JSG_METHOD(getCompatibilityFlags);
     JSG_STATIC_METHOD(getBaselineSnapshotImports);
   }
 
@@ -273,7 +288,8 @@ class PyodideMetadataReader: public jsg::Object {
 struct MemorySnapshotResult {
   kj::Array<kj::byte> snapshot;
   kj::Array<kj::String> importedModulesList;
-  JSG_STRUCT(snapshot, importedModulesList);
+  kj::String snapshotType;
+  JSG_STRUCT(snapshot, importedModulesList, snapshotType);
 };
 
 // This used to be declared nested as ArtifactBundler::State, but then there was a need to
@@ -447,14 +463,15 @@ class SimplePythonLimiter: public jsg::Object {
     }
   }
 
-  void finishStartup() {
+  void finishStartup(kj::Maybe<kj::String> snapshotType) {
     KJ_IF_SOME(cb, getTimeCb) {
       JSG_REQUIRE(startTime != kj::none, TypeError, "Need to call `beginStartup` first.");
       auto endTime = cb();
       kj::Duration diff = endTime - KJ_ASSERT_NONNULL(startTime);
       auto diffMs = diff / kj::MILLISECONDS;
 
-      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit");
+      JSG_REQUIRE(diffMs <= startupLimitMs, TypeError, "Python Worker startup exceeded CPU limit ",
+          diffMs, "<=", startupLimitMs, " with snapshot ", snapshotType.orDefault(kj::str("none")));
     }
   }
 

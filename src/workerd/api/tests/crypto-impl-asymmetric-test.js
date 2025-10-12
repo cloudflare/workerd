@@ -94,3 +94,19 @@ export const ecdhJwkTest = {
     );
   },
 };
+
+export const rsaAlgTest = {
+  async test() {
+    const v3 = { kty: 'RSA' };
+    Object.defineProperty(v3, 'alg', {
+      writable: true,
+      configurable: true,
+      value: 1024n,
+    });
+    const v7 = { name: 'RSA-OAEP', hash: 'SHA-1' };
+    const v8 = [];
+    await assert.rejects(crypto.subtle.importKey('jwk', v3, v7, 6, v8), {
+      message: /Unrecognized or unimplemented algorithm "1024"/,
+    });
+  },
+};

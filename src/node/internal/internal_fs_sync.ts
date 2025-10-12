@@ -194,7 +194,10 @@ export function copyFileSync(
     throw new ERR_UNSUPPORTED_OPERATION();
   }
   if (mode & COPYFILE_EXCL && existsSync(dest)) {
-    throw new ERR_EEXIST({ syscall: 'copyFile' });
+    throw new ERR_EEXIST({
+      syscall: 'copyFile',
+      path: normalizePath(dest).pathname,
+    });
   }
   cffs.renameOrCopy(normalizePath(src), normalizePath(dest), { copy: true });
 }
