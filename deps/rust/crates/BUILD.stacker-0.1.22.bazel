@@ -44,7 +44,7 @@ rust_library(
     version = "0.1.22",
     deps = [
         "@crates_vendor__cfg-if-1.0.3//:cfg_if",
-        "@crates_vendor__libc-0.2.176//:libc",
+        "@crates_vendor__libc-0.2.177//:libc",
         "@crates_vendor__psm-0.1.27//:psm",
         "@crates_vendor__stacker-0.1.22//:build_script_build",
     ] + select({
@@ -103,7 +103,7 @@ cargo_build_script(
     version = "0.1.22",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__cc-1.2.40//:cc",
+        "@crates_vendor__cc-1.2.41//:cc",
     ],
 )
 

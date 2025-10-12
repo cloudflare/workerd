@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "toml_datetime",
+    name = "capnp",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,7 +30,7 @@ rust_library(
     ),
     crate_features = [
         "alloc",
-        "serde",
+        "default",
         "std",
     ],
     crate_root = "src/lib.rs",
@@ -40,13 +40,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=toml_datetime",
+        "crate-name=capnp",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.2",
-    deps = [
-        "@crates_vendor__serde_core-1.0.228//:serde_core",
-    ],
+    version = "0.21.6",
 )

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "toml_writer",
+    name = "unicode_width",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,8 +29,8 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
-        "std",
+        "cjk",
+        "default",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -39,10 +39,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=toml_writer",
+        "crate-name=unicode-width",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.3",
+    version = "0.2.2",
 )
