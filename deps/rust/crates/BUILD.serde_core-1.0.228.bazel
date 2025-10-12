@@ -30,7 +30,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
         "default",
         "rc",
         "result",
@@ -74,7 +73,6 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "alloc",
         "default",
         "rc",
         "result",

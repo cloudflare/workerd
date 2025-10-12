@@ -50,7 +50,7 @@ rust_library(
     version = "2.0.0",
     deps = [
         "@crates_vendor__icu_locale_core-2.0.0//:icu_locale_core",
-        "@crates_vendor__stable_deref_trait-1.2.0//:stable_deref_trait",
+        "@crates_vendor__stable_deref_trait-1.2.1//:stable_deref_trait",
         "@crates_vendor__tinystr-0.8.1//:tinystr",
         "@crates_vendor__writeable-0.6.1//:writeable",
         "@crates_vendor__yoke-0.8.0//:yoke",

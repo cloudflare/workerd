@@ -48,7 +48,7 @@ rust_library(
     deps = [
         "@crates_vendor__bitflags-2.9.4//:bitflags",
         "@crates_vendor__cfg-if-1.0.3//:cfg_if",
-        "@crates_vendor__libc-0.2.176//:libc",
+        "@crates_vendor__libc-0.2.177//:libc",
         "@crates_vendor__nix-0.30.1//:build_script_build",
     ],
 )

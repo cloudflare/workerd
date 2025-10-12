@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "target_triple",
+    name = "libc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,6 +29,11 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "extra_traits",
+        "std",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -36,14 +41,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=target-triple",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.4",
+    version = "0.2.177",
     deps = [
-        "@crates_vendor__target-triple-0.1.4//:build_script_build",
+        "@crates_vendor__libc-0.2.177//:build_script_build",
     ],
 )
 
@@ -66,6 +71,11 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "extra_traits",
+        "std",
+    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -81,18 +91,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "target-triple",
+    pkg_name = "libc",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=target-triple",
+        "crate-name=libc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.4",
+    version = "0.2.177",
     visibility = ["//visibility:private"],
 )
 

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "winnow",
+    name = "stable_deref_trait",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,17 +28,22 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "alloc",
+        "default",
+        "std",
+    ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=winnow",
+        "crate-name=stable_deref_trait",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.7.13",
+    version = "1.2.1",
 )

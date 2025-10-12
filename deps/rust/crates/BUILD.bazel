@@ -68,14 +68,14 @@ alias(
 )
 
 alias(
-    name = "capnp-0.21.5",
-    actual = "@crates_vendor__capnp-0.21.5//:capnp",
+    name = "capnp-0.21.6",
+    actual = "@crates_vendor__capnp-0.21.6//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.21.5//:capnp",
+    actual = "@crates_vendor__capnp-0.21.6//:capnp",
     tags = ["manual"],
 )
 
@@ -92,14 +92,14 @@ alias(
 )
 
 alias(
-    name = "cc-1.2.40",
-    actual = "@crates_vendor__cc-1.2.40//:cc",
+    name = "cc-1.2.41",
+    actual = "@crates_vendor__cc-1.2.41//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.40//:cc",
+    actual = "@crates_vendor__cc-1.2.41//:cc",
     tags = ["manual"],
 )
 
@@ -140,14 +140,14 @@ alias(
 )
 
 alias(
-    name = "flate2-1.1.2",
-    actual = "@crates_vendor__flate2-1.1.2//:flate2",
+    name = "flate2-1.1.4",
+    actual = "@crates_vendor__flate2-1.1.4//:flate2",
     tags = ["manual"],
 )
 
 alias(
     name = "flate2",
-    actual = "@crates_vendor__flate2-1.1.2//:flate2",
+    actual = "@crates_vendor__flate2-1.1.4//:flate2",
     tags = ["manual"],
 )
 
@@ -388,18 +388,6 @@ alias(
 alias(
     name = "tracing",
     actual = "@crates_vendor__tracing-0.1.41//:tracing",
-    tags = ["manual"],
-)
-
-alias(
-    name = "trybuild-1.0.111",
-    actual = "@crates_vendor__trybuild-1.0.111//:trybuild",
-    tags = ["manual"],
-)
-
-alias(
-    name = "trybuild",
-    actual = "@crates_vendor__trybuild-1.0.111//:trybuild",
     tags = ["manual"],
 )
 
