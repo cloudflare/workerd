@@ -598,10 +598,13 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     ioContext.getLimitEnforcer().topUpActor();
 
     auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
+    // We need to be able to access the results builder from both the promise below and its
+    // exception handler.
+    auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    auto promise = ioContext.run(
-        [this, &ioContext, reportContext, ownReportContext = kj::mv(ownReportContext)](
-            Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
+                                     reportContext, ownReportContext = ownReportContext->addRef()](
+                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
@@ -616,10 +619,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto result = ([&]() -> kj::Promise<void> {
         KJ_IF_SOME(handler, maybeHandler) {
           auto h = handler.getHandle(lock);
-          return handleEvents(
-              lock, h, ioContext, events.releaseAsArray(), reportContext.initResults());
+          return handleEvents(lock, h, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
         } else {
-          return handleOnset(lock, ioContext, events.releaseAsArray(), reportContext.initResults());
+          return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
         }
       })();
 
@@ -634,7 +636,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
     auto paf = kj::newPromiseAndFulfiller<void>();
     promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&, &fulfiller = *paf.fulfiller](kj::Exception&& e) {
+        [&, &fulfiller = *paf.fulfiller, ownReportContext = kj::mv(ownReportContext),
+            results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
       // This is the top level exception catcher for tail events being delivered. We do not want to
       // propagate JS exceptions to the client side here, all exceptions should stay within this
       // customEvent. Instead, we propagate the exception to the doneFulfiller, where it is used to
@@ -648,6 +651,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       }
       // We still fulfill this fulfiller to disarm the cancellation check below
       fulfiller.fulfill();
+      results->setStop(true);
       doneReceiving = true;
       doneFulfiller->reject(kj::mv(e));
     });
@@ -664,6 +668,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
  private:
+  // Used to share the results builder (and send the stop signal) from both the main code path and
+  // the exception handler.
+  struct SharedResults: public kj::Refcounted, rpc::TailStreamTarget::TailStreamResults::Builder {
+    SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
+        : rpc::TailStreamTarget::TailStreamResults::Builder(kj::mv(results)) {}
+  };
   // Handles the very first (onset) event in the tail stream. This will cause
   // the exported tailStream handler to be called, passing the onset event
   // as the initial argument. If the tail stream wishes to continue receiving
@@ -673,7 +683,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
       kj::Array<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) {
+      kj::Rc<SharedResults> results) {
     // There should be only a single onset event in this batch.
     KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
         "Expected only a single onset event");
@@ -694,7 +704,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     if (!maybeFn->IsFunction()) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
                                "not export a tailStream() handler.");
-      results.setStop(true);
+      results->setStop(true);
       doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
@@ -717,24 +727,12 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto result =
           jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
 
-      // We need to be able to access the results builder from both the
-      // success and failure branches of the promise we set up below.
-      struct SharedResults: public kj::Refcounted {
-        rpc::TailStreamTarget::TailStreamResults::Builder results;
-        rpc::TailStreamTarget::TailStreamResults::Builder& get() {
-          return results;
-        }
-        SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
-            : results(kj::mv(results)) {}
-      };
-      auto sharedResults = kj::rc<SharedResults>(kj::mv(results));
-
       // The handler can return a function, an object, undefined, or a promise
       // for any of these. We will convert the result to a promise for consistent
       // handling...
       return ioContext.awaitJs(js,
           js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = sharedResults.addRef(), &ioContext](
+              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
                                        jsg::Lock& js, jsg::Value value) mutable {
         // The value here can be one of a function, an object, or undefined.
         // Any value other than these will result in a warning but will otherwise
@@ -762,22 +760,22 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         }
         // And finally, we'll stop the stream since the tail worker did not return
         // a handler for us to continue with.
-        results->get().setStop(true);
+        results->setStop(true);
         doneReceiving = true;
         doneFulfiller->fulfill();
       }),
               ioContext.addFunctor(
-                  [&, results = sharedResults.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+                  [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
         // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
         // the exception later.
-        results->get().setStop(true);
+        results->setStop(true);
         doneReceiving = true;
         js.throwException(kj::mv(error));
       })));
     } catch (...) {
       ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
                                "not return a valid tailStream() handler.");
-      results.setStop(true);
+      results->setStop(true);
       doneReceiving = true;
       doneFulfiller->fulfill();
       return kj::READY_NOW;
@@ -789,7 +787,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       const jsg::JsValue& handler,
       IoContext& ioContext,
       kj::Array<tracing::TailEvent> events,
-      rpc::TailStreamTarget::TailStreamResults::Builder results) {
+      kj::Rc<SharedResults> results) {
     jsg::Lock& js = lock;
 
     // Should not ever happen but let's handle it anyway.
@@ -816,7 +814,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       if (finishing) break;
       if (event.event.is<tracing::Outcome>()) {
         finishing = true;
-        results.setStop(true);
+        results->setStop(true);
         doneReceiving = true;
         // We set doFulfill to indicate that the outcome event has been received via RPC and no more
         // events are expected.
