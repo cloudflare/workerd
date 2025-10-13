@@ -50,9 +50,6 @@ export function withSpan<T>(
     span.end();
     return result;
   } catch (error) {
-    // We'll have to special-case this in the tail worker.
-    // TODO: Expose a way of updating status
-    span.setAttribute('cloudflare.status', 'error');
     span.end();
     throw error;
   }
