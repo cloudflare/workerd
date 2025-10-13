@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -17,7 +18,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
-  CompatibilityFlags::Reader flags = js.getCompatibilityFlags();
+  auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -57,45 +58,55 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
       uint32_t timeoutMs = 0;
       KJ_SWITCH_ONEOF(hardTimeout) {
         KJ_CASE_ONEOF(ms, int64_t) {
-          JSG_REQUIRE(ms > 0 && ms <= UINT32_MAX, TypeError, "Hard timeout must be between 1 and ", UINT32_MAX, " ms");
+          JSG_REQUIRE(ms > 0 && ms <= UINT32_MAX, TypeError, "Hard timeout must be between 1 and ",
+              UINT32_MAX, " ms");
           timeoutMs = static_cast<uint32_t>(ms);
         }
         KJ_CASE_ONEOF(duration, kj::String) {
-          // Parse duration string like "30s", "5m", "2h", "1000ms"
+          // Parse duration strings: "30s", "5m", "2h", "1000ms"
           JSG_REQUIRE(duration.size() >= 2, TypeError, "Invalid duration format: ", duration);
-          
+
           auto unit = duration[duration.size() - 1];
           auto numberStr = duration.slice(0, duration.size() - 1);
-          
-          // Handle "ms" suffix
+
+          // Special case for milliseconds
           if (duration.endsWith("ms")) {
             JSG_REQUIRE(duration.size() >= 3, TypeError, "Invalid duration format: ", duration);
             numberStr = duration.slice(0, duration.size() - 2);
-            unit = 'x';
+            unit = 'x';  // Use placeholder for ms case
           }
-          
-          KJ_IF_SOME(value, numberStr.parseAs<int64_t>()) {
+
+          int64_t timeoutMsValue = 0;
+          KJ_IF_SOME(value, kj::str(numberStr).tryParseAs<int64_t>()) {
             JSG_REQUIRE(value > 0, TypeError, "Invalid duration number: ", numberStr);
+
+            switch (unit) {
+              case 'x':
+                timeoutMsValue = value;
+                break;
+              case 's':
+                timeoutMsValue = value * 1000;
+                break;
+              case 'm':
+                timeoutMsValue = value * 60 * 1000;
+                break;
+              case 'h':
+                timeoutMsValue = value * 60 * 60 * 1000;
+                break;
+              default:
+                JSG_FAIL_REQUIRE(TypeError, "Invalid duration unit '", kj::str(unit),
+                    "'. Use 'ms', 's', 'm', or 'h'");
+            }
           } else {
             JSG_FAIL_REQUIRE(TypeError, "Invalid duration number: ", numberStr);
           }
-          
-          int64_t timeoutMsLong = 0;
-          switch (unit) {
-            case 'x': timeoutMsLong = value; break;
-            case 's': timeoutMsLong = value * 1000; break;
-            case 'm': timeoutMsLong = value * 60 * 1000; break;
-            case 'h': timeoutMsLong = value * 60 * 60 * 1000; break;
-            default:
-              JSG_FAIL_REQUIRE(TypeError, "Invalid duration unit '", kj::str(unit), "'. Use 'ms', 's', 'm', or 'h'");
-          }
-          
-          JSG_REQUIRE(timeoutMsLong > 0 && timeoutMsLong <= UINT32_MAX, TypeError, 
-                      "Hard timeout must be between 1 and ", UINT32_MAX, " ms (about 49.7 days)");
-          timeoutMs = static_cast<uint32_t>(timeoutMsLong);
+
+          JSG_REQUIRE(timeoutMsValue > 0 && timeoutMsValue <= UINT32_MAX, TypeError,
+              "Hard timeout must be between 1 and ", UINT32_MAX, " ms (about 49.7 days)");
+          timeoutMs = static_cast<uint32_t>(timeoutMsValue);
         }
       }
-      
+
       JSG_REQUIRE(timeoutMs > 0, TypeError, "Hard timeout must be greater than 0");
       req.setHardTimeoutMs(timeoutMs);
     }
@@ -103,15 +114,15 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {
-  JSG_REQUIRE(durationMs > 0 && durationMs <= UINT32_MAX, TypeError, 
-              "setInactivityTimeout() durationMs must be between 1 and ", UINT32_MAX, " ms (about 49.7 days)");
+  JSG_REQUIRE(durationMs > 0 && durationMs <= UINT32_MAX, TypeError,
+      "setInactivityTimeout() durationMs must be between 1 and ", UINT32_MAX,
+      " ms (about 49.7 days)");
 
   auto req = rpcClient->setInactivityTimeoutRequest();
 
   req.setDurationMs(static_cast<uint32_t>(durationMs));
   return IoContext::current().awaitIo(js, req.sendIgnoringResult());
 }
-
 
 jsg::Promise<void> Container::monitor(jsg::Lock& js) {
   JSG_REQUIRE(running, Error, "monitor() cannot be called on a container that is not running.");
