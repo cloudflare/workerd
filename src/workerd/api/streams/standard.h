@@ -222,11 +222,6 @@ class ReadableImpl {
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, Queue> state;
   Algorithms algorithms;
 
-  bool disturbed = false;
-  bool pullAgain = false;
-  bool pulling = false;
-  bool started = false;
-  bool starting = false;
   size_t highWaterMark = 1;
 
   struct PendingCancel {
@@ -238,6 +233,14 @@ class ReadableImpl {
     }
   };
   kj::Maybe<PendingCancel> maybePendingCancel;
+
+  struct Flags {
+    uint8_t pullAgain : 1 = 0;
+    uint8_t pulling : 1 = 0;
+    uint8_t started : 1 = 0;
+    uint8_t starting : 1 = 0;
+  };
+  Flags flags{};
 
   friend Self;
 };
@@ -368,22 +371,27 @@ class WritableImpl {
   kj::OneOf<StreamStates::Closed, StreamStates::Errored, StreamStates::Erroring, Writable> state =
       Writable();
   Algorithms algorithms;
-  bool started = false;
-  bool starting = false;
-  bool backpressure = false;
+
   size_t highWaterMark = 1;
+  size_t amountBuffered = 0;
+  size_t excessiveBackpressureWarningCount = 0;
 
   // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
   // is more memory efficient than a std::deque, for example.
   std::list<WriteRequest> writeRequests;
-  size_t amountBuffered = 0;
-  bool warnAboutExcessiveBackpressure = true;
-  size_t excessiveBackpressureWarningCount = 0;
 
   kj::Maybe<WriteRequest> inFlightWrite;
   kj::Maybe<jsg::Promise<void>::Resolver> inFlightClose;
   kj::Maybe<jsg::Promise<void>::Resolver> closeRequest;
   kj::Maybe<kj::Own<PendingAbort>> maybePendingAbort;
+
+  struct Flags {
+    uint8_t started : 1 = 0;
+    uint8_t starting : 1 = 0;
+    uint8_t backpressure : 1 = 0;
+    uint8_t warnAboutExcessiveBackpressure : 1 = 1;
+  };
+  Flags flags{};
 
   friend Self;
 };
@@ -601,7 +609,7 @@ class WritableStreamDefaultController: public jsg::Object {
   kj::Maybe<v8::Local<v8::Value>> isErroring(jsg::Lock& js);
 
   bool isStarted() {
-    return impl.started;
+    return impl.flags.started;
   }
 
   void setup(jsg::Lock& js, UnderlyingSink underlyingSink, StreamQueuingStrategy queuingStrategy);
