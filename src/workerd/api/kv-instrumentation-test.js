@@ -2,19 +2,18 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
+import { createInstrumentationState } from 'instrumentation-test-helper';
 
-// tailStream is going to be invoked multiple times, but we want to wait
-// to run the test until all executions are done. Collect promises for
-// each
-let invocationPromises = [];
-let spans = new Map();
+// KV test uses a custom tail stream handler
+const state = createInstrumentationState();
 
-export default {
-  tailStream(event, env, ctx) {
+// Custom tail stream handler implementation
+const createKVTailStreamHandler = (state) => {
+  return (event, env, ctx) => {
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
     let resolveFn;
-    invocationPromises.push(
+    state.invocationPromises.push(
       new Promise((resolve, reject) => {
         resolveFn = resolve;
       })
@@ -32,7 +31,7 @@ export default {
         case 'spanOpen':
           // spanOpen creates a new span with ID in event.event.spanId
           spanKey = event.invocationId + event.event.spanId;
-          spans.set(spanKey, {
+          state.spans.set(spanKey, {
             name: event.event.name,
           });
           break;
@@ -44,7 +43,7 @@ export default {
           }
 
           // attributes references an existing span via spanContext.spanId
-          let span = spans.get(spanKey);
+          let span = state.spans.get(spanKey);
           if (!span) {
             throw new Error(`Attributes event for unknown span: ${spanKey}`);
           }
@@ -55,7 +54,7 @@ export default {
         }
         case 'spanClose': {
           // spanClose references an existing span via spanContext.spanId
-          let span = spans.get(spanKey);
+          let span = state.spans.get(spanKey);
           if (!span) {
             throw new Error(`SpanClose event for unknown span: ${spanKey}`);
           }
@@ -67,17 +66,21 @@ export default {
           break;
       }
     };
-  },
+  };
+};
+
+export default {
+  tailStream: createKVTailStreamHandler(state),
 };
 
 export const test = {
   async test() {
     // Wait for all the tailStream executions to finish
-    await Promise.allSettled(invocationPromises);
+    await Promise.allSettled(state.invocationPromises);
 
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with KV
-    let received = Array.from(spans.values()).filter(
+    let received = Array.from(state.spans.values()).filter(
       (span) => span.name !== 'jsRpcSession'
     );
 

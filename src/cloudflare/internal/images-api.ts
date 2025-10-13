@@ -6,6 +6,7 @@ import {
   createBase64DecoderTransformStream,
   createBase64EncoderTransformStream,
 } from 'cloudflare-internal:streaming-base64';
+import { withSpan } from 'cloudflare-internal:tracing-helpers';
 
 type Fetcher = {
   fetch: typeof fetch;
@@ -233,40 +234,49 @@ class ImagesBindingImpl implements ImagesBinding {
     stream: ReadableStream<Uint8Array>,
     options?: ImageInputOptions
   ): Promise<ImageInfoResponse> {
-    const body = new StreamableFormData();
+    return await withSpan('images_info', async (span) => {
+      const body = new StreamableFormData();
 
-    const decodedStream =
-      options?.encoding === 'base64'
-        ? stream.pipeThrough(createBase64DecoderTransformStream())
-        : stream;
+      const decodedStream =
+        options?.encoding === 'base64'
+          ? stream.pipeThrough(createBase64DecoderTransformStream())
+          : stream;
 
-    body.append('image', decodedStream, { type: 'file' });
+      span.setAttribute('cloudflare.images.info.encoding', options?.encoding);
 
-    const response = await this.#fetcher.fetch(
-      'https://js.images.cloudflare.com/info',
-      {
-        method: 'POST',
-        headers: {
-          'content-type': body.contentType(),
-        },
-        body: body.stream(),
+      body.append('image', decodedStream, { type: 'file' });
+
+      const response = await this.#fetcher.fetch(
+        'https://js.images.cloudflare.com/info',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': body.contentType(),
+          },
+          body: body.stream(),
+        }
+      );
+
+      await throwErrorIfErrorResponse('INFO', response);
+
+      const r = (await response.json()) as RawInfoResponse;
+
+      span.setAttribute('cloudflare.images.info.format', r.format);
+
+      if ('file_size' in r) {
+        span.setAttribute('cloudflare.images.info.file_size', r.file_size);
+        span.setAttribute('cloudflare.images.info.width', r.width);
+        span.setAttribute('cloudflare.images.info.height', r.height);
+        return {
+          fileSize: r.file_size,
+          width: r.width,
+          height: r.height,
+          format: r.format,
+        };
       }
-    );
 
-    await throwErrorIfErrorResponse('INFO', response);
-
-    const r = (await response.json()) as RawInfoResponse;
-
-    if ('file_size' in r) {
-      return {
-        fileSize: r.file_size,
-        width: r.width,
-        height: r.height,
-        format: r.format,
-      };
-    }
-
-    return r;
+      return r;
+    });
   }
 
   input(
