@@ -156,7 +156,7 @@ class ReadableImpl {
   void close(jsg::Lock& js);
 
   // Push a chunk of data into the queue.
-  void enqueue(jsg::Lock& js, kj::Own<Entry> entry, jsg::Ref<Self> self);
+  void enqueue(jsg::Lock& js, kj::Rc<Entry> entry, jsg::Ref<Self> self);
 
   void doClose(jsg::Lock& js);
 
