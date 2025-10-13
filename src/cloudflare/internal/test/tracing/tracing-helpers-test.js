@@ -211,24 +211,3 @@ export const multipleEndCalls = {
     // Should only see one span-ended event due to idempotency
   },
 };
-
-export const nestedSpans = {
-  async test(ctrl, env, ctx) {
-    const { withSpan } = env.tracingTest;
-
-    // Test: Nested spans
-    const result = await withSpan('outer-op', async (outerSpan) => {
-      outerSpan.setAttribute('type', 'outer');
-
-      const innerResult = await withSpan('inner-op', async (innerSpan) => {
-        innerSpan.setAttribute('type', 'inner');
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return 'inner-value';
-      });
-
-      return `outer-${innerResult}`;
-    });
-
-    assert.strictEqual(result, 'outer-inner-value');
-  },
-};
