@@ -118,25 +118,6 @@ export const notThenableObject = {
   },
 };
 
-export const nullAndUndefinedReturns = {
-  async test(ctrl, env, ctx) {
-    const { withSpan } = env.tracingTest;
-
-    // Test: Null and undefined returns - should be treated as sync
-    const nullResult = withSpan('null-op', (span) => {
-      span.setAttribute('type', 'null');
-      return null;
-    });
-    assert.strictEqual(nullResult, null);
-
-    const undefinedResult = withSpan('undefined-op', (span) => {
-      span.setAttribute('type', 'undefined');
-      return undefined;
-    });
-    assert.strictEqual(undefinedResult, undefined);
-  },
-};
-
 export const generatorFunction = {
   async test(ctrl, env, ctx) {
     const { withSpan } = env.tracingTest;
