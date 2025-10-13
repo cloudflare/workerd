@@ -653,9 +653,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
     });
     promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
       if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "The destination execution context for this tail session was canceled while the "
-            "call was still running."));
+        // The promise for handling events got canceled, perhaps because the request got aborted
+        // during a crash. There is nothing we can do to recover in that case, a previous error
+        // should already indicate what went wrong. Still fulfill the fulfillers so they get cleaned
+        // up properly.
+        fulfiller->fulfill();
       }
     }));
     ioContext.addTask(kj::mv(promise));
