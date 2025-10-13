@@ -226,7 +226,7 @@ class EmptyReadOnlyActorStorageImpl final: public rpc::ActorStorage::Stage::Serv
 jsg::Bundle::Reader retrievePyodideBundle(
     const api::pyodide::PythonConfig& pyConfig, kj::StringPtr version) {
   auto result = pyConfig.pyodideBundleManager.getPyodideBundle(version);
-  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle");
+  return KJ_ASSERT_NONNULL(result, "Failed to get Pyodide bundle", version);
 }
 
 /**
