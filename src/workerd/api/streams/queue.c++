@@ -562,8 +562,9 @@ void ByteQueue::maybeUpdateBackpressure() {
     // take of them from time to time since. Since maybeUpdateBackpressure
     // is going to be called regularly while the queue is actively in use,
     // this is as good a place to clean them out as any.
-    auto pivot KJ_UNUSED = std::remove_if(state.pendingByobReadRequests.begin(),
+    auto pivot = std::remove_if(state.pendingByobReadRequests.begin(),
         state.pendingByobReadRequests.end(), [](auto& item) { return item->isInvalidated(); });
+    state.pendingByobReadRequests.erase(pivot, state.pendingByobReadRequests.end());
   }
   impl.maybeUpdateBackpressure();
 }
