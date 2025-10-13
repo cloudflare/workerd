@@ -65,6 +65,12 @@ with open('$@', 'w') as f:
             main_py_file,
             vendored_srcs_target,
         ],
+        # Disable on windows because of flakiness
+        # TODO fix this
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
         **kwds
     )
 
