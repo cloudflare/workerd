@@ -264,16 +264,15 @@ class ImagesBindingImpl implements ImagesBinding {
       span.setAttribute('cloudflare.images.info.format', r.format);
 
       if ('file_size' in r) {
-        const ret = {
+        span.setAttribute('cloudflare.images.info.file_size', r.file_size);
+        span.setAttribute('cloudflare.images.info.width', r.width);
+        span.setAttribute('cloudflare.images.info.height', r.height);
+        return {
           fileSize: r.file_size,
           width: r.width,
           height: r.height,
           format: r.format,
         };
-        span.setAttribute('cloudflare.images.info.file_size', ret.fileSize);
-        span.setAttribute('cloudflare.images.info.width', ret.width);
-        span.setAttribute('cloudflare.images.info.height', ret.height);
-        return ret;
       }
 
       return r;
