@@ -7,6 +7,7 @@
 #include "common.h"
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/ring-buffer.h>
 
 #include <list>
 #include <set>
@@ -341,10 +342,7 @@ class ConsumerImpl final {
     queue.addConsumer(this);
   }
 
-  ConsumerImpl(ConsumerImpl& other) = delete;
-  ConsumerImpl(ConsumerImpl&&) = delete;
-  ConsumerImpl& operator=(ConsumerImpl&) = delete;
-  ConsumerImpl& operator=(ConsumerImpl&&) = delete;
+  KJ_DISALLOW_COPY_AND_MOVE(ConsumerImpl);
 
   ~ConsumerImpl() noexcept(false) {
     queue.removeConsumer(this);
@@ -544,9 +542,7 @@ class ConsumerImpl final {
   struct Closed {};
   using Errored = jsg::Value;
   struct Ready {
-    // We use std::list to keep memory overhead low when there are many streams with no or few
-    // pending entries/reads.
-    std::list<kj::OneOf<QueueEntry, Close>> buffer;
+    workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
     std::list<ReadRequest> readRequests;
     size_t queueTotalSize = 0;
 
@@ -865,8 +861,6 @@ class ByteQueue final {
   };
 
   struct State {
-    // We use std::list to keep memory overhead low when there are many streams with no or few
-    // pending reads.
     std::list<kj::Own<ByobRequest>> pendingByobReadRequests;
 
     JSG_MEMORY_INFO(ByteQueue::State) {
