@@ -212,7 +212,7 @@ class QueueImpl final {
   // If the entry type is byteOriented and has not been fully consumed by pending consume
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
-  void push(jsg::Lock& js, kj::Own<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
+  void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Maybe<ConsumerImpl&> skipConsumer = kj::none) {
     auto& ready =
         KJ_REQUIRE_NONNULL(state.template tryGet<Ready>(), "The queue is closed or errored.");
 
@@ -389,7 +389,7 @@ class ConsumerImpl final {
     }
   }
 
-  void push(jsg::Lock& js, kj::Own<Entry> entry) {
+  void push(jsg::Lock& js, kj::Rc<Entry> entry) {
     auto& ready = KJ_REQUIRE_NONNULL(
         state.template tryGet<Ready>(), "The consumer is either closed or errored.");
     KJ_REQUIRE(!isClosing(), "The consumer is already closing.");
@@ -656,7 +656,7 @@ class ValueQueue final {
 
   // A value queue entry consists of an arbitrary JavaScript value and a size that is
   // calculated by the size algorithm function provided in the stream constructor.
-  class Entry {
+  class Entry: public kj::Refcounted {
    public:
     explicit Entry(jsg::Value value, size_t size);
     KJ_DISALLOW_COPY_AND_MOVE(Entry);
@@ -667,7 +667,7 @@ class ValueQueue final {
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-    kj::Own<Entry> clone(jsg::Lock& js);
+    kj::Rc<Entry> clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ValueQueue::Entry) {
       tracker.trackField("value", value);
@@ -679,11 +679,11 @@ class ValueQueue final {
   };
 
   struct QueueEntry {
-    kj::Own<Entry> entry;
+    kj::Rc<Entry> entry;
     QueueEntry clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ValueQueue::QueueEntry) {
-      tracker.trackField("entry", entry);
+      tracker.trackFieldWithSize("entry", entry->getSize());
     }
   };
 
@@ -706,7 +706,7 @@ class ValueQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
-    void push(jsg::Lock& js, kj::Own<Entry> entry);
+    void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
 
@@ -740,7 +740,7 @@ class ValueQueue final {
 
   void maybeUpdateBackpressure();
 
-  void push(jsg::Lock& js, kj::Own<Entry> entry);
+  void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
   size_t size() const;
 
@@ -760,7 +760,7 @@ class ValueQueue final {
   QueueImpl impl;
 
   static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> entry);
+      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
@@ -878,7 +878,7 @@ class ByteQueue final {
 
   // A byte queue entry consists of a jsg::BufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
-  class Entry {
+  class Entry: public kj::Refcounted {
    public:
     explicit Entry(jsg::BufferSource store);
 
@@ -888,7 +888,7 @@ class ByteQueue final {
 
     void visitForGc(jsg::GcVisitor& visitor);
 
-    kj::Own<Entry> clone(jsg::Lock& js);
+    kj::Rc<Entry> clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ByteQueue::Entry) {
       tracker.trackField("store", store);
@@ -899,13 +899,13 @@ class ByteQueue final {
   };
 
   struct QueueEntry {
-    kj::Own<Entry> entry;
+    kj::Rc<Entry> entry;
     size_t offset;
 
     QueueEntry clone(jsg::Lock& js);
 
     JSG_MEMORY_INFO(ByteQueue::QueueEntry) {
-      tracker.trackField("entry", entry);
+      tracker.trackFieldWithSize("entry", entry->getSize());
     }
   };
 
@@ -928,7 +928,7 @@ class ByteQueue final {
 
     void read(jsg::Lock& js, ReadRequest request);
 
-    void push(jsg::Lock& js, kj::Own<Entry> entry);
+    void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
     void reset();
 
@@ -959,7 +959,7 @@ class ByteQueue final {
 
   void maybeUpdateBackpressure();
 
-  void push(jsg::Lock& js, kj::Own<Entry> entry);
+  void push(jsg::Lock& js, kj::Rc<Entry> entry);
 
   size_t size() const;
 
@@ -989,7 +989,7 @@ class ByteQueue final {
   QueueImpl impl;
 
   static void handlePush(
-      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Own<Entry> entry);
+      jsg::Lock& js, ConsumerImpl::Ready& state, QueueImpl& queue, kj::Rc<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       ConsumerImpl& consumer,
