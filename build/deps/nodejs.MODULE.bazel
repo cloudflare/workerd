@@ -1,7 +1,14 @@
 bazel_dep(name = "aspect_rules_esbuild", version = "0.22.1")
 bazel_dep(name = "aspect_rules_js", version = "2.5.0")
-bazel_dep(name = "aspect_rules_ts", version = "3.7.0")
+bazel_dep(name = "aspect_rules_ts")
 bazel_dep(name = "rules_nodejs", version = "6.5.0")
+
+# TODO(soon): Remove after next rules_ts release
+git_override(
+    module_name = "aspect_rules_ts",
+    remote = "https://github.com/aspect-build/rules_ts.git",
+    commit = "e7a6c5a30dde6448d735182de25a4ec8f6a35fcc",
+)
 
 NODE_VERSION = "22.18.0"
 

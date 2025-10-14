@@ -1,12 +1,8 @@
 import base64 from 'cloudflare-internal:base64';
 
 function base64Error(cause: unknown): Error {
-  // TODO(soon): Remove once we update to TS 5.9
-  // @ts-expect-error: Error.isError seems to be missing from types?
-  const isError: (_: unknown) => boolean = Error.isError; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-  if (isError(cause)) {
-    const e = cause as Error;
-    return new Error(`base64 error: ${e.message}`, { cause });
+  if (Error.isError(cause)) {
+    return new Error(`base64 error: ${cause.message}`, { cause });
   } else {
     return new Error('unknown base64 error');
   }
