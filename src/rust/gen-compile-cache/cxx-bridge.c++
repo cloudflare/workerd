@@ -1,11 +1,12 @@
 #include "cxx-bridge.h"
 
 #include <workerd/jsg/compile-cache.h>
-#include <workerd/jsg/type-wrapper.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/jsg/type-wrapper.h>
+
+#include <kj-rs/kj-rs.h>
 
 #include <capnp/serialize.h>
-#include <kj-rs/kj-rs.h>
 
 using namespace kj_rs;
 namespace workerd::rust::gen_compile_cache {
@@ -36,6 +37,7 @@ constexpr v8::ScriptCompiler::CompileOptions compileOptions = v8::ScriptCompiler
   auto data = ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& isolateLock) {
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
+      v8::TryCatch tryCatch(js.v8Isolate);
       auto resourceName = jsg::newExternalOneByteString(js, kj::from<Rust>(path));
       v8::ScriptOrigin origin(resourceName, resourceLineOffset, resourceColumnOffset,
           resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
@@ -48,6 +50,10 @@ constexpr v8::ScriptCompiler::CompileOptions compileOptions = v8::ScriptCompiler
       auto codeCache = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
       auto data = kj::arrayPtr(codeCache->data, codeCache->length).as<RustCopy>();
       delete codeCache;
+      if (tryCatch.HasCaught()) {
+        auto exception = js.exceptionToKj(js.v8Ref(tryCatch.Exception()));
+        KJ_FAIL_REQUIRE("JavaScript compilation error", path, exception.getDescription());
+      }
       return data;
     });
   });
