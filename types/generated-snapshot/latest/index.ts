@@ -9252,7 +9252,14 @@ export interface VectorizeError {
  *
  * This list is expected to grow as support for more operations are released.
  */
-export type VectorizeVectorMetadataFilterOp = "$eq" | "$ne";
+export type VectorizeVectorMetadataFilterOp =
+  | "$eq"
+  | "$ne"
+  | "$lt"
+  | "$lte"
+  | "$gt"
+  | "$gte";
+export type VectorizeVectorMetadataFilterCollectionOp = "$in" | "$nin";
 /**
  * Filter criteria for vector metadata used to limit the retrieved query result set.
  */
@@ -9265,6 +9272,12 @@ export type VectorizeVectorMetadataFilter = {
           VectorizeVectorMetadataValue,
           string[]
         > | null;
+      }
+    | {
+        [Op in VectorizeVectorMetadataFilterCollectionOp]?: Exclude<
+          VectorizeVectorMetadataValue,
+          string[]
+        >[];
       };
 };
 /**
