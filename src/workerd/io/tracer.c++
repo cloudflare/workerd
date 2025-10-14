@@ -512,9 +512,8 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
 
 void WorkerTracer::setReturn(
     kj::Maybe<kj::Date> timestamp, kj::Maybe<tracing::FetchResponseInfo> fetchResponseInfo) {
-  // Match the behavior of setEventInfo(). Any resolution of the TODO comments
-  // in setEventInfo() that are related to this check while probably also affect
-  // this function.
+  // Match the behavior of setEventInfo(). Any resolution of the TODO comments in setEventInfo()
+  // that are related to this check will probably also affect this function.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
   }
@@ -553,6 +552,10 @@ SpanParent BaseTracer::getUserRequestSpan() {
 void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     const kj::ConstString& methodName) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
   // Update the method name in the already-set JsRpcEventInfo for LTW compatibility
   KJ_IF_SOME(info, trace->eventInfo) {
     KJ_SWITCH_ONEOF(info) {
