@@ -1066,9 +1066,9 @@ kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
   // Deliver remaining streaming tail events in batches if possible.
   while (!current->queue.empty()) {
     auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-    auto eventsBuilder = builder.initEvents(current->queue.size());
-    size_t n = 0;
-    current->queue.drainTo([&](tracing::TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
+    auto eventsBuilder = builder.initEvents(1);
+    auto singleEvent = KJ_ASSERT_NONNULL(current->queue.pop());
+    singleEvent.copyTo(eventsBuilder[0]);
 
     auto result = co_await builder.send();
 
