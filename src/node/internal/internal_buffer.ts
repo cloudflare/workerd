@@ -43,6 +43,37 @@ import {
 
 const { ASCII, BASE64, BASE64URL, HEX, LATIN1, UTF16LE, UTF8 } = bufferUtil;
 
+// TODO(soon): Remove this once TypeScript recognizes base64/hex methods
+// Type declarations for V8 14.1+ ArrayBuffer base64/hex methods
+// https://tc39.es/proposal-arraybuffer-base64/
+declare global {
+  interface Uint8Array {
+    toHex(): string;
+    toBase64(options?: {
+      alphabet?: 'base64' | 'base64url';
+      omitPadding?: boolean;
+    }): string;
+    setFromHex(hexString: string): { read: number; written: number };
+    setFromBase64(
+      base64String: string,
+      options?: {
+        alphabet?: 'base64' | 'base64url';
+        lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial';
+      }
+    ): { read: number; written: number };
+  }
+  interface Uint8ArrayConstructor {
+    fromHex(hexString: string): Uint8Array;
+    fromBase64(
+      base64String: string,
+      options?: {
+        alphabet?: 'base64' | 'base64url';
+        lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial';
+      }
+    ): Uint8Array;
+  }
+}
+
 // Temporary buffers to convert numbers.
 const float32Array = new Float32Array(1);
 const uInt8Float32Array = new Uint8Array(float32Array.buffer);
@@ -376,7 +407,26 @@ function fromString(string: StringLike, encoding?: string) {
     throw new ERR_UNKNOWN_ENCODING(`${encoding}`);
   }
 
-  const ab = bufferUtil.decodeString(`${string}`, normalizedEncoding);
+  const str = `${string}`;
+  try {
+    if (normalizedEncoding === HEX) {
+      const u8 = Uint8Array.fromHex(str);
+      return fromArrayBuffer(u8.buffer, u8.byteOffset, u8.byteLength);
+    } else if (normalizedEncoding === BASE64) {
+      const u8 = Uint8Array.fromBase64(str, { lastChunkHandling: 'loose' });
+      return fromArrayBuffer(u8.buffer, u8.byteOffset, u8.byteLength);
+    } else if (normalizedEncoding === BASE64URL) {
+      const u8 = Uint8Array.fromBase64(str, {
+        alphabet: 'base64url',
+        lastChunkHandling: 'loose',
+      });
+      return fromArrayBuffer(u8.buffer, u8.byteOffset, u8.byteLength);
+    }
+  } catch {
+    // Native methods throw on invalid input, fall back to C++ for Node.js-compatible error handling
+  }
+
+  const ab = bufferUtil.decodeString(str, normalizedEncoding);
   if (ab === undefined) {
     throw new ERR_INVALID_ARG_VALUE(
       'string',
@@ -656,6 +706,17 @@ Buffer.prototype.toString = function toString(
     throw new ERR_UNKNOWN_ENCODING(`${encoding}`);
   }
 
+  if (normalizedEncoding === HEX) {
+    return this.subarray(start as number, end as number).toHex();
+  } else if (normalizedEncoding === BASE64) {
+    return this.subarray(start as number, end as number).toBase64();
+  } else if (normalizedEncoding === BASE64URL) {
+    return this.subarray(start as number, end as number).toBase64({
+      alphabet: 'base64url',
+      omitPadding: true,
+    });
+  }
+
   return bufferUtil.toString(
     this,
     start as number,
@@ -874,7 +935,7 @@ Buffer.prototype.base64Slice = function base64Slice(
 ) {
   validateOffset(start, 'start', 0, this.length);
   validateOffset(end, 'end', 0, this.length);
-  return bufferUtil.toString(this, start, end, BASE64);
+  return this.subarray(start, end).toBase64({ omitPadding: true });
 };
 
 Buffer.prototype.base64urlSlice = function base64urlSlice(
@@ -883,13 +944,16 @@ Buffer.prototype.base64urlSlice = function base64urlSlice(
 ) {
   validateOffset(start, 'start', 0, this.length);
   validateOffset(end, 'end', 0, this.length);
-  return bufferUtil.toString(this, start, end, BASE64URL);
+  return this.subarray(start, end).toBase64({
+    alphabet: 'base64url',
+    omitPadding: true,
+  });
 };
 
 Buffer.prototype.hexSlice = function hexSlice(start: number, end: number) {
   validateOffset(start, 'start', 0, this.length);
   validateOffset(end, 'end', 0, this.length);
-  return bufferUtil.toString(this, start, end, HEX);
+  return this.subarray(start, end).toHex();
 };
 
 Buffer.prototype.latin1Slice = function latin1Slice(
@@ -940,13 +1004,12 @@ Buffer.prototype.base64Write = function base64Write(
   length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
-  return bufferUtil.write(
-    this,
-    `${string}`,
+  const target = this.subarray(
     offset as number,
-    length as number,
-    BASE64
+    (offset as number) + (length as number)
   );
+  const result = target.setFromBase64(`${string}`);
+  return result.written;
 };
 
 Buffer.prototype.base64urlWrite = function base64urlWrite(
@@ -958,13 +1021,12 @@ Buffer.prototype.base64urlWrite = function base64urlWrite(
   length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
-  return bufferUtil.write(
-    this,
-    `${string}`,
+  const target = this.subarray(
     offset as number,
-    length as number,
-    BASE64URL
+    (offset as number) + (length as number)
   );
+  const result = target.setFromBase64(`${string}`, { alphabet: 'base64url' });
+  return result.written;
 };
 
 Buffer.prototype.hexWrite = function hexWrite(
@@ -976,13 +1038,12 @@ Buffer.prototype.hexWrite = function hexWrite(
   length ??= this.length;
   validateOffset(offset as number, 'offset', 0, this.length);
   validateOffset(length as number, 'length', 0, this.length - offset);
-  return bufferUtil.write(
-    this,
-    `${string}`,
+  const target = this.subarray(
     offset as number,
-    length as number,
-    HEX
+    ((offset as number) + length) as number
   );
+  const result = target.setFromHex(`${string}`);
+  return result.written;
 };
 
 Buffer.prototype.latin1Write = function latin1Write(

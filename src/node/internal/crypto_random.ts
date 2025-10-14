@@ -399,7 +399,8 @@ function unsignedBigIntToBuffer(bigint: bigint, name: string): Buffer {
 
   const hex = bigint.toString(16);
   const padded = hex.padStart(hex.length + (hex.length % 2), '0');
-  return Buffer.from(padded, 'hex');
+  const u8 = Uint8Array.fromHex(padded);
+  return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength);
 }
 
 function validateCandidate(candidate: PrimeNum): Buffer {

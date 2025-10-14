@@ -71,6 +71,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     search?: string | undefined;
     hash?: string | undefined;
   };
+  #encoder: TextEncoder | undefined;
 
   _ended: boolean = false;
 
@@ -276,9 +277,10 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       }
 
       if (options.auth && !this.getHeader('Authorization')) {
+        this.#encoder ??= new TextEncoder();
         this.setHeader(
           'Authorization',
-          'Basic ' + Buffer.from(options.auth).toString('base64')
+          'Basic ' + this.#encoder.encode(options.auth).toBase64()
         );
       }
     } else {

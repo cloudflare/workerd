@@ -1,6 +1,36 @@
 import { AiInternalError } from 'cloudflare-internal:ai-api';
 import type { GatewayOptions } from 'cloudflare-internal:aig-api';
-import base64 from 'cloudflare-internal:base64';
+
+// TODO(soon): Remove this once TypeScript recognizes base64/hex methods
+// Type declarations for V8 14.1+ ArrayBuffer base64/hex methods
+// https://tc39.es/proposal-arraybuffer-base64/
+declare global {
+  interface Uint8Array {
+    toHex(): string;
+    toBase64(options?: {
+      alphabet?: 'base64' | 'base64url';
+      omitPadding?: boolean;
+    }): string;
+    setFromHex(hexString: string): { read: number; written: number };
+    setFromBase64(
+      base64String: string,
+      options?: {
+        alphabet?: 'base64' | 'base64url';
+        lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial';
+      }
+    ): { read: number; written: number };
+  }
+  interface Uint8ArrayConstructor {
+    fromHex(hexString: string): Uint8Array;
+    fromBase64(
+      base64String: string,
+      options?: {
+        alphabet?: 'base64' | 'base64url';
+        lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial';
+      }
+    ): Uint8Array;
+  }
+}
 
 interface Fetcher {
   fetch: typeof fetch;
@@ -27,7 +57,8 @@ export type SupportedFileFormat = {
 };
 
 async function blobToBase64(blob: Blob): Promise<string> {
-  return base64.encodeArrayToString(await blob.arrayBuffer());
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer).toBase64();
 }
 
 export class ToMarkdownService {
