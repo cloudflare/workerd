@@ -296,7 +296,7 @@ export function compileFunction(
     columnOffset = 0,
     lineOffset = 0,
     cachedData = undefined,
-    produceCachedData = false,
+    produceCachedData = false, // eslint-disable-line @typescript-eslint/no-deprecated
     parsingContext = undefined,
     contextExtensions = [],
     importModuleDynamically = false,

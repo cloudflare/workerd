@@ -50,11 +50,16 @@ export class Worker extends EventEmitter implements _Worker {
   stderr: Readable;
   stdout: Readable;
   threadId: number;
+  threadName: string = 'workerd';
   performance: WorkerPerformance;
 
   constructor() {
     super();
     throw new ERR_METHOD_NOT_IMPLEMENTED('Worker');
+  }
+
+  cpuUsage(_prev?: NodeJS.CpuUsage): Promise<NodeJS.CpuUsage> {
+    return Promise.reject(new ERR_METHOD_NOT_IMPLEMENTED('Worker.cpuUsage'));
   }
 
   postMessage(_value: unknown, _transferList?: readonly Transferable[]): void {

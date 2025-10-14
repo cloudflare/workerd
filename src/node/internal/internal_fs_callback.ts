@@ -321,7 +321,7 @@ export function cp(
       throw new ERR_INVALID_ARG_TYPE(
         'options.filter',
         'function',
-        options.filter // eslint-disable-line @typescript-eslint/unbound-method
+        options.filter
       );
     }
     // We do not implement the filter option currently. There's a bug in the Node.js

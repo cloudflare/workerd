@@ -300,7 +300,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     if (this.method !== 'GET' && this.method !== 'HEAD') {
       if (this.#body.length > 0) {
         const value = this.getHeader('content-type') ?? '';
-        body = new Blob(this.#body, {
+        body = new Blob(this.#body as BlobPart[], {
           type: Array.isArray(value) ? value.join(', ') : `${value}`,
         });
       }

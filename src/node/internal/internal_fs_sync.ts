@@ -245,7 +245,7 @@ export function cpSync(
       throw new ERR_INVALID_ARG_TYPE(
         'options.filter',
         'function',
-        options.filter // eslint-disable-line @typescript-eslint/unbound-method
+        options.filter
       );
     }
     throw new ERR_UNSUPPORTED_OPERATION();

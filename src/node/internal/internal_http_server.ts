@@ -130,6 +130,7 @@ export class Server
   joinDuplicateHeaders: boolean = false;
   rejectNonStandardBodyWrites: boolean = false;
   keepAliveTimeout: number = 5_000;
+  keepAliveTimeoutBuffer: number = 1_000;
   highWaterMark: number = getDefaultHighWaterMark();
   #port: number | null = null;
 
@@ -462,6 +463,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
 
         if (streamController) {
           if (chunk.length > 0) {
+            // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
             streamController.enqueue(chunk);
           }
         } else {
@@ -492,6 +494,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
             onStreamStart: (controller) => {
               streamController = controller;
               for (const chunk of chunks) {
+                // @ts-expect-error TS2345 Buffer extends Uint8Array, but has ArrayBufferLike instead of ArrayBuffer.
                 controller.enqueue(chunk);
               }
               chunks.length = 0;
@@ -757,6 +760,12 @@ export function storeHTTPOptions(
   if (keepAliveTimeout !== undefined) {
     validateInteger(keepAliveTimeout, 'keepAliveTimeout', 0);
     throw new ERR_OPTION_NOT_IMPLEMENTED('keepAliveTimeout');
+  }
+
+  const keepAliveTimeoutBuffer = options.keepAliveTimeoutBuffer;
+  if (keepAliveTimeoutBuffer !== undefined) {
+    validateInteger(keepAliveTimeoutBuffer, 'keepAliveTimeoutBuffer');
+    throw new ERR_OPTION_NOT_IMPLEMENTED('keepAliveTimeoutBuffer');
   }
 
   const connectionsCheckingInterval = options.connectionsCheckingInterval;
