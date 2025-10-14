@@ -37,24 +37,24 @@ constexpr v8::ScriptCompiler::CompileOptions compileOptions = v8::ScriptCompiler
   auto data = ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& isolateLock) {
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
-      v8::TryCatch tryCatch(js.v8Isolate);
-      auto resourceName = jsg::newExternalOneByteString(js, kj::from<Rust>(path));
-      v8::ScriptOrigin origin(resourceName, resourceLineOffset, resourceColumnOffset,
-          resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
+      return js.tryCatch([&]() {
+        auto resourceName = jsg::newExternalOneByteString(js, kj::from<Rust>(path));
+        v8::ScriptOrigin origin(resourceName, resourceLineOffset, resourceColumnOffset,
+            resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
 
-      auto contentStr = jsg::newExternalOneByteString(js, kj::from<Rust>(source));
-      auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
-      auto module =
-          jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
+        auto contentStr = jsg::newExternalOneByteString(js, kj::from<Rust>(source));
+        auto source = v8::ScriptCompiler::Source(contentStr, origin, nullptr);
+        auto module =
+            jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source, compileOptions));
 
-      auto codeCache = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
-      auto data = kj::arrayPtr(codeCache->data, codeCache->length).as<RustCopy>();
-      delete codeCache;
-      if (tryCatch.HasCaught()) {
-        auto exception = js.exceptionToKj(js.v8Ref(tryCatch.Exception()));
-        KJ_FAIL_REQUIRE("JavaScript compilation error", path, exception.getDescription());
-      }
-      return data;
+        auto codeCache = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript());
+        auto data = kj::arrayPtr(codeCache->data, codeCache->length).as<RustCopy>();
+        delete codeCache;
+        return data;
+      }, [&](jsg::Value exception) -> ::rust::Vec<uint8_t> {
+        auto kjException = js.exceptionToKj(kj::mv(exception));
+        KJ_FAIL_REQUIRE("JavaScript compilation error", path, kjException.getDescription());
+      });
     });
   });
 
