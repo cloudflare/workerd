@@ -95,7 +95,7 @@ export class Cluster extends EventEmitter implements _Cluster {
     setupPrimary(settings);
   }
   setupMaster(settings?: ClusterSettings): void {
-    setupPrimary(settings);
+    setupMaster(settings);
   }
   disconnect(): void {
     disconnect();
