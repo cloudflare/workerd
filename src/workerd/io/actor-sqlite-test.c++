@@ -2169,5 +2169,45 @@ KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
   KJ_EXPECT_THROW_MESSAGE("alarm commit failed", promise.wait(test.ws));
 }
 
+KJ_TEST("sync() throws after critical error in explicit transaction") {
+  ActorSqliteTest test({.monitorOutputGate = false});
+
+  // Start an explicit transaction
+  auto txn = test.actor.startTransaction();
+
+  // Do a write within the transaction
+  txn->put(kj::str("foo"), kj::heapArray(kj::str("bar").asBytes()), {});
+
+  // Trigger a critical error using SQLITE_NOMEM by setting a very low heap limit
+  // and then trying to insert a large value.
+  try {
+    // Set SQLite's memory limit very low to trigger SQLITE_NOMEM
+    test.db.run("PRAGMA hard_heap_limit=8192");  // 8KB limit
+
+    // Create data that will exceed the memory limit
+    auto largeData = kj::heapArray<byte>(50000, 'X');  // 50KB
+
+    // This should trigger SQLITE_NOMEM, causing SQLite to auto-rollback the transaction,
+    // which will trigger the critical error handler.
+    //
+    // We have to copy it again in order to convert to a Array<const byte> from an Array<byte>.
+    txn->put(kj::str("large_key"), kj::heapArray<const byte>(largeData.asBytes()), /*options=*/{});
+    KJ_FAIL_ASSERT("Query should have failed with SQLITE_NOMEM");
+  } catch (kj::Exception& e) {
+    // Expected: out of memory error. We catch and ignore this to continue the test.
+    KJ_ASSERT(e.getDescription().contains("out of memory"));
+  }
+
+  // sync() should also throw an exception because the storage is now broken
+  auto syncResult = test.sync();
+  KJ_ASSERT(syncResult != kj::none);
+  auto syncPromise = kj::mv(KJ_ASSERT_NONNULL(syncResult));
+  KJ_EXPECT_THROW_MESSAGE("broken", syncPromise.wait(test.ws));
+
+  // The transaction is now in a broken state due to the critical error.
+  // Attempting to commit should fail.
+  KJ_EXPECT_THROW_MESSAGE("broken", txn->commit());
+}
+
 }  // namespace
 }  // namespace workerd
