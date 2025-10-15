@@ -4,13 +4,12 @@ bazel_dep(name = "bazel_skylib", version = "1.8.1")
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_cc", version = "0.2.8")
 
-http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-http_archive(
+git_repository(
     name = "codspeed",
-    url = "https://api.github.com/repos/CodSpeedHQ/codspeed-cpp/tarball/v1.2.0",
+    commit = "2b6afb971742dfc003aa350a6aae4efc33f933f4",
     patches = ["codspeed_pr_21.patch"],
-    strip_prefix = "CodSpeedHQ-codspeed-cpp-719c41f",
-    type = "tgz",
-    sha256 = "1ced2c2e813313a574f41de9a218f38b53a4114cf7e72ee286801eaba6d8b240",
+    recursive_init_submodules = True,
+    remote = "https://github.com/CodSpeedHQ/codspeed-cpp",
 )
