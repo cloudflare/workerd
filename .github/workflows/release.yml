@@ -16,7 +16,7 @@ on:
         default: false
 permissions:
   id-token: write
-  contents: read
+  contents: write
   actions: write
 
 jobs:
