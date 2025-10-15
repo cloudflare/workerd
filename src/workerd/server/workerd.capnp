@@ -185,6 +185,12 @@ struct Service {
     # An HTTP service backed by a directory on disk, supporting a basic HTTP GET/PUT. Generally
     # not intended to be exposed directly to the internet; typically you want to bind this into
     # a Worker that adds logic for setting Content-Type and the like.
+
+    database @6 :DatabaseServer;
+    # A service that fowards all requests to a specific remote database server.
+    # This differs from ExternalServer because this allows clients to control
+    # upgrading TLS for their external database. Useful for database drivers
+    # that call startTls after initial tcp connection has been opened.
   }
 
   # TODO(someday): Allow defining a list of middlewares to stack on top of the service. This would
@@ -781,6 +787,35 @@ struct ExternalServer {
 
     # TODO(someday): Cap'n Proto RPC
   }
+}
+
+struct DatabaseServer {
+  # Defines a custom database egress where the client
+  # can control the tcp communication to the external database.
+  # This is useful for cases such as a database driver will
+  # optionally call startTls.
+
+  address @0 :Text;
+  # Address/port of the server. Optional; if not specified, then you will be required to specify
+  # the address on the command line with with `--external-addr <name>=<addr>`.
+
+  tcp :group {
+    # Connect to the server over raw TCP. Bindings to this service will only support the
+    # `connect()` method; `fetch()` will throw an exception.
+    tlsOptions @1 :TlsOptions;
+    certificateHost @2 :Text;
+  }
+
+  sslmode @3 :Text = "prefer";
+  # sslmode will give the client the ability to upgrade TLS stream
+  # after initial connection is created.
+  # SSL modes supported are 'prefer' and 'require'
+  # prefer - Try TLS connection, if that fails fall back to plain tcp
+  # require - Client requires server to accept ssl, fails if TLS connection is not established
+  # Default behavior is 'prefer'
+
+  scheme @4 :Text;
+  # Database scheme defines either Postgres or MySQL database.
 }
 
 struct Network {

@@ -220,6 +220,9 @@ class Server final: private kj::TaskSet::ErrorHandler {
   kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
+  kj::Own<Service> makeDatabaseService(kj::StringPtr name,
+      config::DatabaseServer::Reader conf,
+      kj::HttpHeaderTable::Builder& headerTableBuilder);
   kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
       config::Worker::Reader conf,
       capnp::List<config::Extension>::Reader extensions);
@@ -252,6 +255,7 @@ class Server final: private kj::TaskSet::ErrorHandler {
   class ExternalTcpService;
   class NetworkService;
   class DiskDirectoryService;
+  class DatabaseService;
   class WorkerService;
   class WorkerEntrypointService;
   class HttpListener;
