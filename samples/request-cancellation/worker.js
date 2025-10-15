@@ -4,15 +4,27 @@
 
 export default {
   async fetch(request, env, ctx) {
-    request.signal.addEventListener('abort', () => {
-      console.log('Request was aborted');
+    // This sets up an event listener that will be called if the client disconnects from your
+    // worker.
+    request.signal.addEventListener("abort", () => {
+      console.log("The request was aborted!");
     });
 
-    console.log('Starting long-running task');
-    // Simulate a long-running task so we can test aborting
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    ctx.waitUntil(new Promise((resolve) => setTimeout(resolve, 4000)));
-
-    return new Response("Request was not aborted");
-  }
+    const { readable, writable } = new IdentityTransformStream();
+    sendPing(writable);
+    return new Response(readable, {
+      headers: { "Content-Type": "text/plain" },
+    });
+  },
 };
+
+async function sendPing(writable) {
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+
+  for (;;) {
+    // Send 'ping' every second to keep the connection alive
+    await writer.write(enc.encode("ping\r\n"));
+    await scheduler.wait(1000);
+  }
+}
