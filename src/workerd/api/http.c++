@@ -2016,7 +2016,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
 
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(cfRay, headers.get(headerIds.cfRay)) {
-          ctx.userSpan.setTag("http.response.header.cf-ray"_kjc, kj::str(cfRay));
+          ctx.userSpan.setTag("cloudflare.ray_id"_kjc, kj::str(cfRay));
         }
       }
 
