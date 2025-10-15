@@ -18,7 +18,7 @@ permissions:
   id-token: write
   contents: read
   actions: write
-  
+
 jobs:
   version:
     outputs:
@@ -185,7 +185,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd-${{ matrix.arch }}/package.json
         env:
@@ -247,7 +247,7 @@ jobs:
       - name: Use Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Cache
         id: cache
