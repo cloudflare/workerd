@@ -206,19 +206,13 @@ class TextDecoder final: public jsg::Object {
 // https://encoding.spec.whatwg.org/#interface-textencoder
 class TextEncoder final: public jsg::Object {
  public:
-  struct EncodeIntoResult {
-    int read;
-    int written;
-    // TODO(conform): Perhaps use unsigned long long.
-
-    JSG_STRUCT(read, written);
-  };
+  TextEncoder(jsg::Lock& js);
 
   static jsg::Ref<TextEncoder> constructor(jsg::Lock& js);
 
   jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 
-  EncodeIntoResult encodeInto(jsg::Lock& js, jsg::JsString input, jsg::BufferSource buffer);
+  jsg::JsObject encodeInto(jsg::Lock& js, jsg::JsString input, jsg::BufferSource buffer);
 
   // UTF-8 is the only encoding type supported by the WHATWG spec.
   kj::StringPtr getEncoding() {
@@ -239,11 +233,19 @@ class TextEncoder final: public jsg::Object {
     // `Uint8Array`. The spec defines that this function returns a `Uint8Array` too.
     JSG_TS_OVERRIDE({
       encode(input?: string): Uint8Array;
+      encodeInto(input: string, buffer: ArrayBuffer | ArrayBufferView): TextEncoderEncodeIntoResult;
+    });
+    JSG_TS_DEFINE(interface TextEncoderEncodeIntoResult {
+      read: number;
+      written: number;
     });
   }
+
+ private:
+  v8::Global<v8::ObjectTemplate> encodeIntoTemplate;
 };
 
 #define EW_ENCODING_ISOLATE_TYPES                                                                  \
   api::TextDecoder, api::TextEncoder, api::TextDecoder::ConstructorOptions,                        \
-      api::TextDecoder::DecodeOptions, api::TextEncoder::EncodeIntoResult
+      api::TextDecoder::DecodeOptions
 }  // namespace workerd::api

@@ -534,6 +534,10 @@ JsObject Lock::obj() {
   return JsObject(v8::Object::New(v8Isolate));
 }
 
+JsObject Lock::obj(v8::Local<v8::ObjectTemplate> tmpl) {
+  return JsObject(jsg::check(tmpl->NewInstance(v8Context())));
+}
+
 JsObject Lock::obj(kj::ArrayPtr<kj::StringPtr> keys, kj::ArrayPtr<JsValue> values) {
   KJ_DASSERT(keys.size() == values.size());
   v8::LocalVector<v8::Name> keys_(v8Isolate, keys.size());

@@ -1307,6 +1307,10 @@ declare class TextDecoder {
   get fatal(): boolean;
   get ignoreBOM(): boolean;
 }
+interface TextEncoderEncodeIntoResult {
+  read: number;
+  written: number;
+}
 /**
  * TextEncoder takes a stream of code points as input and emits a stream of bytes. For a more scalable, non-native library, see StringView – a C-like representation of strings based on typed arrays.
  *
@@ -1337,10 +1341,6 @@ interface TextDecoderConstructorOptions {
 }
 interface TextDecoderDecodeOptions {
   stream: boolean;
-}
-interface TextEncoderEncodeIntoResult {
-  read: number;
-  written: number;
 }
 /**
  * Events providing information related to errors in scripts or in files.
