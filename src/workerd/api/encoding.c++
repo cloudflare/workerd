@@ -464,24 +464,13 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-namespace {
-TextEncoder::EncodeIntoResult encodeIntoImpl(
-    jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-  return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
-  };
-}
-}  // namespace
-
 jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
   auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
       "Cannot allocate space for TextEncoder.encode");
-  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
-  KJ_DASSERT(result.written == view.size());
+  [[maybe_unused]] auto [read, written] = str.writeInto(
+      js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  KJ_DASSERT(written == view.size());
   return kj::mv(view);
 }
 
@@ -489,7 +478,12 @@ TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::BufferSource buffer) {
   auto handle = buffer.getHandle(js);
   JSG_REQUIRE(handle->IsUint8Array(), TypeError, "buffer must be a Uint8Array");
-  return encodeIntoImpl(js, input, buffer);
+  auto result = input.writeInto(
+      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+  return TextEncoder::EncodeIntoResult{
+    .read = result.read,
+    .written = result.written,
+  };
 }
 
 }  // namespace workerd::api

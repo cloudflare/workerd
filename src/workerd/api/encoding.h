@@ -207,9 +207,8 @@ class TextDecoder final: public jsg::Object {
 class TextEncoder final: public jsg::Object {
  public:
   struct EncodeIntoResult {
-    int read;
-    int written;
-    // TODO(conform): Perhaps use unsigned long long.
+    size_t read;
+    size_t written;
 
     JSG_STRUCT(read, written);
   };
