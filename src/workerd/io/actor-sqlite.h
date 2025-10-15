@@ -219,23 +219,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // The alarm state for which we last received confirmation that the db was durably stored.
   kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
 
-  // The latest time we'd expect a scheduled alarm to fire, given the current set of in-flight
-  // scheduling requests, without yet knowing if any of them succeeded or failed.  We use this
-  // value to maintain the invariant that the scheduled alarm is always equal to or earlier than
-  // the alarm value in the persisted database state.
-  kj::Maybe<kj::Date> alarmScheduledNoLaterThan;
+  // The current alarm time according to our source of truth.
+  kj::Maybe<kj::Date> currentGuaranteedAlarmTime;
+
+  // Track if we're currently fixing an alarm mismatch to prevent duplicates
+  kj::Maybe<kj::ForkedPromise<void>> alarmFixupInProgress;
 
   // A promise for an in-progress alarm notification update and database commit.
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
-
-  class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
-   public:
-    void taskFailed(kj::Exception&& exception) override;
-  };
-  AlarmLaterErrorHandler alarmLaterErrorHandler;
-  kj::TaskSet alarmLaterTasks;
 
   void startImplicitTxn();
 
