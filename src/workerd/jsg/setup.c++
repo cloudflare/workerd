@@ -230,6 +230,7 @@ void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
 }
 
 void IsolateBase::deferDestruction(Item item) {
+  KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
   queue.lockExclusive()->push(kj::mv(item));
 }
 
@@ -457,6 +458,7 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     ptr->Dispose();
+    ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });
