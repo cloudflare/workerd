@@ -152,13 +152,12 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
   v8::Local<v8::Object> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
     auto isolate = js.v8Isolate;
-    v8::EscapableHandleScope handleScope(isolate);
     auto& fields = getFields(isolate);
     v8::Local<v8::Object> out = v8::Object::New(isolate);
     (kj::get<indices>(fields).wrap(
          js, static_cast<Self&>(*this), isolate, context, creator, in, out),
         ...);
-    return handleScope.Escape(out);
+    return out;
   }
 
   kj::Maybe<T> tryUnwrap(Lock& js,
@@ -193,7 +192,6 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
 
     if (!handle->IsObject()) return kj::none;
 
-    v8::HandleScope handleScope(js.v8Isolate);
     auto& fields = getFields(js.v8Isolate);
     auto in = handle.As<v8::Object>();
 

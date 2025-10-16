@@ -2014,6 +2014,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         headers.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
       }
 
+      KJ_IF_SOME(ctx, traceContext) {
+        KJ_IF_SOME(cfRay, headers.get(headerIds.cfRay)) {
+          ctx.userSpan.setTag("cloudflare.ray_id"_kjc, kj::str(cfRay));
+        }
+      }
+
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
       auto& nr = KJ_ASSERT_NONNULL(nativeRequest);
       auto stream = newSystemStream(kj::mv(nr.body), StreamEncoding::IDENTITY);
