@@ -1646,8 +1646,7 @@ export class SocketAddress implements _SocketAddress {
 
   constructor(options: SocketAddressInitOptions = {}) {
     validateObject(options, 'options');
-    const { family } = options;
-    this.#family = (family as IPVersion | undefined) || 'ipv4';
+    this.#family = options.family || 'ipv4';
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (typeof this.#family?.toLowerCase === 'function')
       this.#family = this.#family.toLowerCase() as IPVersion;

@@ -43,6 +43,7 @@ import {
 } from 'node-internal:internal_errors';
 import { default as urlUtil } from 'node-internal:url';
 import { spliceOne } from 'node-internal:internal_utils';
+import type { URLFormatOptions } from 'node:url';
 
 // Reference: RFC 3986, RFC 1808, RFC 2396
 
@@ -961,7 +962,7 @@ export function parse(
 // Format a parsed object into a url string
 export function format(
   urlObject: typeof Url | URL | string | null,
-  options: unknown
+  options?: URLFormatOptions
 ): string {
   // Ensure it's an object, and not a string url.
   // If it's an object, this is a no-op.
@@ -985,19 +986,19 @@ export function format(
       validateObject(options, 'options');
 
       if (options.fragment != null) {
-        fragment = Boolean(options.fragment);
+        fragment = Boolean(options.fragment); // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
       }
 
       if (options.unicode != null) {
-        unicode = Boolean(options.unicode);
+        unicode = Boolean(options.unicode); // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
       }
 
       if (options.search != null) {
-        search = Boolean(options.search);
+        search = Boolean(options.search); // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
       }
 
       if (options.auth != null) {
-        auth = Boolean(options.auth);
+        auth = Boolean(options.auth); // eslint-disable-line @typescript-eslint/no-unnecessary-type-conversion
       }
     }
 

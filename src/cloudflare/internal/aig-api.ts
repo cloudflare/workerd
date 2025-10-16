@@ -226,7 +226,10 @@ export class AiGateway {
 
   run(
     data: AIGatewayUniversalRequest | AIGatewayUniversalRequest[],
-    options?: { gateway?: UniversalGatewayOptions; extraHeaders?: object }
+    options?: {
+      gateway?: UniversalGatewayOptions;
+      extraHeaders?: Record<string, string>;
+    }
   ): Promise<Response> {
     const input = Array.isArray(data) ? data : [data];
 
@@ -259,7 +262,7 @@ export class AiGateway {
 
   #getHeadersFromOptions(
     options?: UniversalGatewayOptions,
-    extraHeaders?: object
+    extraHeaders?: Record<string, string>
   ): Headers {
     const headers = new Headers();
     headers.set('content-type', 'application/json');
@@ -320,7 +323,7 @@ export class AiGateway {
 
     if (extraHeaders) {
       for (const [key, value] of Object.entries(extraHeaders)) {
-        headers.set(key, value as string);
+        headers.set(key, value);
       }
     }
 

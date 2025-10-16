@@ -288,18 +288,17 @@ export function tracingChannel(
         this[kError] = channel(`tracing:${nameOrChannels}:error`);
       } else {
         validateObject(nameOrChannels, 'channels');
-        const channels = nameOrChannels as TracingChannels;
-        this[kStart] = validateChannel(channels.start, 'channels.start');
-        this[kEnd] = validateChannel(channels.end, 'channels.end');
+        this[kStart] = validateChannel(nameOrChannels.start, 'channels.start');
+        this[kEnd] = validateChannel(nameOrChannels.end, 'channels.end');
         this[kAsyncStart] = validateChannel(
-          channels.asyncStart,
+          nameOrChannels.asyncStart,
           'channels.asyncStart'
         );
         this[kAsyncEnd] = validateChannel(
-          channels.asyncEnd,
+          nameOrChannels.asyncEnd,
           'channels.asyncEnd'
         );
-        this[kError] = validateChannel(channels.error, 'channels.error');
+        this[kError] = validateChannel(nameOrChannels.error, 'channels.error');
       }
     },
     [],

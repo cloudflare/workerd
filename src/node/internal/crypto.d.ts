@@ -257,7 +257,7 @@ export interface EdKeyPairOptions {
 
 export interface DhKeyPairOptions {
   primeOrGroup: BufferSource | number | string;
-  generator?: number;
+  generator?: number | undefined;
 }
 
 export function generateRsaKeyPair(options: RsaKeyPairOptions): CryptoKeyPair;
