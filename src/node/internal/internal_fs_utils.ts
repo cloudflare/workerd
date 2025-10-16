@@ -297,7 +297,7 @@ export function validateRmDirArgs(
   options: RmDirOptions
 ): { path: URL; recursive: boolean } {
   validateObject(options, 'options');
-  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options;
+  const { maxRetries = 0, recursive = false, retryDelay = 0 } = options; // eslint-disable-line @typescript-eslint/no-deprecated
   // We do not implement the maxRetries or retryDelay options in any meaningful
   // way. We just validate them.
   validateUint32(maxRetries, 'options.maxRetries');
@@ -368,7 +368,7 @@ export function validateOpendirArgs(
   validateBoolean(recursive, 'options.recursive');
   return {
     path: normalizePath(path),
-    encoding: encoding as BufferEncoding,
+    encoding,
     recursive,
   };
 }
@@ -477,12 +477,13 @@ export function validateWriteFileArgs(
     flag = 'w',
     flush = false,
   } = options;
+  // @ts-expect-error TS2367 types does not overlap.
   if (encoding !== 'buffer' && !Buffer.isEncoding(encoding)) {
     throw new ERR_INVALID_ARG_VALUE('options.encoding', encoding);
   }
   validateBoolean(flush, 'options.flush');
   parseFileMode(mode, 'options.mode', 0o666);
-  const newFlag = stringToFlags(flag as string);
+  const newFlag = stringToFlags(flag);
 
   const append = Boolean(newFlag & O_APPEND);
   const write = Boolean(newFlag & O_WRONLY || newFlag & O_RDWR) || append;

@@ -312,7 +312,7 @@ export function compileFunction(
   if (parsingContext !== undefined) {
     if (
       typeof parsingContext !== 'object' ||
-      parsingContext === null ||
+      parsingContext === null || // eslint-disable-line @typescript-eslint/no-unnecessary-condition
       !isContext(parsingContext)
     ) {
       throw new ERR_INVALID_ARG_TYPE(

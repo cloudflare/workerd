@@ -46,6 +46,7 @@ import {
 import { Buffer, kMaxLength } from 'node-internal:internal_buffer';
 
 import { arrayBufferToUnsignedBigInt } from 'node-internal:crypto_util';
+import type { RandomUUIDOptions } from 'node:crypto';
 
 export type RandomBytesCallback = (
   err: Error | null,
@@ -264,7 +265,7 @@ export function randomInt(
   return undefined;
 }
 
-export function randomUUID(options: unknown): string {
+export function randomUUID(options?: RandomUUIDOptions): string {
   // While we do not actually use the entropy cache, we go ahead and validate
   // the input parameters as Node.js does.
   if (options !== undefined) {
