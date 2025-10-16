@@ -474,8 +474,7 @@ export const testHttpGetTestSearchParams = {
         hostname: env.SIDECAR_HOSTNAME,
         port: env.HELLO_WORLD_SERVER_PORT,
         method: 'POST',
-        path: '/search-path',
-        search: '?hello=world',
+        path: '/search-path?hello=world',
       },
       (res) => {
         strictEqual(res.statusCode, 200);
