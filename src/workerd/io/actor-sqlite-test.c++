@@ -9,6 +9,8 @@
 #include <workerd/util/capnp-mock.h>
 #include <workerd/util/test.h>
 
+#include <sqlite3.h>
+
 #include <kj/debug.h>
 #include <kj/test.h>
 
@@ -2147,6 +2149,12 @@ KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
 
 KJ_TEST("sync() throws after critical error in explicit transaction") {
   ActorSqliteTest test({.monitorOutputGate = false});
+  auto heapLimit = [&]() {
+    auto row = test.db.run("PRAGMA hard_heap_limit");
+    return row.getInt(0);
+  }();
+  KJ_DBG(heapLimit);
+  KJ_DEFER(sqlite3_hard_heap_limit64(heapLimit););
 
   // Start an explicit transaction
   auto txn = test.actor.startTransaction();
