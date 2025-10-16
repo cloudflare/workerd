@@ -12,8 +12,8 @@
 namespace workerd {
 namespace {
 
-struct TextEncoderBenchmark: public benchmark::Fixture {
-  virtual ~TextEncoderBenchmark() noexcept(true) {}
+struct TextEncoder: public benchmark::Fixture {
+  virtual ~TextEncoder() noexcept(true) {}
 
   void SetUp(benchmark::State& state) noexcept(true) override {
     TestFixture::SetupParams params = {.mainModuleSource = R"(
@@ -65,68 +65,63 @@ struct TextEncoderBenchmark: public benchmark::Fixture {
   kj::Own<TestFixture> fixture;
 };
 
-BENCHMARK_F(TextEncoderBenchmark, Encode_ASCII_32)(benchmark::State& state) {
+// Parameterized benchmark to avoid duplication
+// Args format: (operation, type, length)
+// operation: 0=encode, 1=encodeInto
+// type: 0=ascii, 1=one-byte, 2=two-byte
+BENCHMARK_DEFINE_F(TextEncoder, Parameterized)(benchmark::State& state) {
+  const char* op = state.range(0) == 0 ? "encode" : "encodeInto";
+  const char* type;
+  switch (state.range(1)) {
+    case 0:
+      type = "ascii";
+      break;
+    case 1:
+      type = "one-byte";
+      break;
+    case 2:
+      type = "two-byte";
+      break;
+    default:
+      type = "ascii";
+      break;
+  }
+  int64_t len = state.range(2);
+
+  auto url = kj::str("http://example.com?op=", op, "&type=", type, "&len=", len);
+
   for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=ascii&len=32"_kj, ""_kj));
+    benchmark::DoNotOptimize(fixture->runRequest(kj::HttpMethod::GET, url, ""_kj));
   }
 }
 
-BENCHMARK_F(TextEncoderBenchmark, Encode_ASCII_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=ascii&len=256"_kj, ""_kj));
-  }
-}
+#define TEXT_ENCODER_BENCH(op_name, op_val, type_name, type_val, len)                              \
+  BENCHMARK_REGISTER_F(TextEncoder, Parameterized)                                                 \
+      ->Args({op_val, type_val, len})                                                              \
+      ->Name(#op_name "_" #type_name "_" #len)
 
-BENCHMARK_F(TextEncoderBenchmark, Encode_ASCII_1024)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=ascii&len=1024"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, Encode_ASCII_8192)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=ascii&len=8192"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, Encode_OneByte_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=one-byte&len=256"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, Encode_TwoByte_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encode&type=two-byte&len=256"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, EncodeInto_ASCII_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encodeInto&type=ascii&len=256"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, EncodeInto_OneByte_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encodeInto&type=one-byte&len=256"_kj, ""_kj));
-  }
-}
-
-BENCHMARK_F(TextEncoderBenchmark, EncodeInto_TwoByte_256)(benchmark::State& state) {
-  for (auto _: state) {
-    benchmark::DoNotOptimize(fixture->runRequest(
-        kj::HttpMethod::GET, "http://example.com?op=encodeInto&type=two-byte&len=256"_kj, ""_kj));
-  }
-}
+// Note: Google Benchmark will append the arg values to the name (e.g., "Encode_ASCII_32/0/0/32")
+// where the trailing numbers are the actual argument values passed via ->Args():
+//   /0/0/32 = operation (0=encode, 1=encodeInto) / type (0=ascii, 1=one-byte, 2=two-byte) / length
+TEXT_ENCODER_BENCH(Encode, 0, ASCII, 0, 32);
+TEXT_ENCODER_BENCH(Encode, 0, ASCII, 0, 256);
+TEXT_ENCODER_BENCH(Encode, 0, ASCII, 0, 1024);
+TEXT_ENCODER_BENCH(Encode, 0, ASCII, 0, 8192);
+TEXT_ENCODER_BENCH(Encode, 0, OneByte, 1, 256);
+TEXT_ENCODER_BENCH(Encode, 0, OneByte, 1, 1024);
+TEXT_ENCODER_BENCH(Encode, 0, OneByte, 1, 8192);
+TEXT_ENCODER_BENCH(Encode, 0, TwoByte, 2, 256);
+TEXT_ENCODER_BENCH(Encode, 0, TwoByte, 2, 1024);
+TEXT_ENCODER_BENCH(Encode, 0, TwoByte, 2, 8192);
+TEXT_ENCODER_BENCH(EncodeInto, 1, ASCII, 0, 256);
+TEXT_ENCODER_BENCH(EncodeInto, 1, ASCII, 0, 1024);
+TEXT_ENCODER_BENCH(EncodeInto, 1, ASCII, 0, 8192);
+TEXT_ENCODER_BENCH(EncodeInto, 1, OneByte, 1, 256);
+TEXT_ENCODER_BENCH(EncodeInto, 1, OneByte, 1, 1024);
+TEXT_ENCODER_BENCH(EncodeInto, 1, OneByte, 1, 8192);
+TEXT_ENCODER_BENCH(EncodeInto, 1, TwoByte, 2, 256);
+TEXT_ENCODER_BENCH(EncodeInto, 1, TwoByte, 2, 1024);
+TEXT_ENCODER_BENCH(EncodeInto, 1, TwoByte, 2, 8192);
 
 }  // namespace
 }  // namespace workerd
