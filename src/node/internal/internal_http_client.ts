@@ -66,17 +66,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   #body: (Buffer | Uint8Array)[] = [];
   #incomingMessage?: IncomingMessage;
   #timer: number | null = null;
-  // TODO(soon): Types/node is wrong. RequestOptions should contain search and hash fields.
-  #options: RequestOptions & {
-    search?: string | undefined;
-    hash?: string | undefined;
-  };
 
   _ended: boolean = false;
 
   timeout?: number;
   method: string = 'GET';
-  path: string;
+  path: string = '/';
   host: string;
   protocol: string = 'http:';
   port: string = '80';
@@ -296,7 +291,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     });
 
     this[kUniqueHeaders] = parseUniqueHeadersOption(options.uniqueHeaders);
-    this.#options = options;
   }
 
   #onFinish(): void {
@@ -360,15 +354,15 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
     }
 
     const host = this.getHeader('host') ?? this.host;
-    const url = new URL(`http://${host}`);
+    let url = new URL(`http://${host}`);
     url.protocol = this.protocol;
     url.port = this.port;
-    url.pathname = this.path;
-    if (this.#options.search != null) {
-      url.search = this.#options.search;
-    }
-    if (this.#options.hash != null) {
-      url.hash = this.#options.hash;
+
+    if (this.path.length > 0 && this.path !== '/') {
+      // We pass `path` as the first argument since it can contain search and hash components.
+      // Therefore, running the pathname setter will not work.
+      // Since this is an extremely costly operation, we only do it if necessary.
+      url = new URL(this.path, url);
     }
 
     // Our fetch implementation has the following limitations.
