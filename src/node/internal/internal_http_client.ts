@@ -29,7 +29,7 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
-import { addAbortSignal } from 'node-internal:streams_util';
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
@@ -43,7 +43,7 @@ import {
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
-import type { Socket } from 'net';
+import type { Socket } from 'node:net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
@@ -79,7 +79,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   agent: Agent | undefined;
 
   // Unused fields required to be Node.js compatible.
-  aborted: boolean = false;
+  override aborted: boolean = false;
   reusedSocket: boolean = false;
   maxHeadersCount: number = Infinity;
   connection: Socket | null = null;
@@ -168,7 +168,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      addAbortSignal(signal, this);
+      addAbortSignal(signal, this as unknown as Writable);
     }
     let method = options.method;
     const methodIsString = typeof method === 'string';

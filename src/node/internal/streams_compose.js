@@ -33,8 +33,8 @@ import {
   isNodeStream,
   isReadable,
   isWritable,
-  destroyer,
 } from 'node-internal:streams_util';
+import { destroyer } from 'node-internal:streams_destroy';
 import {
   AbortError,
   ERR_INVALID_ARG_VALUE,

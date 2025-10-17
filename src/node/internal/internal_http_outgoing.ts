@@ -8,7 +8,7 @@
 
 import { validateString } from 'node-internal:validators';
 import { Writable } from 'node-internal:streams_writable';
-import { getDefaultHighWaterMark } from 'node-internal:streams_util';
+import { getDefaultHighWaterMark } from 'node-internal:streams_state';
 import type { DataWrittenEvent } from 'node-internal:internal_http_server';
 import {
   ERR_HTTP_HEADERS_SENT,
@@ -228,7 +228,7 @@ export class OutgoingMessage extends Writable implements _OutgoingMessage {
   maxRequestsOnConnectionReached = false;
 
   // These are attributes provided by the Node.js implementation.
-  _closed = false;
+  override _closed = false;
   _headerSent = false;
   _onPendingData: (delta: number) => void = () => {};
   _header: string | null = null;
