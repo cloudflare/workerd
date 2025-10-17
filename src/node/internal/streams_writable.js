@@ -85,6 +85,9 @@ const kWriteCbValue = Symbol('kWriteCbValue');
 const kAfterWriteTickInfoValue = Symbol('kAfterWriteTickInfoValue');
 const kBufferedValue = Symbol('kBufferedValue');
 
+// Bitfield flag constants for WritableState. Each constant uses left-shift (<<) to set a specific
+// bit position, allowing multiple boolean flags to be stored efficiently in a single integer (kState).
+// For example, `1 << 9` creates a value with only bit 9 set (value: 512).
 const kSync = 1 << 9;
 const kFinalCalled = 1 << 10;
 const kNeedDrain = 1 << 11;

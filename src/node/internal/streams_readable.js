@@ -87,6 +87,9 @@ const kDefaultEncodingValue = Symbol('kDefaultEncodingValue');
 const kDecoderValue = Symbol('kDecoderValue');
 const kEncodingValue = Symbol('kEncodingValue');
 
+// Bitfield flag constants for ReadableState. Each constant uses left-shift (<<) to set a specific
+// bit position, allowing multiple boolean flags to be stored efficiently in a single integer (kState).
+// For example, `1 << 9` creates a value with only bit 9 set (value: 512).
 const kEnded = 1 << 9;
 const kEndEmitted = 1 << 10;
 const kReading = 1 << 11;
