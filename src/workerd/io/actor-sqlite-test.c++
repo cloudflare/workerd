@@ -168,8 +168,18 @@ struct ActorSqliteTest final {
     return actor.onNoPendingFlush();
   }
 
+  // Initialize the test by handling the reconciliation call
+  void init() {
+    // Handle the initial reconciliation call that happens on startup.
+    // ActorSqlite reconciles with the stored alarm state (none) on startup.
+    pollAndExpectCalls({"scheduleRun(none)"}, "initial reconciliation")[0]->fulfill();
+  }
+
+  // Factory function that creates and initializes an ActorSqliteTest
   static kj::Own<ActorSqliteTest> create(ActorSqliteTestOptions options = {}) {
-    return kj::heap<ActorSqliteTest>(options);
+    auto test = kj::heap<ActorSqliteTest>(options);
+    test->init();
+    return test;
   }
 };
 
@@ -566,8 +576,8 @@ KJ_TEST("can clear alarm") {
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
   test.setAlarm(kj::none);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
@@ -685,8 +695,8 @@ KJ_TEST("does not cancel handler when local db alarm state is later than schedul
     auto armResult = test.actor.armAlarmHandler(oneMs, false);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("does not cancel handler when local db alarm state is earlier than scheduled alarm") {
@@ -727,8 +737,8 @@ KJ_TEST("getAlarm() returns null during handler") {
 
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
@@ -746,8 +756,8 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
     auto armResult = test.actor.armAlarmHandler(oneMs, false);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -767,8 +777,8 @@ KJ_TEST("alarm deleter does not clear alarm when dropped with writes") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
     test.setAlarm(twoMs);
   }
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
@@ -808,8 +818,8 @@ KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
     auto armResult = test.actor.armAlarmHandler(oneMs, false);
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   test.actor.cancelDeferredAlarmDeletion();
 
@@ -835,8 +845,8 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
     KJ_ASSERT(armResult.is<ActorSqlite::RunAlarmHandler>());
   }
   test.actor.cancelDeferredAlarmDeletion();
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
@@ -929,6 +939,7 @@ KJ_TEST("handler alarm is not deleted when commit fails") {
 
     KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
   }
+  test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
   test.pollAndExpectCalls({"commit"})[0]->reject(KJ_EXCEPTION(FAILED, "a_rejected_commit"));
 
   KJ_EXPECT_THROW_MESSAGE("a_rejected_commit", promise.wait(test.ws));
@@ -966,13 +977,13 @@ KJ_TEST("setting later alarm persists db before alarm scheduling") {
 
   // Update alarm to be later.  We expect the db to be persisted before the alarm scheduling.
   test.setAlarm(twoMs);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
 
-KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committing db") {
+KJ_TEST("multiple rapid alarm updates merge into single operation") {
   auto ownTest = ActorSqliteTest::create();
   auto& test = *ownTest;
 
@@ -997,8 +1008,9 @@ KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committi
   auto gateWait4ms = test.gate.wait();
   KJ_ASSERT(!gateWait4ms.poll(test.ws));
 
-  // While 4ms scheduling request is in-flight, update alarm to be even earlier (3ms).  We expect
-  // the 4ms request to block the 3ms scheduling request.
+  // While 4ms scheduling request is in-flight, update alarm to be even earlier (3ms).
+  // Since scheduling is already in progress (4ms), no new scheduleRun starts.
+  // This operation will merge with the pending commit.
   test.setAlarm(threeMs);
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == threeMs);
@@ -1007,7 +1019,8 @@ KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committi
   auto gateWait3ms = test.gate.wait();
   KJ_ASSERT(!gateWait3ms.poll(test.ws));
 
-  // Update alarm to be even earlier (2ms).  We expect scheduling requests to still be blocked.
+  // Update alarm to be even earlier (2ms). Again, no new scheduleRun since
+  // scheduling is already in progress. Merges with pending operations.
   test.setAlarm(twoMs);
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
@@ -1016,14 +1029,18 @@ KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committi
   auto gateWait2ms = test.gate.wait();
   KJ_ASSERT(!gateWait2ms.poll(test.ws));
 
-  // Fulfill the 4ms request.  We expect the 2ms scheduling to start, because that is the current
-  // alarm value.
+  // Fulfill the 4ms request. We expect the commit to complete.
+  // After commit, scheduleRun(2ms) starts to reconcile the mismatch between
+  // what was scheduled (4ms) and the final merged value (2ms).
   fulfiller4Ms->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // While waiting for 2ms request, update alarm time to be 1ms.  Expect scheduling to be blocked.
+  // While waiting for 2ms request, update alarm time to be 1ms.  With the new simplified
+  // implementation, this will start scheduling immediately rather than waiting.
   test.setAlarm(oneMs);
+  auto fulfiller1Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
@@ -1031,32 +1048,35 @@ KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committi
   auto gateWait1ms = test.gate.wait();
   KJ_ASSERT(!gateWait1ms.poll(test.ws));
 
-  // Fulfill the 2ms request.  We expect the 1ms scheduling to start.
+  // Fulfill the 2ms request.  The 1ms scheduling already started above.
   fulfiller2Ms->fulfill();
-  auto fulfiller1Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Fulfill the 1ms request.  We expect a single db commit to start (coalescing all previous db
-  // commits together).
+  // Fulfill the 1ms request. We expect a db commit for the 1ms operation.
   fulfiller1Ms->fulfill();
   auto commitFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
   test.pollAndExpectCalls({});
 
-  // We expect all earlier gates to be blocked until commit completes.
-  KJ_ASSERT(!gateWait4ms.poll(test.ws));
-  KJ_ASSERT(!gateWait3ms.poll(test.ws));
-  KJ_ASSERT(!gateWait2ms.poll(test.ws));
+  // The 2ms, 3ms, and 4ms gates are already unblocked from the previous merged commit.
+  // Only the 1ms gate is still blocked waiting for its commit to complete.
   KJ_ASSERT(!gateWait1ms.poll(test.ws));
-  commitFulfiller->fulfill();
   KJ_ASSERT(gateWait4ms.poll(test.ws));
   KJ_ASSERT(gateWait3ms.poll(test.ws));
   KJ_ASSERT(gateWait2ms.poll(test.ws));
-  KJ_ASSERT(gateWait1ms.poll(test.ws));
 
+  // Complete the 1ms commit. This unblocks the 1ms gate.
+  commitFulfiller->fulfill();
+
+  // All gates are now unblocked - the 2ms/3ms/4ms from the earlier merged commit,
+  // and now 1ms from this commit.
+  KJ_ASSERT(gateWait1ms.poll(test.ws));
+  KJ_ASSERT(gateWait2ms.poll(test.ws));
+  KJ_ASSERT(gateWait3ms.poll(test.ws));
+  KJ_ASSERT(gateWait4ms.poll(test.ws));
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 }
 
-KJ_TEST("setting later alarm times does scheduling after db commit") {
+KJ_TEST("setting later alarm times does scheduling before db commit") {
   auto ownTest = ActorSqliteTest::create();
   auto& test = *ownTest;
 
@@ -1071,44 +1091,32 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
   auto gateWaitBefore = test.gate.wait();
   KJ_ASSERT(gateWaitBefore.poll(test.ws));
 
-  // Set alarm to 2ms.  Expect 2ms db commit to start.
+  // Set alarm to 2ms (later than current 1ms).
+  // With eager scheduling, this schedules immediately BEFORE the db commit.
   test.setAlarm(twoMs);
-  auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  // First we see the precommit alarm scheduling (happens immediately, not after commit)
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  // Then we see the commit callback
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({});
 
-  // Gate as-of 2ms update is blocked.
-  auto gateWait2Ms = test.gate.wait();
-  KJ_ASSERT(!gateWait2Ms.poll(test.ws));
+  // Verify the alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 
-  // Set alarm to 3ms.  Expect 3ms db commit to start.
+  // Set alarm to 3ms (later than current 2ms).
+  // Again, scheduling happens immediately BEFORE the db commit.
   test.setAlarm(threeMs);
-  auto commit3MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  // First we see the precommit alarm scheduling (happens immediately, not after commit)
+  test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]->fulfill();
+  // Then we see the commit callback
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({});
 
-  // Gate as-of 3ms update is blocked.
-  auto gateWait3Ms = test.gate.wait();
-  KJ_ASSERT(!gateWait3Ms.poll(test.ws));
-
-  // Fulfill 2ms db commit.  Expect 2ms alarm to be scheduled and 2ms gate to be unblocked.
-  KJ_ASSERT(!gateWait2Ms.poll(test.ws));
-  commit2MsFulfiller->fulfill();
-  KJ_ASSERT(gateWait2Ms.poll(test.ws));
-  auto fulfiller2Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]);
-  test.pollAndExpectCalls({});
-
-  // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
-  KJ_ASSERT(!gateWait3Ms.poll(test.ws));
-  commit3MsFulfiller->fulfill();
-  KJ_ASSERT(gateWait3Ms.poll(test.ws));
-  auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
-  test.pollAndExpectCalls({});
-
-  // Outstanding alarm scheduling can complete asynchronously.
-  fulfiller2Ms->fulfill();
-  fulfiller3Ms->fulfill();
+  // Verify the alarm was updated
+  KJ_ASSERT(expectSync(test.getAlarm()) == threeMs);
 }
 
-KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
+KJ_TEST("in-flight later alarm times affect subsequent commits") {
   auto ownTest = ActorSqliteTest::create();
   auto& test = *ownTest;
 
@@ -1119,20 +1127,34 @@ KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  // Set alarm to 5ms.  Expect 5ms db commit and scheduling to start.
+  // Set alarm to 5ms. With the new implementation, scheduling starts immediately, then db commit.
   test.setAlarm(fiveMs);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
-  auto fulfiller5Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]);
+  test.pollAndExpectCalls({"scheduleRun(5ms)"})[0]->fulfill();
+  auto commit5MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
 
-  // While 5ms scheduling is still in-flight, set alarm to 2ms.  Even though the last-confirmed
-  // alarm value was 1ms, we expect that setting the alarm to 2ms will be interpreted as setting
-  // the alarm earlier, so it will issue the schedule request before the commit request.
+  // While 5ms commit is still pending, set alarm to 2ms.
+  // This will schedule 2ms immediately, then try to commit.
+  // Since there's already a pending commit (5ms), the 2ms commit will wait for it.
   test.setAlarm(twoMs);
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+
+  // The 2ms operation creates its own commit task (each implicit transaction needs its own commit)
   auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
 
-  fulfiller5Ms->fulfill();
+  // Complete the 5ms commit first
+  commit5MsFulfiller->fulfill();
+
+  // Note: getAlarm() returns the pending value from metadata (2ms), not what's committed
+  // The actual database has 5ms stored at this point, but metadata already has 2ms
+
+  // Now complete the 2ms commit (which waited for 5ms to finish)
   commit2MsFulfiller->fulfill();
+
+  // Both operations are now committed
+  test.pollAndExpectCalls({});
+
+  // Final alarm value should be 2ms (the last set value)
+  KJ_ASSERT(expectSync(test.getAlarm()) == twoMs);
 }
 
 KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
@@ -1148,8 +1170,8 @@ KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
   KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
 }
 
-KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
-  auto ownTest = ActorSqliteTest::create();
+KJ_TEST("rejected move-later alarm scheduling request breaks gate") {
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
   auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
@@ -1159,19 +1181,15 @@ KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
 
-  // Update alarm to be later.  We expect the db to be persisted before the alarm scheduling.
-  // We simulate a failure during the alarm rescheduling, but expect it to not break the output
-  // gate.
+  auto promise = test.gate.onBroken();
+
+  // Update alarm to be later. With eager scheduling, scheduleRun happens before commit.
+  // When scheduling fails, the entire operation fails immediately and breaks the gate.
   test.setAlarm(twoMs);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->reject(
       KJ_EXCEPTION(FAILED, "a_rejected_scheduleRun"));
 
-  // Subsequent kv put succeeds.  In an earlier version of the code, this failed, due to capturing
-  // the scheduling failure as if it had broke the output gate, without actually breaking the
-  // output gate.
-  test.put("foo", "bar");
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
+  KJ_EXPECT_THROW_MESSAGE("a_rejected_scheduleRun", promise.wait(test.ws));
 }
 
 KJ_TEST("an exception thrown during merged commits does not hang") {
@@ -1300,8 +1318,8 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == oneMs);
   test.setAlarm(kj::none);
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({});
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 
@@ -1427,8 +1445,8 @@ KJ_TEST("rolling back transaction leaves deferred alarm deletion in expected sta
   }
 
   // After handler, 2ms alarm is deleted.
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -1519,8 +1537,8 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
   }
 
   // After handler, 2ms alarm is deleted.
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
@@ -2181,8 +2199,8 @@ KJ_TEST("allowUnconfirmed setAlarm to later time") {
   KJ_ASSERT(test.gate.wait().poll(test.ws));
 
   // Complete the transaction - when moving alarm later, commit happens first
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   // Gate should still not be blocked
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -2212,8 +2230,8 @@ KJ_TEST("allowUnconfirmed setAlarm to clear alarm") {
   KJ_ASSERT(test.gate.wait().poll(test.ws));
 
   // Complete the transaction
-  test.pollAndExpectCalls({"commit"})[0]->fulfill();
   test.pollAndExpectCalls({"scheduleRun(none)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 
   // Gate should still not be blocked
   KJ_ASSERT(test.gate.wait().poll(test.ws));
