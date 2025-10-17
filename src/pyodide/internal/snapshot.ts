@@ -37,6 +37,7 @@ type DsoHandles = {
 type DsoLoadInfo = {
   readonly loadOrder: string[];
   readonly soMemoryBases: { [name: string]: number };
+  readonly soTableBases?: { [name: string]: number };
 };
 
 // This is the old wire format, where "settings" is mixed with the DsoHandles information and
@@ -102,8 +103,9 @@ const HEADER_SIZE = 4 * 4;
 const LOADED_SNAPSHOT_META: LoadedSnapshotMeta | undefined = decodeSnapshot(
   MEMORY_SNAPSHOT_READER
 );
-const CREATED_SNAPSHOT_META: DsoLoadInfo = {
+const CREATED_SNAPSHOT_META: Required<DsoLoadInfo> = {
   soMemoryBases: {},
+  soTableBases: {},
   loadOrder: [],
 };
 if (LOADED_SNAPSHOT_META) {
@@ -112,6 +114,10 @@ if (LOADED_SNAPSHOT_META) {
   Object.assign(
     CREATED_SNAPSHOT_META.soMemoryBases,
     LOADED_SNAPSHOT_META.soMemoryBases
+  );
+  Object.assign(
+    CREATED_SNAPSHOT_META.soTableBases,
+    LOADED_SNAPSHOT_META.soTableBases
   );
   CREATED_SNAPSHOT_META.loadOrder.push(...LOADED_SNAPSHOT_META.loadOrder);
 }
@@ -231,7 +237,7 @@ function getMemoryPatched(
   }
   // 2. It's not loaded in the snapshot. Record
   {
-    const { loadOrder, soMemoryBases } = CREATED_SNAPSHOT_META;
+    const { loadOrder, soMemoryBases, soTableBases } = CREATED_SNAPSHOT_META;
     // Okay, we didn't load this before so we need to allocate new memory for it. Also record what we
     // did in case someone makes a snapshot from this run.
     loadOrder.push(libPath);
@@ -240,6 +246,8 @@ function getMemoryPatched(
     // full path.
     soMemoryBases[libPath] = memoryBase;
     soMemoryBases[libName] = memoryBase;
+    soTableBases[libPath] = Module.wasmTable.length;
+    soTableBases[libName] = Module.wasmTable.length;
     return memoryBase;
   }
 }
