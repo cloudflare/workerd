@@ -99,6 +99,12 @@ def python_test_setup():
         visibility = ["//visibility:public"],
     )
 
+def compute_python_flags(python_flags, skip_python_flags):
+    if python_flags == "all":
+        python_flags = BUNDLE_VERSION_INFO.keys()
+    python_flags = [flag for flag in python_flags if flag not in skip_python_flags and flag in BUNDLE_VERSION_INFO]
+    return python_flags
+
 def py_wd_test(
         directory = None,
         *,
@@ -115,9 +121,7 @@ def py_wd_test(
         use_snapshot = None,
         skip_default_data = False,
         **kwargs):
-    if python_flags == "all":
-        python_flags = BUNDLE_VERSION_INFO.keys()
-    python_flags = [flag for flag in python_flags if flag not in skip_python_flags and flag in BUNDLE_VERSION_INFO]
+    python_flags = compute_python_flags(python_flags, skip_python_flags)
     if data == None:
         data = []
     if directory and not skip_default_data:

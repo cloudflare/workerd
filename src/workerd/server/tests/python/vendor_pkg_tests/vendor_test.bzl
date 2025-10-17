@@ -1,5 +1,5 @@
 load("//:build/python_metadata.bzl", "BUNDLE_VERSION_INFO")
-load("//src/workerd/server/tests/python:py_wd_test.bzl", "py_wd_test")
+load("//src/workerd/server/tests/python:py_wd_test.bzl", "compute_python_flags", "py_wd_test")
 
 def _vendored_py_wd_test(name, version, test_template, main_py_file, vendored_srcs_target_prefix, **kwds):
     """Creates a Python Workers test which includes vendored packages in its bundle, the
@@ -74,7 +74,15 @@ with open('$@', 'w') as f:
         **kwds
     )
 
-def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendored_srcs_target_prefix = None, **kwds):
+def vendored_py_wd_test(
+        name,
+        test_template = None,
+        main_py_file = None,
+        vendored_srcs_target_prefix = None,
+        python_flags = "all",
+        skip_python_flags = [],
+        **kwds):
+    python_flags = compute_python_flags(python_flags, skip_python_flags)
     bzl_name = "%s_vendor_test" % name
     if test_template == None:
         test_template = "%s_vendor.wd-test" % name
@@ -83,7 +91,8 @@ def vendored_py_wd_test(name, test_template = None, main_py_file = None, vendore
     if vendored_srcs_target_prefix == None:
         vendored_srcs_target_prefix = "@%s_src" % name
 
-    for info in BUNDLE_VERSION_INFO.values():
+    for flag in python_flags:
+        info = BUNDLE_VERSION_INFO[flag]
         if name not in info["vendored_packages_for_tests"]:
             fail("Not found", name, "in", info["vendored_packages_for_tests"])
         _vendored_py_wd_test(bzl_name, info["name"], test_template, main_py_file, vendored_srcs_target_prefix, **kwds)
