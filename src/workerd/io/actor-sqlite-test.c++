@@ -167,16 +167,22 @@ struct ActorSqliteTest final {
   auto sync() {
     return actor.onNoPendingFlush();
   }
+
+  static kj::Own<ActorSqliteTest> create(ActorSqliteTestOptions options = {}) {
+    return kj::heap<ActorSqliteTest>(options);
+  }
 };
 
 KJ_TEST("initial alarm value is unset") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   KJ_ASSERT(expectSync(test.getAlarm()) == kj::none);
 }
 
 KJ_TEST("can set and get alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   test.setAlarm(oneMs);
   test.pollAndExpectCalls({"scheduleRun(1ms)"})[0]->fulfill();
@@ -186,7 +192,8 @@ KJ_TEST("can set and get alarm") {
 }
 
 KJ_TEST("check put multiple wraps operations in a transaction") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Let's deinit the autogate. This will enforce the old behavior where putMultiple would commit
   // some puts, until a single put failed.
@@ -236,7 +243,8 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
 }
 
 KJ_TEST("check put multiple wraps operations in a transaction") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   kj::Vector<ActorCache::KeyValuePair> putKVs;
   putKVs.add(ActorCache::KeyValuePair{kj::str("foo"), kj::heapArray(kj::str("bar").asBytes())});
@@ -282,7 +290,8 @@ KJ_TEST("check put multiple wraps operations in a transaction") {
 }
 
 KJ_TEST("check put multiple wraps operations in a transaction and rollback on error") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // We expect that putMultiple is all or nothing, rolling back if a single put fails.
 
@@ -358,7 +367,8 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
 }
 
 KJ_TEST("alarm write happens transactionally with storage ops") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   test.setAlarm(oneMs);
   test.put("foo", "bar");
@@ -370,7 +380,8 @@ KJ_TEST("alarm write happens transactionally with storage ops") {
 }
 
 KJ_TEST("storage op without alarm change does not wait on scheduler") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   test.put("foo", "bar");
   test.pollAndExpectCalls({"commit"})[0]->fulfill();
@@ -380,7 +391,8 @@ KJ_TEST("storage op without alarm change does not wait on scheduler") {
 }
 
 KJ_TEST("alarm scheduling starts synchronously before implicit local db commit") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // In workerd (unlike edgeworker), there is no remote storage, so there is no work done in
   // commitCallback(); the local db is considered durably stored after the synchronous sqlite
@@ -416,7 +428,8 @@ KJ_TEST("alarm scheduling starts synchronously before implicit local db commit")
 }
 
 KJ_TEST("alarm scheduling starts synchronously before explicit local db commit") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -462,7 +475,8 @@ KJ_TEST("alarm scheduling starts synchronously before explicit local db commit")
 }
 
 KJ_TEST("alarm scheduling does not start synchronously before nested explicit local db commit") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -497,7 +511,8 @@ KJ_TEST("alarm scheduling does not start synchronously before nested explicit lo
 }
 
 KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw synchronously") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
   auto promise = test.gate.onBroken();
 
   auto getLocalAlarm = [&]() -> kj::Maybe<kj::Date> {
@@ -540,7 +555,8 @@ KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw sy
 }
 
 KJ_TEST("can clear alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -557,7 +573,8 @@ KJ_TEST("can clear alarm") {
 }
 
 KJ_TEST("can set alarm twice") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   test.setAlarm(oneMs);
   test.setAlarm(twoMs);
@@ -568,7 +585,8 @@ KJ_TEST("can set alarm twice") {
 }
 
 KJ_TEST("setting duplicate alarm is no-op") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   test.setAlarm(kj::none);
   test.pollAndExpectCalls({});
@@ -582,7 +600,8 @@ KJ_TEST("setting duplicate alarm is no-op") {
 }
 
 KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   {
     auto armResult = test.actor.armAlarmHandler(oneMs, false);
@@ -601,7 +620,8 @@ KJ_TEST("tells alarm handler to cancel when committed alarm is empty") {
 }
 
 KJ_TEST("tells alarm handler to reschedule when handler alarm is later than committed alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -625,7 +645,8 @@ KJ_TEST("tells alarm handler to reschedule when handler alarm is later than comm
 }
 
 KJ_TEST("tells alarm handler to reschedule when handler alarm is earlier than committed alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -649,7 +670,8 @@ KJ_TEST("tells alarm handler to reschedule when handler alarm is earlier than co
 }
 
 KJ_TEST("does not cancel handler when local db alarm state is later than scheduled alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -668,7 +690,8 @@ KJ_TEST("does not cancel handler when local db alarm state is later than schedul
 }
 
 KJ_TEST("does not cancel handler when local db alarm state is earlier than scheduled alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -687,7 +710,8 @@ KJ_TEST("does not cancel handler when local db alarm state is earlier than sched
 }
 
 KJ_TEST("getAlarm() returns null during handler") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -708,7 +732,8 @@ KJ_TEST("getAlarm() returns null during handler") {
 }
 
 KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -727,7 +752,8 @@ KJ_TEST("alarm handler handle clears alarm when dropped with no writes") {
 }
 
 KJ_TEST("alarm deleter does not clear alarm when dropped with writes") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -748,7 +774,8 @@ KJ_TEST("alarm deleter does not clear alarm when dropped with writes") {
 }
 
 KJ_TEST("can cancel deferred alarm deletion during handler") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -767,7 +794,8 @@ KJ_TEST("can cancel deferred alarm deletion during handler") {
 }
 
 KJ_TEST("canceling deferred alarm deletion outside handler has no effect") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -792,7 +820,8 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
   // Presumably harmless to cancel deletion if the client requests it after the handler ends but
   // before the event loop runs the commit code?  Trying to cancel deletion outside the handler is
   // a bit of a contract violation anyway -- maybe we should just assert against it?
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -814,7 +843,8 @@ KJ_TEST("canceling deferred alarm deletion outside handler edge case") {
 
 KJ_TEST("canceling deferred alarm deletion is idempotent") {
   // Not sure if important, but matches ActorCache behavior.
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -835,7 +865,8 @@ KJ_TEST("canceling deferred alarm deletion is idempotent") {
 
 KJ_TEST("alarm handler cleanup succeeds when output gate is broken") {
   auto runWithSetup = [](auto testFunc) {
-    ActorSqliteTest test({.monitorOutputGate = false});
+    auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+    auto& test = *ownTest;
     auto promise = test.gate.onBroken();
 
     // Initialize alarm state to 1ms.
@@ -880,7 +911,8 @@ KJ_TEST("alarm handler cleanup succeeds when output gate is broken") {
 }
 
 KJ_TEST("handler alarm is not deleted when commit fails") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -903,7 +935,8 @@ KJ_TEST("handler alarm is not deleted when commit fails") {
 }
 
 KJ_TEST("setting earlier alarm persists alarm scheduling before db") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -921,7 +954,8 @@ KJ_TEST("setting earlier alarm persists alarm scheduling before db") {
 }
 
 KJ_TEST("setting later alarm persists db before alarm scheduling") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -939,7 +973,8 @@ KJ_TEST("setting later alarm persists db before alarm scheduling") {
 }
 
 KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committing db") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 5ms.
   test.setAlarm(fiveMs);
@@ -1022,7 +1057,8 @@ KJ_TEST("multiple set-earlier in-flight alarms wait for earliest before committi
 }
 
 KJ_TEST("setting later alarm times does scheduling after db commit") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -1073,7 +1109,8 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
 }
 
 KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -1099,7 +1136,8 @@ KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
 }
 
 KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1111,7 +1149,8 @@ KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {
 }
 
 KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -1136,7 +1175,8 @@ KJ_TEST("rejected move-later alarm scheduling request does not break gate") {
 }
 
 KJ_TEST("an exception thrown during merged commits does not hang") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1171,7 +1211,8 @@ KJ_TEST("an exception thrown during merged commits does not hang") {
 }
 
 KJ_TEST("getAlarm/setAlarm check for brokenness") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1194,7 +1235,8 @@ KJ_TEST("getAlarm/setAlarm check for brokenness") {
 }
 
 KJ_TEST("calling deleteAll() preserves alarm state if alarm is set") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -1248,7 +1290,8 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is set") {
 }
 
 KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to empty value in metadata table.
   test.setAlarm(oneMs);
@@ -1308,7 +1351,8 @@ KJ_TEST("calling deleteAll() preserves alarm state if alarm is not set") {
 }
 
 KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm state") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   KJ_ASSERT(!test.actor.isCommitScheduled());
 
@@ -1334,7 +1378,8 @@ KJ_TEST("calling deleteAll() during an implicit transaction preserves alarm stat
 }
 
 KJ_TEST("rolling back transaction leaves alarm in expected state") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -1354,7 +1399,8 @@ KJ_TEST("rolling back transaction leaves alarm in expected state") {
 }
 
 KJ_TEST("rolling back transaction leaves deferred alarm deletion in expected state") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -1387,7 +1433,8 @@ KJ_TEST("rolling back transaction leaves deferred alarm deletion in expected sta
 }
 
 KJ_TEST("committing transaction leaves deferred alarm deletion in expected state") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -1418,7 +1465,8 @@ KJ_TEST("committing transaction leaves deferred alarm deletion in expected state
 }
 
 KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expected state") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -1477,7 +1525,8 @@ KJ_TEST("rolling back nested transaction leaves deferred alarm deletion in expec
 }
 
 KJ_TEST("database write operations check for brokenness") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1498,7 +1547,8 @@ KJ_TEST("database write operations check for brokenness") {
 }
 
 KJ_TEST("allowUnconfirmed put does not block output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1520,7 +1570,8 @@ KJ_TEST("allowUnconfirmed put does not block output gate") {
 }
 
 KJ_TEST("confirmed put blocks output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1542,7 +1593,8 @@ KJ_TEST("confirmed put blocks output gate") {
 }
 
 KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1566,7 +1618,8 @@ KJ_TEST("mixed confirmed and unconfirmed writes in same transaction use output g
 }
 
 KJ_TEST("allowUnconfirmed delete does not block output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // First set up some data
   test.put("foo", "bar");
@@ -1592,7 +1645,8 @@ KJ_TEST("allowUnconfirmed delete does not block output gate") {
 }
 
 KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate should be unblocked at start
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1622,7 +1676,8 @@ KJ_TEST("allowUnconfirmed putMultiple does not block output gate") {
 }
 
 KJ_TEST("allowUnconfirmed deleteMultiple does not block output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // First set up some data
   kj::Vector<ActorCache::KeyValuePair> putKVs;
@@ -1662,7 +1717,8 @@ KJ_TEST("allowUnconfirmed deleteMultiple does not block output gate") {
 }
 
 KJ_TEST("unconfirmed write failure still breaks output gate") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1681,7 +1737,8 @@ KJ_TEST("unconfirmed write failure still breaks output gate") {
 }
 
 KJ_TEST("Direct SQL queries are confirmed writes") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1712,7 +1769,8 @@ KJ_TEST("Direct SQL queries are confirmed writes") {
 }
 
 KJ_TEST("An unconfirmed put followed by a direct SQL queries requires the output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1744,7 +1802,8 @@ KJ_TEST("An unconfirmed put followed by a direct SQL queries requires the output
 }
 
 KJ_TEST("sync() returns immediately when no writes are pending") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // When there are no pending writes, sync() should return a resolved promise
   auto syncResult = test.sync();
@@ -1753,7 +1812,8 @@ KJ_TEST("sync() returns immediately when no writes are pending") {
 }
 
 KJ_TEST("sync() waits for confirmed writes to complete") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Do a confirmed write (default behavior)
   test.put("foo", "bar", {.allowUnconfirmed = false});
@@ -1779,7 +1839,8 @@ KJ_TEST("sync() waits for confirmed writes to complete") {
 }
 
 KJ_TEST("sync() waits for unconfirmed writes to complete") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Do an unconfirmed write
   test.put("foo", "bar", {.allowUnconfirmed = true});
@@ -1805,7 +1866,8 @@ KJ_TEST("sync() waits for unconfirmed writes to complete") {
 }
 
 KJ_TEST("sync() waits for multiple unconfirmed writes in a row") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Do multiple unconfirmed writes - they should batch into a single transaction
   test.put("foo", "bar", {.allowUnconfirmed = true});
@@ -1834,7 +1896,8 @@ KJ_TEST("sync() waits for multiple unconfirmed writes in a row") {
 }
 
 KJ_TEST("sync() only waits for writes before it was called") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // First write
   test.put("foo", "bar", {.allowUnconfirmed = true});
@@ -1873,7 +1936,8 @@ KJ_TEST("sync() only waits for writes before it was called") {
 }
 
 KJ_TEST("sync() propagates commit errors") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -1900,7 +1964,8 @@ KJ_TEST("sync() propagates commit errors") {
 }
 
 KJ_TEST("sync() with mixed confirmed and unconfirmed writes") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Do an unconfirmed write followed by a confirmed write
   test.put("foo", "bar", {.allowUnconfirmed = true});
@@ -1927,7 +1992,8 @@ KJ_TEST("sync() with mixed confirmed and unconfirmed writes") {
 }
 
 KJ_TEST("multiple sync() calls for same commit") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Do a write
   test.put("foo", "bar", {.allowUnconfirmed = true});
@@ -1964,7 +2030,8 @@ KJ_TEST("multiple sync() calls for same commit") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -1987,7 +2054,8 @@ KJ_TEST("allowUnconfirmed setAlarm does not block output gate") {
 }
 
 KJ_TEST("confirmed setAlarm blocks output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -2010,7 +2078,8 @@ KJ_TEST("confirmed setAlarm blocks output gate") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm then confirmed put uses output gate") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -2035,7 +2104,8 @@ KJ_TEST("allowUnconfirmed setAlarm then confirmed put uses output gate") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Gate is currently not blocked.
   KJ_ASSERT(test.gate.wait().poll(test.ws));
@@ -2060,7 +2130,8 @@ KJ_TEST("allowUnconfirmed setAlarm with storage ops") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm updating existing alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 2ms.
   test.setAlarm(twoMs);
@@ -2090,7 +2161,8 @@ KJ_TEST("allowUnconfirmed setAlarm updating existing alarm") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm to later time") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -2120,7 +2192,8 @@ KJ_TEST("allowUnconfirmed setAlarm to later time") {
 }
 
 KJ_TEST("allowUnconfirmed setAlarm to clear alarm") {
-  ActorSqliteTest test;
+  auto ownTest = ActorSqliteTest::create();
+  auto& test = *ownTest;
 
   // Initialize alarm state to 1ms.
   test.setAlarm(oneMs);
@@ -2150,7 +2223,8 @@ KJ_TEST("allowUnconfirmed setAlarm to clear alarm") {
 }
 
 KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   auto promise = test.gate.onBroken();
 
@@ -2170,7 +2244,8 @@ KJ_TEST("unconfirmed setAlarm failure still breaks output gate") {
 }
 
 KJ_TEST("sync() throws after critical error in explicit transaction") {
-  ActorSqliteTest test({.monitorOutputGate = false});
+  auto ownTest = ActorSqliteTest::create({.monitorOutputGate = false});
+  auto& test = *ownTest;
 
   // Start an explicit transaction
   auto txn = test.actor.startTransaction();
