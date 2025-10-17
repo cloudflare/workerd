@@ -38,11 +38,8 @@ import {
 import { ok as assert } from 'node-internal:internal_assert';
 import { Stream } from 'node-internal:streams_legacy';
 import { nextTick } from 'node-internal:internal_process';
-
 import { validateBoolean, validateObject } from 'node-internal:validators';
-
 import { normalizeEncoding } from 'node-internal:internal_utils';
-
 import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 
 import {
@@ -57,13 +54,11 @@ import {
   isDuplexNodeStream,
   kOnConstructed,
 } from 'node-internal:streams_util';
-
-import { eos } from 'node-internal:streams_end_of_stream';
-
 import {
-  destroyer,
   construct as destroyConstruct,
+  destroyer,
 } from 'node-internal:streams_destroy';
+import { eos } from 'node-internal:streams_end_of_stream';
 
 import {
   AbortError,
@@ -87,8 +82,7 @@ Object.setPrototypeOf(Duplex, Readable);
   // Allow the keys array to be GC'ed.
   for (let i = 0; i < keys.length; i++) {
     const method = keys[i];
-    if (!Duplex.prototype[method])
-      Duplex.prototype[method] = Writable.prototype[method];
+    Duplex.prototype[method] ||= Writable.prototype[method];
   }
 }
 
@@ -170,39 +164,50 @@ Duplex.prototype.destroy = Writable.prototype.destroy;
 
 Object.defineProperties(Duplex.prototype, {
   writable: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writable'),
   },
   writableHighWaterMark: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(
       Writable.prototype,
       'writableHighWaterMark'
     ),
   },
   writableObjectMode: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(
       Writable.prototype,
       'writableObjectMode'
     ),
   },
   writableBuffer: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableBuffer'),
   },
   writableLength: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableLength'),
   },
   writableFinished: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableFinished'),
   },
   writableCorked: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableCorked'),
   },
   writableEnded: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableEnded'),
   },
   writableNeedDrain: {
+    __proto__: null,
     ...Object.getOwnPropertyDescriptor(Writable.prototype, 'writableNeedDrain'),
   },
+
   destroyed: {
+    __proto__: null,
     get() {
       if (
         this._readableState === undefined ||
@@ -242,10 +247,6 @@ export function from(body) {
 Duplex.fromWeb = fromWeb;
 Duplex.toWeb = toWeb;
 Duplex.from = from;
-
-export function isDuplexInstance(obj) {
-  return obj instanceof Duplex;
-}
 
 // ======================================================================================
 
@@ -800,7 +801,7 @@ export function newStreamDuplexFromReadableWritablePair(
       writer.ready.then(() => {
         return Promise.all(
           chunks.map((data) => {
-            return writer.write(data);
+            return writer.write(data.chunk);
           })
         ).then(done, done);
       }, done);

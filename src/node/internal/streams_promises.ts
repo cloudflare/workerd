@@ -25,6 +25,7 @@
 
 import { isIterable, isNodeStream } from 'node-internal:streams_util';
 import { finished } from 'node-internal:streams_end_of_stream';
+
 import { pipelineImpl as pl } from 'node-internal:streams_pipeline';
 
 export { finished };

@@ -3,10 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { Readable as _Readable, Duplex } from 'node:stream';
+import type EventEmitter from 'node:events';
 import {
-  kDestroyed,
-  kIsReadable,
+  kState,
   kIsWritable,
+  kIsReadable,
+  kIsClosedPromise,
+  kIsDestroyed,
 } from 'node-internal:streams_util';
 
 export declare class ReadableState {
@@ -27,13 +30,13 @@ export declare class ReadableState {
   readingMore?: boolean;
   readableDidRead?: boolean;
   readableAborted?: boolean;
+  [kState]: number;
 }
 
 export declare class Readable extends _Readable {
   _readableState: ReadableState;
   _writableState: undefined;
   _closed: boolean;
-
   errored?: Error | null;
   writableErrored: boolean;
   readableErrored: boolean;
@@ -43,11 +46,13 @@ export declare class Readable extends _Readable {
   writable?: boolean;
   aborted?: boolean;
   req?: EventEmitter;
+
   writableEnded?: boolean;
 
-  [kDestroyed]: boolean;
-  [kIsReadable]: boolean;
   [kIsWritable]: boolean;
+  [kIsReadable]: boolean;
+  [kIsClosedPromise]: Promise<unknown>;
+  [kIsDestroyed]: boolean;
 }
 
 export const from: typeof Duplex.from;

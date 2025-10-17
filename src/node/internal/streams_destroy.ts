@@ -23,21 +23,34 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-call */
+
 import { nextTick } from 'node-internal:internal_process';
+
+import type { Writable, WritableState } from 'node-internal:streams_writable';
+import type { Readable, ReadableState } from 'node-internal:streams_readable';
+
 import {
   AbortError,
   aggregateTwoErrors,
   ERR_MULTIPLE_CALLBACK,
 } from 'node-internal:internal_errors';
 import {
+  kIsDestroyed,
   isDestroyed,
   isFinished,
   isServerRequest,
+  kState,
+  kErrorEmitted,
+  kEmitClose,
+  kClosed,
+  kCloseEmitted,
+  kConstructed,
   kDestroyed,
+  kAutoDestroy,
+  kErrored,
 } from 'node-internal:streams_util';
-import { isRequest } from 'node-internal:streams_end_of_stream';
-import type { Writable, WritableState } from 'node-internal:streams_writable';
-import type { Readable, ReadableState } from 'node-internal:streams_readable';
+import type { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 
 const kConstruct = Symbol('kConstruct');
 const kDestroy = Symbol('kDestroy');
@@ -60,17 +73,22 @@ function checkError(
   }
 }
 
+// Backwards compat. cb() is undocumented and unused in core but
+// unfortunately might be used by modules.
 export function destroy(
   this: Readable | Writable,
-  err: Error,
-  cb: VoidFunction
+  err?: Error,
+  cb?: VoidFunction
   // @ts-expect-error TS2526 Returning this is not allowed.
 ): this {
   const r = this._readableState;
   const w = this._writableState;
   // With duplex streams we use the writable side for state.
   const s = w || r;
-  if ((w && w.destroyed) || (r && r.destroyed)) {
+  if (
+    (w && (w[kState] & kDestroyed) !== 0) ||
+    (r && (r[kState] & kDestroyed) !== 0)
+  ) {
     if (typeof cb === 'function') {
       cb();
     }
@@ -81,14 +99,15 @@ export function destroy(
   // to make it re-entrance safe in case destroy() is called within callbacks
   checkError(err, w, r);
   if (w) {
-    w.destroyed = true;
+    w[kState] |= kDestroyed;
   }
   if (r) {
-    r.destroyed = true;
+    r[kState] |= kDestroyed;
   }
 
   // If still constructing then defer calling _destroy.
-  if (!s?.constructed) {
+  // @ts-expect-error TS18048 `s` will always be defined here.
+  if ((s[kState] & kConstructed) === 0) {
     this.once(kDestroy, function (this: Readable | Writable, er: Error) {
       _destroy(this, aggregateTwoErrors(er, err), cb);
     });
@@ -100,27 +119,31 @@ export function destroy(
 
 function _destroy(
   self: Readable | Writable,
-  err: Error | null,
-  cb: (err?: Error | null) => void
+  err?: Error,
+  cb?: (err?: Error | null) => void
 ): void {
   let called = false;
+
   function onDestroy(err?: Error | null): void {
     if (called) {
       return;
     }
     called = true;
+
     const r = self._readableState;
     const w = self._writableState;
     checkError(err, w, r);
     if (w) {
-      w.closed = true;
+      w[kState] |= kClosed;
     }
     if (r) {
-      r.closed = true;
+      r[kState] |= kClosed;
     }
+
     if (typeof cb === 'function') {
       cb(err);
     }
+
     if (err) {
       nextTick(emitErrorCloseNT, self, err);
     } else {
@@ -143,12 +166,15 @@ function emitCloseNT(self: Readable | Writable): void {
   const r = self._readableState;
   const w = self._writableState;
   if (w) {
-    w.closeEmitted = true;
+    w[kState] |= kCloseEmitted;
   }
   if (r) {
-    r.closeEmitted = true;
+    r[kState] |= kCloseEmitted;
   }
-  if ((w && w.emitClose) || (r && r.emitClose)) {
+  if (
+    (w && (w[kState] & kEmitClose) !== 0) ||
+    (r && (r[kState] & kEmitClose) !== 0)
+  ) {
     self.emit('close');
   }
 }
@@ -156,14 +182,18 @@ function emitCloseNT(self: Readable | Writable): void {
 function emitErrorNT(self: Readable | Writable, err: Error): void {
   const r = self._readableState;
   const w = self._writableState;
-  if ((w && w.errorEmitted) || (r && r.errorEmitted)) {
+  if (
+    (w && (w[kState] & kErrorEmitted) !== 0) ||
+    (r && (r[kState] & kErrorEmitted) !== 0)
+  ) {
     return;
   }
+
   if (w) {
-    w.errorEmitted = true;
+    w[kState] |= kErrorEmitted;
   }
   if (r) {
-    r.errorEmitted = true;
+    r[kState] |= kErrorEmitted;
   }
   self.emit('error', err);
 }
@@ -201,7 +231,8 @@ export function errorOrDestroy(
   stream: Readable | Writable,
   err?: Error,
   sync: boolean = false
-): void {
+  // @ts-expect-error TS2526 Apparently `this` is disallowed.
+): this | undefined {
   // We have tests that rely on errors being emitted
   // in the same tick, so changing this is semver major.
   // For now when you opt-in to autoDestroy we allow
@@ -210,18 +241,26 @@ export function errorOrDestroy(
 
   const r = stream._readableState;
   const w = stream._writableState;
-  if ((w && w.destroyed) || (r && r.destroyed)) {
-    return;
+  if (
+    (w && (w[kState] ? (w[kState] & kDestroyed) !== 0 : w.destroyed)) ||
+    (r && (r[kState] ? (r[kState] & kDestroyed) !== 0 : r.destroyed))
+  ) {
+    // @ts-expect-error TS2683 This should be somehow type-defined.
+    return this;
   }
-  if ((r && r.autoDestroy) || (w && w.autoDestroy)) stream.destroy(err);
-  else if (err) {
+  if (
+    (r && (r[kState] & kAutoDestroy) !== 0) ||
+    (w && (w[kState] & kAutoDestroy) !== 0)
+  ) {
+    stream.destroy(err);
+  } else if (err) {
     // Avoid V8 leak, https://github.com/nodejs/node/pull/34103#issuecomment-652002364
     err.stack; // eslint-disable-line @typescript-eslint/no-unused-expressions
 
-    if (w && !w.errored) {
+    if (w && (w[kState] & kErrored) === 0) {
       w.errored = err;
     }
-    if (r && !r.errored) {
+    if (r && (r[kState] & kErrored) === 0) {
       r.errored = err;
     }
     if (sync) {
@@ -230,6 +269,8 @@ export function errorOrDestroy(
       emitErrorNT(stream, err);
     }
   }
+
+  return undefined;
 }
 
 export function construct(stream: Readable | Writable, cb: VoidFunction): void {
@@ -238,64 +279,78 @@ export function construct(stream: Readable | Writable, cb: VoidFunction): void {
   }
   const r = stream._readableState;
   const w = stream._writableState;
+
   if (r) {
-    r.constructed = false;
+    r[kState] &= ~kConstructed;
   }
   if (w) {
-    w.constructed = false;
+    w[kState] &= ~kConstructed;
   }
+
   stream.once(kConstruct, cb);
+
   if (stream.listenerCount(kConstruct) > 1) {
     // Duplex
     return;
   }
+
   nextTick(constructNT, stream);
 }
 
-function constructNT(stream: Readable | Writable): void {
+function constructNT(this: unknown, stream: Readable | Writable): void {
   let called = false;
-  function onConstruct(err: Error | null | undefined): void {
+
+  function onConstruct(err?: Error): void {
     if (called) {
-      errorOrDestroy(
-        stream,
-        err !== null && err !== undefined ? err : new ERR_MULTIPLE_CALLBACK()
-      );
+      errorOrDestroy(stream, err ?? new ERR_MULTIPLE_CALLBACK());
       return;
     }
     called = true;
+
     const r = stream._readableState;
     const w = stream._writableState;
     const s = w || r;
+
     if (r) {
-      r.constructed = true;
+      r[kState] |= kConstructed;
     }
     if (w) {
-      w.constructed = true;
+      w[kState] |= kConstructed;
     }
+
     if (s?.destroyed) {
       stream.emit(kDestroy, err);
     } else if (err) {
       errorOrDestroy(stream, err, true);
     } else {
-      nextTick(emitConstructNT, stream);
+      stream.emit(kConstruct);
     }
   }
+
   try {
-    stream._construct?.(onConstruct);
+    stream._construct?.((err) => {
+      nextTick(onConstruct, err);
+    });
   } catch (err) {
-    onConstruct(err as Error);
+    nextTick(onConstruct, err);
   }
 }
 
-function emitConstructNT(stream: Readable | Writable): void {
-  stream.emit(kConstruct);
+function isRequest(stream: unknown): stream is OutgoingMessage {
+  return (
+    stream != null &&
+    typeof stream === 'object' &&
+    'setHeader' in stream &&
+    'abort' in stream &&
+    typeof stream.abort === 'function'
+  );
 }
 
 function emitCloseLegacy(stream: Readable | Writable): void {
   stream.emit('close');
 }
 
-function emitErrorCloseLegacy(stream: Readable | Writable, err: Error): void {
+function emitErrorCloseLegacy(stream: Readable | Writable, err?: Error): void {
   stream.emit('error', err);
   nextTick(emitCloseLegacy, stream);
 }
@@ -308,6 +363,7 @@ export function destroyer(
   if (!stream || isDestroyed(stream)) {
     return;
   }
+
   if (!err && !isFinished(stream)) {
     err = new AbortError();
   }
@@ -318,20 +374,22 @@ export function destroyer(
     stream.socket = null;
     stream.destroy(err);
   } else if (isRequest(stream)) {
+    // @ts-expect-error TS2339 - abort exists on OutgoingMessage but not in types
     stream.abort();
   } else if (isRequest(stream.req)) {
+    // @ts-expect-error TS2339 - abort exists on req but not in all types
     stream.req.abort();
   } else if (typeof stream.destroy === 'function') {
     stream.destroy(err);
   } else if ('close' in stream && typeof stream.close === 'function') {
     // TODO: Don't lose err?
-    stream.close(); // eslint-disable-line @typescript-eslint/no-unsafe-call
+    stream.close();
   } else if (err) {
     nextTick(emitErrorCloseLegacy, stream, err);
   } else {
     nextTick(emitCloseLegacy, stream);
   }
   if (!stream.destroyed) {
-    stream[kDestroyed] = true;
+    stream[kIsDestroyed] = true;
   }
 }
