@@ -16,6 +16,8 @@ To update the version of V8 used by workerd, the steps are:
    fetch v8
    ```
 
+   You should probably put this outside of your workerd repo to avoid confusing Bazel.
+
 4. Sync the local copy of V8 to the version used by workerd.
 
    First, find workerd's current version of V8 in `v8.MODULE.bazel`. We will call this `<old_version>`.
@@ -65,6 +67,8 @@ from the V8 directory.
     bazel's preferred format just by looking into the mismatch error while trying to compile
     workerd using the newer V8 version or by running
     `openssl dgst -sha256 -binary <tarball_filename> | openssl base64 -A`
+    where `<tarball_filename>` is the file available at
+    `https://github.com/v8/v8/archive/refs/tags<new_version>.tar.gz`
 
 10. Update V8's dependencies in `v8.MODULE.bazel` and `WORKSPACE`.
 
