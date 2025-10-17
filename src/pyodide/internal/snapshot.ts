@@ -344,11 +344,14 @@ export function preloadDynamicLibs(Module: Module): void {
   const userBundleNames = MetadataReader.getNames();
   for (let path of LOADED_SNAPSHOT_META.loadOrder) {
     let root = sitePackagesRoot;
+    let base = '';
     if (path.startsWith(sitePackages)) {
       path = path.slice(sitePackages.length);
+      base = sitePackages;
     } else if (path.startsWith(dynlibPath)) {
       path = path.slice(dynlibPath.length);
       root = dynlibRoot;
+      base = dynlibPath;
     }
 
     const pathSplit = path.split('/');
@@ -361,7 +364,7 @@ export function preloadDynamicLibs(Module: Module): void {
     } else {
       // This is a file path relative to the site-packages directory, like pkg/lib.so. So we are
       // loading the built-in package's dynlibs here.
-      loadDynlibFromTarFs(Module, sitePackages, root, pathSplit);
+      loadDynlibFromTarFs(Module, base, root, pathSplit);
     }
   }
   Module.freeTableIndexes.push(PyEMCountArgsPtr);
