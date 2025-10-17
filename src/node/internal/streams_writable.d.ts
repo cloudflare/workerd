@@ -5,9 +5,11 @@
 import type { OutgoingMessage } from 'node:http';
 import { Writable as _Writable, Duplex } from 'node:stream';
 import {
-  kDestroyed,
-  kIsReadable,
+  kState,
   kIsWritable,
+  kIsReadable,
+  kIsClosedPromise,
+  kIsDestroyed,
 } from 'node-internal:streams_util';
 
 export declare class WritableState {
@@ -32,6 +34,7 @@ export declare class WritableState {
   prefinished?: boolean;
   finalCalled?: boolean;
   writelen?: number;
+  [kState]: number;
 }
 
 export declare class Writable extends _Writable {
@@ -54,6 +57,8 @@ export declare class Writable extends _Writable {
   [kDestroyed]: boolean;
   [kIsReadable]: boolean;
   [kIsWritable]: boolean;
+  [kIsDestroyed]: boolean;
+  [kIsClosedPromise]: Promise<unknown>;
 }
 
 export const fromWeb: typeof Duplex.fromWeb;

@@ -23,18 +23,15 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
 import { validateInteger } from 'node-internal:validators';
+import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
 
 let defaultHighWaterMarkBytes = 64 * 1024;
 let defaultHighWaterMarkObjectMode = 16;
 
-export type HighWaterMarkFromOptions = {
-  highWaterMark?: number;
-  [key: string]: number | undefined;
-};
+export type HighWaterMarkFromOptions = { highWaterMark?: number };
 
-export function highWaterMarkFrom(
+function highWaterMarkFrom(
   options: HighWaterMarkFromOptions,
   isDuplex: boolean,
   duplexKey: string
@@ -42,18 +39,12 @@ export function highWaterMarkFrom(
   return options.highWaterMark != null
     ? options.highWaterMark
     : isDuplex
-      ? (options[duplexKey] as number)
+      ? // @ts-expect-error TS7053 Fix this soon.
+        (options[duplexKey] as number)
       : null;
 }
 
-// By default Node.js uses:
-//   - Object mode: 16
-//   - Non-object mode:
-//     - Windows: 16 * 1024
-//     - Non-windows: 64 * 1024
-// Ref: https://github.com/nodejs/node/blob/d9fe28bd6b7836accff5a174ef76f7340bf5e600/lib/internal/streams/state.js#L12
-// We always return 64 * 1024 to be in par with production.
-export function getDefaultHighWaterMark(objectMode: boolean = false): number {
+export function getDefaultHighWaterMark(objectMode?: boolean): number {
   return objectMode
     ? defaultHighWaterMarkObjectMode
     : defaultHighWaterMarkBytes;
@@ -81,7 +72,7 @@ export function getHighWaterMark(
   if (hwm != null) {
     if (!Number.isInteger(hwm) || hwm < 0) {
       const name = isDuplex ? `options.${duplexKey}` : 'options.highWaterMark';
-      throw new ERR_INVALID_ARG_VALUE(name, hwm, name);
+      throw new ERR_INVALID_ARG_VALUE(name, hwm);
     }
     return Math.floor(hwm);
   }

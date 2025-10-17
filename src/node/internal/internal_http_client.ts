@@ -43,7 +43,7 @@ import {
 import { OutgoingMessage } from 'node-internal:internal_http_outgoing';
 import { Agent, globalAgent } from 'node-internal:internal_http_agent';
 import type { IncomingMessageCallback } from 'node-internal:internal_http_util';
-import type { Socket } from 'net';
+import type { Socket } from 'node:net';
 
 const INVALID_PATH_REGEX = /[^\u0021-\u00ff]/;
 
@@ -168,7 +168,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      addAbortSignal(signal, this);
+      addAbortSignal(signal, this as unknown as Writable);
     }
     let method = options.method;
     const methodIsString = typeof method === 'string';

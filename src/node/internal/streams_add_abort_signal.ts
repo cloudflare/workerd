@@ -23,41 +23,85 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { validateAbortSignal } from 'node-internal:validators';
-import { isNodeStream } from 'node-internal:streams_util';
-import { eos } from 'node-internal:streams_end_of_stream';
 import {
   AbortError,
   ERR_INVALID_ARG_TYPE,
 } from 'node-internal:internal_errors';
-import { addAbortListener } from 'node-internal:events';
 
+import {
+  isNodeStream,
+  isWebStream,
+  kControllerErrorFunction,
+} from 'node-internal:streams_util';
+
+import { eos } from 'node-internal:streams_end_of_stream';
 import type { Readable } from 'node-internal:streams_readable';
 import type { Writable } from 'node-internal:streams_writable';
 import type { Transform } from 'node-internal:streams_transform';
+import { addAbortListener } from 'node-internal:events';
 
-type NodeStream = Readable | Writable | Transform;
+// This method is inlined here for readable-stream
+// It also does not allow for signal to not exist on the stream
+// https://github.com/nodejs/node/pull/36061#discussion_r533718029
+function validateAbortSignal(
+  signal: unknown,
+  name: string
+): asserts signal is AbortSignal {
+  if (signal == null || typeof signal !== 'object' || !('aborted' in signal)) {
+    throw new ERR_INVALID_ARG_TYPE(name, 'AbortSignal', signal);
+  }
+}
 
-export function addAbortSignal<T extends { destroy: (err: Error) => void }>(
+type StreamType =
+  | Readable
+  | Writable
+  | Transform
+  | ReadableStream
+  | WritableStream;
+
+export function addAbortSignal<T extends StreamType>(
   signal: unknown,
   stream: T
 ): T {
   validateAbortSignal(signal, 'signal');
-  if (!isNodeStream(stream)) {
-    throw new ERR_INVALID_ARG_TYPE('stream', 'stream.Stream', stream);
-  }
-  const onAbort = (): void => {
-    stream.destroy(
-      new AbortError(undefined, {
-        cause: signal.reason,
-      })
+  if (!isNodeStream(stream) && !isWebStream(stream)) {
+    throw new ERR_INVALID_ARG_TYPE(
+      'stream',
+      ['ReadableStream', 'WritableStream', 'Stream'],
+      stream
     );
-  };
+  }
+  return addAbortSignalNoValidate(signal, stream);
+}
+
+export function addAbortSignalNoValidate<T extends StreamType>(
+  signal: AbortSignal | null | undefined,
+  stream: T
+): T {
+  if (signal == null || typeof signal !== 'object' || !('aborted' in signal)) {
+    return stream;
+  }
+  const onAbort = isNodeStream(stream)
+    ? (): void => {
+        stream.destroy(new AbortError(undefined, { cause: signal.reason }));
+      }
+    : (): void => {
+        (
+          stream as ReadableStream & {
+            [kControllerErrorFunction]: (err: Error) => void;
+          }
+        )[kControllerErrorFunction](
+          new AbortError(undefined, { cause: signal.reason })
+        );
+      };
   if (signal.aborted) {
     onAbort();
   } else {
     const disposable = addAbortListener(signal, onAbort);
-    eos(stream as NodeStream, disposable[Symbol.dispose]);
+    eos(
+      stream as Readable | Writable | Transform,
+      disposable[Symbol.dispose] as () => void
+    );
   }
   return stream;
 }

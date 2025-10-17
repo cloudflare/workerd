@@ -61,13 +61,12 @@ function chunkToBuffer(
 // For stdout, we emulate `nohup node foo.js`
 class SyncWriteStream extends Writable {
   fd: number;
-  override readable: boolean;
+  override readable: boolean = false;
   _type = 'fs';
   _isStdio = true;
   constructor(fd: number) {
     super({ autoDestroy: true });
     this.fd = fd;
-    this.readable = false;
   }
   override _write(
     chunk: string | Buffer | ArrayBufferView | DataView,
