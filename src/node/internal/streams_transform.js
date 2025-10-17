@@ -73,6 +73,9 @@ import { nextTick } from 'node-internal:internal_process';
 import { Duplex } from 'node-internal:streams_duplex';
 import { getHighWaterMark } from 'node-internal:streams_state';
 
+const avoidDrainCompatibilityFlag =
+  Cloudflare.compatibilityFlags.avoid_drain_on_nodejs_transform_streams;
+
 Object.setPrototypeOf(Transform.prototype, Duplex.prototype);
 Object.setPrototypeOf(Transform, Duplex);
 
@@ -168,12 +171,13 @@ Transform.prototype._write = function (chunk, encoding, callback) {
     if (val != null) {
       this.push(val);
     }
-    if (rState.ended) {
-      // If user has called this.push(null) we have to
-      // delay the callback to properly propagate the new
+    if (avoidDrainCompatibilityFlag && rState.ended) {
+      // If user has called this.push(null) we have to delay the callback to properly propagate the new
       // state.
       nextTick(callback);
+      return;
     } else if (
+      rState.ended ||
       wState.ended ||
       // Backwards compat.
       length === rState.length ||
