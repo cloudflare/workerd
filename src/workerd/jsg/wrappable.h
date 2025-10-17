@@ -56,13 +56,8 @@ template <typename T>
 kj::Maybe<T&> getAlignedPointerFromEmbedderData(
     v8::Local<v8::Context> context, ContextPointerSlot slot) {
   KJ_DASSERT(slot != ContextPointerSlot::RESERVED, "Attempt to use reserved embedder data slot.");
-  // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  void* ptr = context->GetAlignedPointerFromEmbedderData(static_cast<int>(slot));
-#else
   void* ptr = context->GetAlignedPointerFromEmbedderData(
       static_cast<int>(slot), static_cast<v8::EmbedderDataTypeTag>(slot));
-#endif
   if (ptr == nullptr) return kj::none;
   return *reinterpret_cast<T*>(ptr);
 }
@@ -116,15 +111,9 @@ class Wrappable: public kj::Refcounted {
   static constexpr uint16_t WORKERD_WRAPPABLE_TAG = 0xeb04;
 
   static bool isWorkerdApiObject(v8::Local<v8::Object> object) {
-    // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-    return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX) ==
-        &WORKERD_WRAPPABLE_TAG;
-#else
     return object->GetAlignedPointerFromInternalField(WRAPPABLE_TAG_FIELD_INDEX,
                static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX)) ==
         &WORKERD_WRAPPABLE_TAG;
-#endif
   }
 
   void addStrongRef();
@@ -329,15 +318,9 @@ T& extractInternalPointer(
         getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
   } else {
     KJ_ASSERT(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-    // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-    return *reinterpret_cast<T*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-#else
     return *reinterpret_cast<T*>(
         object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
             static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
-#endif
   }
 }
 
