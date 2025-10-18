@@ -23,6 +23,9 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
+# Emit build profile so that slow builds can be investigated
+build:ci --profile build.bazel-profile.gz
+test:ci --profile test.bazel-profile.gz
 test:ci --test_output=errors --test_summary=terse
 build:ci --disk_cache=~/bazel-disk-cache
 

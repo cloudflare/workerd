@@ -113,7 +113,7 @@ jobs:
         # support. Since we still need symlinks to compile C++ code properly, compile these targets
         # separately.
         run: |
-          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
+          bazel --nowindows_enable_symlinks build ${{ inputs.extra_bazel_args }} --config=ci --profile build-win-workaround.bazel-profile.gz --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev //src/wpt:wpt-all@tsproject //src/node:node@tsproject //src/pyodide:pyodide_static@tsproject
       - name: Bazel build
         # timestamps are no longer being added here, the GitHub logs include timestamps (Use
         # 'Show timestamps' on the web interface)
@@ -158,6 +158,12 @@ jobs:
           name: ${{ inputs.os_name }}-${{ inputs.arch_name }}${{ inputs.suffix }}-binary
           path: bazel-bin/src/workerd/server/workerd${{ runner.os == 'Windows' && '.exe' || '' }}
           if-no-files-found: error
+      - name: Upload build statistics
+        if: inputs.run_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
+          path: '*.bazel-profile.gz'
 
       - name: Drop large Bazel cache files
         if: always()
