@@ -8,9 +8,9 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/ring-buffer.h>
+#include <workerd/util/small-set.h>
 
 #include <list>
-#include <set>
 
 namespace workerd::api {
 
@@ -164,7 +164,7 @@ class QueueImpl final {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the close callback, invalidating the iterator.
-      auto consumers = ready.consumers;
+      auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         consumer->close(js);
       }
@@ -188,7 +188,7 @@ class QueueImpl final {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
       // We copy the list of consumers in case the consumers remove themselves
       // from the queue during the error callback, invalidating the iterator.
-      auto consumers = ready.consumers;
+      auto consumers = ready.consumers.snapshot();
       for (auto consumer: consumers) {
         consumer->error(js, reason.addRef(js));
       }
@@ -284,7 +284,10 @@ class QueueImpl final {
   using Errored = jsg::Value;
 
   struct Ready final: public State {
-    std::set<ConsumerImpl*> consumers;
+    // The set of consumers attached to this queue. In the typical case this
+    // will be a very small number (often just one or two), so we use SmallSet to
+    // optimize for that.
+    SmallSet<ConsumerImpl*> consumers;
   };
 
   size_t highWaterMark;
@@ -293,13 +296,13 @@ class QueueImpl final {
 
   void addConsumer(ConsumerImpl* consumer) {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
-      ready.consumers.insert(consumer);
+      ready.consumers.add(consumer);
     }
   }
 
   void removeConsumer(ConsumerImpl* consumer) {
     KJ_IF_SOME(ready, state.template tryGet<Ready>()) {
-      ready.consumers.erase(consumer);
+      ready.consumers.remove(consumer);
       maybeUpdateBackpressure();
     }
   }
