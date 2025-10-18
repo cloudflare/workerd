@@ -1,0 +1,3 @@
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+- '@types/node'
