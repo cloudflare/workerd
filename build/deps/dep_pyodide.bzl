@@ -73,7 +73,7 @@ def _snapshot_http_files(
     _snapshot_http_file(name, "test-snapshot/", numpy_snapshot, numpy_snapshot_integrity, None)
     _snapshot_http_file(name, "test-snapshot/", fastapi_snapshot, fastapi_snapshot_integrity, None)
 
-def dep_pyodide():
+def _impl(mctx):
     for info in PYODIDE_VERSIONS:
         _pyodide_core(**info)
 
@@ -83,6 +83,9 @@ def dep_pyodide():
 
     for info in PYTHON_LOCKFILES:
         _pyodide_packages(**info)
-
     for ver in BUNDLE_VERSION_INFO.values():
+        if ver["name"] == "development":
+            continue  # development is a copy of earlier bundle snapshots
         _snapshot_http_files(**ver)
+
+dep_pyodide = module_extension(implementation = _impl)
