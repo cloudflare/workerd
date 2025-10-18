@@ -762,7 +762,7 @@ export class ConnResetException extends NodeError {
 
 export function aggregateTwoErrors(
   innerError: unknown,
-  outerError: Error | null
+  outerError: Error | null | undefined
 ): AggregateError {
   if (innerError && outerError && innerError !== outerError) {
     if ('errors' in outerError && Array.isArray(outerError.errors)) {

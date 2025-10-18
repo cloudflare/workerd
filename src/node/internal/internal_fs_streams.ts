@@ -40,7 +40,8 @@ import type {
 
 import type { FileHandle } from 'node-internal:internal_fs_promises';
 
-import { errorOrDestroy, eos } from 'node-internal:streams_util';
+import { errorOrDestroy } from 'node-internal:streams_destroy';
+import { eos } from 'node-internal:streams_end_of_stream';
 
 import {
   ERR_INVALID_ARG_VALUE,
@@ -541,7 +542,7 @@ function readImpl(this: ReadStream, n: number): void {
     }
 
     if (er) {
-      errorOrDestroy(this, er);
+      errorOrDestroy(this, er as Error);
       return;
     }
 

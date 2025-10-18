@@ -8,7 +8,9 @@ export const platform: string;
 
 declare global {
   const Cloudflare: {
-    readonly compatibilityFlags: Record<string, boolean>;
+    readonly compatibilityFlags: Record<string, boolean> & {
+      avoid_drain_on_nodejs_transform_streams: boolean;
+    };
   };
 }
 

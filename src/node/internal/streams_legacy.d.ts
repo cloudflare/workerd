@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import NodeJSStream from 'node:stream';
+import EventEmitter from 'node:events';
 
 export declare class Stream extends NodeJSStream.Stream {
   static isWritable: typeof NodeJSStream.isWritable;
@@ -20,4 +21,18 @@ export declare class Stream extends NodeJSStream.Stream {
   static _uint8ArrayToBuffer(value: Uint8Array): NodeJS.Buffer;
 
   static Stream: typeof Stream;
+
+  aborted?: boolean;
+  readable: boolean;
+  writable: boolean;
+  destroyed: boolean;
+  req: EventEmitter;
+
+  _writableState: {
+    errorEmitted: boolean;
+    pendingcb?: number;
+  };
+  _readableState: {
+    errorEmitted: boolean;
+  };
 }

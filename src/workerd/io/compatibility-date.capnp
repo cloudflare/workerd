@@ -1192,4 +1192,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_python_external_sdk")
     $experimental;
   # Don't include the Python sdk from the runtime, use a vendored copy.
+
+  avoidDrainOnNodejsTransformStreams @150 :Bool
+    $compatEnableFlag("avoid_drain_on_nodejs_transform_streams")
+    $compatDisableFlag("disable_avoid_drain_on_nodejs_transform_streams")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-11-01");
+  # Avoid draining Node.js transform streams.
+  # Ref: https://github.com/nodejs/node/pull/50014
 }
