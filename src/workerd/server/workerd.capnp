@@ -94,6 +94,9 @@ struct Config {
 
   logging @6 : LoggingOptions;
   # Console and Stdio logging configuration options.
+
+  actorInactivityTimeout @7 : UInt64 = 10000;
+  # Timeout in milliseconds before evicting inactive Durable Objects. Defaults to 10 seconds.
 }
 
 struct LoggingOptions {
