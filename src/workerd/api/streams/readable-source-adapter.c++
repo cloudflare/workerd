@@ -1,5 +1,7 @@
 #include "readable-source-adapter.h"
 
+#include "writable-sink.h"
+
 #include <workerd/util/checked-queue.h>
 
 namespace workerd::api::streams {
@@ -149,7 +151,7 @@ void ReadableStreamSourceJsAdapter::shutdown(jsg::Lock& js) {
 }
 
 bool ReadableStreamSourceJsAdapter::isClosed() {
-  return state.template is<Closed>();
+  return state.is<Closed>();
 }
 
 kj::Maybe<const kj::Exception&> ReadableStreamSourceJsAdapter::isCanceled() {
@@ -209,7 +211,7 @@ jsg::Promise<ReadableStreamSourceJsAdapter::ReadResult> ReadableStreamSourceJsAd
         // kj::ArrayPtr directly to the read call, but ReadableStreamSource has
         // not yet been updated to do so. When it is, we can update this read to
         // pass `buffer` directly rather than passing the begin() and size().
-        co_return co_await active.source->tryRead(buffer.begin(), minBytes, buffer.size());
+        co_return co_await active.source->read(buffer, minBytes);
       }));
       return ioContext
           .awaitIo(js, kj::mv(promise),
@@ -392,7 +394,7 @@ jsg::Promise<jsg::BufferSource> ReadableStreamSourceJsAdapter::readAllBytes(
       active.closePending = true;
 
       struct Holder {
-        kj::Maybe<kj::Array<kj::byte>> result;
+        kj::Maybe<kj::Array<const kj::byte>> result;
       };
       auto holder = kj::heap<Holder>();
 
@@ -460,18 +462,13 @@ kj::Maybe<ReadableStreamSourceJsAdapter::Tee> ReadableStreamSourceJsAdapter::try
       // If we are closing, or have pending tasks, we cannot tee.
       JSG_REQUIRE(!active.closePending && !active.running && active.queue.empty(), Error,
           "Cannot tee a stream that is closing or has pending reads.");
-      KJ_IF_SOME(tee, active.source->tryTee(limit)) {
-        auto& ioContext = IoContext::current();
-        state.init<Closed>();
-        return Tee{
-          .branch1 =
-              kj::heap<ReadableStreamSourceJsAdapter>(js, ioContext, kj::mv(tee.branches[0])),
-          .branch2 =
-              kj::heap<ReadableStreamSourceJsAdapter>(js, ioContext, kj::mv(tee.branches[1])),
-        };
-      }
-      // Unable to tee.
-      return kj::none;
+      auto tee = active.source->tee(limit);
+      auto& ioContext = IoContext::current();
+      state.init<Closed>();
+      return Tee{
+        .branch1 = kj::heap<ReadableStreamSourceJsAdapter>(js, ioContext, kj::mv(tee.branch1)),
+        .branch2 = kj::heap<ReadableStreamSourceJsAdapter>(js, ioContext, kj::mv(tee.branch2)),
+      };
     }
     KJ_CASE_ONEOF(_, Closed) {
       // We are already closed, cannot tee.
@@ -540,6 +537,8 @@ struct ReadableStreamSourceKjAdapter::ReadContext {
   jsg::Ref<ReadableStream> stream;
   jsg::Ref<ReadableStreamDefaultReader> reader;
   kj::ArrayPtr<kj::byte> buffer;
+  // Only set to back the buffer if we need to keep it alive.
+  kj::Maybe<kj::Array<kj::byte>> backingBuffer;
   size_t totalRead = 0;
   size_t minBytes = 0;
   kj::Maybe<Active::Readable> maybeLeftOver;
@@ -548,6 +547,14 @@ struct ReadableStreamSourceKjAdapter::ReadContext {
   // If the adapter is gone, or transitions to a closed or canceled
   // state we will abandon the read.
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> adapterRef;
+
+  void reset() {
+    totalRead = 0;
+    minBytes = 0;
+    maybeLeftOver = kj::none;
+    // Resetting is only allowed if we have the backing buffer.
+    buffer = KJ_ASSERT_NONNULL(backingBuffer);
+  }
 };
 
 namespace {
@@ -765,8 +772,8 @@ jsg::Promise<kj::Own<ReadableStreamSourceKjAdapter::ReadContext>> ReadableStream
 }
 
 // We separate out the actual read implementation so that it can be used by
-// both tryRead and the pumpToImpl implementation.
-kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
+// both read and the pumpToImpl implementation.
+kj::Promise<size_t> ReadableStreamSourceKjAdapter::readImpl(
     Active& active, kj::ArrayPtr<kj::byte> dest, size_t minBytes) {
 
   KJ_IF_SOME(readable, active.state.tryGet<Active::Readable>()) {
@@ -902,19 +909,19 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryReadImpl(
   });
 }
 
-kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryRead(
-    void* buffer, size_t minBytes, size_t maxBytes) {
+kj::Promise<size_t> ReadableStreamSourceKjAdapter::read(
+    kj::ArrayPtr<kj::byte> buffer, size_t minBytes) {
 
-  if (maxBytes == 0) {
+  if (buffer.size() == 0) {
     // Nothing to read. This is a no-op.
     return static_cast<size_t>(0);
   }
 
-  // Clamp the minBytes to [1, maxBytes].
-  minBytes = kj::min(maxBytes, kj::max(minBytes, 1UL));
+  // Clamp the minBytes to [1, buffer.size()].
+  minBytes = kj::min(buffer.size(), kj::max(minBytes, 1UL));
 
-  KJ_DASSERT(
-      minBytes >= 1 && minBytes <= maxBytes, "minBytes must be less than or equal to maxBytes.");
+  KJ_DASSERT(minBytes >= 1 && minBytes <= buffer.size(),
+      "minBytes must be less than or equal to the buffer size.");
 
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(active, kj::Own<Active>) {
@@ -941,13 +948,11 @@ kj::Promise<size_t> ReadableStreamSourceKjAdapter::tryRead(
         }
         KJ_CASE_ONEOF(r, Active::Readable) {
           // There is some data left over from a previous read.
-          kj::ArrayPtr dest(static_cast<kj::byte*>(buffer), maxBytes);
-          return tryReadImpl(*active, dest, minBytes);
+          return readImpl(*active, buffer, minBytes);
         }
         KJ_CASE_ONEOF(_, Active::Idle) {
           // There are no pending reads and no left over data.
-          kj::ArrayPtr dest(static_cast<kj::byte*>(buffer), maxBytes);
-          return tryReadImpl(*active, dest, minBytes);
+          return readImpl(*active, buffer, minBytes);
         }
       }
     }
@@ -1007,12 +1012,12 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(WritableStreamSink& 
       KJ_CASE_ONEOF(active, kj::Own<Active>) {
         try {
           // Read at least 8192 bytes up to the size of our buffer.
-          // Keep in mind that tryRead() requires acquiring the isolate lock
+          // Keep in mind that read() requires acquiring the isolate lock
           // on each call, so we want to try to read a decent amount each time
           // to avoid excessive lock latency. But, we also don't want to read
           // too much and end up with too much memory pressure or lock latency.
           // The values here are somewhat arbitrary, but seem reasonable.
-          auto bytesRead = co_await tryReadImpl(*active, buffer, kMinRead);
+          auto bytesRead = co_await readImpl(*active, buffer, kMinRead);
 
           // WARNING: do not access 'active' after this point because the stream
           // may have been closed or canceled while we were awaiting the read.
@@ -1072,7 +1077,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
     WritableStreamSink& output, bool end) {
   // The pumpTo operation continually reads from the stream and writes
   // to the output until the stream is closed or an error occurs. While
-  // pumping, the adapter is considered active but tryRead() calls will
+  // pumping, the adapter is considered active but read() calls will
   // be rejected. Once pumping is complete, the adapter will be closed.
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(active, kj::Own<Active>) {
@@ -1124,10 +1129,177 @@ kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
       return newNoopDeferredProxy();
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
-      return kj::Promise<DeferredProxy<void>>(kj::cp(exception));
+      return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::cp(exception)});
     }
   }
   KJ_UNREACHABLE;
+}
+
+ReadableStreamSource::Tee ReadableStreamSourceKjAdapter::tee(kj::Maybe<size_t> maybeLimit) {
+  KJ_UNIMPLEMENTED("Teeing a ReadableStreamSourceKjAdapter is not supported.");
+  // Explanation: Teeing a ReadableStream must be done under the isolate lock,
+  // as does creating a new ReadableStreamSourceKjAdapter. However, when tee()
+  // is called we are not guaranteed to be under the isolate lock, nor can
+  // we acquire the lock here because this is a synchronous operation and
+  // acquiring the isolate lock requires waiting for a promise to resolve.
+  //
+  // Teeing here is unlikely to be necessary. If you do need a tee, it's
+  // necessary to tee the underlying ReadableStream directly and create
+  // two separate ReadableStreamSourceKjAdapters, one for each branch of
+  // that tee while the lock is held.
+}
+
+kj::Promise<kj::Array<const kj::byte>> ReadableStreamSourceKjAdapter::readAllBytes(size_t limit) {
+  co_return co_await readAllImpl<kj::byte>(limit);
+}
+
+kj::Promise<kj::String> ReadableStreamSourceKjAdapter::readAllText(size_t limit) {
+  auto array = co_await readAllImpl<char>(limit);
+  co_return kj::String(kj::mv(array));
+}
+
+template <typename T>
+kj::Promise<kj::Array<T>> ReadableStreamSourceKjAdapter::readAllImpl(size_t limit) {
+  KJ_SWITCH_ONEOF(state) {
+    KJ_CASE_ONEOF(active, kj::Own<Active>) {
+      KJ_REQUIRE(!active->state.is<Active::Reading>() && !active->pumping,
+          "Cannot have multiple concurrent reads.");
+      // Not really pumping but we can reuse the same flag.
+      active->pumping = true;
+
+      if (active->state.is<Active::Done>()) {
+        // The previous read indicated that it was the last read by returning
+        // less than the minimum bytes requested. We have to treat this as
+        // the stream being closed.
+        state.init<Closed>();
+        co_return kj::Array<T>();
+      }
+
+      KJ_IF_SOME(canceling, active->state.tryGet<Active::Canceling>()) {
+        auto exception = kj::mv(canceling.exception);
+        state = kj::cp(exception);
+        kj::throwFatalException(kj::mv(exception));
+      }
+
+      // Each read has a target buffer of 16384 bytes. This is somewhat arbitrary,
+      // but seems like a reasonable compromise between memory usage and performance.
+      // It's entirely possible that the stream will return more data than we can fit
+      // into this buffer, in which case the read will stash the left over data away in
+      // in the context. For regular read and pumpTo calls, this ends up being read on
+      // the next read call, but for readAll, we can just consume it immediately.
+      auto buffer = kj::heapArray<kj::byte>(16384);
+
+      auto context = kj::heap<ReadContext>(ReadContext{
+        .stream = active->stream.addRef(),
+        .reader = active->reader.addRef(),
+        .buffer = buffer.asBytes(),
+        .backingBuffer = kj::mv(buffer),
+        .totalRead = 0,
+        .minBytes = 1,
+        .adapterRef = selfRef.addRef(),
+      });
+
+      co_return co_await active->canceler
+          .wrap(
+              active->ioContext.run([context = kj::mv(context), accumulated = kj::Vector<T>(),
+                                        limit](jsg::Lock& js) mutable -> kj::Promise<kj::Array<T>> {
+        // Similar to a pump loop, except we perform the entire operation from within
+        // the isolate lock and accumulate all the data as we go. We stop when we reach
+        // the end of the stream or error if we exceed the limit.
+        auto& ioContext = IoContext::current();
+
+        return ioContext.awaitJs(
+            js, readAllReadImpl(js, kj::mv(context), kj::mv(accumulated), limit));
+      })).then([self = selfRef.addRef()](kj::Array<T> data) -> kj::Promise<kj::Array<T>> {
+        self->runIfAlive([](auto& self) { self.state.template init<Closed>(); });
+        return kj::mv(data);
+      }, [self = selfRef.addRef()](kj::Exception exception) -> kj::Promise<kj::Array<T>> {
+        self->runIfAlive([&](ReadableStreamSourceKjAdapter& self) {
+          KJ_IF_SOME(active, self.state.tryGet<kj::Own<Active>>()) {
+            active->cancel(kj::cp(exception));
+          }
+          self.state = kj::cp(exception);
+        });
+        return kj::mv(exception);
+      });
+    }
+    KJ_CASE_ONEOF(_, Closed) {
+      co_return kj::Array<T>();
+    }
+    KJ_CASE_ONEOF(exception, kj::Exception) {
+      kj::throwFatalException(kj::cp(exception));
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+template <typename T>
+jsg::Promise<kj::Array<T>> ReadableStreamSourceKjAdapter::readAllReadImpl(
+    jsg::Lock& js, kj::Own<ReadContext> context, kj::Vector<T> accumulated, size_t limit) {
+  auto promise = readInternal(js, kj::mv(context), MinReadPolicy::OPPORTUNISTIC);
+  return promise.then(js,
+      [limit, accumulated = kj::mv(accumulated)](
+          jsg::Lock& js, kj::Own<ReadContext> context) mutable {
+    // The read completed and we have some data in the context.buffer.
+    // We might also have some left over data in context.maybeLeftOver.
+    // Great news! We don't have to wait to read the left over data,
+    // we can just consume it now and perform another read if necessary.
+    // Since we specify a minRead or 1, we know that we hit EOF when
+    // context.totalRead is zero.
+    if (context->totalRead == 0) {
+      // Nothing was read. There shouldn't be anything left over either.
+      KJ_DASSERT(context->maybeLeftOver == kj::none);
+      if constexpr (kj::isSameType<T, char>()) {
+        // We're readying text, we need to NUL-terminate it.
+        accumulated.add('\0');
+      }
+      return js.resolvedPromise(accumulated.releaseAsArray());
+    }
+
+    // Did our adapter disappear while we were reading? If so, just
+    // abandon the read. While we don't depend on the adapter being
+    // active here, we do want to avoid accumulating data if the
+    // adapter is no longer valid.
+    if (!context->adapterRef->isValid()) {
+      auto error = js.error("Stream was closed while reading");
+      context->reader->cancel(js, error);
+      return js.rejectedPromise<kj::Array<T>>(error);
+    }
+
+    // Let's check to see if we exceeded the limit.
+    size_t totalSoFar = accumulated.size();
+    totalSoFar += context->totalRead;
+    KJ_IF_SOME(leftOver, context->maybeLeftOver) {
+      totalSoFar += leftOver.view.size();
+    }
+    if (totalSoFar > limit) {
+      auto error = js.rangeError("Memory limit would be exceeded before EOF.");
+      context->reader->cancel(js, error);
+      return js.rejectedPromise<kj::Array<T>>(error);
+    }
+
+    // Nice, we have not exceeded the limit. Let's accumulate what we have.
+    accumulated.reserve(totalSoFar);
+
+    // We had to have set the backing buffer at the start.
+    auto filled = KJ_ASSERT_NONNULL(context->backingBuffer).first(context->totalRead);
+
+    accumulated.addAll(filled);
+    // It's possible that the stream returned more data than we could fit
+    // into our read buffer. We don't actually have to wait to read that data
+    // again... we can just consume it now.
+    KJ_IF_SOME(leftOver, context->maybeLeftOver) {
+      accumulated.addAll(leftOver.view);
+    }
+
+    // Ok, we're going to read more, let's reset the context.
+    context->reset();
+
+    // While this appears to be a recursive call, remember that this is a JS
+    // promise chain, so we're not actually growing the stack here, just
+    // appending another promise to the chain.
+    return readAllReadImpl(js, kj::mv(context), kj::mv(accumulated), limit);
+  });
 }
 
 }  // namespace workerd::api::streams
