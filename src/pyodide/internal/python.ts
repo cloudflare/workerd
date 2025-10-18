@@ -22,7 +22,7 @@ import type { PyodideEntrypointHelper } from 'pyodide:python-entrypoint-helper';
 
 /**
  * SetupEmscripten is an internal module defined in setup-emscripten.h the module instantiates
- * emscripten seperately from this code in another context.
+ * emscripten separately from this code in another context.
  * The underlying code for it can be found in pool/emscriptenSetup.ts.
  */
 import { default as SetupEmscripten } from 'internal:setup-emscripten';
