@@ -131,6 +131,15 @@ class TestStream {
     KJ_EXPECT(gotCode == expectedCode);
   }
 
+  void recvBytes(int expectedBytes) {
+    auto actual = readAllBytes();
+    if (actual == nullptr) {
+      KJ_FAIL_REQUIRE("message never received");
+    } else {
+      KJ_EXPECT(actual.size() == expectedBytes);
+    }
+  }
+
   void sendHttpGet(kj::StringPtr path, kj::SourceLocation loc = {}) {
     send(kj::str("GET ", path,
              " HTTP/1.1\n"
@@ -212,6 +221,36 @@ class TestStream {
 
   // isEof() may prematurely read a character. Keep it off to the side for the next actual read.
   kj::Maybe<char> premature;
+
+  // return raw bytes from stream
+  kj::Vector<char> readAllBytes() {
+    kj::Vector<char> buffer(256);
+    KJ_IF_SOME(p, premature) {
+      buffer.add(p);
+    }
+
+    // Continuously try to read until there's nothing to read (or we've gone way past the size
+    // expected).
+    for (;;) {
+      size_t pos = buffer.size();
+      buffer.resize(kj::max(buffer.size() + 256, buffer.capacity()));
+
+      auto promise = stream->tryRead(buffer.begin() + pos, 1, buffer.size() - pos);
+      if (!promise.poll(ws)) {
+        // A tryRead() of 1 byte didn't resolve, there must be no data to read.
+        buffer.resize(pos);
+        break;
+      }
+      size_t n = promise.wait(ws);
+      if (n == 0) {
+        buffer.resize(pos);
+        break;
+      }
+      buffer.resize(pos);
+    };
+    buffer.add('\0');
+    return buffer;
+  }
 
   kj::String readAllAvailable() {
     kj::Vector<char> buffer(256);
@@ -1470,6 +1509,155 @@ KJ_TEST("Server: capability bindings") {
     Hello from Queue
     Hello from Hyperdrive(test-user)
   )"_blockquote);
+}
+
+KJ_TEST("Server: Hyperdrive TLS binding passes sslmode prefer") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    let items = [];
+                `    const connection = await env.hyperdrive.connect();
+                `    const encoded = new TextEncoder().encode("hyperdrive-test");
+                `    await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `    items.push(`Hello from Hyperdrive(${env.hyperdrive.user}) connected TLS stream\n`);
+                `    return new Response(items.join(""));
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", database = (
+        address = "hyperdrive-host",
+        scheme = "postgresql",
+        sslmode = "prefer",
+        tcp = (
+          tlsOptions = (
+            trustBrowserCas = true
+          )
+        )
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    // Avoids deadlock of waiting to read initial message from client
+    subreq.recvBytes(1);
+    // For tests respond with "N" for not supported and fall back to plain tcp
+    subreq.send("N");
+    // After connection is made receive message from client
+    subreq.recv("hyperdrive-test");
+  }
+  conn.recvHttp200(R"(
+    Hello from Hyperdrive(test-user) connected TLS stream
+  )"_blockquote);
+}
+
+KJ_TEST("Server: Hyperdrive TLS binding fails sslmode require") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello-require",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      const connection = await env.hyperdrive.connect();
+                `      const encoded = new TextEncoder().encode("hyperdrive-test");
+                `      await connection.writable.getWriter().write(new Uint8Array(encoded));
+                `      return new Response("Should not reach here");
+                `    } catch (e) {
+                `      return new Response("Connection failed: " + e.message, { status: 500 });
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "hyperdrive-outbound",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "hyperdrive-outbound", database = (
+        address = "hyperdrive-host",
+        scheme = "postgresql",
+        sslmode = "require",
+        tcp = (
+          tlsOptions = (
+            trustBrowserCas = true
+          )
+        )
+      ))
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello-require"
+      )
+    ]
+  ))"_kj);
+
+  KJ_EXPECT_LOG(ERROR, "Server does not support SSL, but client requires it");
+  KJ_EXPECT_LOG(WARNING, "failed to connect to local database");
+  KJ_EXPECT_LOG(ERROR, "unexpected error connecting to database");
+  KJ_EXPECT_LOG(ERROR, "unexpected error connecting to database");
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  {
+    auto subreq = test.receiveSubrequest("hyperdrive-host");
+    // Avoids deadlock of waiting to read initial message from client
+    subreq.recvBytes(1);
+    // For tests respond with "N" for not supported, which should fail since sslmode = 'require'
+    subreq.send("N");
+  }
+
+  conn.recvRegex(R"(
+    HTTP/1.1 500 Internal Server Error
+    Content-Length: 71
+    Content-Type: text/plain;charset=UTF-8
+
+    Connection failed: internal error.*)"_blockquote);
 }
 
 KJ_TEST("Server: cyclic bindings") {
