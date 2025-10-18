@@ -150,12 +150,12 @@ async function test(state) {
   assert.deepEqual(sql.ingest(`SELECT 12`).remainder, 'SELECT 12');
   assert.deepEqual(sql.ingest(`SELECT 1`).remainder, 'SELECT 1');
 
-  // Exec throws with trailing comments
-  assert.throws(
-    () => sql.exec('SELECT 123; SELECT 456; -- trailing comment'),
-    /SQL code did not contain a statement/
+  // Exec strips trailing comments
+  assert.deepEqual(
+    sql.exec('SELECT 123; SELECT 456; -- trailing comment').one(),
+    { 456: 456 }
   );
-  // Ingest does not
+  // Ingest keeps them around
   assert.deepEqual(
     sql.ingest(`SELECT 123; SELECT 456; -- trailing comment`).remainder,
     ' -- trailing comment'
@@ -1748,4 +1748,35 @@ actorFuncs.doCriticalErrorOnTransactionRollback = async (state) => {
       txn.rollback();
     });
   }, /^Error: database or disk is full: SQLITE_FULL/);
+
+  // Exec skips over statements that are empty apart from comments
+  assert.deepEqual(
+    sql
+      .exec(
+        `
+          ;;;;;;; -- a bunch of empty statements
+          SELECT 0;
+          /* SELECT 'c-style commented out code' */;
+          SELECT 1;
+          -- SELECT 'commented out code with' ; -- in the middle
+          ;SELECT 2;
+        `
+      )
+      .one(),
+    { 2: 2 }
+  );
+  // Ingest skips over statements that are empty apart from comments
+  assert.deepEqual(
+    sql.ingest(
+      `
+          ;;;;;;; -- a bunch of empty statements
+          SELECT 0;
+          /* SELECT 'c-style commented out code' */;
+          SELECT 1;
+          -- SELECT 'commented out code with' ; -- in the middle
+          ;SELECT 2;
+        `
+    ).remainder,
+    ''
+  );
 };
