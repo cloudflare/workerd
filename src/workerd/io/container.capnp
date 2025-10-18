@@ -34,6 +34,12 @@ interface Container @0x9aaceefc06523bca {
     # If null, the container will start with the environment variables defined in its image.
     # The format is defined as a list of `NAME=VALUE`.
     # The container runtime should validate the environment variables input.
+
+    hardTimeoutMs @3 :UInt32;
+    # Configures an absolute timeout that starts when the container starts and never resets.
+    # The container will be forcefully terminated when this timeout expires, regardless of activity.
+    # Unlike inactivity timeout, this is a hard deadline from container startup.
+    # If 0 (default), no hard timeout is applied.
   }
 
   monitor @2 () -> (exitCode: Int32);
@@ -94,7 +100,7 @@ interface Container @0x9aaceefc06523bca {
     # attempting to connect.
   }
 
-  setInactivityTimeout @7 (durationMs  :Int64);
+  setInactivityTimeout @7 (durationMs  :UInt32);
   # Configures the duration where the runtime should shutdown the container after there is
   # no connections or activity to the Container.
   #
