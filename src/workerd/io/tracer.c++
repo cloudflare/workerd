@@ -469,22 +469,22 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
       if (context.hasCurrentIncomingRequest()) {
         span.endTime = context.now();
       } else {
-        // We have an IOContext, but there's no current IncomingRequest. Always log a warning here,
-        // this should not be happening. Still report completeTime as a useful timestamp if
-        // available.
-        bool hasCompleteTime = false;
+        // We have an IOContext, but there's no current IncomingRequest. This can happen when a DO
+        // request is aborted, resulting in the pending tasks of its IoContext being deallocated
+        // when the IoContext is still alive but no longer has the IncomingRequest associated with
+        // it (see IncomingRequest::~IoContext_IncomingRequest()). In this case the return time
+        // should already be set, otherwise we log an error.
         if (completeTime != kj::UNIX_EPOCH) {
           span.endTime = completeTime;
-          hasCompleteTime = true;
         } else {
           span.endTime = span.startTime;
-        }
-        if (isPredictableModeForTest()) {
-          KJ_FAIL_ASSERT(
-              "reported span without current request", span.operationName, hasCompleteTime);
-        } else {
-          KJ_LOG(WARNING, "reported span without current request", span.operationName,
-              hasCompleteTime);
+          if (isPredictableModeForTest()) {
+            KJ_FAIL_ASSERT(
+                "reported span without current request or return time", span.operationName);
+          } else {
+            KJ_LOG(
+                ERROR, "reported span without current request or return time", span.operationName);
+          }
         }
       }
     });
@@ -503,7 +503,7 @@ void BaseTracer::adjustSpanTime(CompleteSpan& span) {
         if (isPredictableModeForTest()) {
           KJ_FAIL_ASSERT("reported span after IoContext was deallocated", span.operationName);
         } else {
-          KJ_LOG(WARNING, "reported span after IoContext was deallocated", span.operationName);
+          KJ_LOG(ERROR, "reported span after IoContext was deallocated", span.operationName);
         }
       }
     }
