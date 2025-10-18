@@ -1569,6 +1569,10 @@ declare class TextDecoder {
   get fatal(): boolean;
   get ignoreBOM(): boolean;
 }
+interface TextEncoderEncodeIntoResult {
+  read: number;
+  written: number;
+}
 /**
  * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
  *
@@ -1599,10 +1603,6 @@ interface TextDecoderConstructorOptions {
 }
 interface TextDecoderDecodeOptions {
   stream: boolean;
-}
-interface TextEncoderEncodeIntoResult {
-  read: number;
-  written: number;
 }
 /**
  * The **`ErrorEvent`** interface represents events providing information related to errors in scripts or in files.

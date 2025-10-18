@@ -1574,6 +1574,10 @@ export declare class TextDecoder {
   get fatal(): boolean;
   get ignoreBOM(): boolean;
 }
+export interface TextEncoderEncodeIntoResult {
+  read: number;
+  written: number;
+}
 /**
  * The **`TextEncoder`** interface takes a stream of code points as input and emits a stream of UTF-8 bytes.
  *
@@ -1604,10 +1608,6 @@ export interface TextDecoderConstructorOptions {
 }
 export interface TextDecoderDecodeOptions {
   stream: boolean;
-}
-export interface TextEncoderEncodeIntoResult {
-  read: number;
-  written: number;
 }
 /**
  * The **`ErrorEvent`** interface represents events providing information related to errors in scripts or in files.

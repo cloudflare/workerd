@@ -461,35 +461,38 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 // TextEncoder implementation
 
 jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
-  return js.alloc<TextEncoder>();
+  return js.alloc<TextEncoder>(js);
 }
-
-namespace {
-TextEncoder::EncodeIntoResult encodeIntoImpl(
-    jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-  return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
-  };
-}
-}  // namespace
 
 jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
   auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
       "Cannot allocate space for TextEncoder.encode");
-  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
+  [[maybe_unused]] auto result = str.writeInto(
+      js, view.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
   KJ_DASSERT(result.written == view.size());
   return kj::mv(view);
 }
 
-TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
+TextEncoder::TextEncoder(jsg::Lock& js) {
+  auto tmpl = v8::ObjectTemplate::New(js.v8Isolate);
+  tmpl->SetInternalFieldCount(2);
+  tmpl->Set(js.v8Isolate, "written", v8::Number::New(js.v8Isolate, 0));
+  tmpl->Set(js.v8Isolate, "read", v8::Number::New(js.v8Isolate, 0));
+  encodeIntoTemplate.Reset(js.v8Isolate, tmpl);
+}
+
+jsg::JsObject TextEncoder::encodeInto(
     jsg::Lock& js, jsg::JsString input, jsg::BufferSource buffer) {
   auto handle = buffer.getHandle(js);
   JSG_REQUIRE(handle->IsUint8Array(), TypeError, "buffer must be a Uint8Array");
-  return encodeIntoImpl(js, input, buffer);
+  auto result = input.writeInto(
+      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+
+  auto obj = js.obj(encodeIntoTemplate.Get(js.v8Isolate));
+  obj.set(js, "written"_kj, js.num(static_cast<int>(result.written)));
+  obj.set(js, "read"_kj, js.num(static_cast<int>(result.read)));
+  return obj;
 }
 
 }  // namespace workerd::api
