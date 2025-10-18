@@ -83,6 +83,15 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "small-set",
+    hdrs = ["small-set.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "mimetype",
     srcs = ["mimetype.c++"],
     hdrs = ["mimetype.h"],
@@ -344,4 +353,9 @@ kj_test(
 kj_test(
     src = "ring-buffer-test.c++",
     deps = [":ring-buffer"],
+)
+
+kj_test(
+    src = "small-set-test.c++",
+    deps = [":small-set"],
 )
