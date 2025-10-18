@@ -63,11 +63,6 @@ EmscriptenRuntime EmscriptenRuntime::initialize(
   kj::Maybe<capnp::Data::Reader> emsciptenSetupJsReader;
   kj::Maybe<capnp::Data::Reader> pythonStdlibZipReader;
   kj::Maybe<capnp::Data::Reader> pyodideAsmWasmReader;
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  js.installJspi();
-#endif
   for (auto module: bundle.getModules()) {
     if (module.getName().endsWith("emscriptenSetup.js")) {
       emsciptenSetupJsReader = module.getData();

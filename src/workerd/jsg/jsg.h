@@ -2624,14 +2624,6 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // Install JSPI on the current context. Currently used only for Python workers.
-  //
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  void installJspi();
-#endif
-
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
   bool isUsingEnhancedErrorSerialization() const;

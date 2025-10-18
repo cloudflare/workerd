@@ -25,7 +25,7 @@ git_override(
     # This should match the version specified in V8 DEPS, but in practice it is generally acceptable
     # for it to be behind – zlib is very stable and its API has not changed in a long time, most
     # changes to the Chromium fork affect ancillary tools and not the zlib library itself.
-    commit = "044b44e6deab31fe77f09c948f1c5d870b3a7a31",
+    commit = "85f05b0835f934e52772efc308baa80cdd491838",
     patch_args = ["-p1"],
     patches = ["//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch"],
     remote = "https://chromium.googlesource.com/chromium/src/third_party/zlib.git",

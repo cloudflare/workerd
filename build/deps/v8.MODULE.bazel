@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "14.1.146.1"
+VERSION = "14.2.231.7"
 
-INTEGRITY = "sha256-2HdTM2N2J1XBI6617Icx73S2qs5+Qd/h4hQUek8CUFU="
+INTEGRITY = "sha256-Xs9AtB9tv/jeyjfkvQlG6VpmUSNC+tbVguJKPQGOdB0="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -43,16 +43,14 @@ PATCHES = [
     "0018-Modify-where-to-look-for-fast_float-and-simdutf.patch",
     "0019-Remove-unneded-latomic-linker-flag.patch",
     "0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch",
-    "0021-Remove-DCHECK-from-WriteOneByteV2-to-skip-v8-fatal.patch",
-    "0022-Port-concurrent-mksnapshot-support.patch",
-    "0023-Port-V8_USE_ZLIB-support.patch",
-    "0024-Modify-where-to-look-for-dragonbox.patch",
-    "0025-Disable-slow-handle-check.patch",
-    "0026-Workaround-for-builtin-can-allocate-issue.patch",
-    "0027-Implement-additional-Exception-construction-methods.patch",
-    "0028-Export-icudata-file-to-facilitate-embedding-it.patch",
-    "0029-IsGraphAsync-module-cast-check.patch",
-    "0030-bind-icu-to-googlesource.patch",
+    "0021-Port-concurrent-mksnapshot-support.patch",
+    "0022-Port-V8_USE_ZLIB-support.patch",
+    "0023-Modify-where-to-look-for-dragonbox.patch",
+    "0024-Disable-slow-handle-check.patch",
+    "0025-Workaround-for-builtin-can-allocate-issue.patch",
+    "0026-Implement-additional-Exception-construction-methods.patch",
+    "0027-Export-icudata-file-to-facilitate-embedding-it.patch",
+    "0028-bind-icu-to-googlesource.patch",
 ]
 
 http_archive(

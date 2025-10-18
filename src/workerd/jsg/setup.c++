@@ -303,17 +303,10 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // V8 calls this to tell us when our wrapper can be dropped. See comment about droppable
   // references in Wrappable::attachWrapper() for details.
   v8::HandleScope scope(isolate);
-  // TODO(cleanup): Remove this #if when workerd's V8 version is updated to 14.2.
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  auto& wrappable = *static_cast<Wrappable*>(
-      handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
-          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-#else
   auto& wrappable = *static_cast<Wrappable*>(
       handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
           Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
           static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
-#endif
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
   // visit the reference again, but it will DCHECK-fail on that second attempt because the
@@ -401,11 +394,6 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-    // JSPI was stabilized in V8 version 14.2, and this API removed.
-    // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-    ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
-#endif
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -530,16 +518,6 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
 }
-
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-// JSPI was stabilized in V8 version 14.2, and this API removed.
-// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->jspiEnabled;
-}
-#endif
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source
