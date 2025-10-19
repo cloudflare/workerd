@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_unpretty")
+load("@workerd//:build/rust_toolchains.bzl", "RUSTC_FLAGS")
 
 def rust_cxx_bridge(
         name,
@@ -120,6 +121,7 @@ def wd_rust_crate(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }),
+        rustc_flags = RUSTC_FLAGS,
     )
 
     rust_test(
@@ -140,6 +142,7 @@ def wd_rust_crate(
             "@platforms//os:windows": 0,
             "//conditions:default": 1,
         }),
+        rustc_flags = RUSTC_FLAGS,
     )
 
     if len(proc_macro_deps) + len(cxx_bridge_srcs) > 0:
