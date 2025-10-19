@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "regex_syntax",
+    name = "windows_sys",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,16 +29,15 @@ rust_library(
         ],
     ),
     crate_features = [
+        "Win32",
+        "Win32_Foundation",
+        "Win32_Networking",
+        "Win32_Networking_WinSock",
+        "Win32_System",
+        "Win32_System_IO",
+        "Win32_System_Threading",
+        "Win32_System_WindowsProgramming",
         "default",
-        "std",
-        "unicode",
-        "unicode-age",
-        "unicode-bool",
-        "unicode-case",
-        "unicode-gencat",
-        "unicode-perl",
-        "unicode-script",
-        "unicode-segment",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
@@ -47,10 +46,13 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=regex-syntax",
+        "crate-name=windows-sys",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.8.7",
+    version = "0.60.2",
+    deps = [
+        "@crates_vendor__windows-targets-0.53.5//:windows_targets",
+    ],
 )

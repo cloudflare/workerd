@@ -105,7 +105,7 @@ cargo_build_script(
     deps = [
         "@crates_vendor__cc-1.2.41//:cc",
         "@crates_vendor__link_args-0.6.0//:link_args",
-        "@crates_vendor__regex-1.12.1//:regex",
+        "@crates_vendor__regex-1.12.2//:regex",
     ],
 )
 

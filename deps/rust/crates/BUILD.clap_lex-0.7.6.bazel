@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "codespan_reporting",
+    name = "clap_lex",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,11 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "std",
-        "termcolor",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -40,14 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=codespan-reporting",
+        "crate-name=clap_lex",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.12.0",
-    deps = [
-        "@crates_vendor__termcolor-1.4.1//:termcolor",
-        "@crates_vendor__unicode-width-0.2.2//:unicode_width",
-    ],
+    version = "0.7.6",
 )
