@@ -1192,4 +1192,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
     $compatDisableFlag("disable_python_external_sdk")
     $experimental;
   # Don't include the Python sdk from the runtime, use a vendored copy.
+
+  fastJsgStruct @141 :Bool
+    $compatEnableFlag("enable_fast_jsg_struct")
+    $compatDisableFlag("disable_fast_jsg_struct");
+  # Enables the fast jsg::Struct optimization. With this enabled, JSG_STRUCTS
+  # will use a more efficient creation pattern that reduces construction time.
+  # However, optional fields will be explicitly set to undefined rather than
+  # being omitted, which is an observable behavior change.
+  # TODO(soon): Once proven in production, add a default on date
 }

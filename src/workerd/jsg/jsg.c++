@@ -191,6 +191,14 @@ void Lock::setUsingEnhancedErrorSerialization() {
   IsolateBase::from(v8Isolate).setUsingEnhancedErrorSerialization();
 }
 
+void Lock::setUsingFastJsgStruct() {
+  IsolateBase::from(v8Isolate).setUsingFastJsgStruct();
+}
+
+bool Lock::isUsingFastJsgStruct() const {
+  return IsolateBase::from(v8Isolate).getUsingFastJsgStruct();
+}
+
 bool Lock::isUsingEnhancedErrorSerialization() const {
   return IsolateBase::from(v8Isolate).getUsingEnhancedErrorSerialization();
 }

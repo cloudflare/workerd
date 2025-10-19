@@ -91,6 +91,9 @@ class FieldWrapper {
   explicit FieldWrapper(v8::Isolate* isolate)
       : nameHandle(isolate, v8StrIntern(isolate, exportedName)) {}
 
+  // The is the original, slow-path wrap implementation that uses Set(). Prefer the other overload
+  // for better performance. It is, however, a breaking change to remove this overload so we
+  // need to keep it with a compatibility flag.
   void wrap(Lock& js,
       TypeWrapper& wrapper,
       v8::Isolate* isolate,
@@ -109,6 +112,24 @@ class FieldWrapper {
       }
       auto value = wrapper.wrap(js, context, creator, kj::mv(in.*field));
       check(out->Set(context, nameHandle.Get(isolate), value));
+    }
+  }
+
+  void wrap(Lock& js,
+      TypeWrapper& wrapper,
+      v8::Isolate* isolate,
+      v8::Local<v8::Context> context,
+      kj::Maybe<v8::Local<v8::Object>> creator,
+      Struct& in,
+      v8::MaybeLocal<v8::Value>& out,
+      size_t& idx) {
+    if constexpr (kj::isSameType<T, SelfRef>()) {
+      // Ignore SelfRef when converting to JS.
+    } else if constexpr (kj::isSameType<T, Unimplemented>() || kj::isSameType<T, WontImplement>()) {
+      // Fields with these types are required NOT to be present, so don't try to convert them.
+    } else {
+      idx++;
+      out = wrapper.wrap(js, context, creator, kj::mv(in.*field));
     }
   }
 
@@ -149,10 +170,42 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
     return typeid(T);
   }
 
+  // A count of the JSG_STRUCT fields that are usable for the v8::DictionaryTemplate
+  // version of wrap (i.e. not SelfRef, Unimplemented, or WontImplement).
+  static constexpr size_t kCountOfUsableFields =
+      ((isUsableStructField<typename FieldWrappers::Type> ? 1 : 0) + ...);
+
   v8::Local<v8::Object> wrap(
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T&& in) {
     auto isolate = js.v8Isolate;
     auto& fields = getFields(isolate);
+
+    // Fast path using a cached dictionary template.
+    if (js.isUsingFastJsgStruct()) {
+      v8::MaybeLocal<v8::Value> values[kCountOfUsableFields]{};
+
+      size_t idx = 0;
+      (kj::get<indices>(fields).wrap(
+           js, static_cast<Self&>(*this), isolate, context, creator, in, values[idx], idx),
+          ...);
+
+      // We use a cached dictionary template to improve performance on repeated struct wraps.
+
+      v8::Local<v8::DictionaryTemplate> tmpl;
+      if (templateHandle.IsEmpty()) {
+        tmpl = T::template jsgGetTemplate<T>(isolate);
+        templateHandle.Reset(isolate, tmpl);
+      } else {
+        tmpl = templateHandle.Get(isolate);
+      }
+
+      // Make sure we filled in the expected number of fields.
+      KJ_ASSERT(idx == kCountOfUsableFields);
+
+      return tmpl->NewInstance(context, values);
+    }
+
+    // Original slow path.
     v8::Local<v8::Object> out = v8::Object::New(isolate);
     (kj::get<indices>(fields).wrap(
          js, static_cast<Self&>(*this), isolate, context, creator, in, out),
@@ -217,6 +270,7 @@ class StructWrapper<Self, T, TypeTuple<FieldWrappers...>, kj::_::Indexes<indices
   void getTemplate() = delete;
 
  private:
+  v8::Global<v8::DictionaryTemplate> templateHandle;
   kj::Maybe<kj::Tuple<FieldWrappers...>> lazyFields;
 
   kj::Tuple<FieldWrappers...>& getFields(v8::Isolate* isolate) {

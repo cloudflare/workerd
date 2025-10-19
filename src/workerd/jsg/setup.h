@@ -255,6 +255,14 @@ class IsolateBase {
     return usingEnhancedErrorSerialization;
   }
 
+  void setUsingFastJsgStruct() {
+    usingFastJsgStruct = true;
+  }
+
+  bool getUsingFastJsgStruct() const {
+    return usingFastJsgStruct;
+  }
+
   bool pumpMsgLoop() {
     return v8System.pumpMsgLoop(ptr);
   }
@@ -319,6 +327,7 @@ class IsolateBase {
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
+  bool usingFastJsgStruct = false;
 
   // Only used when the original module registry is used.
   bool throwOnUnrecognizedImportAssertion = false;
