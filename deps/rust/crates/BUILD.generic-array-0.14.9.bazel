@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "nix",
+    name = "generic_array",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,26 +30,24 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
+        "more_lengths",
     ],
     crate_root = "src/lib.rs",
-    edition = "2021",
+    edition = "2015",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=nix",
+        "crate-name=generic-array",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.30.1",
+    version = "0.14.9",
     deps = [
-        "@crates_vendor__bitflags-2.9.4//:bitflags",
-        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
-        "@crates_vendor__libc-0.2.177//:libc",
-        "@crates_vendor__nix-0.30.1//:build_script_build",
+        "@crates_vendor__generic-array-0.14.9//:build_script_build",
+        "@crates_vendor__typenum-1.19.0//:typenum",
     ],
 )
 
@@ -73,7 +71,7 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "default",
+        "more_lengths",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -89,22 +87,22 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2021",
-    pkg_name = "nix",
+    edition = "2015",
+    pkg_name = "generic-array",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=nix",
+        "crate-name=generic-array",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.30.1",
+    version = "0.14.9",
     visibility = ["//visibility:private"],
     deps = [
-        "@crates_vendor__cfg_aliases-0.2.1//:cfg_aliases",
+        "@crates_vendor__version_check-0.9.5//:version_check",
     ],
 )
 

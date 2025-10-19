@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "gimli",
+    name = "cfg_if",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,10 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=gimli",
+        "crate-name=cfg-if",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.32.3",
+    version = "1.0.4",
 )

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "tokio",
+    name = "windows_targets",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,20 +28,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "libc",
-        "mio",
-        "net",
-        "rt",
-        "rt-multi-thread",
-        "socket2",
-        "time",
-    ] + select({
-        "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "windows-sys",  # x86_64-pc-windows-msvc
-        ],
-        "//conditions:default": [],
-    }),
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -49,31 +35,18 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=tokio",
+        "crate-name=windows-targets",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.47.1",
-    deps = [
-        "@crates_vendor__mio-1.0.4//:mio",
-        "@crates_vendor__pin-project-lite-0.2.16//:pin_project_lite",
-        "@crates_vendor__socket2-0.6.0//:socket2",
-    ] + select({
-        "@rules_rust//rust/platform:aarch64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-apple-darwin
-        ],
-        "@rules_rust//rust/platform:aarch64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # aarch64-unknown-linux-gnu
-        ],
-        "@rules_rust//rust/platform:x86_64-apple-darwin": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-apple-darwin
-        ],
+    version = "0.53.5",
+    deps = select({
         "@rules_rust//rust/platform:x86_64-pc-windows-msvc": [
-            "@crates_vendor__windows-sys-0.59.0//:windows_sys",  # x86_64-pc-windows-msvc
+            "@crates_vendor__windows_x86_64_msvc-0.53.1//:windows_x86_64_msvc",  # cfg(all(any(target_arch = "x86_64", target_arch = "arm64ec"), target_env = "msvc", not(windows_raw_dylib)))
         ],
         "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": [
-            "@crates_vendor__libc-0.2.177//:libc",  # x86_64-unknown-linux-gnu
+            "@crates_vendor__windows_x86_64_gnu-0.53.1//:windows_x86_64_gnu",  # cfg(all(target_arch = "x86_64", target_env = "gnu", not(target_abi = "llvm"), not(windows_raw_dylib)))
         ],
         "//conditions:default": [],
     }),

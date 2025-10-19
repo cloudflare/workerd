@@ -44,10 +44,10 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.3",
+    version = "0.3.4",
     deps = [
-        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
-        "@crates_vendor__getrandom-0.3.3//:build_script_build",
+        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
+        "@crates_vendor__getrandom-0.3.4//:build_script_build",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [
             "@crates_vendor__libc-0.2.177//:libc",  # cfg(any(target_os = "macos", target_os = "openbsd", target_os = "vita", target_os = "emscripten"))
@@ -113,7 +113,7 @@ cargo_build_script(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.3.3",
+    version = "0.3.4",
     visibility = ["//visibility:private"],
 )
 

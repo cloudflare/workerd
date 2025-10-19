@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "generic_array",
+    name = "windows_aarch64_msvc",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,25 +29,21 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "more_lengths",
-    ],
     crate_root = "src/lib.rs",
-    edition = "2015",
+    edition = "2021",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=generic-array",
+        "crate-name=windows_aarch64_msvc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.14.7",
+    version = "0.53.1",
     deps = [
-        "@crates_vendor__generic-array-0.14.7//:build_script_build",
-        "@crates_vendor__typenum-1.19.0//:typenum",
+        "@crates_vendor__windows_aarch64_msvc-0.53.1//:build_script_build",
     ],
 )
 
@@ -70,9 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "more_lengths",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -87,23 +80,20 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    edition = "2015",
-    pkg_name = "generic-array",
+    edition = "2021",
+    pkg_name = "windows_aarch64_msvc",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=generic-array",
+        "crate-name=windows_aarch64_msvc",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.14.7",
+    version = "0.53.1",
     visibility = ["//visibility:private"],
-    deps = [
-        "@crates_vendor__version_check-0.9.5//:version_check",
-    ],
 )
 
 alias(

@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "wasi",
+    name = "regex_syntax",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -28,6 +28,18 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "default",
+        "std",
+        "unicode",
+        "unicode-age",
+        "unicode-bool",
+        "unicode-case",
+        "unicode-gencat",
+        "unicode-perl",
+        "unicode-script",
+        "unicode-segment",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -35,13 +47,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=wasi",
+        "crate-name=regex-syntax",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.14.7+wasi-0.2.4",
-    deps = [
-        "@crates_vendor__wasip2-1.0.1-wasi-0.2.4//:wasip2",
-    ],
+    version = "0.8.8",
 )
