@@ -15,7 +15,6 @@ def kj_test(
         testonly = True,
         srcs = [src],
         deps = [
-            "//deps/rust:runtime",
             "@capnp-cpp//src/kj:kj-test",
         ] + deps,
         linkstatic = select({
