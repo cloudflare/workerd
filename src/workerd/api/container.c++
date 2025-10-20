@@ -164,7 +164,7 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // ... and now we can just forward our call to that.
     try {
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      co_await connectionPromise.exclusiveJoin(service->request(method, noHostUrl, newHeaders, requestBody, response));
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       connectionException = kj::some(kj::mv(exception));
