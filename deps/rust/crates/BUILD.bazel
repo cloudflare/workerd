@@ -80,6 +80,18 @@ alias(
 )
 
 alias(
+    name = "capnp-rpc-0.21.0",
+    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
+    tags = ["manual"],
+)
+
+alias(
+    name = "capnp-rpc",
+    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
+    tags = ["manual"],
+)
+
+alias(
     name = "capnpc-0.21.4",
     actual = "@crates_vendor__capnpc-0.21.4//:capnpc",
     tags = ["manual"],

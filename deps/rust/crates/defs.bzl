@@ -299,6 +299,7 @@ _NORMAL_DEPENDENCIES = {
             "ada-url": Label("@crates_vendor//:ada-url-3.3.0"),
             "anyhow": Label("@crates_vendor//:anyhow-1.0.100"),
             "capnp": Label("@crates_vendor//:capnp-0.21.7"),
+            "capnp-rpc": Label("@crates_vendor//:capnp-rpc-0.21.0"),
             "capnpc": Label("@crates_vendor//:capnpc-0.21.4"),
             "cc": Label("@crates_vendor//:cc-1.2.41"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.35"),
@@ -676,6 +677,26 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/capnp/0.21.7/download"],
         strip_prefix = "capnp-0.21.7",
         build_file = Label("//deps/rust/crates:BUILD.capnp-0.21.7.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__capnp-futures-0.21.0",
+        sha256 = "d04478adeb234836f886ec554a0d96e3af3a939ba7b3962af5addddf7ab71231",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnp-futures/0.21.0/download"],
+        strip_prefix = "capnp-futures-0.21.0",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-futures-0.21.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__capnp-rpc-0.21.0",
+        sha256 = "85e9c19ef52ff1b9c9822fb21bfa68a72bc58711676295ff06eb88e64c7877f7",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnp-rpc/0.21.0/download"],
+        strip_prefix = "capnp-rpc-0.21.0",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-rpc-0.21.0.bazel"),
     )
 
     maybe(
@@ -3152,6 +3173,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__anyhow-1.0.100", is_dev_dep = False),
         struct(repo = "crates_vendor__async-trait-0.1.89", is_dev_dep = False),
         struct(repo = "crates_vendor__capnp-0.21.7", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnp-rpc-0.21.0", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.21.4", is_dev_dep = False),
         struct(repo = "crates_vendor__cc-1.2.41", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.35", is_dev_dep = False),

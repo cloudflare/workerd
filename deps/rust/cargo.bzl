@@ -13,6 +13,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "async-trait": crate.spec(version = "0", default_features = False),
     "capnp": crate.spec(version = "0"),
     "capnpc": crate.spec(version = "0"),
+    "capnp-rpc": crate.spec(version = "0"),
     "clang-ast": crate.spec(version = "0"),
     "clap": crate.spec(version = "4", default_features = False, features = ["derive", "std", "help"]),
     "codespan-reporting": crate.spec(version = "0.12.0"),
