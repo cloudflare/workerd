@@ -2,6 +2,7 @@ import { parseTarInfo } from 'pyodide-internal:tar';
 import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
 import {
+  invalidateCaches,
   PythonRuntimeError,
   PythonUserError,
   simpleRunPython,
@@ -151,6 +152,7 @@ class VirtualizedDir {
     return this.dynlibTarFs;
   }
 
+  /** Only used for Pyodide 0.26.0a2 */
   getSoFilesToLoad(): FilePath[] {
     return this.soFiles;
   }
@@ -223,10 +225,7 @@ export function mountWorkerFiles(Module: Module): void {
   Module.FS.mkdirTree('/session/metadata');
   const mdFS = createMetadataFS(Module);
   Module.FS.mount(mdFS, {}, '/session/metadata');
-  simpleRunPython(
-    Module,
-    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
-  );
+  invalidateCaches(Module);
 }
 
 /**
