@@ -6,16 +6,13 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//rust:defs.bzl",
-    "rust_binary",
-    "rust_library",
-)
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "clap",
+    name = "selectors",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -32,39 +29,56 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "help",
-        "std",
-    ],
-    crate_root = "src/lib.rs",
+    crate_root = "lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.49//:clap_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.49",
+    version = "0.32.0",
     deps = [
-        "@crates_vendor__clap_builder-4.5.49//:clap_builder",
+        "@crates_vendor__bitflags-2.10.0//:bitflags",
+        "@crates_vendor__cssparser-0.35.0//:cssparser",
+        "@crates_vendor__derive_more-2.0.1//:derive_more",
+        "@crates_vendor__log-0.4.28//:log",
+        "@crates_vendor__new_debug_unreachable-1.0.6//:debug_unreachable",
+        "@crates_vendor__phf-0.11.3//:phf",
+        "@crates_vendor__precomputed-hash-0.1.1//:precomputed_hash",
+        "@crates_vendor__rustc-hash-2.1.1//:rustc_hash",
+        "@crates_vendor__selectors-0.32.0//:build_script_build",
+        "@crates_vendor__servo_arc-0.4.1//:servo_arc",
+        "@crates_vendor__smallvec-1.15.1//:smallvec",
     ],
 )
 
-rust_binary(
-    name = "stdio-fixture__bin",
+cargo_build_script(
+    name = "_bs",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
     compile_data = glob(
+        include = ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/* *",
+            "**/*.rs",
+            ".tmp_git_root/**/*",
+            "BUILD",
+            "BUILD.bazel",
+            "WORKSPACE",
+            "WORKSPACE.bazel",
+        ],
+    ),
+    crate_name = "build_script_build",
+    crate_root = "build.rs",
+    data = glob(
         include = ["**"],
         allow_empty = True,
         exclude = [
@@ -76,29 +90,27 @@ rust_binary(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "derive",
-        "help",
-        "std",
-    ],
-    crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@crates_vendor__clap_derive-4.5.49//:clap_derive",
-    ],
+    pkg_name = "selectors",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=clap",
+        "crate-name=selectors",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "4.5.49",
+    version = "0.32.0",
+    visibility = ["//visibility:private"],
     deps = [
-        ":clap",
-        "@crates_vendor__clap_builder-4.5.49//:clap_builder",
+        "@crates_vendor__phf_codegen-0.11.3//:phf_codegen",
     ],
+)
+
+alias(
+    name = "build_script_build",
+    actual = ":_bs",
+    tags = ["manual"],
 )

@@ -2,10 +2,10 @@
 
 module(name = "workerd")
 
-bazel_dep(name = "aspect_bazel_lib", version = "2.21.1")
-bazel_dep(name = "bazel_features", version = "1.35.0")
-bazel_dep(name = "bazel_skylib", version = "1.8.1")
-bazel_dep(name = "rules_shell", version = "0.6.0")
+bazel_dep(name = "aspect_bazel_lib", version = "2.21.2")
+bazel_dep(name = "bazel_features", version = "1.37.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "rules_shell", version = "0.6.1")
 
 # abseil is used by protobuf and tcmalloc.
 bazel_dep(name = "abseil-cpp", version = "20250814.0")
@@ -35,7 +35,7 @@ git_override(
 # version, often by rejecting key values that it considers invalid/unsafe even though they are still
 # accepted by BoringSSL. Update with caution and only after confirming this is compatible with the
 # downstream build.
-bazel_dep(name = "boringssl", version = "0.20250818.0", repo_name = "ssl")
+bazel_dep(name = "boringssl", version = "0.20251002.0", repo_name = "ssl")
 
 include("//build/deps:deps.MODULE.bazel")
 
