@@ -6,7 +6,6 @@ import {
 import {
   maybeCollectSnapshot,
   maybeRestoreSnapshot,
-  preloadDynamicLibs,
   finalizeBootstrap,
   isRestoringSnapshot,
 } from 'pyodide-internal:snapshot';
@@ -43,12 +42,6 @@ function prepareWasmLinearMemory(
   Module: Module,
   pyodide_entrypoint_helper: PyodideEntrypointHelper
 ): void {
-  enterJaegerSpan('preload_dynamic_libs', () => {
-    preloadDynamicLibs(Module);
-  });
-  enterJaegerSpan('remove_run_dependency', () => {
-    Module.removeRunDependency('dynlibs');
-  });
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
   entropyAfterRuntimeInit(Module);

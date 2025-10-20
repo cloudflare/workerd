@@ -69,3 +69,10 @@ export function simpleRunPython(
   }
   return cause;
 }
+
+export function invalidateCaches(Module: Module): void {
+  simpleRunPython(
+    Module,
+    `from importlib import invalidate_caches; invalidate_caches(); del invalidate_caches`
+  );
+}

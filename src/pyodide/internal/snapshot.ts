@@ -17,6 +17,7 @@ import {
   IS_SECOND_VALIDATION_PHASE,
 } from 'pyodide-internal:metadata';
 import {
+  invalidateCaches,
   PythonRuntimeError,
   PythonUserError,
   simpleRunPython,
@@ -302,55 +303,40 @@ function loadDynlibFromVendor(
 }
 
 /**
- * This loads all dynamic libraries visible in the site-packages directory. They
- * are loaded before the runtime is initialized outside of the heap, using the
- * same mechanism for DT_NEEDED libs (i.e., the libs that are loaded before the
- * program starts because you passed them as linker args).
- *
- * Currently, we pessimistically preload all libs. It would be nice to only load
- * the ones that are used. I am pretty sure we can manage this by reserving a
- * separate shared lib metadata arena at startup and allocating shared libs
- * there.
+ * Preloading for the legacy 0.26 version. This loads all dynamic libraries
+ * visible in the site-packages directory. They are loaded before the runtime is
+ * initialized outside of the heap, using the same mechanism for DT_NEEDED libs
+ * (i.e., the libs that are loaded before the program starts because you passed
+ * them as linker args).
  */
-export function preloadDynamicLibs(Module: Module): void {
-  Module.noInitialRun = isRestoringSnapshot();
-  Module.getMemoryPatched = getMemoryPatched;
-  Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
+function preloadDynamicLibs026(Module: Module): void {
   const sitePackages = Module.FS.sessionSitePackages + '/';
   const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
-  if (Module.API.version === '0.26.0a2') {
-    const loadedBaselineSnapshot =
-      LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
-    let SO_FILES_TO_LOAD: string[][];
-    if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
-      SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
-    } else {
-      SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
-    }
-    for (const soFile of SO_FILES_TO_LOAD) {
-      loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
-    }
-    return;
+  const loadedBaselineSnapshot =
+    LOADED_SNAPSHOT_META?.settings?.baselineSnapshot;
+  let SO_FILES_TO_LOAD: string[][];
+  if (IS_CREATING_BASELINE_SNAPSHOT || loadedBaselineSnapshot) {
+    SO_FILES_TO_LOAD = [['_lzma.so'], ['_ssl.so']];
+  } else {
+    SO_FILES_TO_LOAD = sortSoFiles(VIRTUALIZED_DIR.getSoFilesToLoad());
   }
-  if (!LOADED_SNAPSHOT_META?.loadOrder) {
-    return;
+  for (const soFile of SO_FILES_TO_LOAD) {
+    loadDynlibFromTarFs(Module, sitePackages, sitePackagesRoot, soFile);
   }
-  // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
-  // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
-  // could drop this patch because we are now on Emscripten 4.0.9.
-  // https://github.com/pyodide/pyodide/blob/main/cpython/patches/0008-Fix-Emscripten-call-trampoline-compatibility-with-Em.patch
-  //
-  // Unfortunately, this initializer allocates a function table slot and is called before dynamic
-  // loading when taking the snapshot but after when restoring the snapshot. Thus, when restoring a
-  // snapshot, before loading dynamic libraries we reserve a function pointer for the
-  // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
-  // used at the right moment.
-  const PyEMCountArgsPtr = Module.getEmptyTableSlot();
+}
 
+/**
+ * If we're restoring from a snapshot, we need to preload dynamic libraries so that any function
+ * pointers that point into the dylib symbols work correctly.
+ * Load the dynamic libraries in loadOrder. Mostly logic dealing with paths.
+ */
+function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
+  const sitePackages = Module.FS.sessionSitePackages + '/';
+  const sitePackagesRoot = VIRTUALIZED_DIR.getSitePackagesRoot();
   const dynlibRoot = VIRTUALIZED_DIR.getDynlibRoot();
   const dynlibPath = '/usr/lib/';
   const userBundleNames = MetadataReader.getNames();
-  for (let path of LOADED_SNAPSHOT_META.loadOrder) {
+  for (let path of loadOrder) {
     let root = sitePackagesRoot;
     let base = '';
     if (path.startsWith(sitePackages)) {
@@ -375,6 +361,32 @@ export function preloadDynamicLibs(Module: Module): void {
       loadDynlibFromTarFs(Module, base, root, pathSplit);
     }
   }
+}
+
+function preloadDynamicLibs(Module: Module): void {
+  if (Module.API.version === '0.26.0a2') {
+    // In 0.26.0a2 we need to preload dynamic libraries even if we aren't restoring a snapshot.
+    preloadDynamicLibs026(Module);
+    return;
+  }
+  //
+  const loadOrder = LOADED_SNAPSHOT_META?.loadOrder;
+  if (!loadOrder) {
+    // In newer versions we only need to do the preloading if there is a snapshot to restore.
+    return;
+  }
+  // In Pyodide 0.28 we switched from using top level EM_JS to initialize the CountArgs function
+  // pointer to using an initializer to work around a regression in Emscripten 4.0.3 and 4.0.4. We
+  // could drop this patch because we are now on Emscripten 4.0.9.
+  // https://github.com/pyodide/pyodide/blob/main/cpython/patches/0008-Fix-Emscripten-call-trampoline-compatibility-with-Em.patch
+  //
+  // Unfortunately, this initializer allocates a function table slot and is called before dynamic
+  // loading when taking the snapshot but after when restoring the snapshot. Thus, when restoring a
+  // snapshot, before loading dynamic libraries we reserve a function pointer for the
+  // CountArgsPointer and after loading dynamic libraries, we put it in the free list so it will be
+  // used at the right moment.
+  const PyEMCountArgsPtr = Module.getEmptyTableSlot();
+  preloadDynamicLibsMain(Module, loadOrder);
   Module.freeTableIndexes.push(PyEMCountArgsPtr);
 }
 
@@ -691,6 +703,17 @@ function checkSnapshotType(snapshotType: string): void {
 }
 
 export function maybeRestoreSnapshot(Module: Module): void {
+  Module.noInitialRun = isRestoringSnapshot();
+  Module.getMemoryPatched = getMemoryPatched;
+  // Make sure memory is large enough
+  Module.growMemory(LOADED_SNAPSHOT_META?.snapshotSize ?? 0);
+  enterJaegerSpan('preload_dynamic_libs', () => {
+    preloadDynamicLibs(Module);
+  });
+  // TODO: Remove the jaeger span here
+  enterJaegerSpan('remove_run_dependency', () => {
+    Module.removeRunDependency('dynlibs');
+  });
   if (!LOADED_SNAPSHOT_META) {
     return;
   }
@@ -703,10 +726,7 @@ export function maybeRestoreSnapshot(Module: Module): void {
   snapshotReader.disposeMemorySnapshot();
   // Invalidate caches if we have a snapshot because the contents of site-packages
   // may have changed.
-  simpleRunPython(
-    Module,
-    'from importlib import invalidate_caches as f; f(); del f'
-  );
+  invalidateCaches(Module);
 }
 
 function collectSnapshot(
