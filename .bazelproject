@@ -22,3 +22,5 @@ test_sources:
   src/workerd/api/*-test.js
   src/workerd/api/*-test.wd-test
   src/workerd/api/*-test.c++
+
+use_query_sync: true
