@@ -102,6 +102,14 @@ archive_override(
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
+    name = "capnp-cpp",
+    url = "https://github.com/capnproto/capnproto/tarball/164284a476eee4bfbcf7cce2a9a82fb156504210",
+    strip_prefix = "capnproto-capnproto-164284a/c++",
+    type = "tgz",
+    sha256 = "03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28",
+)
+
+http_archive(
     name = "nbytes",
     build_file = "//:build/BUILD.nbytes",
     sha256 = "34be48071c86add2f8d14fd4a238c47230965fd743a51b8a1dd0b2f0210f0171",
