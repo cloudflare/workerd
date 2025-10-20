@@ -34,6 +34,7 @@ import type { Context } from 'node:vm';
 import type { Readable, Writable } from 'node:stream';
 import type { Transferable, WorkerPerformance } from 'node:worker_threads';
 import type { HeapInfo } from 'node:v8';
+import type { CPUProfileHandle } from 'v8';
 
 export const MessageChannel = globalThis.MessageChannel;
 export const MessagePort = globalThis.MessagePort;
@@ -64,6 +65,10 @@ export class Worker extends EventEmitter implements _Worker {
 
   postMessage(_value: unknown, _transferList?: readonly Transferable[]): void {
     // Acts as a no-op
+  }
+
+  startCpuProfile(): Promise<CPUProfileHandle> {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('startCpuProfile');
   }
 
   async postMessageToThread(
