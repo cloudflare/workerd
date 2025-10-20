@@ -1,7 +1,7 @@
-bazel_dep(name = "aspect_rules_esbuild", version = "0.22.1")
-bazel_dep(name = "aspect_rules_js", version = "2.5.0")
+bazel_dep(name = "aspect_rules_esbuild", version = "0.23.0")
+bazel_dep(name = "aspect_rules_js", version = "2.6.2")
 bazel_dep(name = "aspect_rules_ts")
-bazel_dep(name = "rules_nodejs", version = "6.5.0")
+bazel_dep(name = "rules_nodejs", version = "6.5.2")
 
 # TODO(soon): Remove after next rules_ts release
 git_override(
@@ -10,7 +10,7 @@ git_override(
     remote = "https://github.com/aspect-build/rules_ts.git",
 )
 
-NODE_VERSION = "22.18.0"
+NODE_VERSION = "22.20.0"
 
 # ========================================================================================
 # Node.js bootstrap

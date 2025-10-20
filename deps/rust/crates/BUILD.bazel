@@ -116,14 +116,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.49",
-    actual = "@crates_vendor__clap-4.5.49//:clap",
+    name = "clap-4.5.50",
+    actual = "@crates_vendor__clap-4.5.50//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.49//:clap",
+    actual = "@crates_vendor__clap-4.5.50//:clap",
     tags = ["manual"],
 )
 
@@ -406,7 +406,7 @@ alias(
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.49//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.50//:stdio-fixture__bin",
     tags = ["manual"],
 )
 
