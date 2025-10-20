@@ -3731,6 +3731,7 @@ interface Container {
   destroy(error?: any): Promise<void>;
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
+  setInactivityTimeout(durationMs: number | bigint): Promise<void>;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
