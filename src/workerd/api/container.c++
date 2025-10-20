@@ -154,7 +154,14 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
     auto pipe = kj::newTwoWayPipe();
     kj::Maybe<kj::Exception> connectionException = kj::none;
 
-    auto connectionPromise = connectImpl(*pipe.ends[1]);
+    // ... create a promise fulfiller to retrieve the connection exception if any
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    auto connectionPromise = connectImpl(*pipe.ends[1]).then([&]() -> kj::Promise<void> {
+      paf.fulfiller->fulfill();
+      return kj::NEVER_DONE;
+    }).catch_([&](kj::Exception&& e) {
+      paf.fulfiller->reject(kj::mv(e));
+    });
 
     // ... and then stack an HttpClient on it ...
     auto client = kj::newHttpClient(headerTable, *pipe.ends[0], {.entropySource = entropySource});
@@ -164,16 +171,27 @@ class Container::TcpPortWorkerInterface final: public WorkerInterface {
 
     // ... and now we can just forward our call to that.
     try {
-      co_await service->request(method, noHostUrl, newHeaders, requestBody, response);
+      // connectionPromise is fulfilled only on an exception,
+      // so this should only exit on error or on http request being fulfilled
+      co_await connectionPromise.exclusiveJoin(service->request(method, noHostUrl, newHeaders, requestBody, response));
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       connectionException = kj::some(kj::mv(exception));
     }
 
+    // if we haven't fulfilled the connect request yet,
+    // and the HTTP request has finished, just fulfill the promise
+    if (paf.fulfiller->isWaiting()) {
+      paf.fulfiller->fulfill();
+    }
+
     // we prefer an exception from the container service that might've caused
     // the error in the first place, that's why we await for the connectionPromise
+    co_await paf.promise;
+
+    // and last but not least, if the connect() call succeeded but the connection
+    // was broken, we throw an exception
     KJ_IF_SOME(exception, connectionException) {
-      co_await connectionPromise;
       kj::throwFatalException(kj::mv(exception));
     }
   }
