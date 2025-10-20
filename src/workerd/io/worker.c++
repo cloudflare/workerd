@@ -1065,6 +1065,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getEnhancedErrorSerialization()) {
       lock->setUsingEnhancedErrorSerialization();
     }
+    if (features.getFastJsgStruct()) {
+      lock->setUsingFastJsgStruct();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
