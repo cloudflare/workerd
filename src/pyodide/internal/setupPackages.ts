@@ -3,7 +3,7 @@ import { createMetadataFS } from 'pyodide-internal:metadatafs';
 import { LOCKFILE } from 'pyodide-internal:metadata';
 import {
   invalidateCaches,
-  PythonRuntimeError,
+  PythonWorkersInternalError,
   PythonUserError,
   simpleRunPython,
 } from 'pyodide-internal:util';
@@ -80,7 +80,7 @@ class VirtualizedDir {
     const dest = dir == 'dynlib' ? this.dynlibTarFs : this.rootInfo;
     overlayInfo.children!.forEach((val, key) => {
       if (dest.children!.has(key)) {
-        throw new PythonRuntimeError(
+        throw new PythonWorkersInternalError(
           `File/folder ${key} being written by multiple packages`
         );
       }
@@ -213,7 +213,7 @@ export function patchLoadPackage(pyodide: Pyodide): void {
 }
 
 function disabledLoadPackage(): never {
-  throw new PythonRuntimeError(
+  throw new PythonWorkersInternalError(
     'pyodide.loadPackage is disabled because packages are encoded in the binary'
   );
 }

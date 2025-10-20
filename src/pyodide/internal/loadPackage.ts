@@ -21,7 +21,10 @@ import {
 import { parseTarInfo } from 'pyodide-internal:tar';
 import { createTarFS } from 'pyodide-internal:tarfs';
 import { default as ArtifactBundler } from 'pyodide-internal:artifacts';
-import { PythonUserError, PythonRuntimeError } from 'pyodide-internal:util';
+import {
+  PythonUserError,
+  PythonWorkersInternalError,
+} from 'pyodide-internal:util';
 
 function getPackageMetadata(requirement: string): PackageDeclaration {
   const obj = LOCKFILE['packages'][requirement];
@@ -39,7 +42,7 @@ function loadBundleFromArtifactBundler(requirement: string): Reader {
   const fullPath = `python-package-bucket/${PACKAGES_VERSION}/${filename}`;
   const reader = ArtifactBundler.getPackage(fullPath);
   if (!reader) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       'Failed to get package ' + fullPath + ' from ArtifactBundler'
     );
   }

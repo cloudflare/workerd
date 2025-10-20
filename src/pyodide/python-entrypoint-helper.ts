@@ -18,7 +18,7 @@ import {
 } from 'pyodide-internal:metadata';
 import { default as Limiter } from 'pyodide-internal:limiter';
 import {
-  PythonRuntimeError,
+  PythonWorkersInternalError,
   PythonUserError,
   reportError,
 } from 'pyodide-internal:util';
@@ -73,7 +73,7 @@ let _pyodide_entrypoint_helper: PyodideEntrypointHelper | null = null;
 
 function get_pyodide_entrypoint_helper(): PyodideEntrypointHelper {
   if (!_pyodide_entrypoint_helper) {
-    throw new PythonRuntimeError(
+    throw new PythonWorkersInternalError(
       'pyodide_entrypoint_helper is not initialized'
     );
   }
