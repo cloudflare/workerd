@@ -45,7 +45,7 @@ rust_library(
         "noclippy",
         "norustfmt",
     ],
-    version = "0.13.0",
+    version = "0.12.0",
     deps = [
         "@crates_vendor__termcolor-1.4.1//:termcolor",
         "@crates_vendor__unicode-width-0.2.2//:unicode_width",
