@@ -374,7 +374,6 @@ class WritableImpl {
 
   size_t highWaterMark = 1;
   size_t amountBuffered = 0;
-  size_t excessiveBackpressureWarningCount = 0;
 
   // `writeRequests` is often going to be empty in common usage patterns, in which case std::list
   // is more memory efficient than a std::deque, for example.
@@ -389,7 +388,6 @@ class WritableImpl {
     uint8_t started : 1 = 0;
     uint8_t starting : 1 = 0;
     uint8_t backpressure : 1 = 0;
-    uint8_t warnAboutExcessiveBackpressure : 1 = 1;
   };
   Flags flags{};
 
