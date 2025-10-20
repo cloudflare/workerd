@@ -42,7 +42,7 @@ rust_library(
     ],
     version = "0.0.0",
     deps = [
-        "@crates_vendor__bitflags-2.9.4//:bitflags",
+        "@crates_vendor__bitflags-2.10.0//:bitflags",
         "@crates_vendor__bstr-1.12.0//:bstr",
         "@crates_vendor__compact_str-0.9.0//:compact_str",
         "@crates_vendor__memchr-2.7.6//:memchr",

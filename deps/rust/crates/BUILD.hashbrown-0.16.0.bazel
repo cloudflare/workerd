@@ -28,6 +28,14 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "allocator-api2",
+        "default",
+        "default-hasher",
+        "equivalent",
+        "inline-more",
+        "raw-entry",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -41,4 +49,9 @@ rust_library(
         "norustfmt",
     ],
     version = "0.16.0",
+    deps = [
+        "@crates_vendor__allocator-api2-0.2.21//:allocator_api2",
+        "@crates_vendor__equivalent-1.0.2//:equivalent",
+        "@crates_vendor__foldhash-0.2.0//:foldhash",
+    ],
 )

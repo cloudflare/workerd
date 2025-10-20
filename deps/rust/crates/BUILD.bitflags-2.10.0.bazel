@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "foldhash",
+    name = "bitflags",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -35,10 +35,10 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=foldhash",
+        "crate-name=bitflags",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "0.1.5",
+    version = "2.10.0",
 )

@@ -18,7 +18,7 @@ PACKAGES = WORKERD_CXX_PACKAGES | {
     "codespan-reporting": crate.spec(version = "0.12.0"),
     "flate2": crate.spec(version = "1"),
     "futures": crate.spec(version = "0"),
-    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.6.0"),
+    "lol_html_c_api": crate.spec(git = "https://github.com/cloudflare/lol-html", tag = "v2.7.0"),
     "nix": crate.spec(version = "0"),
     "pico-args": crate.spec(version = "0"),
     "quote": crate.spec(version = "1"),
