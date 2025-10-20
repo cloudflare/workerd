@@ -90,11 +90,6 @@ build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
 build:unix --per_file_copt=external/v8/src/torque@-fexceptions
 build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
 
-# Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
-# performance improvements but makes code size worse. This will be the default in LLVM19.
-# https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
-build:unix --copt="-mno-relax-all" --host_copt="-mno-relax-all"
-
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.
 https://libcxx.llvm.org/DesignDocs/HeaderRemovalPolicy.html
