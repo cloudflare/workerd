@@ -24,7 +24,7 @@
 
 import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
-import { validateObject, validateStringArray } from 'node-internal:validators';
+import { validateObject, validateString } from 'node-internal:validators';
 
 import { format, customInspectSymbol } from 'node-internal:internal_inspect';
 
@@ -51,8 +51,8 @@ class Tracing {
     return false;
   }
 
-  get categories(): string[] {
-    return [];
+  get categories(): string {
+    return '';
   }
 
   [customInspectSymbol](depth?: number, _: object = {}): string | object {
@@ -68,12 +68,12 @@ class Tracing {
 
 export function createTracing(options: CreateTracingOptions): Tracing {
   validateObject(options, 'options');
-  validateStringArray(options.categories, 'options.categories');
+  validateString(options.categories, 'options.categories');
   throw new ERR_METHOD_NOT_IMPLEMENTED('trace_events.createTracing');
 }
 
-export function getEnabledCategories(): string[] {
-  return [];
+export function getEnabledCategories(): string {
+  return '';
 }
 
 export default {
