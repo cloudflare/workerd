@@ -334,7 +334,6 @@ async function throwErrorIfErrorResponse(
   if (match && match[1]) {
     const errorMessage = await response.text();
     span.setAttribute('cloudflare.images.error.code', match[1]);
-    span.setAttribute('cloudflare.status', 'error');
     span.setAttribute('error.type', errorMessage);
     throw new ImagesErrorImpl(
       `IMAGES_${operation}_${errorMessage}`.trim(),
@@ -345,7 +344,6 @@ async function throwErrorIfErrorResponse(
   if (response.status > 399) {
     const errorMessage = await response.text();
     span.setAttribute('cloudflare.images.error.code', '9523');
-    span.setAttribute('cloudflare.status', 'error');
     span.setAttribute('error.type', errorMessage);
     throw new ImagesErrorImpl(
       `Unexpected error response ${response.status}: ${(
