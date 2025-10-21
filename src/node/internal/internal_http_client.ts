@@ -168,7 +168,6 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
-      // @ts-expect-error TS2379 Type incompatibility with exactOptionalPropertyTypes
       addAbortSignal(signal, this);
     }
     let method = options.method;

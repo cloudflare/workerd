@@ -36,10 +36,12 @@ import type { Readable } from 'node-internal:streams_readable';
 import type { Writable } from 'node-internal:streams_writable';
 import type { Transform } from 'node-internal:streams_transform';
 
-export function addAbortSignal(
+type NodeStream = Readable | Writable | Transform;
+
+export function addAbortSignal<T extends { destroy: (err: Error) => void }>(
   signal: unknown,
-  stream: Readable | Writable | Transform
-): Readable | Writable | Transform {
+  stream: T
+): T {
   validateAbortSignal(signal, 'signal');
   if (!isNodeStream(stream)) {
     throw new ERR_INVALID_ARG_TYPE('stream', 'stream.Stream', stream);
@@ -55,7 +57,7 @@ export function addAbortSignal(
     onAbort();
   } else {
     const disposable = addAbortListener(signal, onAbort);
-    eos(stream, disposable[Symbol.dispose]);
+    eos(stream as NodeStream, disposable[Symbol.dispose]);
   }
   return stream;
 }
