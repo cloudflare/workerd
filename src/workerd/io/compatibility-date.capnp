@@ -1187,6 +1187,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableCtxExports @139 :Bool
     $compatEnableFlag("enable_ctx_exports");
   # Enable the ctx.exports API.
+
   pythonExternalSDK @140 :Bool
     $compatEnableFlag("enable_python_external_sdk")
     $compatDisableFlag("disable_python_external_sdk")
@@ -1201,4 +1202,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # However, optional fields will be explicitly set to undefined rather than
   # being omitted, which is an observable behavior change.
   # TODO(soon): Once proven in production, add a default on date
+
+  cacheReload @142 :Bool
+      $compatEnableFlag("cache_reload_enabled")
+      $compatDisableFlag("cache_reload_disabled")
+      $experimental;
+  # Enables the use of cache: reload in the fetch api.
 }
