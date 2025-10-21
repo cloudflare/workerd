@@ -23,10 +23,15 @@ def _py_wd_test_helper(
     name_flag = name + "_" + python_flag
     templated_src = name_flag.replace("/", "-") + "@template"
     templated_src = "/".join(src.split("/")[:-1] + [templated_src])
-    flags = _get_enable_flags(python_flag) + feature_flags
-    feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
 
     load_snapshot = None
+    pyodide_version = BUNDLE_VERSION_INFO[python_flag]["real_pyodide_version"]
+    if use_snapshot == "stacked":
+        if pyodide_version == "0.26.0a2":
+            use_snapshot = None
+        else:
+            use_snapshot = "baseline"
+            feature_flags = feature_flags + ["python_dedicated_snapshot"]
     if use_snapshot:
         version_info = BUNDLE_VERSION_INFO[python_flag]
 
@@ -37,6 +42,8 @@ def _py_wd_test_helper(
     if load_snapshot and not make_snapshot:
         args += ["--python-load-snapshot", "load_snapshot.bin"]
 
+    flags = _get_enable_flags(python_flag) + feature_flags
+    feature_flags_txt = ",".join(['"{}"'.format(flag) for flag in flags])
     expand_template(
         name = name_flag + "@rule",
         out = templated_src,
@@ -118,7 +125,7 @@ def py_wd_test(
         size = "enormous",
         tags = [],
         make_snapshot = True,
-        use_snapshot = None,
+        use_snapshot = "stacked",
         skip_default_data = False,
         **kwargs):
     python_flags = compute_python_flags(python_flags, skip_python_flags)

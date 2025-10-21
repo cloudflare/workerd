@@ -49,7 +49,11 @@ py_wd_test(
 
 py_wd_test("js-import")
 
-py_wd_test("importable-env")
+py_wd_test(
+    "importable-env",
+    # TODO: why doesn't dedicated snapshot work with this?
+    use_snapshot = None,
+)
 
 py_wd_test("python-rpc")
 
@@ -71,22 +75,4 @@ py_wd_test(
     "numpy",
     make_snapshot = False,
     use_snapshot = "numpy",
-)
-
-py_wd_test(
-    name = "numpy_stacked_snapshot",
-    directory = "numpy",
-    feature_flags = ["python_dedicated_snapshot"],
-    make_snapshot = True,
-    python_flags = ["0.28.2"],
-    use_snapshot = "baseline",
-)
-
-py_wd_test(
-    name = "fastapi_stacked_snapshot",
-    directory = "fastapi",
-    feature_flags = ["python_dedicated_snapshot"],
-    make_snapshot = True,
-    python_flags = ["0.28.2"],
-    use_snapshot = "baseline",
 )

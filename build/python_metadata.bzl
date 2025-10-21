@@ -86,6 +86,7 @@ def _make_bundle_version_info(versions):
         name = entry["name"]
         if name != "development":
             entry["id"] = _bundle_id(**entry)
+            entry["real_pyodide_version"] = entry["pyodide_version"]
         entry["feature_flags"] = [entry["flag"]]
         entry["feature_string_flags"] = [entry["enable_flag_name"]]
         if "packages" in entry:

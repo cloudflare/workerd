@@ -43,6 +43,7 @@ def _test(name, directory, wd_test, py_file, python_version, **kwds):
         directory = directory,
         src = wd_test,
         python_flags = [python_version],
+        use_snapshot = None,
         make_snapshot = False,
         args = ["--experimental", "--pyodide-package-disk-cache-dir", "../all_pyodide_wheels_%s" % pkg_tag],
         skip_default_data = True,

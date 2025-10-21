@@ -17,4 +17,5 @@ py_wd_test(
     ]),
     # Works but times out frequently
     make_snapshot = False,
+    use_snapshot = None,
 )
