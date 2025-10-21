@@ -1305,5 +1305,55 @@ KJ_TEST("jsg::Name works") {
   e.expectEval("forSymbolShared('foo') !== forSymbolApi('foo')", "boolean", "true");
 }
 
+// ========================================================================================
+struct RabContext: public ContextGlobalObject {
+  kj::Maybe<jsg::BufferSource> stored;
+
+  void takeRab(jsg::Lock& js, jsg::BufferSource rab) {
+    stored = kj::mv(rab);
+  }
+
+  bool testRab(jsg::Lock& js, int expectedSize) {
+    auto& s = KJ_ASSERT_NONNULL(stored);
+    KJ_EXPECT(s.size() == expectedSize);
+    auto view = s.asArrayPtr();
+    KJ_EXPECT(view[0] == 1);
+    KJ_EXPECT(view[1] == 1);
+    KJ_EXPECT(view[2] == 1);
+    KJ_EXPECT(view[3] == 1);
+    KJ_EXPECT(view[4] == 0);
+    KJ_EXPECT(view[5] == 0);
+    KJ_EXPECT(view[6] == 0);
+    KJ_EXPECT(view[7] == 0);
+    KJ_EXPECT(view[8] == 0);
+    KJ_EXPECT(view[9] == 0);
+    return true;
+  }
+
+  JSG_RESOURCE_TYPE(RabContext) {
+    JSG_METHOD(takeRab);
+    JSG_METHOD(testRab);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(RabIsolate, RabContext);
+
+KJ_TEST("Resizable array buffer") {
+  Evaluator<RabContext, RabIsolate> e(v8System);
+  e.expectEval("const rab = new ArrayBuffer(10, { maxByteLength: 10 });"
+               "const view = new Uint8Array(rab);"
+               "view.fill(1);"
+               "takeRab(rab);"
+               "rab.resize(4);"
+               "testRab(10);",
+      "boolean", "true");
+  e.expectEval("const rab = new ArrayBuffer(4, { maxByteLength: 10 });"
+               "const view = new Uint8Array(rab);"
+               "view.fill(1);"
+               "takeRab(rab);"
+               "rab.resize(10);"
+               "testRab(4);",
+      "boolean", "true");
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test
