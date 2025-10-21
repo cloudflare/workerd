@@ -180,11 +180,11 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": None,
                 "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
             },
-            {
-                "name": "scipy",
-                "abi": "3.13",
-                "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
-            },
+            # {
+            #     "name": "scipy",
+            #     "abi": "3.13",
+            #     "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
+            # },
         ],
     },
     {
