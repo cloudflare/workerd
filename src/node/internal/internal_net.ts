@@ -59,6 +59,11 @@ import {
 import { isUint8Array, isArrayBufferView } from 'node-internal:internal_types';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Buffer } from 'node-internal:internal_buffer';
+import {
+  kDestroyed,
+  kIsReadable,
+  kIsWritable,
+} from 'node-internal:streams_util';
 import type {
   IpcSocketConnectOpts,
   SocketConnectOpts,
@@ -132,13 +137,12 @@ export type SocketOptions = {
   handle?: Socket['_handle'];
   noDelay?: boolean;
   keepAlive?: boolean;
-  allowHalfOpen?: boolean | undefined;
+  allowHalfOpen?: boolean;
   emitClose?: boolean;
-  signal?: AbortSignal | undefined;
+  signal?: AbortSignal;
   onread?:
     | ({ callback?: () => Uint8Array; buffer?: Uint8Array } & OnReadOpts)
-    | null
-    | undefined;
+    | null;
 };
 
 export function Server(): void {
@@ -211,7 +215,14 @@ export declare class Socket extends _Socket {
   _read(n: number): void;
   _reset(): void;
   _getpeername(): Record<string, unknown>;
-  _writableState: null | unknown[];
+  _readableState: undefined;
+  _closed: boolean;
+  writableErrored: boolean;
+  readableErrored: boolean;
+  [kIsReadable]: boolean;
+  [kIsWritable]: boolean;
+  [kDestroyed]: boolean;
+  _writableState: undefined;
   _bytesDispatched: number;
   _pendingData: SocketWriteData | null;
   _pendingEncoding: string;
@@ -331,7 +342,6 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   // Call Duplex constructor before setting up the abort signal
   // This ensures the stream methods are properly set up before
   // any abort handling that might call destroy()
-  // @ts-expect-error TS2379 Type incompatibility with exactOptionalPropertyTypes
   Duplex.call(this, options);
 
   if (options.handle) {

@@ -31,6 +31,7 @@ let defaultHighWaterMarkObjectMode = 16;
 
 export type HighWaterMarkFromOptions = {
   highWaterMark?: number;
+  [key: string]: number | undefined;
 };
 
 export function highWaterMarkFrom(
@@ -41,8 +42,7 @@ export function highWaterMarkFrom(
   return options.highWaterMark != null
     ? options.highWaterMark
     : isDuplex
-      ? // @ts-expect-error TS7053 Fix this soon.
-        (options[duplexKey] as number)
+      ? (options[duplexKey] as number)
       : null;
 }
 

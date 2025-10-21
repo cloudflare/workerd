@@ -493,8 +493,7 @@ export class BufferList {
     if (this.length === 0) return '';
     let p = this.head;
     let ret = '' + p?.data;
-    // @ts-expect-error TS2365 Plus operand warning.
-    while ((p = p?.next ?? null) != null) ret += s + p?.data;
+    while ((p = p?.next ?? null) != null) ret += s + String(p.data);
     return ret;
   }
 
