@@ -1428,7 +1428,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       KJ_IF_SOME(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(initHeaders));
       } else {
-        headers = js.alloc<Headers>(js, jsg::Dict<jsg::ByteString, jsg::ByteString>());
+        headers = js.alloc<Headers>();
       }
 
       KJ_IF_SOME(newCf, initDict.cf) {
@@ -1538,7 +1538,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
     parsedUrl = kj::str(parsed.getHref());
   } else {
     auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
-    auto maybeParsedUrl = kj::Url::tryParse(kj::str(url), kj::Url::REMOTE_HREF, urlOptions);
+    auto maybeParsedUrl = kj::Url::tryParse(url.asPtr(), kj::Url::REMOTE_HREF, urlOptions);
     if (maybeParsedUrl == kj::none) {
       JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
     }
@@ -1566,8 +1566,8 @@ jsg::Ref<Response> Response::json_(
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->set(js, jsg::ByteString(kj::str("content-type")),
-          jsg::ByteString(MimeType::JSON.toString()));
+      headers->setUnguarded(js, jsg::ByteString(kj::str("content-type")),
+        jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };
