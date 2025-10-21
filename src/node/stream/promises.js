@@ -3,5 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 //
 import { promises } from 'node-internal:streams_promises';
+export {};
 export * from 'node-internal:streams_promises';
 export default promises;

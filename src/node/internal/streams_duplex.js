@@ -43,10 +43,9 @@ import { validateBoolean, validateObject } from 'node-internal:validators';
 
 import { normalizeEncoding } from 'node-internal:internal_utils';
 
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
+
 import {
-  addAbortSignal,
-  destroyer,
-  eos,
   isDestroyed,
   isReadable,
   isWritable,
@@ -57,8 +56,14 @@ import {
   isWritableNodeStream,
   isDuplexNodeStream,
   kOnConstructed,
-  construct as destroyConstruct,
 } from 'node-internal:streams_util';
+
+import { eos } from 'node-internal:streams_end_of_stream';
+
+import {
+  destroyer,
+  construct as destroyConstruct,
+} from 'node-internal:streams_destroy';
 
 import {
   AbortError,

@@ -331,6 +331,7 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
   // Call Duplex constructor before setting up the abort signal
   // This ensures the stream methods are properly set up before
   // any abort handling that might call destroy()
+  // @ts-expect-error TS2379 Type incompatibility with exactOptionalPropertyTypes
   Duplex.call(this, options);
 
   if (options.handle) {

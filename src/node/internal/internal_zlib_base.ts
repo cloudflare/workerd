@@ -22,7 +22,7 @@ import {
   NodeError,
 } from 'node-internal:internal_errors';
 import { Transform, type DuplexOptions } from 'node-internal:streams_transform';
-import { eos as finished } from 'node-internal:streams_util';
+import { eos as finished } from 'node-internal:streams_end_of_stream';
 import {
   isArrayBufferView,
   isAnyArrayBuffer,
@@ -439,6 +439,8 @@ export class ZlibBase extends Transform {
     this._maxOutputLength = maxOutputLength;
   }
 
+  // Note: This is intentionally a getter that shadows the property from Transform
+  // @ts-expect-error TS2611 Property/accessor mismatch with Transform._closed
   get _closed(): boolean {
     return this._handle == null;
   }

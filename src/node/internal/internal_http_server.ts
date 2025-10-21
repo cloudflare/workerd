@@ -24,7 +24,7 @@ import {
   ERR_SERVER_ALREADY_LISTEN,
 } from 'node-internal:internal_errors';
 import { EventEmitter } from 'node-internal:events';
-import { getDefaultHighWaterMark } from 'node-internal:streams_util';
+import { getDefaultHighWaterMark } from 'node-internal:streams_state';
 import {
   kUniqueHeaders,
   OutgoingMessage,

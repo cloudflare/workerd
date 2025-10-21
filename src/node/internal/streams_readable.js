@@ -26,24 +26,28 @@
 /* TODO: the following is adopted code, enabling linting one day */
 /* eslint-disable */
 
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
+
 import {
   nop,
-  getHighWaterMark,
-  getDefaultHighWaterMark,
   kPaused,
-  addAbortSignal,
   BufferList,
-  eos,
+  isDestroyed,
+  isReadable,
+  kOnConstructed,
+} from 'node-internal:streams_util';
+import { eos, finished } from 'node-internal:streams_end_of_stream';
+import {
   construct,
   destroy,
   destroyer,
-  undestroy,
   errorOrDestroy,
-  finished,
-  kOnConstructed,
-  isDestroyed,
-  isReadable,
-} from 'node-internal:streams_util';
+  undestroy,
+} from 'node-internal:streams_destroy';
+import {
+  getDefaultHighWaterMark,
+  getHighWaterMark,
+} from 'node-internal:streams_state';
 import { nextTick } from 'node-internal:internal_process';
 
 import { EventEmitter } from 'node-internal:events';
