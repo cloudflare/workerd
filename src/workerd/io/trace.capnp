@@ -42,3 +42,14 @@ struct UserSpanData {
   parentSpanId @5 :UInt64;
 }
 
+struct SpanOpenData {
+  # Representation of a SpanOpen event
+  operationName @0 :Text;
+
+  startTimeNs @1 :Int64;
+  # Nanoseconds since Unix epoch
+
+  spanId @2 :UInt64;
+  parentSpanId @3 :UInt64;
+}
+

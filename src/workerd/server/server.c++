@@ -1700,11 +1700,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
 class SequentialSpanSubmitter final: public SpanSubmitter {
  public:
   SequentialSpanSubmitter(kj::Own<WorkerTracer> workerTracer): workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) override {
+  void submitSpan(tracing::SpanId spanId, const Span& span) override {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
-    tracing::CompleteSpan span2(
-        spanId, parentSpanId, span.operationName.clone(), span.startTime, span.endTime);
+    tracing::CompleteSpan span2(spanId, span.operationName.clone(), span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
       span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
@@ -1714,6 +1713,15 @@ class SequentialSpanSubmitter final: public SpanSubmitter {
     }
 
     workerTracer->addSpan(kj::mv(span2));
+  }
+  void submitSpanStart(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString& operationName,
+      kj::Date startTime) override {
+    if (isPredictableModeForTest()) {
+      startTime = kj::UNIX_EPOCH;
+    }
+    workerTracer->addSpanOpen(spanId, parentSpanId, operationName, startTime);
   }
 
   tracing::SpanId makeSpanId() override {
