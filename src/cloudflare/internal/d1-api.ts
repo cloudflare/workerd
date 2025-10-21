@@ -777,7 +777,8 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
 
   for (const meta of metas) {
     aggregatedMeta.duration += meta.duration;
-    aggregatedMeta.size_after += meta.size_after;
+    // for size_after, we only want the last value
+    aggregatedMeta.size_after = meta.size_after;
     aggregatedMeta.rows_read += meta.rows_read;
     aggregatedMeta.rows_written += meta.rows_written;
     aggregatedMeta.last_row_id = meta.last_row_id;
@@ -797,6 +798,10 @@ function aggregateD1Meta(metas: D1Meta[]): D1Meta {
     if (meta.total_attempts) {
       aggregatedMeta.total_attempts =
         (aggregatedMeta.total_attempts ?? 0) + meta.total_attempts;
+    }
+    aggregatedMeta.changes += meta.changes;
+    if (meta.changed_db) {
+      aggregatedMeta.changed_db = true;
     }
   }
 
