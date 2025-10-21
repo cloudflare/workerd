@@ -86,6 +86,7 @@ def _make_bundle_version_info(versions):
         name = entry["name"]
         if name != "development":
             entry["id"] = _bundle_id(**entry)
+            entry["real_pyodide_version"] = entry["pyodide_version"]
         entry["feature_flags"] = [entry["flag"]]
         entry["feature_string_flags"] = [entry["enable_flag_name"]]
         if "packages" in entry:
@@ -180,11 +181,11 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": None,
                 "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
             },
-            {
-                "name": "scipy",
-                "abi": "3.13",
-                "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
-            },
+            # {
+            #     "name": "scipy",
+            #     "abi": "3.13",
+            #     "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
+            # },
         ],
     },
     {

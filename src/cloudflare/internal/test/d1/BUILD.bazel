@@ -25,4 +25,5 @@ py_wd_test(
         "*.js",
     ]),
     make_snapshot = False,
+    use_snapshot = None,
 )
