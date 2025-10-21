@@ -672,7 +672,6 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   void registerBuiltinTypes() {
     registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::String>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::StringPtr>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<DOMString>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<ByteString>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<USVString>);
@@ -688,12 +687,8 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
     registry.registerHandler(TYPE_HANDLER_INSTANCE<double>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<bool>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<byte>>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<byte>>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<const byte>>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<const byte>>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<const char>>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<
-            const char>>);  // Add more built-in types as needed based on what the application uses.
+    // Add more built-in types as needed based on what the application uses.
   }
 
   template <typename U>
