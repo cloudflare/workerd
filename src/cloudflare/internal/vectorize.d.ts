@@ -4,8 +4,12 @@
 
 /*****************************
  *
- * NOTE: this is copy & pasted from the types/ folder, as when bazel
- * runs it doesn't have access to that directly and thusly is sad.
+ * !!! WARNING !!!
+ * Changes should be made in `types/defines/vectorize.d.ts`
+ * and then synced back here.
+ *
+ * This files was is copy & pasted from the types/ folder 2 years ago
+ * because when bazel runs it doesn't have access to that directly (and thusly is sad).
  * TODO: come up with a better system for this.
  *
  ****************************** /
@@ -291,3 +295,15 @@ declare abstract class Vectorize {
    */
   getByIds(ids: string[]): Promise<VectorizeVector[]>;
 }
+
+/*****************************
+ *
+ * !!! WARNING !!!
+ * Changes should be made in `types/defines/vectorize.d.ts`
+ * and then synced back here.
+ *
+ * This files was is copy & pasted from the types/ folder 2 years ago
+ * because when bazel runs it doesn't have access to that directly (and thusly is sad).
+ * TODO: come up with a better system for this.
+ *
+ ******************************/
