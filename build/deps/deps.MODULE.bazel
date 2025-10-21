@@ -103,10 +103,10 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 http_archive(
     name = "capnp-cpp",
-    url = "https://github.com/capnproto/capnproto/tarball/164284a476eee4bfbcf7cce2a9a82fb156504210",
+    sha256 = "03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28",
     strip_prefix = "capnproto-capnproto-164284a/c++",
     type = "tgz",
-    sha256 = "03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28",
+    url = "https://github.com/capnproto/capnproto/tarball/164284a476eee4bfbcf7cce2a9a82fb156504210",
 )
 
 http_archive(
