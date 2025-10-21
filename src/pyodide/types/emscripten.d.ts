@@ -56,6 +56,11 @@ interface DSO {
   exports: WebAssembly.Exports;
 }
 
+// https://github.com/emscripten-core/emscripten/blob/main/src/lib/libpath.js
+interface PATH {
+  normalizeArray: (parts: string[], allowAboveRoot: boolean) => string[];
+}
+
 type PreRunHook = (mod: Module) => void;
 
 interface EmscriptenSettings {
@@ -84,6 +89,7 @@ interface Module {
   API: API;
   ENV: ENV;
   LDSO: LDSO;
+  PATH: PATH;
   newDSO: (path: string, opt: object | undefined, handle: string) => DSO;
   _Py_Version: number;
   _py_version_major?: () => number;

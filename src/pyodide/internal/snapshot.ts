@@ -348,7 +348,7 @@ function preloadDynamicLibsMain(Module: Module, loadOrder: string[]): void {
       base = dynlibPath;
     }
 
-    const pathSplit = path.split('/');
+    const pathSplit = Module.PATH.normalizeArray(path.split('/'), true);
     if (pathSplit[0] == '') {
       // This is a file path beginning with `/`, like /session/metadata/vendor/pkg/lib.so. So we
       // are loading the vendored package's dynlibs here.
