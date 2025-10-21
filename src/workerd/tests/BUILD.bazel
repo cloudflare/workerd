@@ -96,6 +96,12 @@ wd_cc_benchmark(
     deps = [":test-fixture"],
 )
 
+wd_cc_benchmark(
+    name = "bench-response",
+    srcs = ["bench-response.c++"],
+    deps = [":test-fixture"],
+)
+
 wd_test(
     src = "unknown-import-assertions-test.wd-test",
     args = ["--experimental"],
@@ -125,6 +131,7 @@ filegroup(
         ":bench-kj-headers",
         ":bench-mimetype",
         ":bench-regex",
+        ":bench-response",
         ":bench-text-encoder",
         ":bench-util",
     ],
