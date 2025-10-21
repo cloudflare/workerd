@@ -9,7 +9,6 @@ bazel_dep(name = "brotli", version = "1.1.0")
 # We want to avoid version skew with v8, so we use identical versions.
 
 bazel_dep(name = "fast_float")
-
 archive_override(
     module_name = "fast_float",
     build_file_content = """cc_library(
@@ -30,7 +29,6 @@ archive_override(
 )
 
 bazel_dep(name = "fp16")
-
 archive_override(
     module_name = "fp16",
     build_file_content = "exports_files(glob([\"**\"]))",
@@ -46,7 +44,6 @@ archive_override(
 )
 
 bazel_dep(name = "highway")
-
 archive_override(
     module_name = "highway",
     integrity = "sha256-fvP4kFP1D4jUYDZwu5qRXSUr2TMUztaR3fWRPtvE51s=",
@@ -86,7 +83,6 @@ archive_override(
 )
 
 bazel_dep(name = "tcmalloc", repo_name = "com_google_tcmalloc")
-
 archive_override(
     module_name = "tcmalloc",
     integrity = "sha256-29cSZUwbEyiW8Y7FneaAzNNYLHeBmAPqBuIciHeE/u0=",
@@ -107,10 +103,10 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 http_archive(
     name = "capnp-cpp",
-    url = "https://github.com/capnproto/capnproto/tarball/164284a476eee4bfbcf7cce2a9a82fb156504210",
+    sha256 = "03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28",
     strip_prefix = "capnproto-capnproto-164284a/c++",
     type = "tgz",
-    sha256 = "03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28",
+    url = "https://github.com/capnproto/capnproto/tarball/164284a476eee4bfbcf7cce2a9a82fb156504210",
 )
 
 http_archive(
