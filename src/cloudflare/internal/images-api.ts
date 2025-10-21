@@ -223,6 +223,9 @@ class ImageTransformerImpl implements ImageTransformer {
 
     walkTransforms(0, this.#transforms);
 
+    // The transforms are a set of operations which are applied to the image in order.
+    // Attaching an attribute as JSON is a little odd, but I'm not sure if there is
+    // a better way to do this.
     if (transforms.length > 0) {
       span.setAttribute(
         'cloudflare.images.options.transforms',
@@ -346,9 +349,7 @@ async function throwErrorIfErrorResponse(
     span.setAttribute('cloudflare.images.error.code', '9523');
     span.setAttribute('error.type', errorMessage);
     throw new ImagesErrorImpl(
-      `Unexpected error response ${response.status}: ${(
-        await response.text()
-      ).trim()}`,
+      `Unexpected error response ${response.status}: ${errorMessage.trim()}`,
       9523
     );
   }
