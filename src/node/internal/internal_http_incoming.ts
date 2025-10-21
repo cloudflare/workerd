@@ -3,9 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 // Copyright Joyent and Node contributors. All rights reserved. MIT license.
 
-// this.aborted attribute is set as deprecated in @types/node package.
-/* eslint-disable @typescript-eslint/no-deprecated */
-
 import { EventEmitter } from 'node-internal:events';
 import { Readable } from 'node-internal:streams_readable';
 import { isIPv4, Socket } from 'node-internal:internal_net';
@@ -43,7 +40,7 @@ export class IncomingMessage extends Readable implements _IncomingMessage {
   #socket: unknown;
   #stream: ReadableStream | null = null;
 
-  aborted = false;
+  override aborted = false;
   url: string = '';
   // @ts-expect-error TS2416 Type-inconsistencies
   method: string | null = null;

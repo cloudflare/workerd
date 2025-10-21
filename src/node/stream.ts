@@ -4,18 +4,20 @@
 //
 
 import { pipeline } from 'node-internal:streams_pipeline';
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
+import { eos } from 'node-internal:streams_end_of_stream';
 import {
-  destroyer,
-  eos,
   isErrored,
   isDisturbed,
   isDestroyed,
   isReadable,
-  addAbortSignal,
-  getDefaultHighWaterMark,
-  setDefaultHighWaterMark,
   isWritable,
 } from 'node-internal:streams_util';
+import { destroyer } from 'node-internal:streams_destroy';
+import {
+  getDefaultHighWaterMark,
+  setDefaultHighWaterMark,
+} from 'node-internal:streams_state';
 import { compose } from 'node-internal:streams_compose';
 import { Stream } from 'node-internal:streams_legacy';
 import { Writable } from 'node-internal:streams_writable';
@@ -56,6 +58,7 @@ export {
   duplexPair,
 };
 
+// @ts-expect-error TS2322 Type incompatibility between internal and Node.js stream types
 Stream.addAbortSignal = addAbortSignal;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 Stream.compose = compose;
@@ -68,11 +71,15 @@ Stream.isErrored = isErrored;
 Stream.isDisturbed = isDisturbed;
 Stream.pipeline = pipeline;
 Stream.Stream = Stream;
+// @ts-expect-error TS2419 Type incompatibility due to exactOptionalPropertyTypes
 Stream.Writable = Writable;
+// @ts-expect-error TS2419 Type incompatibility due to exactOptionalPropertyTypes
 Stream.Readable = Readable;
 Stream.Duplex = Duplex;
+// @ts-expect-error TS2419 Type incompatibility due to exactOptionalPropertyTypes
 Stream.Transform = Transform;
 Stream.PassThrough = PassThrough;
+// @ts-expect-error TS2322 Type incompatibility due to exactOptionalPropertyTypes
 Stream.promises = promises;
 Stream.getDefaultHighWaterMark = getDefaultHighWaterMark;
 Stream.setDefaultHighWaterMark = setDefaultHighWaterMark;

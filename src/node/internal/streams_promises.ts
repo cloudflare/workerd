@@ -23,16 +23,16 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import { isIterable, isNodeStream, finished } from 'node-internal:streams_util';
-
+import { isIterable, isNodeStream } from 'node-internal:streams_util';
+import { finished } from 'node-internal:streams_end_of_stream';
 import { pipelineImpl as pl } from 'node-internal:streams_pipeline';
 
 export { finished };
 
-export function pipeline(...streams) {
+export function pipeline(...streams: unknown[]): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let signal;
-    let end;
+    let signal: AbortSignal | undefined;
+    let end: boolean | undefined;
     const lastArg = streams[streams.length - 1];
     if (
       lastArg &&
@@ -40,13 +40,13 @@ export function pipeline(...streams) {
       !isNodeStream(lastArg) &&
       !isIterable(lastArg)
     ) {
-      const options = streams.pop();
+      const options = streams.pop() as { signal?: AbortSignal; end?: boolean };
       signal = options.signal;
       end = options.end;
     }
     pl(
       streams,
-      (err, value) => {
+      (err: Error | null, value: unknown) => {
         if (err) {
           reject(err);
         } else {

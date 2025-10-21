@@ -29,7 +29,7 @@ import {
   validateNumber,
 } from 'node-internal:validators';
 import { getTimerDuration } from 'node-internal:internal_net';
-import { addAbortSignal } from 'node-internal:streams_util';
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
 import { Writable } from 'node-internal:streams_writable';
 import type {
   ClientRequest as _ClientRequest,
@@ -79,7 +79,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   agent: Agent | undefined;
 
   // Unused fields required to be Node.js compatible.
-  aborted: boolean = false;
+  override aborted: boolean = false;
   reusedSocket: boolean = false;
   maxHeadersCount: number = Infinity;
   connection: Socket | null = null;
@@ -168,6 +168,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
     const signal = options.signal;
     if (signal) {
+      // @ts-expect-error TS2379 Type incompatibility with exactOptionalPropertyTypes
       addAbortSignal(signal, this);
     }
     let method = options.method;

@@ -33,22 +33,30 @@ import { nextTick } from 'node-internal:internal_process';
 import { normalizeEncoding } from 'node-internal:internal_utils';
 import { validateBoolean, validateObject } from 'node-internal:validators';
 
+import { addAbortSignal } from 'node-internal:streams_add_abort_signal';
+
 import {
   nop,
   kOnFinished,
-  getHighWaterMark,
-  getDefaultHighWaterMark,
-  addAbortSignal,
-  construct,
-  destroy,
-  eos,
   isWritableEnded,
   isWritable,
   isDestroyed,
-  undestroy,
-  errorOrDestroy,
   kOnConstructed,
 } from 'node-internal:streams_util';
+
+import { eos } from 'node-internal:streams_end_of_stream';
+
+import {
+  construct,
+  destroy,
+  undestroy,
+  errorOrDestroy,
+} from 'node-internal:streams_destroy';
+
+import {
+  getHighWaterMark,
+  getDefaultHighWaterMark,
+} from 'node-internal:streams_state';
 
 import {
   AbortError,

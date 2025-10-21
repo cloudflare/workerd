@@ -32,12 +32,10 @@ import {
   isReadable,
   isReadableNodeStream,
   isNodeStream,
-  eos,
-  destroyer as destroyerImpl,
 } from 'node-internal:streams_util';
-
+import { eos } from 'node-internal:streams_end_of_stream';
+import { destroyer as destroyerImpl } from 'node-internal:streams_destroy';
 import { nextTick } from 'node-internal:internal_process';
-
 import { PassThrough } from 'node-internal:streams_transform';
 import { Duplex } from 'node-internal:streams_duplex';
 import { Readable, from } from 'node-internal:streams_readable';

@@ -71,7 +71,7 @@ import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
 
 import { Duplex } from 'node-internal:streams_duplex';
 
-import { getHighWaterMark } from 'node-internal:streams_util';
+import { getHighWaterMark } from 'node-internal:streams_state';
 
 Object.setPrototypeOf(Transform.prototype, Duplex.prototype);
 Object.setPrototypeOf(Transform, Duplex);
