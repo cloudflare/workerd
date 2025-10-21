@@ -228,12 +228,22 @@ function getMemoryPatched(
   const libName = libPath.split('/').at(-1)!;
   // 1. Is it loaded in the snapshot? Replay the memory base.
   {
-    const { soMemoryBases } = LOADED_SNAPSHOT_META ?? {};
+    const { soMemoryBases, soTableBases } = LOADED_SNAPSHOT_META ?? {};
     // If we loaded this library before taking the snapshot, we already allocated the memory and the
     // allocator remembers because its state is in the linear memory. We just have to look it up.
-    const base = soMemoryBases?.[libPath] ?? soMemoryBases?.[libName];
-    if (base) {
-      return base;
+    const tableBase = Module.wasmTable.length;
+    const expectedTableBase =
+      soTableBases?.[libPath] ?? soTableBases?.[libName];
+    if (expectedTableBase && tableBase !== expectedTableBase) {
+      // If this happens, we will segfault if we ever try to use this dynamic library.
+      // Save ourselves some debugging pain by crashing early.
+      throw new PythonRuntimeError(
+        `Error loading ${libName}: Expected table base ${expectedTableBase} but got table base ${tableBase}`
+      );
+    }
+    const memoryBase = soMemoryBases?.[libPath] ?? soMemoryBases?.[libName];
+    if (memoryBase) {
+      return memoryBase;
     }
   }
   // 2. It's not loaded in the snapshot. Record
