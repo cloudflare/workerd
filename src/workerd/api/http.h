@@ -946,7 +946,7 @@ public:
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
   // "full", and possibly decide if we want to support the "half" option.
-  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.undefined(); }
   // TODO(conform): Might implement?
 
   // These relate to CORS support, which we do not implement. WinterTC has determined that

@@ -556,7 +556,7 @@ class OptionalWrapper {
     KJ_IF_SOME(p, ptr) {
       return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
-      return v8::Undefined(js.v8Isolate);
+      return js.undefined();
     }
   }
 
@@ -593,7 +593,7 @@ class LenientOptionalWrapper {
     KJ_IF_SOME(p, ptr) {
       return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
-      return v8::Undefined(js.v8Isolate);
+      return js.undefined();
     }
   }
 
@@ -641,7 +641,7 @@ class MaybeWrapper {
     KJ_IF_SOME(p, ptr) {
       return static_cast<TypeWrapper*>(this)->wrap(js, context, creator, kj::fwd<U>(p));
     } else {
-      return v8::Null(js.v8Isolate);
+      return js.null();
     }
   }
 
@@ -718,7 +718,7 @@ class OneOfWrapper {
       kj::OneOf<U...> value) {
     v8::Local<v8::Value> result;
     if (!(wrapHelper<U>(js, context, creator, value, result) || ...)) {
-      result = v8::Undefined(js.v8Isolate);
+      result = js.undefined();
     }
     return result;
   }

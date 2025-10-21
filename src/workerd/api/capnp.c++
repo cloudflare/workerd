@@ -384,11 +384,11 @@ struct JsCapnpConverter {
     return js.withinHandleScope([&]() -> v8::Local<v8::Value> {
       switch (value.getType()) {
         case capnp::DynamicValue::UNKNOWN:
-          return js.v8Undefined();
+          return js.undefined();
         case capnp::DynamicValue::VOID:
-          return js.v8Null();
+          return js.null();
         case capnp::DynamicValue::BOOL:
-          return v8::Boolean::New(js.v8Isolate, value.as<bool>());
+          return js.boolean(value.as<bool>());
         case capnp::DynamicValue::INT: {
           if (type.which() == capnp::schema::Type::INT64 ||
               type.which() == capnp::schema::Type::UINT64) {
@@ -466,7 +466,7 @@ struct JsCapnpConverter {
             return wrapper.wrapCap(js, js.v8Context(), value.as<capnp::DynamicCapability>());
           }
         case capnp::DynamicValue::ANY_POINTER:
-          return js.v8Null();
+          return js.null();
       }
 
       KJ_FAIL_ASSERT("Unimplemented DynamicValue type.");
