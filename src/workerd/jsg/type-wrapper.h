@@ -316,6 +316,54 @@ class TypeWrapperBase<Self, InjectConfiguration<Configuration>, JsgKind::EXTENSI
   Configuration configuration;
 };
 
+class TypeHandlerRegistry final {
+ public:
+  TypeHandlerRegistry() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(TypeHandlerRegistry);
+
+  template <typename T>
+  void registerHandler(const TypeHandler<T>& handler) {
+    handlers.insert(std::type_index(typeid(T)), &handler);
+  }
+
+  template <typename T>
+  const TypeHandler<T>& getHandler() const {
+    auto iter = handlers.find(std::type_index(typeid(T)));
+    return *reinterpret_cast<const TypeHandler<T>*>(
+        KJ_ASSERT_NONNULL(iter, "TypeHandler not found:", typeid(T).name()));
+  }
+
+  static TypeHandlerRegistry& from(v8::Isolate* isolate);
+  static TypeHandlerRegistry& from(Lock& js) {
+    return from(js.v8Isolate);
+  }
+
+  bool isInitialized() const {
+    return initialized;
+  }
+
+  // Store a callback to call initializeRegistry on the owning TypeWrapper
+  void setInitializer(kj::Function<void()> init) {
+    initializerFunc = kj::mv(init);
+  }
+  void markInitialized() {
+    initialized = true;
+  }
+
+ private:
+  // Store TypeHandlers as void* keyed by std::type_index.
+  // The actual type is const TypeHandler<T>* for each registered T
+  kj::HashMap<std::type_index, const void*> handlers;
+  bool initialized = false;
+  kj::Maybe<kj::Function<void()>> initializerFunc;
+
+  void callInitializer() {
+    KJ_IF_SOME(func, initializerFunc) {
+      func();
+    }
+  }
+};
+
 // The TypeWrapper class aggregates functionality to convert between C++ values and JavaScript
 // values. It primarily implements two methods:
 //
@@ -413,6 +461,7 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
                    public JsValueWrapper<Self> {
   // TODO(soon): Should the TypeWrapper object be stored on the isolate rather than the context?
   bool fastApiEnabled = false;
+  TypeHandlerRegistry registry;
 
  public:
   template <typename MetaConfiguration>
@@ -421,6 +470,9 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
         MaybeWrapper<Self>(configuration),
         PromiseWrapper<Self>(configuration) {
     isolate->SetData(SET_DATA_TYPE_WRAPPER, this);
+    // Set the registry pointer immediately so it's available for lazy initialization
+    isolate->SetData(SET_DATA_TYPE_HANDLER_REGISTRY, &registry);
+    registry.setInitializer([this]() { this->initializeRegistry(); });
     fastApiEnabled = util::Autogate::isEnabled(util::AutogateKey::V8_FAST_API);
   }
   KJ_DISALLOW_COPY_AND_MOVE(TypeWrapper);
@@ -596,6 +648,42 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
   void initReflection(Holder* holder, PropertyReflection<U>&... reflections) {
     (initReflection(holder, reflections), ...);
   }
+
+ private:
+  void initializeRegistry() {
+    // Register handlers for all user-defined types.
+    (registerTypeInRegistry<T>(), ...);
+    registerBuiltinTypes();
+  }
+
+  template <typename U>
+  void registerTypeInRegistry() {
+    // Only register if it's a value type (not a resource or struct)
+    // Resources/structs use different mechanisms
+    if constexpr (canWrapByValue<U>()) {
+      registry.registerHandler(TYPE_HANDLER_INSTANCE<U>);
+    }
+  }
+
+  void registerBuiltinTypes() {
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::String>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<double>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<bool>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint32_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int64_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<byte>>);
+  }
+
+  template <typename U>
+  static constexpr bool canWrapByValue() {
+    // Resources, structs, and extensions use different wrapping mechanisms
+    if constexpr (requires { U::JSG_KIND; }) {
+      return U::JSG_KIND != JsgKind::RESOURCE && U::JSG_KIND != JsgKind::STRUCT &&
+          U::JSG_KIND != JsgKind::EXTENSION;
+    }
+    return true;
+  }
 };
 
 template <typename Self, typename... Types>
@@ -614,6 +702,21 @@ class TypeWrapper<Self, Types...>::TypeHandlerImpl final: public TypeHandler<T> 
     return TypeWrapper::from(isolate).tryUnwrap(js, context, handle, (T*)nullptr, kj::none);
   }
 };
+
+// Implementation of TypeHandlerRegistry::from() - defined here after TypeWrapper is complete
+inline TypeHandlerRegistry& TypeHandlerRegistry::from(v8::Isolate* isolate) {
+  auto* registry =
+      reinterpret_cast<TypeHandlerRegistry*>(isolate->GetData(SET_DATA_TYPE_HANDLER_REGISTRY));
+  KJ_ASSERT(registry != nullptr, "TypeHandlerRegistry not found on isolate");
+
+  // Lazy initialization: initialize the registry on first access if not already initialized
+  if (!registry->isInitialized()) {
+    registry->callInitializer();
+    registry->markInitialized();
+  }
+
+  return *registry;
+}
 
 // This macro helps cut down on template spam in error messages. Instead of instantiating Isolate
 // directly, do:
