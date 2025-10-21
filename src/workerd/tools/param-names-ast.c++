@@ -33,6 +33,7 @@
 #include <workerd/api/streams/standard.h>
 #include <workerd/api/sync-kv.h>
 #include <workerd/api/trace.h>
+#include <workerd/api/tracing-module.h>
 #include <workerd/api/unsafe.h>
 #include <workerd/api/url-standard.h>
 #include <workerd/api/urlpattern-standard.h>
