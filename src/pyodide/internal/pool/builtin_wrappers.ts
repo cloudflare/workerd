@@ -1,6 +1,6 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
-import { PythonRuntimeError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 if (typeof FinalizationRegistry === 'undefined') {
   // @ts-expect-error cannot assign to globalThis
@@ -196,7 +196,9 @@ function checkCallee(): void {
   }
   if (!isOkay) {
     console.warn('Invalid call to `WebAssembly.Module`', funcName);
-    throw new PythonRuntimeError('Invalid call to `WebAssembly.Module`');
+    throw new PythonWorkersInternalError(
+      'Invalid call to `WebAssembly.Module`'
+    );
   }
 }
 

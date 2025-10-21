@@ -1,5 +1,5 @@
 import { createReadonlyFS } from 'pyodide-internal:readOnlyFS';
-import { PythonRuntimeError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 const FSOps: FSOps<TarFSInfo> = {
   getNodeMode(_parent, _name, info) {
@@ -19,22 +19,26 @@ const FSOps: FSOps<TarFSInfo> = {
   },
   readdir(node) {
     if (!node.info.children) {
-      throw new PythonRuntimeError('Trying to readdir from a non-dir node');
+      throw new PythonWorkersInternalError(
+        'Trying to readdir from a non-dir node'
+      );
     }
     return Array.from(node.info.children.keys());
   },
   lookup(parent, name) {
     if (!parent.info.children) {
-      throw new PythonRuntimeError('Trying to lookup from a non-dir node');
+      throw new PythonWorkersInternalError(
+        'Trying to lookup from a non-dir node'
+      );
     }
     return parent.info.children.get(name)!;
   },
   read(stream, position, buffer) {
     if (stream.node.contentsOffset == undefined) {
-      throw new PythonRuntimeError('contentsOffset is undefined');
+      throw new PythonWorkersInternalError('contentsOffset is undefined');
     }
     if (!stream.node.info.reader) {
-      throw new PythonRuntimeError('reader is undefined');
+      throw new PythonWorkersInternalError('reader is undefined');
     }
     return stream.node.info.reader.read(
       stream.node.contentsOffset + position,
