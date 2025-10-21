@@ -1542,10 +1542,7 @@ declare class TextEncoder {
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/TextEncoder/encodeInto)
    */
-  encodeInto(
-    input: string,
-    buffer: ArrayBuffer | ArrayBufferView,
-  ): TextEncoderEncodeIntoResult;
+  encodeInto(input: string, buffer: Uint8Array): TextEncoderEncodeIntoResult;
   get encoding(): string;
 }
 interface TextDecoderConstructorOptions {
