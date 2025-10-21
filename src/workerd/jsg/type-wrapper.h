@@ -346,6 +346,11 @@ class TypeHandlerRegistry final {
   void setInitializer(kj::Function<void()> init) {
     initializerFunc = kj::mv(init);
   }
+
+  void setFactory(kj::Own<TypeHandlerRegistry> factoryRegistry) {
+    factory = kj::mv(factoryRegistry);
+  }
+
   void markInitialized() {
     initialized = true;
   }
@@ -354,9 +359,9 @@ class TypeHandlerRegistry final {
   // Store TypeHandlers as void* keyed by std::type_index.
   // The actual type is const TypeHandler<T>* for each registered T
   kj::HashMap<std::type_index, const void*> handlers;
-  bool initialized = false;
+  kj::Maybe<kj::Own<TypeHandlerRegistry>> factory;
   kj::Maybe<kj::Function<void()>> initializerFunc;
-
+  bool initialized = false;
   void callInitializer() {
     KJ_IF_SOME(func, initializerFunc) {
       func();
@@ -667,12 +672,28 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   void registerBuiltinTypes() {
     registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::String>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::StringPtr>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<DOMString>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<ByteString>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<USVString>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int8_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint8_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int16_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint16_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int32_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint32_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<int64_t>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint32_t>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<int>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<double>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<bool>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<uint32_t>);
-    registry.registerHandler(TYPE_HANDLER_INSTANCE<int64_t>);
     registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<byte>>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<byte>>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<const byte>>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<const byte>>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::Array<const char>>);
+    registry.registerHandler(TYPE_HANDLER_INSTANCE<kj::ArrayPtr<
+            const char>>);  // Add more built-in types as needed based on what the application uses.
   }
 
   template <typename U>

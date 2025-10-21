@@ -424,6 +424,20 @@ struct TypeHandlerRegistryContext: public ContextGlobalObject {
     }
   }
 
+  struct Foo: public jsg::Object {
+    JSG_RESOURCE_TYPE(Foo) {}
+  };
+
+  bool registryCanGetFooHandler(jsg::Lock& js) {
+    auto& registry = TypeHandlerRegistry::from(js);
+    try {
+      registry.getHandler<jsg::Ref<Foo>>();
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
   JSG_RESOURCE_TYPE(TypeHandlerRegistryContext) {
     JSG_METHOD(registryWrapString);
     JSG_METHOD(registryUnwrapString);
@@ -433,10 +447,12 @@ struct TypeHandlerRegistryContext: public ContextGlobalObject {
     JSG_METHOD(registryUnwrapDouble);
     JSG_METHOD(registryCanGetStringHandler);
     JSG_METHOD(registryCanGetBoolHandler);
+    JSG_METHOD(registryCanGetFooHandler);
   }
 };
 
-JSG_DECLARE_ISOLATE_TYPE(TypeHandlerRegistryIsolate, TypeHandlerRegistryContext);
+JSG_DECLARE_ISOLATE_TYPE(
+    TypeHandlerRegistryIsolate, TypeHandlerRegistryContext, TypeHandlerRegistryContext::Foo);
 
 KJ_TEST("TypeHandlerRegistry - basic functionality") {
   Evaluator<TypeHandlerRegistryContext, TypeHandlerRegistryIsolate> e(v8System);
@@ -460,6 +476,7 @@ KJ_TEST("TypeHandlerRegistry - type checking") {
   // Test that handlers can be retrieved (no exception)
   e.expectEval("registryCanGetStringHandler()", "boolean", "true");
   e.expectEval("registryCanGetBoolHandler()", "boolean", "true");
+  e.expectEval("registryCanGetFooHandler()", "boolean", "false");
 }
 
 KJ_TEST("TypeHandlerRegistry - round-trip conversions") {
