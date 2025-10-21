@@ -2235,7 +2235,8 @@ class JsMessage;
   V(Set)                                                                                           \
   V(Promise)                                                                                       \
   V(Proxy)                                                                                         \
-  V(Function)
+  V(Function)                                                                                      \
+  V(Uint8Array)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
