@@ -177,6 +177,10 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // first write.
 
   void beforeSqliteReset() override;
+
+  // Helper function that rolls back a multi-put statement and swallows any exceptions that may
+  // occur during the rollback.
+  void rollbackMultiPut(Initialized& stmts, WriteOptions options);
 };
 
 // Iterator over list results.
@@ -272,20 +276,13 @@ void SqliteKv::put(ArrayOfKeyValuePair& pairs, WriteOptions options) {
   // general structure can be shared somehow?
   auto& stmts = ensureInitialized(options.allowUnconfirmed);
   stmts.stmtMultiPutSavepoint.run({.allowUnconfirmed = options.allowUnconfirmed});
-  for (const auto& pair: pairs) {
-    try {
+
+  {
+    // If any of the puts throw an exception, rollback the transaction and re-throw the exception
+    // from the put that failed.
+    KJ_ON_SCOPE_FAILURE(rollbackMultiPut(stmts, options));
+    for (const auto& pair: pairs) {
       put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
-    } catch (...) {
-      try {
-        // This should be rare, so we don't prepare a statement for it.
-        stmts.db.run({.regulator = stmts.regulator, .allowUnconfirmed = options.allowUnconfirmed},
-            kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-        stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
-      } catch (...) {
-        auto e = kj::getCaughtExceptionAsKj();
-        KJ_LOG(WARNING, "silencing exception encountered while rolling back multi-put", e);
-      }
-      throw;
     }
   }
   stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
