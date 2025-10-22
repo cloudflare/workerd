@@ -93,7 +93,7 @@ class Cache: public jsg::Object {
       kj::Maybe<kj::String> cfBlobJson,
       kj::LiteralStringConst operationName,
       kj::StringPtr url,
-      kj::Maybe<jsg::ByteString> cacheControl,
+      kj::Maybe<kj::String> cacheControl,
       bool enableCompatFlags);
 };
 

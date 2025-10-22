@@ -91,7 +91,7 @@ KJ_TEST("string types") {
   KJ_EXPECT(tType<kj::String>() == "(string = (name = \"kj::String\"))");
   KJ_EXPECT(tType<kj::StringPtr>() == "(string = (name = \"kj::StringPtr\"))");
   KJ_EXPECT(tType<v8::String>() == "(string = (name = \"v8::String\"))");
-  KJ_EXPECT(tType<ByteString>() == "(string = (name = \"ByteString\"))");
+  KJ_EXPECT(tType<USVString>() == "(string = (name = \"USVString\"))");
 }
 
 KJ_TEST("object types") {
