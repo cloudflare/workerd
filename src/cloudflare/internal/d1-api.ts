@@ -734,6 +734,7 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
   const aggregatedMeta = aggregateD1Meta(metas);
   addD1MetaToSpan(span, aggregatedMeta);
+  span.setAttribute('cloudflare.d1.response.queries_count', metas.length);
 }
 
 function addD1MetaToSpan(span: Span, meta: D1Meta): void {

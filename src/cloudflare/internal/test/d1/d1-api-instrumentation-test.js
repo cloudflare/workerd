@@ -19,6 +19,7 @@ export const test = {
   async test() {
     await runInstrumentationTest(state, expectedSpans, {
       testName: 'D1 instrumentation',
+      logReceived: true,
       mapFn: (span) => {
         // varies test-by-test because random duration in d1-mock.js
         if (span['http.response.body.size']) {
@@ -676,6 +677,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.queries_count': 2,
     closed: true,
   },
   {
@@ -837,6 +839,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 5,
+    'cloudflare.d1.response.queries_count': 4,
     closed: true,
   },
   {
@@ -994,6 +997,7 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
+    'cloudflare.d1.response.queries_count': 3,
     closed: true,
   },
 ];
