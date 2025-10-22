@@ -204,6 +204,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
+  // TODO(cleanup): It would be nice if kj::HttpHeaders had an inlined has method
   if (body != kj::none && newHeaders.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
       newHeaders.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
