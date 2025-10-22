@@ -4,16 +4,119 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/strings.h>
 
-#include <kj/parse/char.h>
-
-#include <set>
+#ifdef _MSC_VER
+#define strncasecmp _strnicmp
+#define strcasecmp _stricmp
+#endif
 
 namespace workerd::api {
 
 namespace {
+// If any more headers are added to the CommonHeaderName enum later, we should be careful about
+// introducing them into serialization. We need to roll out a change that recognizes the new IDs
+// before rolling out a change that sends them. MAX_COMMON_HEADER_ID is the max value we're willing
+// to send.
+static constexpr size_t MAX_COMMON_HEADER_ID =
+    static_cast<size_t>(capnp::CommonHeaderName::WWW_AUTHENTICATE);
+
+#define COMMON_HEADERS(V)                                                                          \
+  V("accept-charset")                                                                              \
+  V("accept-encoding")                                                                             \
+  V("accept-language")                                                                             \
+  V("accept-ranges")                                                                               \
+  V("accept")                                                                                      \
+  V("access-control-allow-origin")                                                                 \
+  V("age")                                                                                         \
+  V("allow")                                                                                       \
+  V("authorization")                                                                               \
+  V("cache-control")                                                                               \
+  V("content-disposition")                                                                         \
+  V("content-encoding")                                                                            \
+  V("content-language")                                                                            \
+  V("content-length")                                                                              \
+  V("content-location")                                                                            \
+  V("content-range")                                                                               \
+  V("content-type")                                                                                \
+  V("cookie")                                                                                      \
+  V("date")                                                                                        \
+  V("etag")                                                                                        \
+  V("expect")                                                                                      \
+  V("expires")                                                                                     \
+  V("from")                                                                                        \
+  V("host")                                                                                        \
+  V("if-match")                                                                                    \
+  V("if-modified-since")                                                                           \
+  V("if-none-match")                                                                               \
+  V("if-range")                                                                                    \
+  V("if-unmodified-since")                                                                         \
+  V("last-modified")                                                                               \
+  V("link")                                                                                        \
+  V("location")                                                                                    \
+  V("max-forwards")                                                                                \
+  V("proxy-authenticate")                                                                          \
+  V("proxy-authorization")                                                                         \
+  V("range")                                                                                       \
+  V("referer")                                                                                     \
+  V("refresh")                                                                                     \
+  V("retry-after")                                                                                 \
+  V("server")                                                                                      \
+  V("set-cookie")                                                                                  \
+  V("strict-transport-security")                                                                   \
+  V("transfer-encoding")                                                                           \
+  V("user-agent")                                                                                  \
+  V("vary")                                                                                        \
+  V("via")                                                                                         \
+  V("www-authenticate")
+
+// Constexpr array of lowercase common header names (must match CommonHeaderName enum order
+// and must be kept in sync with the ordinal values defined in http-over-capnp.capnp). Since
+// it is extremely unlikely that those will change often, we hardcode them here for runtime
+// efficiency.
+#define V(Name) Name,
+static constexpr const char* COMMON_HEADER_NAMES[] = {nullptr,  // 0: invalid
+  COMMON_HEADERS(V)};
+#undef V
+
+constexpr size_t constexprStrlen(const char* str) {
+  return *str ? 1 + constexprStrlen(str + 1) : 0;
+}
+
+// Helper to avoid recalculating lengths of common headers at runtime repeatedly
+static constexpr size_t COMMON_HEADER_NAME_LENGTHS[] = {0,  // 0: invalid (nullptr)
+#define V(n) constexprStrlen(n),
+  COMMON_HEADERS(V)
+#undef V
+};
+
+inline constexpr kj::StringPtr getCommonHeaderName(uint id) {
+  KJ_ASSERT(id > 0 && id <= MAX_COMMON_HEADER_ID, "Invalid common header ID");
+  kj::StringPtr name = COMMON_HEADER_NAMES[id];
+  KJ_DASSERT(name != nullptr);
+  return name;
+}
+
+// Case-insensitive lookup of common header ID. This avoids allocating a lowercase copy
+// when the header is common. Returns kj::none if not a common header.
+// TODO(perf): It's possible to optimize this further with a good hash function but
+// for now a linear scan is sufficient.
+constexpr kj::Maybe<uint> getCommonHeaderId(kj::StringPtr name) {
+  size_t len = name.size();
+  if (len == 0) return kj::none;
+  for (uint i = 1; i <= MAX_COMMON_HEADER_ID; ++i) {
+    KJ_DASSERT(COMMON_HEADER_NAMES[i] != nullptr);
+    // If the lengths don't match or the first character doesn't match, skip full comparison
+    if (len != COMMON_HEADER_NAME_LENGTHS[i]) continue;
+    if (strncasecmp(name.begin(), COMMON_HEADER_NAMES[i], len) == 0) {
+      return i;
+    }
+  }
+  return kj::none;
+}
+
+static_assert(std::size(COMMON_HEADER_NAMES) == (MAX_COMMON_HEADER_ID + 1));
+
 void warnIfBadHeaderString(const jsg::ByteString& byteString) {
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();
@@ -53,158 +156,279 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
   }
 }
 
+// TODO(perf): This can be optimized further using a lookup table.
+constexpr bool isHttpWhitespace(char c) {
+  return c == '\t' || c == '\r' || c == '\n' || c == ' ';
+}
+
+// TODO(perf): This can be optimized further using a lookup table.
+constexpr bool isValidHeaderValueChar(char c) {
+  return c != '\0' && c != '\r' && c != '\n';
+}
+
 // Left- and right-trim HTTP whitespace from `value`.
 jsg::ByteString normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   warnIfBadHeaderString(value);
+  // Fast path: if empty, return as-is
+  if (value.size() == 0) return kj::mv(value);
 
-  kj::ArrayPtr<char> slice = value;
-  auto isHttpWhitespace = [](char c) { return c == '\t' || c == '\r' || c == '\n' || c == ' '; };
-  while (slice.size() > 0 && isHttpWhitespace(slice.front())) {
-    slice = slice.slice(1, slice.size());
-  }
-  while (slice.size() > 0 && isHttpWhitespace(slice.back())) {
-    slice = slice.first(slice.size() - 1);
-  }
-  if (slice.size() == value.size()) {
-    return kj::mv(value);
-  }
-  return jsg::ByteString(kj::str(slice));
+  char* begin = value.begin();
+  char* end = value.end();
+
+  while (begin < end && isHttpWhitespace(*begin)) ++begin;
+  while (begin < end && isHttpWhitespace(*(end - 1))) --end;
+
+  size_t newSize = end - begin;
+  if (newSize == value.size()) return kj::mv(value);
+
+  return jsg::ByteString(kj::str(kj::ArrayPtr(begin, newSize)));
 }
 
-void requireValidHeaderName(const jsg::ByteString& name) {
-  // TODO(cleanup): Code duplication with kj/compat/http.c++
-
-  warnIfBadHeaderString(name);
-
-  constexpr auto HTTP_SEPARATOR_CHARS = kj::parse::anyOfChars("()<>@,;:\\\"/[]?={} \t");
-  // RFC2616 section 2.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec2.html#sec2.2
-
-  constexpr auto HTTP_TOKEN_CHARS = kj::parse::controlChar.orChar('\x7f')
-                                        .orGroup(kj::parse::whitespaceChar)
-                                        .orGroup(HTTP_SEPARATOR_CHARS)
-                                        .invert();
-  // RFC2616 section 2.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec2.html#sec2.2
-  // RFC2616 section 4.2: https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.2
-
-  for (char c: name) {
-    JSG_REQUIRE(HTTP_TOKEN_CHARS.contains(c), TypeError, "Invalid header name.");
-  }
-}
-
-void requireValidHeaderValue(kj::StringPtr value) {
-  // TODO(cleanup): Code duplication with kj/compat/http.c++
-
-  for (char c: value) {
-    JSG_REQUIRE(c != '\0' && c != '\r' && c != '\n', TypeError, "Invalid header value.");
-  }
-}
-
-// If any more headers are added to the CommonHeaderName enum later, we should be careful about
-// introducing them into serialization. We need to roll out a change that recognizes the new IDs
-// before rolling out a change that sends them. MAX_COMMON_HEADER_ID is the max value we're willing
-// to send.
-static constexpr size_t MAX_COMMON_HEADER_ID =
-    static_cast<size_t>(capnp::CommonHeaderName::WWW_AUTHENTICATE);
-
-// Constexpr array of lowercase common header names (must match CommonHeaderName enum order
-// and must be kept in sync with the ordinal values defined in http-over-capnp.capnp). Since
-// it is extremely unlikely that those will change often, we hardcode them here for runtime
-// efficiency.
-static constexpr const char* COMMON_HEADER_NAMES[] = {
-  nullptr,                        // 0: invalid
-  "accept-charset",               // 1
-  "accept-encoding",              // 2
-  "accept-language",              // 3
-  "accept-ranges",                // 4
-  "accept",                       // 5
-  "access-control-allow-origin",  // 6
-  "age",                          // 7
-  "allow",                        // 8
-  "authorization",                // 9
-  "cache-control",                // 10
-  "content-disposition",          // 11
-  "content-encoding",             // 12
-  "content-language",             // 13
-  "content-length",               // 14
-  "content-location",             // 15
-  "content-range",                // 16
-  "content-type",                 // 17
-  "cookie",                       // 18
-  "date",                         // 19
-  "etag",                         // 20
-  "expect",                       // 21
-  "expires",                      // 22
-  "from",                         // 23
-  "host",                         // 24
-  "if-match",                     // 25
-  "if-modified-since",            // 26
-  "if-none-match",                // 27
-  "if-range",                     // 28
-  "if-unmodified-since",          // 29
-  "last-modified",                // 30
-  "link",                         // 31
-  "location",                     // 32
-  "max-forwards",                 // 33
-  "proxy-authenticate",           // 34
-  "proxy-authorization",          // 35
-  "range",                        // 36
-  "referer",                      // 37
-  "refresh",                      // 38
-  "retry-after",                  // 39
-  "server",                       // 40
-  "set-cookie",                   // 41
-  "strict-transport-security",    // 42
-  "transfer-encoding",            // 43
-  "user-agent",                   // 44
-  "vary",                         // 45
-  "via",                          // 46
-  "www-authenticate",             // 47
+// Fast lookup table for valid HTTP token characters (RFC 2616).
+// Valid token chars are: !#$%&'*+-.0-9A-Z^_`a-z|~
+// (i.e., any CHAR except CTLs or separators)
+static constexpr uint8_t HTTP_TOKEN_CHAR_TABLE[] = {
+  // Control characters 0x00-0x1F and 0x7F are invalid
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x00-0x07
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x08-0x0F
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x10-0x17
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x18-0x1F
+  0, 1, 0, 1, 1, 1, 1, 1,  // 0x20-0x27: SP!"#$%&'
+  0, 0, 1, 1, 0, 1, 1, 0,  // 0x28-0x2F: ()*+,-./
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x30-0x37: 01234567
+  1, 1, 0, 0, 0, 0, 0, 0,  // 0x38-0x3F: 89:;<=>?
+  0, 1, 1, 1, 1, 1, 1, 1,  // 0x40-0x47: @ABCDEFG
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x48-0x4F: HIJKLMNO
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x50-0x57: PQRSTUVW
+  1, 1, 1, 0, 0, 0, 1, 1,  // 0x58-0x5F: XYZ[\]^_
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x60-0x67: `abcdefg
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x68-0x6F: hijklmno
+  1, 1, 1, 1, 1, 1, 1, 1,  // 0x70-0x77: pqrstuvw
+  1, 1, 1, 0, 1, 0, 1, 0,  // 0x78-0x7F: xyz{|}~DEL
+  // Extended ASCII 0x80-0xFF are all invalid per RFC 2616
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x80-0x87
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x88-0x8F
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x90-0x97
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0x98-0x9F
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xA0-0xA7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xA8-0xAF
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xB0-0xB7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xB8-0xBF
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xC0-0xC7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xC8-0xCF
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xD0-0xD7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xD8-0xDF
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xE0-0xE7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xE8-0xEF
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xF0-0xF7
+  0, 0, 0, 0, 0, 0, 0, 0,  // 0xF8-0xFF
 };
 
-kj::String getCommonHeaderName(uint id) {
-  KJ_ASSERT(id > 0 && id <= MAX_COMMON_HEADER_ID, "Invalid common header ID");
-  auto name = COMMON_HEADER_NAMES[id];
-  KJ_DASSERT(name != nullptr);
-  return kj::str(name);
-}
+inline void requireValidHeaderName(const jsg::ByteString& name) {
+  // TODO(cleanup): Code duplication with kj/compat/http.c++
+  warnIfBadHeaderString(name);
 
-kj::Maybe<uint> getCommonHeaderId(kj::StringPtr name) {
-  // It really shouldn't be possible for a name to be empty but just in case...
-  if (name.size() == 0) return kj::none;
-  for (uint i = 1; i <= MAX_COMMON_HEADER_ID; ++i) {
-    KJ_DASSERT(COMMON_HEADER_NAMES[i] != nullptr);
-    if (name == COMMON_HEADER_NAMES[i]) return i;
+  for (char c: name) {
+    JSG_REQUIRE(HTTP_TOKEN_CHAR_TABLE[static_cast<uint8_t>(c)], TypeError, "Invalid header name.");
   }
-  return kj::none;
 }
 
-static_assert(std::size(COMMON_HEADER_NAMES) == (MAX_COMMON_HEADER_ID + 1));
+inline void requireValidHeaderValue(kj::StringPtr value) {
+  for (char c: value) {
+    JSG_REQUIRE(isValidHeaderValueChar(c), TypeError, "Invalid header value.");
+  }
+}
 }  // namespace
+
+Headers::UncommonHeaderKey::UncommonHeaderKey(kj::String name)
+    : name(kj::mv(name)),
+      hash(kj::hashCode(this->name)) {}
+
+Headers::UncommonHeaderKey::UncommonHeaderKey(kj::StringPtr name)
+    : name(kj::str(name)),
+      hash(kj::hashCode(this->name)) {}
+
+bool Headers::UncommonHeaderKey::operator==(const UncommonHeaderKey& other) const {
+  // The same hash code is a necessary but not sufficient condition for equality.
+  return hash == other.hash && name == other.name;
+}
+
+bool Headers::UncommonHeaderKey::operator==(kj::StringPtr otherName) const {
+  if (name.size() != otherName.size()) return false;
+  return strncasecmp(name.begin(), otherName.begin(), name.size()) == 0;
+}
+
+Headers::HeaderKey Headers::getHeaderKeyFor(kj::StringPtr name) {
+  KJ_IF_SOME(commonId, getCommonHeaderId(name)) {
+    return commonId;
+  }
+
+  // Not a common header, so allocate lowercase copy for uncommon header
+  return UncommonHeaderKey(toLower(name));
+}
+
+Headers::HeaderKey Headers::cloneHeaderKey(const HeaderKey& key) {
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(commonId, uint) {
+      return commonId;
+    }
+    KJ_CASE_ONEOF(uncommonKey, UncommonHeaderKey) {
+      return uncommonKey.clone();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool Headers::isSetCookie(const HeaderKey& key) {
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(commonId, uint) {
+      return commonId == static_cast<uint>(capnp::CommonHeaderName::SET_COOKIE);
+    }
+    KJ_CASE_ONEOF(uncommonKey, UncommonHeaderKey) {
+      // This case really shouldn't happen since "set-cookie" is a common header,
+      // but just in case...
+      return uncommonKey == "set-cookie";
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+bool Headers::headerKeyEquals(const HeaderKey& a, const HeaderKey& b) {
+  KJ_SWITCH_ONEOF(a) {
+    KJ_CASE_ONEOF(aCommonId, uint) {
+      KJ_IF_SOME(bCommonId, b.tryGet<uint>()) {
+        return aCommonId == bCommonId;
+      }
+      return false;
+    }
+    KJ_CASE_ONEOF(aUncommonKey, UncommonHeaderKey) {
+      KJ_IF_SOME(bUncommonKey, b.tryGet<UncommonHeaderKey>()) {
+        return aUncommonKey == bUncommonKey;
+      }
+      return false;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+Headers::Header::Header(jsg::ByteString name, kj::Vector<jsg::ByteString> values)
+    : key(getHeaderKeyFor(name)),
+      values(kj::mv(values)) {
+  if (getKeyName() != name) {
+    // The casing of the provided name does not match the lower-cased version
+    // held by the key, so we need to preserve the original casing for display
+    // purposes.
+    this->name = kj::mv(name);
+  }
+}
+
+Headers::Header::Header(jsg::ByteString name, jsg::ByteString value)
+    : key(getHeaderKeyFor(name)),
+      values(1) {
+  values.add(kj::mv(value));
+  if (getKeyName() != name) {
+    // The casing of the provided name does not match the lower-cased version
+    // held by the key, so we need to preserve the original casing for display
+    // purposes.
+    this->name = kj::mv(name);
+  }
+}
+
+Headers::Header::Header(
+    HeaderKey key, kj::Maybe<jsg::ByteString> name, kj::Vector<jsg::ByteString> values)
+    : key(kj::mv(key)),
+      name(kj::mv(name)),
+      values(kj::mv(values)) {}
+
+Headers::Header::Header(HeaderKey key, jsg::ByteString name, jsg::ByteString value)
+    : key(kj::mv(key)),
+      values(1) {
+  values.add(kj::mv(value));
+  if (getKeyName() != name) {
+    this->name = kj::mv(name);
+  }
+}
+
+kj::StringPtr Headers::Header::Header::getKeyName() const {
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(commonId, uint) {
+      return COMMON_HEADER_NAMES[commonId];
+    }
+    KJ_CASE_ONEOF(uncommonKey, UncommonHeaderKey) {
+      return uncommonKey.getName();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::StringPtr Headers::Header::getHeaderName() const {
+  KJ_IF_SOME(preservedName, name) {
+    return preservedName;
+  }
+  return getKeyName();
+}
+
+Headers::Header Headers::Header::clone() const {
+  return Header(cloneHeaderKey(key),
+      name.map([](const kj::String& n) { return jsg::ByteString(kj::str(n)); }),
+      KJ_MAP(value, values) { return jsg::ByteString(kj::str(value)); });
+}
+
+bool Headers::HeaderCallbacks::matches(Header& header, const HeaderKey& other) {
+  return headerKeyEquals(header.key, other);
+}
+
+bool Headers::HeaderCallbacks::matches(Header& header, kj::StringPtr otherName) {
+  return matches(header, getHeaderKeyFor(otherName));
+}
+
+bool Headers::HeaderCallbacks::matches(Header& header, capnp::CommonHeaderName commondId) {
+  KJ_IF_SOME(headerCommonId, header.key.tryGet<uint>()) {
+    return headerCommonId == static_cast<uint>(commondId);
+  }
+  return false;
+}
+
+kj::uint Headers::HeaderCallbacks::hashCode(const HeaderKey& key) {
+  KJ_SWITCH_ONEOF(key) {
+    KJ_CASE_ONEOF(commonId, uint) {
+      return kj::hashCode(commonId);
+    }
+    KJ_CASE_ONEOF(uncommonKey, UncommonHeaderKey) {
+      return uncommonKey.hashCode();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::uint Headers::HeaderCallbacks::hashCode(capnp::CommonHeaderName commondId) {
+  return kj::hashCode(static_cast<uint>(commondId));
+}
 
 Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
     : guard(Guard::NONE) {
+  headers.reserve(dict.fields.size());
   for (auto& field: dict.fields) {
     append(js, kj::mv(field.name), kj::mv(field.value));
   }
 }
 
 Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
+  headers.reserve(other.headers.size());
   for (auto& header: other.headers) {
-    Header copy{
-      jsg::ByteString(kj::str(header.second.key)),
-      jsg::ByteString(kj::str(header.second.name)),
-      KJ_MAP(value, header.second.values) { return jsg::ByteString(kj::str(value)); },
-    };
-    kj::StringPtr keyRef = copy.key;
-    KJ_ASSERT(headers.insert(std::make_pair(keyRef, kj::mv(copy))).second);
+    // There really shouldn't be any duplicate headers in other, but just in case, use upsert
+    // and we'll just ignore duplicates.
+    headers.upsert(header.clone(), [](auto&, auto&&) {});
   }
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  // TODO(soon): Remove this. Throw if the any header values are invalid.
-  throwIfInvalidHeaderValue(other);
+  headers.reserve(other.size());
   other.forEach([this, &js](auto name, auto value) {
-    append(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value)));
+    // We have to copy the strings here but we can avoid normalizing and validating since
+    // they presumably already went through that process when they were added to the
+    // kj::HttpHeader instance.
+    appendUnguarded(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value)));
   });
 
   this->guard = guard;
@@ -220,8 +444,8 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
   for (auto& entry: headers) {
-    for (auto& value: entry.second.values) {
-      out.addPtrPtr(entry.second.name, value);
+    for (auto& value: entry.values) {
+      out.addPtrPtr(entry.getHeaderName(), value);
     }
   }
 }
@@ -232,36 +456,52 @@ bool Headers::hasLowerCase(kj::StringPtr name) {
     KJ_DREQUIRE(!('A' <= c && c <= 'Z'));
   }
 #endif
-  return headers.contains(name);
+  return headers.find(getHeaderKeyFor(name)) != kj::none;
 }
 
 kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) {
   if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
-    kj::Vector<Headers::DisplayedHeader> copy;
-    for (auto& entry: headers) {
-      if (entry.first == "set-cookie") {
-        // For set-cookie entries, we iterate each individually without
-        // combining them.
-        for (auto& value: entry.second.values) {
-          copy.add(Headers::DisplayedHeader{
-            .key = jsg::ByteString(kj::str(entry.first)),
+    kj::Vector<Headers::DisplayedHeader> vec;
+    size_t reserved = 0;
+    for (auto& header: headers) {
+      if (isSetCookie(header.key)) {
+        reserved += header.values.size();
+      } else {
+        reserved += 1;
+      }
+    }
+    vec.reserve(reserved);
+    for (auto& header: headers) {
+      if (isSetCookie(header.key)) {
+        // For set-cookie entries, we iterate each individually without combining them.
+        for (auto& value: header.values) {
+          vec.add(Headers::DisplayedHeader{
+            .key = jsg::ByteString(kj::str(header.getKeyName())),
             .value = jsg::ByteString(kj::str(value)),
           });
         }
       } else {
-        copy.add(Headers::DisplayedHeader{.key = jsg::ByteString(kj::str(entry.first)),
-          .value = jsg::ByteString(kj::strArray(entry.second.values, ", "))});
+        vec.add(Headers::DisplayedHeader{
+          .key = jsg::ByteString(kj::str(header.getKeyName())),
+          .value = jsg::ByteString(kj::strArray(header.values, ", ")),
+        });
       }
     }
-    return copy.releaseAsArray();
+    auto ret = vec.releaseAsArray();
+    std::sort(ret.begin(), ret.end(), [](const auto& a, const auto& b) { return a.key < b.key; });
+    return kj::mv(ret);
   } else {
     // The old behavior before the standard getSetCookie() API was introduced...
-    auto headersCopy = KJ_MAP(mapEntry, headers) {
-      const auto& header = mapEntry.second;
-      return DisplayedHeader{
-        jsg::ByteString(kj::str(header.key)), jsg::ByteString(kj::strArray(header.values, ", "))};
-    };
-    return headersCopy;
+    kj::Vector<Headers::DisplayedHeader> vec(headers.size());
+    for (auto& header: headers) {
+      vec.add(DisplayedHeader{
+        .key = jsg::ByteString(kj::str(header.getKeyName())),
+        .value = jsg::ByteString(kj::strArray(header.values, ", ")),
+      });
+    }
+    auto ret = vec.releaseAsArray();
+    std::sort(ret.begin(), ret.end(), [](const auto& a, const auto& b) { return a.key < b.key; });
+    return kj::mv(ret);
   }
 }
 
@@ -315,22 +555,26 @@ kj::Maybe<jsg::ByteString> Headers::get(jsg::Lock& js, jsg::ByteString name) {
   return getNoChecks(js, name.asPtr());
 }
 
-kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock& js, kj::StringPtr name) {
-  auto iter = headers.find(toLower(name));
-  if (iter == headers.end()) {
-    return kj::none;
-  } else {
-    return jsg::ByteString(kj::strArray(iter->second.values, ", "));
+kj::Maybe<jsg::ByteString> Headers::getNoChecks(jsg::Lock&, kj::StringPtr name) {
+  KJ_IF_SOME(found, headers.find(getHeaderKeyFor(name))) {
+    return jsg::ByteString(kj::strArray(found.values, ", "));
   }
+  return kj::none;
+}
+
+kj::Maybe<jsg::ByteString> Headers::getCommon(jsg::Lock& js, capnp::CommonHeaderName idx) {
+  KJ_DASSERT(static_cast<size_t>(idx) <= MAX_COMMON_HEADER_ID);
+  KJ_IF_SOME(found, headers.find(idx)) {
+    return jsg::ByteString(kj::strArray(found.values, ", "));
+  }
+  return kj::none;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getSetCookie() {
-  auto iter = headers.find("set-cookie");
-  if (iter == headers.end()) {
-    return nullptr;
-  } else {
-    return iter->second.values.asPtr();
+  KJ_IF_SOME(found, headers.find(capnp::CommonHeaderName::SET_COOKIE)) {
+    return found.values.asPtr();
   }
+  return nullptr;
 }
 
 kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
@@ -348,7 +592,12 @@ kj::ArrayPtr<jsg::ByteString> Headers::getAll(jsg::ByteString name) {
 
 bool Headers::has(jsg::ByteString name) {
   requireValidHeaderName(name);
-  return headers.contains(toLower(kj::mv(name)));
+  return headers.find(getHeaderKeyFor(name)) != kj::none;
+}
+
+bool Headers::hasCommon(capnp::CommonHeaderName idx) {
+  KJ_DASSERT(static_cast<size_t>(idx) <= MAX_COMMON_HEADER_ID);
+  return headers.find(idx) != kj::none;
 }
 
 void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
@@ -359,34 +608,43 @@ void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   setUnguarded(js, kj::mv(name), kj::mv(value));
 }
 
+void Headers::setCommon(jsg::Lock& js, capnp::CommonHeaderName idx, jsg::ByteString value) {
+  KJ_DASSERT(static_cast<size_t>(idx) <= MAX_COMMON_HEADER_ID);
+  HeaderKey key = static_cast<uint>(idx);
+  kj::Vector<jsg::ByteString> values(1);
+  values.add(kj::mv(value));
+  headers.upsert(Header(kj::mv(key), kj::none, kj::mv(values)),
+      [](auto& existing, auto&& replacement) { existing.values = kj::mv(replacement.values); });
+}
+
 void Headers::setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
-  // The variation of toLower we use here creates a copy.
-  auto key = jsg::ByteString(toLower(name));
-  auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
-  if (!emplaced) {
-    // Overwrite existing value(s).
-    iter->second.values.clear();
-    iter->second.values.add(kj::mv(value));
-  }
+  // We're unconditionally replacing existing values.
+  headers.upsert(Header(kj::mv(name), kj::mv(value)),
+      [](auto& existing, auto&& replacement) { existing.values = kj::mv(replacement.values); });
 }
 
 void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
   checkGuard();
   requireValidHeaderName(name);
-  // The variation of toLower we use here creates a copy.
-  auto key = jsg::ByteString(toLower(name));
   value = normalizeHeaderValue(js, kj::mv(value));
   requireValidHeaderValue(value);
-  auto [iter, emplaced] = headers.try_emplace(key, kj::mv(key), kj::mv(name), kj::mv(value));
-  if (!emplaced) {
-    iter->second.values.add(kj::mv(value));
+  appendUnguarded(js, kj::mv(name), kj::mv(value));
+}
+
+void Headers::appendUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
+  // If the header already exists, we just add to its values.
+  auto key = getHeaderKeyFor(name);
+  KJ_IF_SOME(found, headers.find(key)) {
+    found.values.add(kj::mv(value));
+  } else {
+    headers.insert(Header(kj::mv(key), kj::mv(name), kj::mv(value)));
   }
 }
 
 void Headers::delete_(jsg::ByteString name) {
   checkGuard();
   requireValidHeaderName(name);
-  headers.erase(toLower(kj::mv(name)));
+  headers.eraseMatch(getHeaderKeyFor(name));
 }
 
 // There are a couple implementation details of the Headers iterators worth calling out.
@@ -420,46 +678,40 @@ jsg::Ref<Headers::EntryIterator> Headers::entries(jsg::Lock& js) {
 jsg::Ref<Headers::KeyIterator> Headers::keys(jsg::Lock& js) {
   if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
     kj::Vector<jsg::ByteString> keysCopy;
-    for (auto& entry: headers) {
+    for (auto& header: headers) {
       // Set-Cookie headers must be handled specially. They should never be combined into a
       // single value, so the values iterator must separate them. It seems a bit silly, but
       // the keys iterator can end up having multiple set-cookie instances.
-      if (entry.first == "set-cookie") {
-        for (auto n = 0; n < entry.second.values.size(); n++) {
-          keysCopy.add(jsg::ByteString(kj::str(entry.first)));
+      if (isSetCookie(header.key)) {
+        for (auto n = 0; n < header.values.size(); n++) {
+          keysCopy.add(jsg::ByteString(kj::str(header.getKeyName())));
         }
       } else {
-        keysCopy.add(jsg::ByteString(kj::str(entry.first)));
+        keysCopy.add(jsg::ByteString(kj::str(header.getKeyName())));
       }
     }
-    return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{keysCopy.releaseAsArray()});
+    auto ret = keysCopy.releaseAsArray();
+    std::sort(ret.begin(), ret.end(), [](const auto& a, const auto& b) { return a < b; });
+    return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(ret)});
   } else {
     auto keysCopy =
-        KJ_MAP(mapEntry, headers) { return jsg::ByteString(kj::str(mapEntry.second.key)); };
+        KJ_MAP(header, headers) { return jsg::ByteString(kj::str(header.getKeyName())); };
+    std::sort(keysCopy.begin(), keysCopy.end(), [](const auto& a, const auto& b) { return a < b; });
     return js.alloc<KeyIterator>(IteratorState<jsg::ByteString>{kj::mv(keysCopy)});
   }
 }
 jsg::Ref<Headers::ValueIterator> Headers::values(jsg::Lock& js) {
-  if (FeatureFlags::get(js).getHttpHeadersGetSetCookie()) {
-    kj::Vector<jsg::ByteString> values;
-    for (auto& entry: headers) {
-      // Set-Cookie headers must be handled specially. They should never be combined into a
-      // single value, so the values iterator must separate them.
-      if (entry.first == "set-cookie") {
-        for (auto& value: entry.second.values) {
-          values.add(jsg::ByteString(kj::str(value)));
-        }
-      } else {
-        values.add(jsg::ByteString(kj::strArray(entry.second.values, ", ")));
-      }
-    }
-    return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{values.releaseAsArray()});
-  } else {
-    auto valuesCopy = KJ_MAP(mapEntry, headers) {
-      return jsg::ByteString(kj::strArray(mapEntry.second.values, ", "));
-    };
-    return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>{kj::mv(valuesCopy)});
-  }
+  // Annoyingly, the spec requires that the values iterator still be sorted by key.
+  // To make this easiest, let's grab the displayed headers and then extract the values.
+  // the getDisplayedHeaders() function does the sorting for us at the cost of an extra
+  // copy of the names. Fortunately, enumerating by value is likely way less common than
+  // other forms of iteration so the cost should be acceptable.
+  auto headers = getDisplayedHeaders(js);
+  kj::Vector<jsg::ByteString> values(headers.size());
+  for (auto& header: headers) {
+    values.add(kj::mv(header.value));
+  };
+  return js.alloc<ValueIterator>(IteratorState<jsg::ByteString>(values.releaseAsArray()));
 }
 
 void Headers::forEach(jsg::Lock& js,
@@ -481,6 +733,12 @@ void Headers::forEach(jsg::Lock& js,
 
 bool Headers::inspectImmutable() {
   return guard != Guard::NONE;
+}
+
+void Headers::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
+  for (const auto& header: headers) {
+    tracker.trackField(nullptr, header);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -507,20 +765,21 @@ void Headers::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Write the count of headers.
   uint count = 0;
   for (auto& entry: headers) {
-    count += entry.second.values.size();
+    count += entry.values.size();
   }
   serializer.writeRawUint32(count);
 
   // Now write key/values.
-  for (auto& entry: headers) {
-    auto& header = entry.second;
-    auto commonId = getCommonHeaderId(header.key);
+  for (auto& header: headers) {
     for (auto& value: header.values) {
-      KJ_IF_SOME(c, commonId) {
-        serializer.writeRawUint32(c);
-      } else {
-        serializer.writeRawUint32(0);
-        serializer.writeLengthDelimited(header.name);
+      KJ_SWITCH_ONEOF(header.key) {
+        KJ_CASE_ONEOF(commonId, uint) {
+          serializer.writeRawUint32(commonId);
+        }
+        KJ_CASE_ONEOF(uncommonKey, UncommonHeaderKey) {
+          serializer.writeRawUint32(0);
+          serializer.writeLengthDelimited(header.getHeaderName());
+        }
       }
       serializer.writeLengthDelimited(value);
     }
@@ -542,11 +801,14 @@ jsg::Ref<Headers> Headers::deserialize(
       name = deserializer.readLengthDelimitedString();
     } else {
       KJ_ASSERT(commonId <= MAX_COMMON_HEADER_ID);
-      name = getCommonHeaderName(commonId);
+      name = kj::str(getCommonHeaderName(commonId));
     }
 
     auto value = deserializer.readLengthDelimitedString();
 
+    // TODO(performance): We can avoid some copies here by constructing the
+    // the Header entry directly using information from the deserializer
+    // directly without relying on append.
     result->append(js, jsg::ByteString(kj::mv(name)), jsg::ByteString(kj::mv(value)));
   }
 

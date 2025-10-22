@@ -212,10 +212,11 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
     : impl(kj::mv(init).map([&headers, &js](auto i) -> Impl {
         KJ_IF_SOME(ct, i.contentType) {
-          if (!headers.hasLowerCase("content-type")) {
+          if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
-            headers.set(js, jsg::ByteString(kj::str("Content-Type")), jsg::ByteString(kj::mv(ct)));
+            headers.setCommon(
+                js, capnp::CommonHeaderName::CONTENT_TYPE, jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
@@ -308,7 +309,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       // When running in the fiddle, let's warn the developer if they do this.
       auto& context = IoContext::current();
       if (context.isInspectorEnabled()) {
-        KJ_IF_SOME(type, headersRef.getNoChecks(js, "Content-Type"_kj)) {
+        KJ_IF_SOME(type, headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
           maybeWarnIfNotText(js, type);
         }
       }
@@ -331,8 +332,9 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
 
-    auto contentType = JSG_REQUIRE_NONNULL(headersRef.getNoChecks(js, "Content-Type"_kj), TypeError,
-        "Parsing a Body as FormData requires a Content-Type header.");
+    auto contentType =
+        JSG_REQUIRE_NONNULL(headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE),
+            TypeError, "Parsing a Body as FormData requires a Content-Type header.");
 
     KJ_IF_SOME(i, impl) {
       KJ_ASSERT(!i.stream->isDisturbed());
@@ -363,7 +365,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
-    kj::String contentType = headersRef.getNoChecks(js, "Content-Type"_kj)
+    kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
                                  .map([](jsg::ByteString&& b) -> kj::String {
       return kj::mv(b);
     }).orDefault(nullptr);
@@ -1041,8 +1043,8 @@ jsg::Ref<Response> Response::json_(
     jsg::Lock& js, jsg::JsValue any, jsg::Optional<Initializer> maybeInit) {
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
-    if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->setUnguarded(js, jsg::ByteString(kj::str("content-type")),
+    if (!headers->hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
+      headers->setCommon(js, capnp::CommonHeaderName::CONTENT_TYPE,
         jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
@@ -1849,7 +1851,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       }
 
       auto headers = js.alloc<Headers>();
-      headers->set(js, jsg::ByteString(kj::str("content-type"_kj)),
+      headers->setCommon(js, capnp::CommonHeaderName::CONTENT_TYPE,
           jsg::ByteString(dataUrl.getMimeType().toString()));
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{

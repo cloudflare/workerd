@@ -1,10 +1,10 @@
 #pragma once
 
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/memory.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <kj/compat/http.h>
-#include <map>
 
 namespace workerd::api {
 
@@ -35,12 +35,9 @@ public:
   explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
+  KJ_DISALLOW_COPY_AND_MOVE(Headers);
 
-  Headers(Headers&&) = delete;
-  Headers& operator=(Headers&&) = delete;
-
-  // Make a copy of this Headers object, and preserve the guard. The normal copy constructor sets
-  // the copy's guard to NONE.
+  // Make a copy of this Headers object, and preserve the guard.
   jsg::Ref<Headers> clone(jsg::Lock& js) const;
 
   // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
@@ -76,6 +73,8 @@ public:
 
   kj::Maybe<jsg::ByteString> getNoChecks(jsg::Lock& js, kj::StringPtr name);
 
+  kj::Maybe<jsg::ByteString> getCommon(jsg::Lock& js, capnp::CommonHeaderName idx);
+
   // getAll is a legacy non-standard extension API that we introduced before
   // getSetCookie() was defined. We continue to support it for backwards
   // compatibility but users really ought to be using getSetCookie() now.
@@ -87,13 +86,18 @@ public:
 
   bool has(jsg::ByteString name);
 
+  // A fast-patch version of has() for common (indexed) headers.
+  bool hasCommon(capnp::CommonHeaderName idx);
+
   void set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
+  void setCommon(jsg::Lock& js, capnp::CommonHeaderName idx, jsg::ByteString value);
 
   // Like set(), but ignores the header guard if set. This can only be called from C++, and may be
   // used to mutate headers before dispatching a request.
   void setUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
   void append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
+  void appendUnguarded(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
 
   void delete_(jsg::ByteString name);
 
@@ -157,16 +161,66 @@ public:
 
   JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
 
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    for (const auto& entry : headers) {
-      tracker.trackField(entry.first, entry.second);
-    }
-  }
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
 private:
-  struct Header {
-    jsg::ByteString key;   // lower-cased name
-    jsg::ByteString name;
+  // The header key can be stored either as a common header ID (uint) or an an
+  // UncommonHeaderKey. This class encapsulates the lower-cased header name and
+  // precomputed hash code for efficient comparisons. It is used for any header
+  // name that is not in the common header list.
+  class UncommonHeaderKey final {
+   public:
+    UncommonHeaderKey(UncommonHeaderKey&&) = default;
+    UncommonHeaderKey& operator=(UncommonHeaderKey&&) = default;
+    KJ_DISALLOW_COPY(UncommonHeaderKey);
+
+    inline bool operator==(const UncommonHeaderKey& other) const;
+    inline bool operator==(kj::StringPtr otherName) const;
+
+    inline uint hashCode() const { return hash; }
+    inline kj::StringPtr getName() const { return name; }
+
+    JSG_MEMORY_INFO(UncommonHeaderKey) {
+      tracker.trackField("name", name);
+    }
+
+    inline UncommonHeaderKey clone() const {
+      return UncommonHeaderKey(kj::str(name), hash);
+    }
+
+   private:
+    // The name is expected to be stored in lower-case form, but we do not
+    // enforce that actually within the struct. It is the responsibility of
+    // the caller to ensure it is appropriately lower-cased.
+    kj::String name;
+    kj::uint hash;
+
+    // Critically, because of hash collisions, we must still compare the full string
+    // to determine equality but we can use the hash code to avoid unnecessary string
+    // comparisons.
+    inline UncommonHeaderKey(kj::String name);
+    inline UncommonHeaderKey(kj::StringPtr name);
+    inline UncommonHeaderKey(kj::String name, kj::uint hash): name(kj::mv(name)), hash(hash) {}
+    friend class Headers;
+  };
+
+  // A header is identified by either a common header ID or an uncommon header name.
+  // The header key name is always identifed in lower-case form, while the original
+  // casing is preserved in the actual Header struct to support case-preserving display.
+  using HeaderKey = kj::OneOf<uint, UncommonHeaderKey>;
+
+  static HeaderKey getHeaderKeyFor(kj::StringPtr name);
+  static bool headerKeyEquals(const HeaderKey& a, const HeaderKey& b);
+  static HeaderKey cloneHeaderKey(const HeaderKey& key);
+  static bool isSetCookie(const HeaderKey& key);
+
+  struct Header final {
+    // The header key, either a common header ID or an uncommon header name.
+    HeaderKey key;
+    // If the casing of the header name does not match the lower-cased version, we
+    // store the original casing here for display purposes. If the casing matches, this
+    // remains unset to avoid redundant allocation.
+    kj::Maybe<jsg::ByteString> name;
 
     // We intentionally do not comma-concatenate header values of the same name, as we need to be
     // able to re-serialize them separately. This is particularly important for the Set-Cookie
@@ -180,16 +234,22 @@ private:
     //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
     kj::Vector<jsg::ByteString> values;
 
-    explicit Header(jsg::ByteString key, jsg::ByteString name,
-                    kj::Vector<jsg::ByteString> values)
-        : key(kj::mv(key)), name(kj::mv(name)), values(kj::mv(values)) {}
-    explicit Header(jsg::ByteString key, jsg::ByteString name, jsg::ByteString value)
-        : key(kj::mv(key)), name(kj::mv(name)), values(1) {
-      values.add(kj::mv(value));
-    }
+    kj::StringPtr getKeyName() const;
+
+    // If the casing of the header name matches the lower-cased version, this
+    // returns the key name, otherwise it returns the preserved-casing name.
+    kj::StringPtr getHeaderName() const;
+
+    explicit Header(jsg::ByteString name, kj::Vector<jsg::ByteString> values);
+    explicit Header(jsg::ByteString name, jsg::ByteString value);
+    explicit Header(HeaderKey key, kj::Maybe<jsg::ByteString> name,
+                    kj::Vector<jsg::ByteString> values);
+    explicit Header(HeaderKey key, jsg::ByteString name, jsg::ByteString value);
+
+    Header clone() const;
 
     JSG_MEMORY_INFO(Header) {
-      tracker.trackField("key", key);
+      tracker.trackField("key", key.tryGet<UncommonHeaderKey>());
       tracker.trackField("name", name);
       for (const auto& value : values) {
         tracker.trackField(nullptr, value);
@@ -197,8 +257,19 @@ private:
     }
   };
 
+  struct HeaderCallbacks final {
+    inline static const HeaderKey& keyForRow(const Header& header) { return header.key; }
+    inline static HeaderKey& keyForRow(Header& header) { return header.key; }
+    static bool matches(Header& header, const HeaderKey& other);
+    static bool matches(Header& header, kj::StringPtr otherName);
+    static bool matches(Header& header, capnp::CommonHeaderName commondId);
+    static kj::uint hashCode(const HeaderKey& key);
+    static kj::uint hashCode(capnp::CommonHeaderName commondId);
+  };
+
+  kj::Table<Header, kj::HashIndex<HeaderCallbacks>> headers;
+
   Guard guard;
-  std::map<kj::StringPtr, Header> headers;
 
   void checkGuard() {
     JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
