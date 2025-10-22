@@ -191,7 +191,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpan(CompleteSpan&& span) {
+void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
@@ -458,7 +458,7 @@ kj::Date BaseTracer::getTime() {
   return timestamp;
 }
 
-void BaseTracer::adjustSpanTime(CompleteSpan& span) {
+void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
   // To report I/O time, we need the IOContext to still be alive.
   // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
   // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on
