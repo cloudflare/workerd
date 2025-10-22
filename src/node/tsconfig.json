@@ -16,6 +16,7 @@
       "cloudflare-internal:http": ["./internal/http.d.ts"],
       "cloudflare-internal:sockets": ["./internal/sockets.d.ts"],
       "cloudflare-internal:workers": ["./internal/workers.d.ts"],
+      "cloudflare-internal:tracing": ["./internal/tracing.d.ts"],
       "cloudflare-internal:filesystem": ["./internal/filesystem.d.ts"]
     }
   }
