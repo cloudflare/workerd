@@ -13,10 +13,7 @@ JsSpan::~JsSpan() noexcept(false) {
 }
 
 void JsSpan::end() {
-  KJ_IF_SOME(s, span) {
-    s->end();
-    span = kj::none;
-  }
+  span = kj::none;
 }
 
 void JsSpan::setAttribute(
