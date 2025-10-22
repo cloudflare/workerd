@@ -1551,7 +1551,7 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
 void Worker::setupContext(
     jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
   // Set WebAssembly.Module @@HasInstance
-  setWebAssemblyModuleHasInstance(lock, context);
+  //setWebAssemblyModuleHasInstance(lock, context);  SnapshotCreator's isolate doesn't have access to WebAssembly
 
   // We replace the default V8 console.log(), etc. methods, to give the worker access to
   // logged content, and log formatted values to stdout/stderr locally.
@@ -1841,6 +1841,20 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               impl->permanentException, currentSpan);
         }
       });
+
+      // Create a V8 snapshot blob after stage 2
+      auto maybeexp = kj::runCatchingExceptions([&]() {
+        jsg::Lock& js = lock;
+        auto& isolateBase = jsg::IsolateBase::from(js.v8Isolate);
+        isolateBase.getSnapshotCreator()->SetDefaultContext(context);
+        auto blob = isolateBase.getSnapshotCreator()->CreateBlob(
+            v8::SnapshotCreator::FunctionCodeHandling::kClear);
+        KJ_DBG("Created snapshot blob!", blob.raw_size, blob.data);
+      });
+
+      KJ_IF_SOME(exp, maybeexp) {
+        KJ_DBG(exp);
+      }
     });
   });
 }

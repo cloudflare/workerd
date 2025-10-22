@@ -337,9 +337,39 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(
-    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
-  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+// static v8::Isolate* newIsolate(
+//     v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
+//   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+//     // We currently don't attempt to support incremental marking or sweeping. We probably could
+//     // support them, but it will take some careful investigation and testing. It's not clear if
+//     // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
+//     // full atomic mark-sweep usually doesn't require much of a pause.
+//     //
+//     // We probably won't ever support concurrent marking or sweeping because concurrent GC is
+//     // only expected to be a win if there are idle CPU cores available. Workers normally run on
+//     // servers that are handling many requests at once, thus it's expected CPU cores will be
+//     // fully utilized. This differs from browser environments, where a user is typically doing
+//     // only one thing at a time and thus likely has CPU cores to spare.
+
+//     // V8 takes ownership of the v8::CppHeap.
+//     params.cpp_heap = cppHeap;
+
+//     if (params.array_buffer_allocator == nullptr &&
+//         params.array_buffer_allocator_shared == nullptr) {
+// #ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+//       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+//           v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
+// #else
+//       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
+//           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+// #endif
+//     }
+//     return v8::Isolate::New(group, params);
+//   });
+// }
+static kj::Own<v8::SnapshotCreator> newSnapshotCreator(
+    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap) {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> decltype(auto) {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
     // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
@@ -356,15 +386,10 @@ static v8::Isolate* newIsolate(
 
     if (params.array_buffer_allocator == nullptr &&
         params.array_buffer_allocator_shared == nullptr) {
-#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
-      params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
-          v8::ArrayBuffer::Allocator::NewDefaultAllocator(group));
-#else
       params.array_buffer_allocator_shared = std::shared_ptr<v8::ArrayBuffer::Allocator>(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
-#endif
     }
-    return v8::Isolate::New(group, params);
+    return kj::heap<v8::SnapshotCreator>(params);
   });
 }
 }  // namespace
@@ -375,7 +400,8 @@ IsolateBase::IsolateBase(V8System& system,
     v8::IsolateGroup group)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      snapshotCreator(newSnapshotCreator(kj::mv(createParams), cppHeap.release())),
+      ptr(snapshotCreator->GetIsolate()),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),

@@ -273,6 +273,10 @@ class IsolateBase {
     deferDestruction(kj::mv(item));
   }
 
+  v8::SnapshotCreator* getSnapshotCreator() {
+    return snapshotCreator.get();
+  }
+
  private:
   template <typename TypeWrapper>
   friend class Isolate;
@@ -309,6 +313,7 @@ class IsolateBase {
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
+  kj::Own<v8::SnapshotCreator> snapshotCreator;
   v8::Isolate* ptr;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
