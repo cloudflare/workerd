@@ -2,9 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Explicitly import the public D1 types
-/// <reference path="../../../types/defines/d1.d.ts" />
-
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
 import type { Span } from './tracing';
 

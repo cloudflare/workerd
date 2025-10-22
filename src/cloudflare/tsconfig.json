@@ -6,5 +6,6 @@
       "cloudflare:*": ["./*"],
       "cloudflare-internal:*": ["./internal/*"]
     }
-  }
+  },
+  "include": ["**/*", "../../types/defines/d1.d.ts"]
 }
