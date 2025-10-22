@@ -2,10 +2,39 @@
 #![warn(must_not_suspend)]
 
 use std::cell::Cell;
+use std::num::ParseIntError;
 use std::rc::Rc;
 
-pub type Error = String;
-pub type Result<T> = std::result::Result<T, Error>;
+pub struct Error {
+    pub name: String,
+    pub message: String,
+}
+
+impl Error {
+    pub fn new(name: String, message: String) -> Self {
+        Self { name, message }
+    }
+}
+
+impl Default for Error {
+    fn default() -> Self {
+        Self {
+            name: "Error".to_owned(),
+            message: "An unknown error occurred".to_owned(),
+        }
+    }
+}
+
+impl From<ParseIntError> for Error {
+    fn from(err: ParseIntError) -> Self {
+        Self::new(
+            "TypeError".to_owned(),
+            format!("Failed to parse integer: {err}"),
+        )
+    }
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub mod ffi {
 
@@ -14,6 +43,13 @@ pub mod ffi {
     pub struct Value {}
 
     pub fn value_from_string(_lock: &Lock, _value: &str) -> Value {
+        todo!()
+    }
+
+    pub fn value_from_jsg_struct<T>(_lock: &Lock, _value: &T) -> Value
+    where
+        T: crate::Struct,
+    {
         todo!()
     }
 
@@ -44,7 +80,7 @@ impl Lock {
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
     where
         F: Future<Output = I>,
-        C: FnOnce(Lock, I) -> Result<R>,
+        C: FnOnce(Self, I) -> Result<R>,
     {
         todo!()
     }
@@ -90,7 +126,7 @@ impl TypeRegistrar {
     }
 }
 
-/// TODO: Implement memory_info(jsg::MemoryTracker)
+/// TODO: Implement `memory_info(jsg::MemoryTracker)`
 pub trait Type {
     /// Same as jsgGetMemoryName
     fn memory_name() -> &'static str {
