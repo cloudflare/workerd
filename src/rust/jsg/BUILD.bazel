@@ -1,0 +1,8 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "jsg",
+    visibility = ["//visibility:public"],
+    deps = [
+    ],
+)
