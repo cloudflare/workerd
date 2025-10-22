@@ -2,55 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Explicitly import the public D1 types
+/// <reference path="../../../types/defines/d1.d.ts" />
+
 import { withSpan } from 'cloudflare-internal:tracing-helpers';
 import type { Span } from './tracing';
-
-interface D1Meta {
-  duration: number;
-  size_after: number;
-  rows_read: number;
-  rows_written: number;
-  last_row_id: number;
-  changed_db: boolean;
-  changes: number;
-
-  /**
-   * The region of the database instance that executed the query.
-   */
-  served_by_region?: string;
-
-  /**
-   * True if-and-only-if the database instance that executed the query was the primary.
-   */
-  served_by_primary?: boolean;
-
-  timings?: {
-    /**
-     * The duration of the SQL query execution by the database instance. It doesn't include any network time.
-     */
-    sql_duration_ms: number;
-  };
-
-  /**
-   * Number of total attempts to execute the query, due to automatic retries.
-   * Note: All other fields in the response like `timings` only apply to the last attempt.
-   */
-  total_attempts?: number;
-}
 
 interface Fetcher {
   fetch: typeof fetch;
 }
-
-type D1Response = {
-  success: true;
-  meta: D1Meta & Record<string, unknown>;
-  error?: never;
-};
-
-type D1Result<T = unknown> = D1Response & {
-  results: T[];
-};
 
 type D1RawOptions = {
   columnNames?: boolean;
@@ -734,7 +694,7 @@ async function toJson<T = unknown>(response: Response): Promise<T> {
 function addAggregatedD1MetaToSpan(span: Span, metas: D1Meta[]): void {
   const aggregatedMeta = aggregateD1Meta(metas);
   addD1MetaToSpan(span, aggregatedMeta);
-  span.setAttribute('cloudflare.d1.response.queries_count', metas.length);
+  span.setAttribute('cloudflare.d1.response.meta', JSON.stringify(metas));
 }
 
 function addD1MetaToSpan(span: Span, meta: D1Meta): void {

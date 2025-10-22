@@ -677,7 +677,8 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 2,
     'cloudflare.d1.response.changed_db': false,
     'cloudflare.d1.response.changes': 0,
-    'cloudflare.d1.response.queries_count': 2,
+    'cloudflare.d1.response.meta':
+      '[{"duration":0.0026086921579674773,"served_by":"d1-mock","changes":0,"last_row_id":2,"changed_db":false,"size_after":8192,"rows_read":1,"rows_written":0},{"duration":0.009433951424302995,"served_by":"d1-mock","changes":0,"last_row_id":2,"changed_db":false,"size_after":8192,"rows_read":1,"rows_written":0}]',
     closed: true,
   },
   {
@@ -839,7 +840,8 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 5,
-    'cloudflare.d1.response.queries_count': 4,
+    'cloudflare.d1.response.meta':
+      '[{"duration":0.005720710256240147,"served_by":"d1-mock","changes":0,"last_row_id":2,"changed_db":true,"size_after":12288,"rows_read":1,"rows_written":2},{"duration":0.004320826749400744,"served_by":"d1-mock","changes":0,"last_row_id":2,"changed_db":true,"size_after":16384,"rows_read":1,"rows_written":2},{"duration":0.00036466236099620187,"served_by":"d1-mock","changes":2,"last_row_id":2,"changed_db":true,"size_after":16384,"rows_read":0,"rows_written":2},{"duration":0.00026737735172635004,"served_by":"d1-mock","changes":3,"last_row_id":3,"changed_db":true,"size_after":16384,"rows_read":0,"rows_written":3}]',
     closed: true,
   },
   {
@@ -997,7 +999,8 @@ const expectedSpans = [
     'cloudflare.d1.response.last_row_id': 3,
     'cloudflare.d1.response.changed_db': true,
     'cloudflare.d1.response.changes': 0,
-    'cloudflare.d1.response.queries_count': 3,
+    'cloudflare.d1.response.meta':
+      '[{"duration":0.00528014130524755,"served_by":"d1-mock","changes":0,"last_row_id":3,"changed_db":true,"size_after":12288,"rows_read":4,"rows_written":0},{"duration":0.004510939746142337,"served_by":"d1-mock","changes":0,"last_row_id":3,"changed_db":true,"size_after":8192,"rows_read":3,"rows_written":0},{"duration":0.009795894690743141,"served_by":"d1-mock","changes":0,"last_row_id":3,"changed_db":true,"size_after":4096,"rows_read":2,"rows_written":0}]',
     closed: true,
   },
 ];
