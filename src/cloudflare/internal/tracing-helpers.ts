@@ -4,8 +4,6 @@
 
 import tracing from 'cloudflare-internal:tracing';
 
-export type Span = ReturnType<typeof tracing.startSpan>;
-
 /**
  * Helper function to wrap operations with tracing spans.
  * Automatically handles span lifecycle for both sync and async operations.
