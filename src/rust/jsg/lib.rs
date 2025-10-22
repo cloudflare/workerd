@@ -144,6 +144,9 @@ pub trait Type {
 pub type MethodCallbackImpl<S, R> =
     dyn FnMut(*mut S, *mut ffi::Lock, *mut ffi::Args) -> Result<R> + 'static;
 
+pub type StaticMethodCallbackImpl<R> =
+    dyn FnMut(*mut ffi::Lock, *mut ffi::Args) -> Result<R> + 'static;
+
 pub enum Member<S: Sized> {
     Constructor,
     Method {
@@ -157,7 +160,7 @@ pub enum Member<S: Sized> {
     },
     StaticMethod {
         name: &'static str,
-        callback: Box<MethodCallbackImpl<(), ffi::Value>>,
+        callback: Box<StaticMethodCallbackImpl<ffi::Value>>,
     },
 }
 

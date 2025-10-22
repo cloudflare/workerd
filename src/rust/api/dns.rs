@@ -219,7 +219,6 @@ impl DnsUtil {
 // Generated code.
 impl DnsUtil {
     fn parse_caa_record_callback(
-        _this: *mut Self,
         lock: *mut jsg::ffi::Lock,
         args: *mut jsg::ffi::Args,
     ) -> jsg::Result<jsg::ffi::Value, jsg::Error> {
@@ -234,7 +233,6 @@ impl DnsUtil {
     }
 
     fn parse_naptr_record_callback(
-        _this: *mut Self,
         lock: *mut jsg::ffi::Lock,
         args: *mut jsg::ffi::Args,
     ) -> jsg::Result<jsg::ffi::Value, jsg::Error> {
