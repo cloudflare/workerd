@@ -1,6 +1,8 @@
 #![feature(must_not_suspend)]
 #![warn(must_not_suspend)]
 
+pub mod dns;
+
 pub struct URLSearchParams {
     search: String,
 }
