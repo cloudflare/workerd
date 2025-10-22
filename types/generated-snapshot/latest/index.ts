@@ -7653,6 +7653,10 @@ export type AutoRagSearchRequest = {
     ranker?: string;
     score_threshold?: number;
   };
+  reranking?: {
+    enabled?: boolean;
+    model?: string;
+  };
   rewrite_query?: boolean;
 };
 export type AutoRagAiSearchRequest = AutoRagSearchRequest & {
