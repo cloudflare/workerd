@@ -200,7 +200,7 @@ InvocationSpanContext InvocationSpanContext::newForInvocation(
     kj::Maybe<kj::EntropySource&> entropySource) {
   kj::Maybe<const InvocationSpanContext&> parent;
   auto traceId = triggerContext
-                     .map([&](auto& ctx) mutable -> TraceId {
+                     .map([&](auto& ctx) mutable {
     parent = ctx;
     return ctx.traceId;
   }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
@@ -470,16 +470,12 @@ EmailEventInfo EmailEventInfo::clone() const {
 namespace {
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<const kj::Own<Trace>> traces) {
-  return KJ_MAP(t, traces) -> TraceEventInfo::TraceItem {
-    return TraceEventInfo::TraceItem(mapCopyString(t->scriptName));
-  };
+  return KJ_MAP(t, traces) { return TraceEventInfo::TraceItem(mapCopyString(t->scriptName)); };
 }
 
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
     rpc::Trace::TraceEventInfo::Reader reader) {
-  return KJ_MAP(r,
-             reader
-                 .getTraces()) -> TraceEventInfo::TraceItem { return TraceEventInfo::TraceItem(r); };
+  return KJ_MAP(r, reader.getTraces()) { return TraceEventInfo::TraceItem(r); };
 }
 }  // namespace
 
