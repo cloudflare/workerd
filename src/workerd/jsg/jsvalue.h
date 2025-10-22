@@ -44,7 +44,6 @@ inline void requireOnStack(void* self) {
   V(ArrayBuffer)                                                                                   \
   V(ArrayBufferView)                                                                               \
   V(TypedArray)                                                                                    \
-  V(Uint8Array)                                                                                    \
   V(Uint8ClampedArray)                                                                             \
   V(Int8Array)                                                                                     \
   V(Uint16Array)                                                                                   \
@@ -228,6 +227,20 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
   void add(Lock& js, const JsValue& value);
 
   using JsBase<v8::Array, JsArray>::JsBase;
+};
+
+class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
+ public:
+  template <typename T = kj::byte>
+  kj::ArrayPtr<T> asArrayPtr() {
+    v8::Local<v8::Uint8Array> inner = *this;
+    auto buf = inner->Buffer();
+    T* data = static_cast<T*>(buf->Data()) + inner->ByteOffset();
+    size_t length = inner->ByteLength();
+    return kj::ArrayPtr(data, length);
+  }
+
+  using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
 };
 
 class JsString final: public JsBase<v8::String, JsString> {
