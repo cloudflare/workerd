@@ -55,9 +55,7 @@ class Container: public jsg::Object {
     JSG_METHOD(destroy);
     JSG_METHOD(signal);
     JSG_METHOD(getTcpPort);
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(setInactivityTimeout);
-    }
+    JSG_METHOD(setInactivityTimeout);
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
