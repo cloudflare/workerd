@@ -318,8 +318,8 @@ build:windows --copt='/Zc:dllexportInlines-'
 build:parse_headers --features=parse_headers --process_headers_in_dependencies
 # Silence some capnproto warnings/errors that are not relevant for header parsing
 build:parse_headers --per_file_copt='.*\.h@-Wno-unused-function,-Wno-pragma-system-header-outside-header'
-build:parse_headers --per_file_copt=external/capnp-cpp/src/kj/common.h@-Wno-unreachable-code
-build:parse_headers --per_file_copt=external/capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE
+build:parse_headers --per_file_copt='external/.*capnp-cpp/src/kj/common.h@-Wno-unreachable-code'
+build:parse_headers --per_file_copt='external/.*capnp-cpp/src/capnp/arena.h@-DCAPNP_PRIVATE'
 
 # optimized configuration
 build:opt -c opt
