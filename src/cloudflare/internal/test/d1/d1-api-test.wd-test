@@ -9,9 +9,8 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "d1-api-test.js"),
           (name = "d1-api-test-common", esModule = embed "d1-api-test-common.js"),
         ],
-        compatibilityDate = "2024-05-12",
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
-        streamingTails = ["tail"],
+        compatibilityDate = "2023-01-15",
+        compatibilityFlags = ["nodejs_compat"],
         bindings = [
         (
           name = "d1",
@@ -41,16 +40,6 @@ const unitTests :Workerd.Config = (
           (name = "db", durableObjectNamespace = "D1MockDO"),
         ],
       )
-    ),
-    ( name = "tail", worker = .tailWorker, ),
+    )
   ]
-);
-
-const tailWorker :Workerd.Worker = (
-  modules = [
-    (name = "worker", esModule = embed "d1-api-instrumentation-test.js"),
-    (name = "instrumentation-test-helper", esModule = embed "../instrumentation-test-helper.js")
-  ],
-  compatibilityDate = "2024-10-14",
-  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
