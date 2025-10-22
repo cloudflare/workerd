@@ -43,10 +43,14 @@ class Body: public jsg::Object {
   // will fail, because there is no body source left. On the other hand, if the body was constructed
   // from any of the other source types, Body can create a new ReadableStream from the source, and
   // the POST will successfully retransmit.
-  using Initializer = kj::OneOf<jsg::Ref<ReadableStream>, kj::String, kj::Array<byte>,
-                                jsg::Ref<Blob>, jsg::Ref<FormData>,
-                                jsg::Ref<URLSearchParams>, jsg::Ref<url::URLSearchParams>,
-                                jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
+  using Initializer = kj::OneOf<jsg::Ref<ReadableStream>,
+      kj::String,
+      kj::Array<byte>,
+      jsg::Ref<Blob>,
+      jsg::Ref<FormData>,
+      jsg::Ref<URLSearchParams>,
+      jsg::Ref<url::URLSearchParams>,
+      jsg::AsyncGeneratorIgnoringStrings<jsg::Value>>;
 
   struct RefcountedBytes final: public kj::Refcounted {
     kj::Array<kj::byte> bytes;
@@ -921,11 +925,15 @@ class Response final: public Body {
   // Alias to the global Response_BodyEncoding enum for backward compatibility
   using BodyEncoding = Response_BodyEncoding;
 
-  Response(jsg::Lock& js, int statusCode, kj::Maybe<kj::String> statusText,
-           jsg::Ref<Headers> headers, CfProperty&& cf, kj::Maybe<Body::ExtractedBody> body,
-           kj::Array<kj::String> urlList = {},
-           kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
-           BodyEncoding bodyEncoding = BodyEncoding::AUTO);
+  Response(jsg::Lock& js,
+      int statusCode,
+      kj::Maybe<kj::String> statusText,
+      jsg::Ref<Headers> headers,
+      CfProperty&& cf,
+      kj::Maybe<Body::ExtractedBody> body,
+      kj::Array<kj::String> urlList = {},
+      kj::Maybe<jsg::Ref<WebSocket>> webSocket = kj::none,
+      BodyEncoding bodyEncoding = BodyEncoding::AUTO);
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -1192,26 +1200,13 @@ jsg::Ref<Response> makeHttpResponse(jsg::Lock& js,
     Response::BodyEncoding bodyEncoding = Response::BodyEncoding::AUTO,
     kj::Maybe<jsg::Ref<AbortSignal>> signal = kj::none);
 
-#define EW_HTTP_ISOLATE_TYPES         \
-  api::FetchEvent,                    \
-  api::Headers,                       \
-  api::Headers::EntryIterator,        \
-  api::Headers::EntryIterator::Next,  \
-  api::Headers::KeyIterator,          \
-  api::Headers::KeyIterator::Next,    \
-  api::Headers::ValueIterator,        \
-  api::Headers::ValueIterator::Next,  \
-  api::Body,                          \
-  api::Response,                      \
-  api::Response::InitializerDict,     \
-  api::Request,                       \
-  api::Request::InitializerDict,      \
-  api::Fetcher,                       \
-  api::Fetcher::PutOptions,           \
-  api::Fetcher::ScheduledOptions,     \
-  api::Fetcher::ScheduledResult,      \
-  api::Fetcher::QueueResult,          \
-  api::Fetcher::ServiceBindingQueueMessage
+#define EW_HTTP_ISOLATE_TYPES                                                                      \
+  api::FetchEvent, api::Headers, api::Headers::EntryIterator, api::Headers::EntryIterator::Next,   \
+      api::Headers::KeyIterator, api::Headers::KeyIterator::Next, api::Headers::ValueIterator,     \
+      api::Headers::ValueIterator::Next, api::Body, api::Response, api::Response::InitializerDict, \
+      api::Request, api::Request::InitializerDict, api::Fetcher, api::Fetcher::PutOptions,         \
+      api::Fetcher::ScheduledOptions, api::Fetcher::ScheduledResult, api::Fetcher::QueueResult,    \
+      api::Fetcher::ServiceBindingQueueMessage
 
 // The list of http.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

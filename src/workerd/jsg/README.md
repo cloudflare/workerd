@@ -105,16 +105,15 @@ At the time of writing this, the primitive value types currently supported by th
 | uint32_t             |  v8::Uint32    |     number      |                         |
 | uint64_t             |  v8::BigInt    |     bigint      |                         |
 | kj::String(Ptr)      |  v8::String    |     string      |                         |
-| jsg::ByteString      |  v8::String    |     string      | See [ByteString][] spec |
 | kj::Date             |  v8::Date      |     Date        |                         |
 | nullptr              |  v8::Null      |     null        | See kj::Maybe&lt;T>     |
 | nullptr              |  v8::Undefined |     undefined   | See jsg::Optional&lt;T> |
 
 Specifically, for example, when mapping from JavaScript into C++, when JSG encounters a
-string value, it can convert that into either a `kj::String`, or `jsg::ByteString`,
+string value, it can convert that into either a `kj::String`, or `jsg::USVString`,
 depending on what is needed by the C++ layer. Likewise, when translating from C++ to
 JavaScript, JSG will generate a JavaScript `string` whenever it encounters a `kj::String`,
-`kj::StringPtr`, or `jsg::ByteString`.
+`kj::StringPtr`, or `jsg::USVString`.
 
 JSG will *not* translate JavaScript `string` to `kj::StringPtr`.
 
@@ -1413,7 +1412,6 @@ TODO(soon): TBD
 
 ["KJ Style Guide"]: https://github.com/capnproto/capnproto/blob/master/style-guide.md
 ["KJ Tour"]: https://github.com/capnproto/capnproto/blob/master/kjdoc/tour.md
-[ByteString]: https://webidl.spec.whatwg.org/#idl-ByteString
 [Record]: https://webidl.spec.whatwg.org/#idl-record
 [Sequence]: https://webidl.spec.whatwg.org/#idl-sequence
 

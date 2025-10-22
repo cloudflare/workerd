@@ -38,7 +38,8 @@ static_assert(webidl::hasDuplicateTypes<int, bool, char, int> == true);
 static_assert(webidl::hasDuplicateTypes<bool, int, char, int> == true);
 static_assert(webidl::hasDuplicateTypes<bool, char, int, int> == true);
 
-static_assert(webidl::FlattenedTypeTraits<kj::String, ByteString>::stringTypeCount == 2);
+static_assert(webidl::FlattenedTypeTraits<kj::String, USVString>::stringTypeCount == 2);
+static_assert(webidl::FlattenedTypeTraits<kj::String, DOMString>::stringTypeCount == 2);
 
 KJ_TEST("web-idl meta") {
   // Nothing to actually do here; tests are compile-time
