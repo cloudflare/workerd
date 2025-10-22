@@ -618,6 +618,16 @@ Log::Log(kj::Date timestamp, LogLevel logLevel, kj::String message)
       logLevel(logLevel),
       message(kj::mv(message)) {}
 
+void Log::copyTo(rpc::Trace::Log::Builder builder) const {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setLogLevel(logLevel);
+  builder.setMessage(message);
+}
+
+Log Log::clone() const {
+  return Log(timestamp, logLevel, kj::str(message));
+}
+
 Exception::Exception(
     kj::Date timestamp, kj::String name, kj::String message, kj::Maybe<kj::String> stack)
     : timestamp(timestamp),
@@ -625,6 +635,32 @@ Exception::Exception(
       message(kj::mv(message)),
       stack(kj::mv(stack)) {}
 
+Log::Log(rpc::Trace::Log::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      logLevel(reader.getLogLevel()),
+      message(kj::str(reader.getMessage())) {}
+
+Exception::Exception(rpc::Trace::Exception::Reader reader)
+    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
+      name(kj::str(reader.getName())),
+      message(kj::str(reader.getMessage())) {
+  if (reader.hasStack()) {
+    stack = kj::str(reader.getStack());
+  }
+}
+
+void Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
+  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setName(name);
+  builder.setMessage(message);
+  KJ_IF_SOME(s, stack) {
+    builder.setStack(s);
+  }
+}
+
+Exception Exception::clone() const {
+  return Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack));
+}
 }  // namespace tracing
 
 Trace::Trace(kj::Maybe<kj::String> stableId,
@@ -757,29 +793,6 @@ void Trace::copyTo(rpc::Trace::Builder builder) const {
   }
 }
 
-void tracing::Log::copyTo(rpc::Trace::Log::Builder builder) const {
-  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setLogLevel(logLevel);
-  builder.setMessage(message);
-}
-
-tracing::Log tracing::Log::clone() const {
-  return Log(timestamp, logLevel, kj::str(message));
-}
-
-void tracing::Exception::copyTo(rpc::Trace::Exception::Builder builder) const {
-  builder.setTimestampNs((timestamp - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setName(name);
-  builder.setMessage(message);
-  KJ_IF_SOME(s, stack) {
-    builder.setStack(s);
-  }
-}
-
-tracing::Exception tracing::Exception::clone() const {
-  return Exception(timestamp, kj::str(name), kj::str(message), mapCopyString(stack));
-}
-
 void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLevel) {
   // Sandboxed workers currently record their traces as if the pipeline log level were set to
   // "full", so we may need to filter out the extra data after receiving the traces back.
@@ -874,18 +887,6 @@ void Trace::mergeFrom(rpc::Trace::Reader reader, PipelineLogLevel pipelineLogLev
 }
 
 namespace tracing {
-Log::Log(rpc::Trace::Log::Reader reader)
-    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
-      logLevel(reader.getLogLevel()),
-      message(kj::str(reader.getMessage())) {}
-Exception::Exception(rpc::Trace::Exception::Reader reader)
-    : timestamp(kj::UNIX_EPOCH + reader.getTimestampNs() * kj::NANOSECONDS),
-      name(kj::str(reader.getName())),
-      message(kj::str(reader.getMessage())) {
-  if (reader.hasStack()) {
-    stack = kj::str(reader.getStack());
-  }
-}
 
 Attribute::Attribute(kj::ConstString name, Value&& value)
     : name(kj::mv(name)),
@@ -901,6 +902,18 @@ kj::Array<Attribute::Value> readValues(const rpc::Trace::Attribute::Reader& read
   KJ_ASSERT(reader.hasValue());
   auto value = reader.getValue();
   return KJ_MAP(v, value) { return deserializeTagValue(v); };
+}
+
+kj::Maybe<FetchResponseInfo> readReturnInfo(const rpc::Trace::Return::Reader& reader) {
+  auto info = reader.getInfo();
+  switch (info.which()) {
+    case rpc::Trace::Return::Info::EMPTY:
+      return kj::none;
+    case rpc::Trace::Return::Info::FETCH: {
+      return kj::Maybe(FetchResponseInfo(info.getFetch()));
+    }
+  }
+  KJ_UNREACHABLE;
 }
 }  // namespace
 
@@ -925,21 +938,6 @@ kj::String Attribute::toString() const {
 }
 
 Return::Return(kj::Maybe<FetchResponseInfo> info): info(kj::mv(info)) {}
-
-namespace {
-kj::Maybe<FetchResponseInfo> readReturnInfo(const rpc::Trace::Return::Reader& reader) {
-  auto info = reader.getInfo();
-  switch (info.which()) {
-    case rpc::Trace::Return::Info::EMPTY:
-      return kj::none;
-    case rpc::Trace::Return::Info::FETCH: {
-      return kj::Maybe(FetchResponseInfo(info.getFetch()));
-    }
-  }
-  KJ_UNREACHABLE;
-}
-}  // namespace
-
 Return::Return(rpc::Trace::Return::Reader reader): info(readReturnInfo(reader)) {}
 
 void Return::copyTo(rpc::Trace::Return::Builder builder) const {
@@ -1452,6 +1450,52 @@ TailEvent TailEvent::clone() const {
   return TailEvent(spanContext.getTraceId(), invocationId, spanContext.getSpanId(), timestamp,
       sequence, cloneEvent(event));
 }
+
+void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
+  builder.setOperationName(operationName.asPtr());
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+  builder.setParentSpanId(parentSpanId);
+
+  auto tagsParam = builder.initTags(tags.size());
+  auto i = 0;
+  for (auto& tag: tags) {
+    auto tagParam = tagsParam[i++];
+    tagParam.setKey(tag.key.asPtr());
+    serializeTagValue(tagParam.initValue(), tag.value);
+  }
+}
+
+CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
+      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
+  auto tagsParam = reader.getTags();
+  tags.reserve(tagsParam.size());
+  for (auto tagParam: tagsParam) {
+    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
+        deserializeTagValue(tagParam.getValue()));
+  }
+}
+
+CompleteSpan CompleteSpan::clone() const {
+  CompleteSpan copy(
+      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
+  copy.tags.reserve(tags.size());
+  for (auto& tag: tags) {
+    copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+  }
+  return copy;
+}
+
+kj::String CompleteSpan::toString() const {
+  return kj::str("CompleteSpan: ", operationName,
+      kj::strArray(
+          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
+}
 }  // namespace tracing
 
 // ======================================================================================
@@ -1599,54 +1643,6 @@ Span::TagValue deserializeTagValue(RpcValue::Reader value) {
       KJ_UNREACHABLE;
   }
 }
-
-namespace tracing {
-void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
-  builder.setOperationName(operationName.asPtr());
-  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
-  builder.setSpanId(spanId);
-  builder.setParentSpanId(parentSpanId);
-
-  auto tagsParam = builder.initTags(tags.size());
-  auto i = 0;
-  for (auto& tag: tags) {
-    auto tagParam = tagsParam[i++];
-    tagParam.setKey(tag.key.asPtr());
-    serializeTagValue(tagParam.initValue(), tag.value);
-  }
-}
-
-CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
-    : spanId(reader.getSpanId()),
-      parentSpanId(reader.getParentSpanId()),
-      operationName(kj::str(reader.getOperationName())),
-      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
-      endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
-  auto tagsParam = reader.getTags();
-  tags.reserve(tagsParam.size());
-  for (auto tagParam: tagsParam) {
-    tags.insert(kj::ConstString(kj::heapString(tagParam.getKey())),
-        deserializeTagValue(tagParam.getValue()));
-  }
-}
-
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(
-      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
-  }
-  return copy;
-}
-
-kj::String CompleteSpan::toString() const {
-  return kj::str("CompleteSpan: ", operationName,
-      kj::strArray(
-          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
-}
-}  // namespace tracing
 
 ScopedDurationTagger::ScopedDurationTagger(
     SpanBuilder& span, kj::ConstString key, const kj::MonotonicClock& timer)
