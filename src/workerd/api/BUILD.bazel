@@ -24,7 +24,6 @@ filegroup(
             "modules.c++",
             "r2*.c++",
             "rtti.c++",
-            "tracing-module.c++",
             "url.c++",
             "urlpattern.c++",
             "urlpattern-standard.c++",
@@ -52,7 +51,6 @@ filegroup(
             "modules.h",
             "r2*.h",
             "rtti.h",
-            "tracing-module.h",
             "url.h",
             "urlpattern.h",
             "urlpattern-standard.h",
@@ -92,17 +90,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "tracing-module",
-    srcs = ["tracing-module.c++"],
-    hdrs = ["tracing-module.h"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/io",
-        "//src/workerd/jsg",
-    ],
-)
-
-wd_cc_library(
     name = "rtti",
     srcs = [
         "modules.c++",
@@ -122,7 +109,6 @@ wd_cc_library(
         ":hyperdrive",
         ":memory-cache",
         ":r2",
-        ":tracing-module",
         "//src/cloudflare",
         "//src/node",
         "//src/pyodide",
