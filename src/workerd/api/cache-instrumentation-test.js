@@ -18,12 +18,21 @@ export const test = {
 
     // Recorded streaming tail worker events, in insertion order,
     // filtering spans not associated with Cache
-    let received = Array.from(spans.values()).filter(
-      (span) => span.name !== 'jsRpcSession'
-    );
+    let received = Array.from(spans.values());
+    console.log(received);
 
     // spans emitted by cache-test.js in execution order
     let expected = [
+      {
+        name: 'cache_match',
+        'url.full': 'https://example.com/conditional-etag',
+        closed: true,
+      },
+      {
+        name: 'cache_match',
+        'url.full': 'https://example.com/conditional-last-modified',
+        closed: true,
+      },
       {
         name: 'cache_delete',
         'url.full': 'https://example.com/delete-exists',
@@ -37,6 +46,72 @@ export const test = {
       {
         name: 'cache_delete',
         'url.full': 'https://example.com/delete-with-options',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-cache-tag',
+        'cache_control.cacheability': 'public',
+        'cache_control.expiration': 'max-age=3600',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-etag',
+        'cache_control.cacheability': 'public',
+        'cache_control.expiration': 'max-age=3600',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-expires',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-last-modified',
+        'cache_control.cacheability': 'public',
+        'cache_control.expiration': 'max-age=3600',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-set-cookie',
+        'cache_control.cacheability': 'public',
+        'cache_control.expiration': 'max-age=3600',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-set-cookie-private',
+        'cache_control.cacheability': 'private',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-must-revalidate',
+        'cache_control.cacheability': 'public',
+        'cache_control.revalidation': 'must-revalidate',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-proxy-revalidate',
+        'cache_control.cacheability': 'public',
+        'cache_control.revalidation': 'proxy-revalidate',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-private',
+        'cache_control.cacheability': 'private',
+        'cache_control.expiration': 'max-age=3600',
+        closed: true,
+      },
+      {
+        name: 'cache_put',
+        'url.full': 'https://example.com/put-no-cache',
+        'cache_control.expiration': 'no-cache',
         closed: true,
       },
       {

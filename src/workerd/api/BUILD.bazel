@@ -434,7 +434,7 @@ wd_test(
     data = [
         "cache-instrumentation-test.js",
         "cache-mock.js",
-        "cache-test.js",
+        "cache-operations.js",
         "tests/instrumentation-tail-worker.js",
     ],
 )

@@ -5,7 +5,7 @@ const unitTests :Workerd.Config = (
     ( name = "cache-test",
       worker = (
         modules = [
-          ( name = "worker", esModule = embed "cache-test.js" )
+          ( name = "worker", esModule = embed "cache-operations.js" )
         ],
         cacheApiOutbound = "cache-backend",
         compatibilityDate = "2023-07-24",
