@@ -5,6 +5,8 @@ use std::cell::Cell;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
+pub mod modules;
+
 pub struct Error {
     pub name: String,
     pub message: String,
@@ -116,13 +118,19 @@ impl<T> Clone for Ref<T> {
 pub struct TypeRegistrar {}
 
 impl TypeRegistrar {
-    pub fn register_resource<T>(&mut self)
+    pub fn register_module<T>(&mut self, name: &str, module_type: modules::Type)
     where
         T: Resource,
     {
         for _member in &T::members() {
             // register the member in v8
         }
+    }
+
+    pub fn register_struct<T>(&mut self)
+    where
+        T: Struct,
+    {
     }
 }
 

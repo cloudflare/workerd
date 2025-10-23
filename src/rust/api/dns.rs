@@ -102,6 +102,7 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
     Ok(output.join("."))
 }
 
+// #[jsg::resource]
 pub struct DnsUtil {}
 
 impl DnsUtil {
@@ -247,6 +248,7 @@ impl DnsUtil {
     }
 }
 
+// Generated code.
 impl jsg::Resource for DnsUtil {
     fn members() -> Vec<jsg::Member<Self>>
     where
@@ -266,3 +268,9 @@ impl jsg::Resource for DnsUtil {
 }
 
 impl jsg::Type for DnsUtil {}
+
+pub fn register_types(r: &mut jsg::TypeRegistrar) {
+    r.register_module::<crate::dns::DnsUtil>("node-internal:dns", jsg::modules::Type::INTERNAL);
+    r.register_struct::<crate::dns::NaptrRecord>();
+    r.register_struct::<crate::dns::CaaRecord>();
+}
