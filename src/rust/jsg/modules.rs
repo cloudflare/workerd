@@ -8,5 +8,6 @@ pub mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type ModuleRegistry;
+        type ModuleCallback;
     }
 }

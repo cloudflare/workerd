@@ -11,6 +11,8 @@ mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
         type ModuleRegistry = jsg::modules::ffi::ModuleRegistry;
+        type LocalValue = jsg::v8::ffi::LocalValue;
+        type ModuleCallback = jsg::modules::ffi::ModuleCallback;
     }
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
