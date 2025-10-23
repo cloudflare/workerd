@@ -6,6 +6,7 @@
 
 #include "actor-cache.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
 
@@ -49,6 +50,16 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       OutputGate& outputGate,
       kj::Function<kj::Promise<void>()> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks());
+
+  void tryReconcileAlarm() {
+    if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+      // Because we preserve an invariant that scheduled alarms are always at or earlier than
+      // persisted db alarm state, it should be OK to populate our idea of the latest scheduled
+      // alarm using the current db alarm state.  At worst, it may perform one unnecessary
+      // scheduling request in cases where a previous alarm-state-altering transaction failed.
+      alarmScheduledNoLaterThan = metadata.getAlarm();
+    }
+  }
 
   bool isCommitScheduled() {
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;

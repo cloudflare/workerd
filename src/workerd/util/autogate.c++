@@ -25,6 +25,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
+    case AutogateKey::SERIALIZE_SRS_ALARMS:
+      return "serialize-srs-alarms"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

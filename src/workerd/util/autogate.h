@@ -20,6 +20,8 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
+  // Serialize SRS alarm scheduling and enable reconciliation on actor startup.
+  SERIALIZE_SRS_ALARMS,
   NumOfKeys  // Reserved for iteration.
 };
 
