@@ -9,7 +9,6 @@ export const testTailHandler = {
   tailStream(event, env, ctx) {
     // Capture the top-level span ID from the onset event
     const topLevelSpanId = event.event.spanId;
-    console.log(event);
 
     // For each "onset" event, store a promise which we will resolve when
     // we receive the equivalent "outcome" event
