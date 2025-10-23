@@ -76,6 +76,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
+  // TODO start span here
+  // TODO add options to span
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
     return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
@@ -86,6 +88,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
   return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
+    // add jsRequest->getUrl() to span
+
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
@@ -95,6 +99,9 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
+
+    // parse each of the request headers to add info to span
+
     requestHeaders.setPtr(context.getHeaderIds().cacheControl, "only-if-cached");
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
@@ -116,6 +123,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         LOG_CACHE_ERROR_ONCE("Response to Cache API GET has no CF-Cache-Status: ", response);
         return kj::none;
       }
+
+      // TODO add cacheStatus to span
 
       // The status code should be a 504 on cache miss, but we need to rely on CF-Cache-Status
       // because someone might cache a 504.
@@ -244,6 +253,12 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
   return js.evalNow([&] {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
+    auto& context = IoContext::current();
+    // TODO start span here
+    // TODO add jsResponse->getStatus() to span
+    // TODO add response method
+    // TODO parse each of the headers
+
     // TODO(conform): Require that jsRequest's url has an http or https scheme. This is only
     //   important if api::Request is changed to parse its URL eagerly (as required by spec), rather
     //   than at fetch()-time.
@@ -261,8 +276,6 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       JSG_REQUIRE(vary.findFirst('*') == kj::none, TypeError,
           "Cannot cache response with 'Vary: *' header.");
     }
-
-    auto& context = IoContext::current();
 
     if (jsResponse->getStatus() == 304) {
       // Silently discard 304 status responses to conditional requests. Caching 304s could be a
@@ -290,6 +303,8 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
     // as put() returns.
     auto serializePromise = jsResponse->send(js, serializer, {}, kj::none);
     auto payload = serializer.getPayload();
+
+    // TODO get the payload size from payload.stream, add to span
 
     // TODO(someday): Implement Cache API in preview. This bail-out lives all the way down here,
     //   after all KJ_REQUIRE checks and the start of response serialization, so that Cache.put()
@@ -590,6 +605,24 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     return cacheClient->getNamespace(n, kj::mv(metadata));
   }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
   httpClient = httpClient.attach(kj::mv(span), kj::mv(userSpan), kj::mv(cacheClient));
+  return httpClient;
+}
+
+kj::Own<kj::HttpClient> Cache::getHttpClientNew(
+    IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags) {
+  auto cacheClient = context.getCacheClient();
+  auto metadata = CacheClient::SubrequestMetadata{
+    .cfBlobJson = kj::mv(cfBlobJson),
+    .parentSpan = span,
+    .featureFlagsForFl = kj::none,
+  };
+  if (enableCompatFlags) {
+    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+  }
+  auto httpClient =
+      cacheName.map([&](kj::String& n) {
+    return cacheClient->getNamespace(n, kj::mv(metadata));
+  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
   return httpClient;
 }
 
