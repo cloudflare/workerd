@@ -51,6 +51,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       kj::Function<kj::Promise<void>()> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks());
 
+  // If the SERIALIZE_SRS_ALARMS autogate is enabled, sync the alarm manager with our latest durable
+  // alarm time in SRS.
   void tryReconcileAlarm();
 
   bool isCommitScheduled() {
@@ -222,17 +224,26 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // The alarm state for which we last received confirmation that the db was durably stored.
   kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
 
+  // TODO(cleanup): Drop this member once we cleaunp the SERIALIZE_SRS_ALARMS autogate.
+  //
   // The latest time we'd expect a scheduled alarm to fire, given the current set of in-flight
   // scheduling requests, without yet knowing if any of them succeeded or failed.  We use this
   // value to maintain the invariant that the scheduled alarm is always equal to or earlier than
   // the alarm value in the persisted database state.
   kj::Maybe<kj::Date> alarmScheduledNoLaterThan;
 
+  // The current alarm time according to our source of truth.
+  kj::Maybe<kj::Date> currentGuaranteedAlarmTime;
+
+  // Track if we're currently fixing an alarm mismatch to prevent duplicates
+  kj::Maybe<kj::ForkedPromise<void>> alarmFixupInProgress;
+
   // A promise for an in-progress alarm notification update and database commit.
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
 
+  // TODO(cleanup): Delete this class once we cleaunp the SERIALIZE_SRS_ALARMS autogate.
   class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
    public:
     void taskFailed(kj::Exception&& exception) override;
