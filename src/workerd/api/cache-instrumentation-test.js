@@ -21,16 +21,24 @@ export const test = {
     let received = Array.from(spans.values());
     console.log(received);
 
-    // spans emitted by cache-test.js in execution order
+    // spans emitted by cache-operations.js in execution order
     let expected = [
       {
         name: 'cache_match',
-        'url.full': 'https://example.com/conditional-etag',
+        'cache.url': 'https://example.com/conditional-etag',
+        'cache.header.if_none_match': 'abc123',
+        'cache.response.status_code': 504n,
+        'cache.response.body.size': 0n,
+        'cache.response.cache_status': 'MISS',
         closed: true,
       },
       {
         name: 'cache_match',
-        'url.full': 'https://example.com/conditional-last-modified',
+        'cache.url': 'https://example.com/conditional-last-modified',
+        'cache.header.if_modified_since': 'Wed, 21 Oct 2020 07:28:00 GMT',
+        'cache.response.status_code': 504n,
+        'cache.response.body.size': 0n,
+        'cache.response.cache_status': 'MISS',
         closed: true,
       },
       {
@@ -116,17 +124,27 @@ export const test = {
       },
       {
         name: 'cache_match',
-        'url.full': 'https://example.com/cached-resource',
+        'cache.url': 'https://example.com/cached-resource',
+        'cache.response.status_code': 200n,
+        'cache.response.body.size': 14n,
+        'cache.response.cache_status': 'HIT',
         closed: true,
       },
       {
         name: 'cache_match',
-        'url.full': 'https://example.com/not-cached',
+        'cache.url': 'https://example.com/not-cached',
+        'cache.response.status_code': 504n,
+        'cache.response.body.size': 0n,
+        'cache.response.cache_status': 'MISS',
         closed: true,
       },
       {
         name: 'cache_match',
-        'url.full': 'https://example.com/cached-with-options',
+        'cache.ignore_method': false,
+        'cache.url': 'https://example.com/cached-with-options',
+        'cache.response.status_code': 504n,
+        'cache.response.body.size': 0n,
+        'cache.response.cache_status': 'MISS',
         closed: true,
       },
       {

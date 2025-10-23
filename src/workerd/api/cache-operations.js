@@ -286,7 +286,7 @@ export const conditionalRequestOperations = {
     const matchRequest1 = new Request('https://example.com/conditional-etag', {
       method: 'GET',
       headers: {
-        'If-None-Match': '"abc123"',
+        'If-None-Match': 'abc123',
       },
     });
     let matchResult = await cache.match(matchRequest1);

@@ -76,8 +76,16 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
-  // TODO start span here
-  // TODO add options to span
+  auto traceSpan = context.makeTraceSpan("cache_match"_kjc);
+  auto userSpan = context.makeUserTraceSpan("cache_match"_kjc);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
+      traceContext.userSpan.setTag("cache.ignore_method"_kjc, ignoreMethod);
+    }
+  }
+
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
     return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
@@ -88,31 +96,46 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
   return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
-    // add jsRequest->getUrl() to span
-
+    traceContext.userSpan.setTag("cache.url"_kjc, kj::str(jsRequest->getUrl()));
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
       return js.resolvedPromise(jsg::Optional<jsg::Ref<Response>>());
     }
 
-    auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_match"_kjc,
-        jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
+    auto httpClient = getHttpClientNew(
+        context, jsRequest->serializeCfBlobJson(js), traceContext, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
 
+    auto headerIds = context.getHeaderIds();
     // parse each of the request headers to add info to span
+    KJ_IF_SOME(range, requestHeaders.get(headerIds.range)) {
+      traceContext.userSpan.setTag("cache.header.range"_kjc, kj::str(range));
+    }
+    KJ_IF_SOME(ifModifiedSince, requestHeaders.get(headerIds.ifModifiedSince)) {
+      traceContext.userSpan.setTag("cache.header.if_modified_since"_kjc, kj::str(ifModifiedSince));
+    }
+    KJ_IF_SOME(ifNoneMatch, requestHeaders.get(headerIds.ifNoneMatch)) {
+      traceContext.userSpan.setTag("cache.header.if_none_match"_kjc, kj::str(ifNoneMatch));
+    }
 
     requestHeaders.setPtr(context.getHeaderIds().cacheControl, "only-if-cached");
     auto nativeRequest = httpClient->request(
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient), &context](jsg::Lock& js,
+        [httpClient = kj::mv(httpClient), &context, traceContext = kj::mv(traceContext),
+            headerIds = kj::mv(headerIds)](jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Optional<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(httpClient));
 
+      traceContext.userSpan.setTag("cache.response.status_code"_kjc, int64_t(response.statusCode));
+      KJ_IF_SOME(length, response.body->tryGetLength()) {
+        traceContext.userSpan.setTag("cache.response.body.size"_kjc, int64_t(length));
+      }
+
       kj::StringPtr cacheStatus;
-      KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
+      KJ_IF_SOME(cs, response.headers->get(headerIds.cfCacheStatus)) {
         cacheStatus = cs;
       } else {
         // This is an internal error representing a violation of the contract between us and
@@ -125,6 +148,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
       }
 
       // TODO add cacheStatus to span
+      traceContext.userSpan.setTag("cache.response.cache_status"_kjc, kj::str(cacheStatus));
 
       // The status code should be a 504 on cache miss, but we need to rely on CF-Cache-Status
       // because someone might cache a 504.
@@ -608,22 +632,25 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   return httpClient;
 }
 
-// kj::Own<kj::HttpClient> Cache::getHttpClientNew(
-//     IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags) {
-//   auto cacheClient = context.getCacheClient();
-//   auto metadata = CacheClient::SubrequestMetadata{
-//     .cfBlobJson = kj::mv(cfBlobJson),
-//     .featureFlagsForFl = kj::none,
-//   };
-//   if (enableCompatFlags) {
-//     metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
-//   }
-//   auto httpClient =
-//       cacheName.map([&](kj::String& n) {
-//     return cacheClient->getNamespace(n, kj::mv(metadata));
-//   }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
-//   return httpClient;
-// }
+kj::Own<kj::HttpClient> Cache::getHttpClientNew(IoContext& context,
+    kj::Maybe<kj::String> cfBlobJson,
+    TraceContext& traceContext,
+    bool enableCompatFlags) {
+  auto cacheClient = context.getCacheClient();
+  auto metadata = CacheClient::SubrequestMetadata{
+    .cfBlobJson = kj::mv(cfBlobJson),
+    .parentSpan = traceContext.span,
+    .featureFlagsForFl = kj::none,
+  };
+  if (enableCompatFlags) {
+    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+  }
+  auto httpClient =
+      cacheName.map([&](kj::String& n) {
+    return cacheClient->getNamespace(n, kj::mv(metadata));
+  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
+  return httpClient;
+}
 
 // =======================================================================================
 // CacheStorage
