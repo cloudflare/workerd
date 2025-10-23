@@ -6,6 +6,7 @@ use std::num::ParseIntError;
 use std::rc::Rc;
 
 pub mod modules;
+pub mod v8;
 
 pub struct Error {
     pub name: String,
