@@ -124,8 +124,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient), &context, traceContext = kj::mv(traceContext),
-            headerIds = kj::mv(headerIds)](jsg::Lock& js,
+        [httpClient = kj::mv(httpClient), &context, traceContext = kj::mv(traceContext)](
+            jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Optional<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(httpClient));
 
@@ -135,8 +135,9 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
       }
 
       kj::StringPtr cacheStatus;
-      KJ_IF_SOME(cs, response.headers->get(headerIds.cfCacheStatus)) {
+      KJ_IF_SOME(cs, response.headers->get(context.getHeaderIds().cfCacheStatus)) {
         cacheStatus = cs;
+        traceContext.userSpan.setTag("cache.response.cache_status"_kjc, kj::str(cacheStatus));
       } else {
         // This is an internal error representing a violation of the contract between us and
         // the cache. Since it is always conformant to return undefined from Cache::match()
@@ -146,9 +147,6 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         LOG_CACHE_ERROR_ONCE("Response to Cache API GET has no CF-Cache-Status: ", response);
         return kj::none;
       }
-
-      // TODO add cacheStatus to span
-      traceContext.userSpan.setTag("cache.response.cache_status"_kjc, kj::str(cacheStatus));
 
       // The status code should be a 504 on cache miss, but we need to rely on CF-Cache-Status
       // because someone might cache a 504.
@@ -519,6 +517,16 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   // TODO(someday): Implement Cache API in preview.
   auto& context = IoContext::current();
+  auto traceSpan = context.makeTraceSpan("cache_delete"_kjc);
+  auto userSpan = context.makeUserTraceSpan("cache_delete"_kjc);
+  TraceContext traceContext(kj::mv(traceSpan), kj::mv(userSpan));
+
+  KJ_IF_SOME(o, options) {
+    KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
+      traceContext.userSpan.setTag("cache.ignore_method"_kjc, ignoreMethod);
+    }
+  }
+
   if (context.isFiddle()) {
     context.logWarningOnce(CACHE_API_PREVIEW_WARNING);
     return js.resolvedPromise(false);
@@ -529,6 +537,7 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
   return js.evalNow([&]() -> jsg::Promise<bool> {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
+    traceContext.userSpan.setTag("cache.url"_kjc, kj::str(jsRequest->getUrl()));
     if (!options.orDefault({}).ignoreMethod.orDefault(false) &&
         jsRequest->getMethodEnum() != kj::HttpMethod::GET) {
       return js.resolvedPromise(false);
@@ -536,8 +545,8 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
 
     // Make the PURGE request to cache.
 
-    auto httpClient = getHttpClient(context, jsRequest->serializeCfBlobJson(js), "cache_delete"_kjc,
-        jsRequest->getUrl(), kj::none, flags.getCacheApiCompatFlags());
+    auto httpClient = getHttpClientNew(
+        context, jsRequest->serializeCfBlobJson(js), traceContext, flags.getCacheApiCompatFlags());
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     // HACK: The cache doesn't permit PURGE requests from the outside world. It does this by
@@ -551,12 +560,17 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
         kj::HttpMethod::PURGE, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient)](jsg::Lock&, kj::HttpClient::Response&& response) -> bool {
+        [httpClient = kj::mv(httpClient), traceContext = kj::mv(traceContext)](
+            jsg::Lock&, kj::HttpClient::Response&& response) mutable -> bool {
+      traceContext.userSpan.setTag("cache.response.status_code"_kjc, int64_t(response.statusCode));
       if (response.statusCode == 200) {
+        traceContext.userSpan.setTag("cache.response.success"_kjc, true);
         return true;
       } else if (response.statusCode == 404) {
+        traceContext.userSpan.setTag("cache.response.success"_kjc, false);
         return false;
       } else if (response.statusCode == 429) {
+        traceContext.userSpan.setTag("cache.response.success"_kjc, false);
         // Throw, but do not log the response to Sentry, as rate-limited subrequests are normal
         JSG_FAIL_REQUIRE(
             Error, "Unable to delete cached response. Subrequests are being rate-limited.");

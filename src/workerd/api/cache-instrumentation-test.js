@@ -43,17 +43,24 @@ export const test = {
       },
       {
         name: 'cache_delete',
-        'url.full': 'https://example.com/delete-exists',
+        'cache.url': 'https://example.com/delete-exists',
+        'cache.response.status_code': 200n,
+        'cache.response.success': true,
         closed: true,
       },
       {
         name: 'cache_delete',
-        'url.full': 'https://example.com/delete-not-exists',
+        'cache.url': 'https://example.com/delete-not-exists',
+        'cache.response.status_code': 404n,
+        'cache.response.success': false,
         closed: true,
       },
       {
         name: 'cache_delete',
-        'url.full': 'https://example.com/delete-with-options',
+        'cache.ignore_method': true,
+        'cache.url': 'https://example.com/delete-with-options',
+        'cache.response.status_code': 404n,
+        'cache.response.success': false,
         closed: true,
       },
       {
