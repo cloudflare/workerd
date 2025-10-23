@@ -6,6 +6,7 @@
 
 #include "actor-cache.h"
 
+#include <workerd/util/autogate.h>
 #include <workerd/util/sqlite-kv.h>
 #include <workerd/util/sqlite-metadata.h>
 
@@ -49,6 +50,8 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       OutputGate& outputGate,
       kj::Function<kj::Promise<void>()> commitCallback,
       Hooks& hooks = Hooks::getDefaultHooks());
+
+  void tryReconcileAlarm();
 
   bool isCommitScheduled() {
     return !currentTxn.is<NoTxn>() || deleteAllCommitScheduled;

@@ -22,6 +22,8 @@ enum class AutogateKey {
   TAIL_STREAM_REFACTOR,
   // Increase max WebSocket message size to 32MiB.
   WEBSOCKET_MAX_MESSAGE_SIZE_32M,
+  // Serialize SRS alarm scheduling and enable reconciliation on actor startup.
+  SERIALIZE_SRS_ALARMS,
   NumOfKeys  // Reserved for iteration.
 };
 
