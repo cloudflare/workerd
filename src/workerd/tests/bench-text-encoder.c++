@@ -43,13 +43,13 @@ struct TextEncoder: public benchmark::Fixture {
 
             let result;
             if (op === 'encode') {
-              for (let i = 0; i < 100_000; i++) {
+              for (let i = 0; i < 1000; i++) {
                 result = encoder.encode(input);
               }
               return new Response(result.length.toString());
             } else if (op === 'encodeInto') {
               const buffer = new Uint8Array(len * 3); // enough space for any UTF-8 encoding
-              for (let i = 0; i < 100_000; i++) {
+              for (let i = 0; i < 1000; i++) {
                 result = encoder.encodeInto(input, buffer);
               }
               return new Response(result.written.toString());
