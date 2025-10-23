@@ -17,6 +17,10 @@ class ThreadContext {
     const kj::HttpHeaderId contentEncoding;
     const kj::HttpHeaderId cfCacheStatus;  // used by cache API implementation
     const kj::HttpHeaderId cacheControl;
+    const kj::HttpHeaderId cacheTag;
+    const kj::HttpHeaderId etag;
+    const kj::HttpHeaderId expires;
+    const kj::HttpHeaderId lastModified;
     const kj::HttpHeaderId pragma;
     const kj::HttpHeaderId cfCacheNamespace;  // used by Cache binding implementation
     const kj::HttpHeaderId range;
