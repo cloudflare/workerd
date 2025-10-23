@@ -261,8 +261,24 @@ export const websockets = {
     const socket = connect(`localhost:${env.HTTP_SOCKET_SERVER_PORT}`);
     const httpClient = await internalNewHttpClient(socket);
 
-    // Create a WebSocket connection using the HTTP client for fetch
-    const ws = new WebSocket(`ws://localhost:${env.HTTP_SOCKET_SERVER_PORT}/`);
+    const res = await fetch(
+      `http://localhost:${env.HTTP_SOCKET_SERVER_PORT}/`,
+      {
+        headers: {
+          Connection: 'Upgrade',
+          Upgrade: 'websocket',
+        },
+      }
+    );
+
+    const ws = res.webSocket;
+
+    if (!ws) {
+      throw new Error('WebSocket upgrade failed');
+    }
+
+    ws.accept();
+    ws.send('Hello from test client');
 
     // Test the WebSocket connection
     await new Promise((resolve, reject) => {
@@ -270,10 +286,6 @@ export const websockets = {
       const timeout = setTimeout(() => {
         reject(new Error('WebSocket test timed out after 5 seconds'));
       }, 5000);
-
-      ws.addEventListener('open', () => {
-        ws.send('Hello from test client');
-      });
 
       ws.addEventListener('message', (event) => {
         // Verify we got the welcome message
