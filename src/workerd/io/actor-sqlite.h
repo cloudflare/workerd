@@ -58,6 +58,27 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
       // alarm using the current db alarm state.  At worst, it may perform one unnecessary
       // scheduling request in cases where a previous alarm-state-altering transaction failed.
       alarmScheduledNoLaterThan = metadata.getAlarm();
+    } else {
+      // Only do reconciliation if we're using custom hooks that actually support alarms.
+      // The default hooks throw an error for SQLite-backed DOs that don't support alarms yet.
+      //
+      // We also only reconcile if SRS has an alarm time set. If there is no alarm time set and we
+      // diverged from the alarm manager, then when the alarm manager fires the alarm, we'll see
+      // that SRS has no alarm time set, and will cancel the run.
+      if (&hooks != &Hooks::DEFAULT && lastConfirmedAlarmDbState != kj::none) {
+        auto alarmPromise = requestScheduledAlarm(lastConfirmedAlarmDbState);
+        commitTasks.add(alarmPromise.catch_([this](kj::Exception&& e) -> void {
+          // If the setAlarm fails, we need to break the output gate. We can set `broken`
+          // so subsequent storage operations fail with an exception.
+          //
+          // TODO(now): I want this to log for us internally, but print as an internal error to the
+          // application, because we might fail at something as simple as scheduleRun(none) (no
+          // alarm) and the application might NEVER even use alarms. In that case, it would be weird
+          // for the application to get an exception saying "hey your setAlarm failed", since the
+          // client would never even call setAlarm!
+          broken = KJ_EXCEPTION(FAILED, "Failed to reconcile alarm in background.", e);
+        }));
+      }
     }
   }
 
@@ -230,17 +251,26 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
   // The alarm state for which we last received confirmation that the db was durably stored.
   kj::Maybe<kj::Date> lastConfirmedAlarmDbState;
 
+  // TODO(cleanup): Drop this member once we cleaunp the SERIALIZE_SRS_ALARMS autogate.
+  //
   // The latest time we'd expect a scheduled alarm to fire, given the current set of in-flight
   // scheduling requests, without yet knowing if any of them succeeded or failed.  We use this
   // value to maintain the invariant that the scheduled alarm is always equal to or earlier than
   // the alarm value in the persisted database state.
   kj::Maybe<kj::Date> alarmScheduledNoLaterThan;
 
+  // The current alarm time according to our source of truth.
+  kj::Maybe<kj::Date> currentGuaranteedAlarmTime;
+
+  // Track if we're currently fixing an alarm mismatch to prevent duplicates
+  kj::Maybe<kj::ForkedPromise<void>> alarmFixupInProgress;
+
   // A promise for an in-progress alarm notification update and database commit.
   kj::Maybe<kj::ForkedPromise<void>> pendingCommit;
 
   kj::TaskSet commitTasks;
 
+  // TODO(cleanup): Delete this class once we cleaunp the SERIALIZE_SRS_ALARMS autogate.
   class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
    public:
     void taskFailed(kj::Exception&& exception) override;
