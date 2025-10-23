@@ -96,8 +96,8 @@ class Cache: public jsg::Object {
       kj::Maybe<jsg::ByteString> cacheControl,
       bool enableCompatFlags);
 
-  kj::Own<kj::HttpClient> getHttpClientNew(
-      IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags);
+  // kj::Own<kj::HttpClient> getHttpClientNew(
+  // IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags);
 };
 
 // =======================================================================================

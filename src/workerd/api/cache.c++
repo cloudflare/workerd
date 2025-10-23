@@ -608,23 +608,22 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   return httpClient;
 }
 
-kj::Own<kj::HttpClient> Cache::getHttpClientNew(
-    IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags) {
-  auto cacheClient = context.getCacheClient();
-  auto metadata = CacheClient::SubrequestMetadata{
-    .cfBlobJson = kj::mv(cfBlobJson),
-    .parentSpan = span,
-    .featureFlagsForFl = kj::none,
-  };
-  if (enableCompatFlags) {
-    metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
-  }
-  auto httpClient =
-      cacheName.map([&](kj::String& n) {
-    return cacheClient->getNamespace(n, kj::mv(metadata));
-  }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
-  return httpClient;
-}
+// kj::Own<kj::HttpClient> Cache::getHttpClientNew(
+//     IoContext& context, kj::Maybe<kj::String> cfBlobJson, bool enableCompatFlags) {
+//   auto cacheClient = context.getCacheClient();
+//   auto metadata = CacheClient::SubrequestMetadata{
+//     .cfBlobJson = kj::mv(cfBlobJson),
+//     .featureFlagsForFl = kj::none,
+//   };
+//   if (enableCompatFlags) {
+//     metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl();
+//   }
+//   auto httpClient =
+//       cacheName.map([&](kj::String& n) {
+//     return cacheClient->getNamespace(n, kj::mv(metadata));
+//   }).orDefault([&]() { return cacheClient->getDefault(kj::mv(metadata)); });
+//   return httpClient;
+// }
 
 // =======================================================================================
 // CacheStorage
