@@ -105,6 +105,18 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
 // #[jsg::resource]
 pub struct DnsUtil {}
 
+// Generated code
+pub struct DnsUtilWrapper {
+    // memoized_constructor: Option<GlobalFunctionTemplate>,
+    // context_constructor: Option<GlobalFunctionTemplate>,
+}
+
+impl DnsUtilWrapper {
+    fn register(&mut self, isolate: &mut jsg::v8::Isolate) {
+        // Create necessary constructors.
+    }
+}
+
 impl DnsUtil {
     /// Parses an unknown RR format returned from Cloudflare DNS.
     /// Specification is available at
