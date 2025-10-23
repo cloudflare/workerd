@@ -3,6 +3,7 @@
 #include "jsg.h"
 
 #include <v8-container.h>
+#include <v8-date.h>
 #include <v8-external.h>
 
 namespace workerd::jsg {
@@ -738,5 +739,192 @@ class JsMessage final {
  private:
   v8::Local<v8::Message> inner;
 };
+
+inline JsObject Lock::global() {
+  return JsObject(v8Context()->Global());
+}
+
+inline JsValue Lock::undefined() {
+  return JsValue(v8::Undefined(v8Isolate));
+}
+
+inline JsValue Lock::null() {
+  return JsValue(v8::Null(v8Isolate));
+}
+
+inline JsBoolean Lock::boolean(bool val) {
+  return JsBoolean(v8::Boolean::New(v8Isolate, val));
+}
+
+inline JsNumber Lock::num(double val) {
+  return JsNumber(v8::Number::New(v8Isolate, val));
+}
+
+inline JsNumber Lock::num(float val) {
+  return JsNumber(v8::Number::New(v8Isolate, val));
+}
+
+inline JsInt32 Lock::num(int8_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsInt32 Lock::num(int16_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsInt32 Lock::num(int32_t val) {
+  return JsInt32(v8::Integer::New(v8Isolate, val).As<v8::Int32>());
+}
+
+inline JsBigInt Lock::bigInt(int64_t val) {
+  return JsBigInt(v8::BigInt::New(v8Isolate, val));
+}
+
+inline JsUint32 Lock::num(uint8_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsUint32 Lock::num(uint16_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsUint32 Lock::num(uint32_t val) {
+  return JsUint32(v8::Integer::NewFromUnsigned(v8Isolate, val).As<v8::Uint32>());
+}
+
+inline JsBigInt Lock::bigInt(uint64_t val) {
+  return JsBigInt(v8::BigInt::NewFromUnsigned(v8Isolate, val));
+}
+
+inline JsString Lock::str() {
+  return JsString(v8::String::Empty(v8Isolate));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const char16_t> str) {
+  return JsString(check(v8::String::NewFromTwoByte(v8Isolate,
+      reinterpret_cast<const uint16_t*>(str.begin()), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const uint16_t> str) {
+  return JsString(check(
+      v8::String::NewFromTwoByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const char> str) {
+  return JsString(check(
+      v8::String::NewFromUtf8(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::str(kj::ArrayPtr<const kj::byte> str) {
+  return JsString(check(
+      v8::String::NewFromOneByte(v8Isolate, str.begin(), v8::NewStringType::kNormal, str.size())));
+}
+
+inline JsString Lock::strIntern(kj::StringPtr str) {
+  return JsString(check(v8::String::NewFromUtf8(
+      v8Isolate, str.begin(), v8::NewStringType::kInternalized, str.size())));
+}
+
+inline JsString Lock::strExtern(kj::ArrayPtr<const char> str) {
+  return JsString(newExternalOneByteString(*this, str));
+}
+
+inline JsString Lock::strExtern(kj::ArrayPtr<const uint16_t> str) {
+  return JsString(newExternalTwoByteString(*this, str));
+}
+
+inline JsObject Lock::obj() {
+  return JsObject(v8::Object::New(v8Isolate));
+}
+
+inline JsObject Lock::objNoProto() {
+  return JsObject(v8::Object::New(v8Isolate, v8::Null(v8Isolate), nullptr, nullptr, 0));
+}
+
+inline JsMap Lock::map() {
+  return JsMap(v8::Map::New(v8Isolate));
+}
+
+inline JsValue Lock::external(void* ptr) {
+  return JsValue(v8::External::New(v8Isolate, ptr));
+}
+
+inline JsValue Lock::error(kj::StringPtr message) {
+  return JsValue(v8::Exception::Error(v8Str(v8Isolate, message)));
+}
+
+inline JsValue Lock::typeError(kj::StringPtr message) {
+  return JsValue(v8::Exception::TypeError(v8Str(v8Isolate, message)));
+}
+
+inline JsValue Lock::rangeError(kj::StringPtr message) {
+  return JsValue(v8::Exception::RangeError(v8Str(v8Isolate, message)));
+}
+
+inline JsSymbol Lock::symbol(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::New(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsSymbol Lock::symbolShared(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::For(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsSymbol Lock::symbolInternal(kj::StringPtr str) {
+  return JsSymbol(v8::Symbol::ForApi(v8Isolate, v8StrIntern(v8Isolate, str)));
+}
+
+inline JsDate Lock::date(double timestamp) {
+  return JsDate(check(v8::Date::New(v8Context(), timestamp)).As<v8::Date>());
+}
+
+inline JsDate Lock::date(kj::Date date) {
+  return JsDate(jsg::check(v8::Date::New(v8Context(), (date - kj::UNIX_EPOCH) / kj::MILLISECONDS))
+                    .As<v8::Date>());
+}
+
+inline void JsObject::set(Lock& js, const JsValue& name, const JsValue& value) {
+  check(inner->Set(js.v8Context(), name.inner, value.inner));
+}
+
+inline void JsObject::set(Lock& js, kj::StringPtr name, const JsValue& value) {
+  set(js, js.strIntern(name), value);
+}
+
+inline JsValue JsObject::get(Lock& js, const JsValue& name) {
+  return JsValue(check(inner->Get(js.v8Context(), name.inner)));
+}
+
+inline JsValue JsObject::get(Lock& js, kj::StringPtr name) {
+  return get(js, js.strIntern(name));
+}
+
+inline bool JsObject::has(Lock& js, const JsValue& name, HasOption option) {
+  if (option == HasOption::OWN) {
+    KJ_ASSERT(name.inner->IsName());
+    return check(inner->HasOwnProperty(js.v8Context(), name.inner.As<v8::Name>()));
+  } else {
+    return check(inner->Has(js.v8Context(), name.inner));
+  }
+}
+
+inline bool JsObject::has(Lock& js, kj::StringPtr name, HasOption option) {
+  return has(js, js.strIntern(name), option);
+}
+
+inline void JsObject::delete_(Lock& js, const JsValue& name) {
+  check(inner->Delete(js.v8Context(), name.inner));
+}
+
+inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
+  delete_(js, js.strIntern(name));
+}
+
+inline int JsString::length(jsg::Lock& js) const {
+  return inner->Length();
+}
+
+inline size_t JsString::utf8Length(jsg::Lock& js) const {
+  return inner->Utf8LengthV2(js.v8Isolate);
+}
 
 }  // namespace workerd::jsg
