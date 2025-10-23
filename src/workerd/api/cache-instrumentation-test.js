@@ -61,7 +61,7 @@ export const test = {
       },
       {
         name: 'cache_delete',
-        'cache.ignore_method': true,
+        'cache.request.ignore_method': true,
         'cache.request.url': 'https://example.com/delete-with-options',
         'cache.response.status_code': 404n,
         'cache.response.success': false,
@@ -196,7 +196,7 @@ export const test = {
       },
       {
         name: 'cache_match',
-        'cache.ignore_method': false,
+        'cache.request.ignore_method': false,
         'cache.request.url': 'https://example.com/cached-with-options',
         'cache.request.method': 'GET',
         'cache.response.status_code': 504n,

@@ -82,7 +82,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
-      traceContext.userSpan.setTag("cache.ignore_method"_kjc, ignoreMethod);
+      traceContext.userSpan.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
     }
   }
 
@@ -561,7 +561,7 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
 
   KJ_IF_SOME(o, options) {
     KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
-      traceContext.userSpan.setTag("cache.ignore_method"_kjc, ignoreMethod);
+      traceContext.userSpan.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
     }
   }
 
