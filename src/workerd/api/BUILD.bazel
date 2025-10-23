@@ -433,6 +433,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "cache-instrumentation-test.js",
+        "cache-mock.js",
         "cache-test.js",
         "tests/instrumentation-tail-worker.js",
     ],

@@ -7,9 +7,18 @@ const unitTests :Workerd.Config = (
         modules = [
           ( name = "worker", esModule = embed "cache-test.js" )
         ],
+        cacheApiOutbound = "cache-backend",
         compatibilityDate = "2023-07-24",
-        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers", "streaming_tail_worker"],
+        compatibilityFlags = ["nodejs_compat", "streaming_tail_worker"],
         streamingTails = ["tail"],
+      )
+    ),
+    ( name = "cache-backend",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "cache-mock.js" )
+        ],
+        compatibilityDate = "2023-07-24",
       )
     ),
     (name = "tail", worker = .tailWorker, ),

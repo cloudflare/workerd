@@ -24,25 +24,36 @@ export const test = {
 
     // spans emitted by cache-test.js in execution order
     let expected = [
-      // cache.match() - HIT case
+      {
+        name: 'cache_delete',
+        'url.full': 'https://example.com/delete-exists',
+        closed: true,
+      },
+      {
+        name: 'cache_delete',
+        'url.full': 'https://example.com/delete-not-exists',
+        closed: true,
+      },
+      {
+        name: 'cache_delete',
+        'url.full': 'https://example.com/delete-with-options',
+        closed: true,
+      },
       {
         name: 'cache_match',
         'url.full': 'https://example.com/cached-resource',
         closed: true,
       },
-      // cache.match() - MISS case
       {
         name: 'cache_match',
         'url.full': 'https://example.com/not-cached',
         closed: true,
       },
-      // cache.match() with options
       {
         name: 'cache_match',
         'url.full': 'https://example.com/cached-with-options',
         closed: true,
       },
-      // cache.put() with max-age
       {
         name: 'cache_put',
         'url.full': 'https://example.com/put-resource',
@@ -50,60 +61,37 @@ export const test = {
         'cache_control.expiration': 'max-age=3600',
         closed: true,
       },
-      // cache.put() with no-store
       {
         name: 'cache_put',
         'url.full': 'https://example.com/put-no-store',
         'cache_control.cacheability': 'no-store',
         closed: true,
       },
-      // cache.put() with s-maxage
       {
         name: 'cache_put',
         'url.full': 'https://example.com/put-s-maxage',
         'cache_control.cacheability': 'public',
-        'cache_control.expiration': 's-maxage=7200',
-        closed: true,
-      },
-      // cache.delete() - exists
-      {
-        name: 'cache_delete',
-        'url.full': 'https://example.com/delete-exists',
-        closed: true,
-      },
-      // cache.delete() - doesn't exist
-      {
-        name: 'cache_delete',
-        'url.full': 'https://example.com/delete-not-exists',
-        closed: true,
-      },
-      // cache.delete() with options
-      {
-        name: 'cache_delete',
-        'url.full': 'https://example.com/delete-with-options',
         closed: true,
       },
     ];
 
-    console.log(received);
-    assert.fail('test');
-    // assert.equal(
-    //   received.length,
-    //   expected.length,
-    //   `Expected ${expected.length} received ${received.length} spans`
-    // );
-    // let errors = [];
-    // for (let i = 0; i < received.length; i++) {
-    //   try {
-    //     assert.deepStrictEqual(received[i], expected[i]);
-    //   } catch (e) {
-    //     console.error(`value: ${i} does not match`);
-    //     console.log(e);
-    //     errors.push(e);
-    //   }
-    // }
-    // if (errors.length > 0) {
-    //   throw 'cache spans are incorrect';
-    // }
+    assert.equal(
+      received.length,
+      expected.length,
+      `Expected ${expected.length} received ${received.length} spans`
+    );
+    let errors = [];
+    for (let i = 0; i < received.length; i++) {
+      try {
+        assert.deepStrictEqual(received[i], expected[i]);
+      } catch (e) {
+        console.error(`value: ${i} does not match`);
+        console.log(e);
+        errors.push(e);
+      }
+    }
+    if (errors.length > 0) {
+      throw 'cache spans are incorrect';
+    }
   },
 };
