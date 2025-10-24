@@ -231,6 +231,10 @@ void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
 
 void IsolateBase::deferDestruction(Item item) {
   KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
+  if (queueState != QueueState::ACTIVE) {
+    KJ_LOG(ERROR, "tried to defer destruction during isolate shutdown", queueState,
+        kj::getStackTrace());
+  }
   queue.lockExclusive()->push(kj::mv(item));
 }
 
@@ -458,6 +462,8 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
+  KJ_REQUIRE(queueState == QueueState::ACTIVE);
+  queueState = QueueState::DROPPING;
   // Delete all wrappers.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::Locker lock(ptr);
@@ -480,6 +486,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Destroy all wrappers.
     heapTracer.clearWrappers();
+    queueState = QueueState::DROPPED;
   });
 }
 
