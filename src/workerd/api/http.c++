@@ -163,8 +163,6 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  // TODO(soon): Remove this. Throw if the any header values are invalid.
-  throwIfInvalidHeaderValue(other);
   other.forEach([this, &js](auto name, auto value) {
     append(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value)));
   });

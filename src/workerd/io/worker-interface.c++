@@ -27,12 +27,10 @@ class PromisedWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    throwIfInvalidHeaderValue(headers);
     KJ_IF_SOME(w, worker) {
       co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await promise;
-      throwIfInvalidHeaderValue(headers);
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }
@@ -257,7 +255,6 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::request(kj::HttpMethod meth
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
   auto wrappedResponse = kj::heap<RevocableWebSocketHttpResponse>(response, revokeProm.addBranch());
-  throwIfInvalidHeaderValue(headers);
   return worker.request(method, url, headers, requestBody, *wrappedResponse)
       .attach(kj::mv(wrappedResponse));
 }
@@ -369,7 +366,6 @@ kj::Promise<void> RpcWorkerInterface::request(kj::HttpMethod method,
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     Response& response) {
-  throwIfInvalidHeaderValue(headers);
   auto inner = httpOverCapnpFactory.capnpToKj(dispatcher.getHttpServiceRequest().send().getHttp());
   auto promise = inner->request(method, url, headers, requestBody, response);
   return promise.attach(kj::mv(inner));
