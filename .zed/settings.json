@@ -41,7 +41,8 @@
           "--header-insertion=never",
           "--query-driver=**",
           "--clang-tidy"
-        ]
+        ],
+        "path": "/bin/clangd-19"
       }
     },
     "rust-analyzer": {
