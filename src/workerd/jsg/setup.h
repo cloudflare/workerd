@@ -365,6 +365,9 @@ class IsolateBase {
   const kj::MutexGuarded<BatchQueue<Item>> queue{
     DESTRUCTION_QUEUE_INITIAL_SIZE, DESTRUCTION_QUEUE_MAX_CAPACITY};
 
+  enum QueueState { ACTIVE, DROPPING, DROPPED };
+  QueueState queueState = ACTIVE;
+
   struct CodeBlockInfo {
     size_t size = 0;
     kj::Maybe<v8::JitCodeEvent::CodeType> type;
