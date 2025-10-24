@@ -67,11 +67,4 @@ class SimpleResponseObserver final: public kj::HttpService::Response {
   kj::uint* statusCode;
 };
 
-inline void throwIfInvalidHeaderValue(const kj::HttpHeaders& headers) {
-  headers.forEach([](kj::StringPtr name, kj::StringPtr value) {
-    KJ_REQUIRE(kj::HttpHeaders::isValidHeaderValue(value),
-        "Invalid header value received from request", name, value.asBytes());
-  });
-};
-
 }  // namespace workerd
