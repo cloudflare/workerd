@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "rtti.h"
+#include "workerd/api/workflow.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
@@ -93,7 +94,8 @@
   F("export-loopback", EW_EXPORT_LOOPBACK_ISOLATE_TYPES)                                           \
   F("sync-kv", EW_SYNC_KV_ISOLATE_TYPES)                                                           \
   F("worker-loader", EW_WORKER_LOADER_ISOLATE_TYPES)                                               \
-  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)
+  F("performance", EW_PERFORMANCE_ISOLATE_TYPES)                                                   \
+  F("workflow", EW_WORKFLOW_ISOLATE_TYPES)
 
 namespace workerd::api {
 

@@ -44,6 +44,7 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
+struct WorkflowRunHandler;
 class Socket;
 class WebSocket;
 class WebSocketRequestResponsePair;
@@ -634,6 +635,9 @@ class Worker::Api {
   virtual const jsg::TypeHandler<ErrorInterface>& getErrorInterfaceTypeHandler(
       jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
+      jsg::Lock& lock) const = 0;
+
+  virtual const jsg::TypeHandler<api::WorkflowRunHandler>& getWorkflowTypeHandler(
       jsg::Lock& lock) const = 0;
 
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of

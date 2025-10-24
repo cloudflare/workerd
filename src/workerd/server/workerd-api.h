@@ -61,6 +61,8 @@ class WorkerdApi final: public Worker::Api {
       jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const override;
+  const jsg::TypeHandler<api::WorkflowRunHandler>& getWorkflowTypeHandler(
+      jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;
   const jsg::IsolateObserver& getObserver() const override;

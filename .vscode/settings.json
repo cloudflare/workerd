@@ -25,5 +25,8 @@
     "command": ["just", "_rust-analyzer"],
     "progressLabel": "generating rust analyzer config",
     "filesToWatch": ["BUILD.bazel"]
+  },
+  "files.associations": {
+    "chrono": "cpp"
   }
 }

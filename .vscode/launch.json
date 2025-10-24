@@ -175,8 +175,6 @@
         "test",
         "${input:wdtestToDebug}",
         "--experimental",
-        "--directory-path",
-        "TEST_TMPDIR=${workspaceFolder}/bazel-out/test_tmpdir"
       ],
       "cwd": "${workspaceFolder}",
       "type": "cppdbg",
@@ -290,6 +288,7 @@
         "src/workerd/api/node/string-decoder-test.wd-test",
         "src/workerd/api/kv-test.wd-test",
         "src/workerd/api/queue-test.wd-test",
+        "src/workerd/api/workflow-test.wd-test",
         "src/workerd/api/rtti-test.wd-test",
         "src/workerd/api/sql-test.wd-test",
         "src/workerd/api/streams/identitytransformstream-backpressure-test.wd-test",

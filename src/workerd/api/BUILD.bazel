@@ -894,3 +894,11 @@ wd_test(
         "actor-kv-test-tail.js",
     ],
 )
+
+wd_test(
+    src = "workflow-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "workflow-test.js",
+    ],
+)

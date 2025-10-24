@@ -1095,6 +1095,9 @@ tracing::Onset::Info tracing::readOnsetInfo(const rpc::Trace::Onset::Info::Reade
     case rpc::Trace::Onset::Info::CUSTOM: {
       return tracing::CustomEventInfo();
     }
+    case rpc::Trace::Onset::Info::WORKFLOW: {
+        KJ_UNREACHABLE;
+    }
   }
   KJ_UNREACHABLE;
 }

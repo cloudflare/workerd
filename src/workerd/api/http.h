@@ -19,6 +19,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include "worker-rpc.h"
 #include "queue.h"
+#include "workflow.h"
 
 namespace workerd::api {
 
@@ -601,6 +602,8 @@ public:
   jsg::Promise<QueueResult> queue(jsg::Lock& js, kj::String queueName,
                                   kj::Array<ServiceBindingQueueMessage> messages);
 
+  jsg::Promise<WorkflowInvocationResult> runWorkflow(jsg::Lock& js, IncomingWorkflowInvocation event);
+
   struct ScheduledOptions {
     jsg::Optional<kj::Date> scheduledTime;
     jsg::Optional<kj::String> cron;
@@ -641,6 +644,7 @@ public:
     if (flags.getServiceBindingExtraHandlers()) {
       JSG_METHOD(queue);
       JSG_METHOD(scheduled);
+      JSG_METHOD(runWorkflow);
 
       JSG_TS_OVERRIDE(type Fetcher<
         T extends Rpc.EntrypointBranded | undefined = undefined,

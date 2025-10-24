@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "http.h"
-
 #include "data-url.h"
+#include "http.h"
+#include "kj/debug.h"
 #include "queue.h"
 #include "sockets.h"
 #include "system-streams.h"
@@ -2665,6 +2665,20 @@ jsg::Promise<Fetcher::QueueResult> Fetcher::queue(
       .retryMessages = event->getRetryMessages(),
     };
   });
+}
+
+jsg::Promise<WorkflowInvocationResult> Fetcher::runWorkflow(jsg::Lock& js, IncomingWorkflowInvocation workflowEvent) {
+    KJ_UNIMPLEMENTED("Local fetcher not implemented");
+    // auto& ioContext = IoContext::current();
+    // auto worker = getClient(ioContext, kj::none, "runWorkflow"_kjc);
+
+    // auto event = kj::refcounted<api::WorkflowCustomEventImpl>(kj::mv(workflowEvent));
+
+    // return ioContext.awaitIo(js, worker->customEvent(kj::addRef(*event)).attach(kj::mv(worker)),
+    //     [event = kj::addRef(*event)](
+    //         jsg::Lock& js, WorkerInterface::CustomEvent::Result result) mutable {
+    //   return event->getInvocationResult(js);
+    // });
 }
 
 jsg::Promise<Fetcher::ScheduledResult> Fetcher::scheduled(

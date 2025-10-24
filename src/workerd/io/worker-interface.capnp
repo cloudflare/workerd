@@ -127,6 +127,11 @@ struct Trace @0x8e8d911203762d34 {
     batchSize @1 :UInt32;
   }
 
+  struct WorkflowEventInfo {
+    workflowName @0 :Text;
+    instanceId @1 :Text;
+  }
+
   struct EmailEventInfo {
     mailFrom @0 :Text;
     rcptTo @1 :Text;
@@ -255,6 +260,7 @@ struct Trace @0x8e8d911203762d34 {
       trace @6 :TraceEventInfo;
       hibernatableWebSocket @7 :HibernatableWebSocketEventInfo;
       custom @8 :CustomEventInfo;
+      workflow @9 :WorkflowEventInfo;
     }
     }
     info @7: Info;
@@ -624,6 +630,14 @@ interface TailStreamTarget $Cxx.allowCancellation {
   # Report one or more streaming tail events to a tail worker.
 }
 
+struct WorkflowInstanceEvent {
+    payload @0 :Data;
+}
+
+struct WorkflowInvocationResult {
+    result @0: Data;
+}
+
 interface EventDispatcher @0xf20697475ec1752d {
   # Interface used to deliver events to a Worker's global event handlers.
 
@@ -677,6 +691,8 @@ interface EventDispatcher @0xf20697475ec1752d {
   # `topLevel` is the top-level tail session target, on which exactly one method call can
   # be made. This call must be made using pipelining since `tailStreamSession()` won't return
   # until after the call completes. result is accessed after the session is complete.
+
+  runWorkflowInvocation @11 (event: WorkflowInstanceEvent) -> (result :WorkflowInvocationResult) $Cxx.allowCancellation;
 
   obsolete5 @5();
   obsolete6 @6();

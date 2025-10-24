@@ -3,6 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include "workerd-api.h"
+#include "workerd/api/workflow.h"
 
 #include <workerd/api/actor-state.h>
 #include <workerd/api/actor.h>
@@ -138,6 +139,7 @@ JSG_DECLARE_ISOLATE_TYPE(JsgWorkerdIsolate,
     EW_WORKERS_MODULE_ISOLATE_TYPES,
     EW_EXPORT_LOOPBACK_ISOLATE_TYPES,
     EW_PERFORMANCE_ISOLATE_TYPES,
+    EW_WORKFLOW_ISOLATE_TYPES,
     workerd::api::EnvModule,
 
     jsg::TypeWrapperExtension<PromiseWrapper>,
@@ -369,6 +371,12 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
     jsg::Lock& lock) const {
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
+
+const jsg::TypeHandler<api::WorkflowRunHandler>& WorkerdApi::getWorkflowTypeHandler(
+    jsg::Lock& lock) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::WorkflowRunHandler>();
+}
+
 
 jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
