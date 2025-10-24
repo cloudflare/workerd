@@ -443,6 +443,8 @@ IsolateBase::~IsolateBase() noexcept(false) {
   externalMemoryTarget->detach();
 
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+    // clear the batch queue before destroying the isolate to release all v8::Globals.
+    queue.lockExclusive()->pop();
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     ptr->Dispose();
