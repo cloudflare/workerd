@@ -33,41 +33,46 @@ class Event: public jsg::Object {
     JSG_STRUCT(bubbles, cancelable, composed);
   };
 
-  inline explicit Event(kj::String ownType, Init init = Init(), bool trusted = true)
+  inline explicit Event(kj::String ownType, Init init = {}, bool trusted = true)
       : ownType(kj::mv(ownType)),
-        type(this->ownType),
-        init(init),
-        trusted(trusted) {}
+        type(this->ownType) {
+    flags.trusted = trusted;
+    flags.bubbles = init.bubbles.orDefault(false);
+    flags.cancelable = init.cancelable.orDefault(false);
+    flags.composed = init.composed.orDefault(false);
+  }
 
-  inline explicit Event(kj::StringPtr type, Init init = Init(), bool trusted = true)
-      : type(type),
-        init(init),
-        trusted(trusted) {}
+  inline explicit Event(kj::StringPtr type, Init init = {}, bool trusted = true): type(type) {
+    flags.trusted = trusted;
+    flags.bubbles = init.bubbles.orDefault(false);
+    flags.cancelable = init.cancelable.orDefault(false);
+    flags.composed = init.composed.orDefault(false);
+  }
 
   inline bool isPreventDefault() const {
-    return preventedDefault;
+    return flags.preventedDefault;
   }
   inline void clearPreventDefault() {
-    preventedDefault = false;
+    flags.preventedDefault = false;
   }
 
   void beginDispatch(jsg::Ref<EventTarget> target);
   inline void endDispatch() {
-    isBeingDispatched = false;
+    flags.isBeingDispatched = false;
   }
 
   inline bool isStopped() const {
-    return stopped;
+    return flags.stopped;
   }
 
   static jsg::Ref<Event> constructor(jsg::Lock& js, kj::String type, jsg::Optional<Init> init);
   kj::StringPtr getType();
 
   inline void stopImmediatePropagation() {
-    stopped = true;
+    flags.stopped = true;
   }
   inline void preventDefault() {
-    preventedDefault = true;
+    flags.preventedDefault = true;
   }
 
   // The only phases we actually use are NONE and AT_TARGET but we provide
@@ -80,7 +85,7 @@ class Event: public jsg::Object {
   };
 
   inline int getEventPhase() const {
-    return isBeingDispatched ? AT_TARGET : NONE;
+    return flags.isBeingDispatched ? AT_TARGET : NONE;
   }
 
   // Much of the following is not used in our implementation of Event
@@ -89,25 +94,25 @@ class Event: public jsg::Object {
   // provided to fill-out Event spec compliance.
 
   inline bool getCancelBubble() const {
-    return propagationStopped;
+    return flags.propagationStopped;
   }
   inline void setCancelBubble(bool stopped) {
-    propagationStopped = stopped;
+    flags.propagationStopped = stopped;
   }
   inline void stopPropagation() {
-    propagationStopped = true;
+    flags.propagationStopped = true;
   }
   inline bool getComposed() const {
-    return init.composed.orDefault(false);
+    return flags.composed;
   }
   inline bool getBubbles() const {
-    return init.bubbles.orDefault(false);
+    return flags.bubbles;
   }
   inline bool getCancelable() const {
-    return init.cancelable.orDefault(false);
+    return flags.cancelable;
   }
   inline bool getDefaultPrevented() const {
-    return getCancelable() && preventedDefault;
+    return getCancelable() && flags.preventedDefault;
   }
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
@@ -124,7 +129,7 @@ class Event: public jsg::Object {
   // by EW internally is Trusted, any Event created using new Event() in JS
   // is not trusted.
   inline bool getIsTrusted() const {
-    return trusted;
+    return flags.trusted;
   }
 
   // The currentTarget is the EventTarget on which the Event is being
@@ -215,13 +220,19 @@ class Event: public jsg::Object {
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
   kj::StringPtr type;
-  Init init;
-  bool trusted = true;
-  bool stopped = false;
-  bool preventedDefault = false;
-  bool isBeingDispatched = false;
-  bool propagationStopped = false;
   kj::Maybe<jsg::Ref<EventTarget>> target;
+
+  struct Flags {
+    uint8_t trusted : 1 = 1;
+    uint8_t stopped : 1 = 0;
+    uint8_t preventedDefault : 1 = 0;
+    uint8_t isBeingDispatched : 1 = 0;
+    uint8_t propagationStopped : 1 = 0;
+    uint8_t composed : 1 = 0;
+    uint8_t bubbles : 1 = 0;
+    uint8_t cancelable : 1 = 0;
+  };
+  Flags flags{};
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(target);
@@ -306,7 +317,7 @@ class EventTarget: public jsg::Object {
   }
 
   inline void enableWarningOnSpecialEvents() {
-    warnOnSpecialEvents = true;
+    flags.warnOnSpecialEvents = true;
   }
 
   // The EventListenerCallback, if given, is called whenever addEventListener
@@ -530,17 +541,19 @@ class EventTarget: public jsg::Object {
 
   kj::HashMap<kj::String, EventHandlerSet> typeMap;
 
-  // When using module syntax, the "fetch", "scheduled", "trace", etc.
-  // events are handled by exports rather than events. When warnOnSpecialEvents is true,
-  // when using module syntax, attempts to register event handlers for these special
-  // types of events will result in a warning being emitted.
-  bool warnOnSpecialEvents = false;
-
-  // Event handlers are not supposed to return values. The first time one does, we'll
-  // emit a warning to help users debug things but we'll otherwise ignore it.
-  bool warnOnHandlerReturn = true;
-
   kj::Maybe<EventListenerCallback> maybeListenerCallback;
+
+  struct Flags {
+    // When using module syntax, the "fetch", "scheduled", "trace", etc.
+    // events are handled by exports rather than events. When warnOnSpecialEvents is true,
+    // when using module syntax, attempts to register event handlers for these special
+    // types of events will result in a warning being emitted.
+    uint8_t warnOnSpecialEvents : 1 = 0;
+    // Event handlers are not supposed to return values. The first time one does, we'll
+    // emit a warning to help users debug things but we'll otherwise ignore it.
+    uint8_t warnOnHandlerReturn : 1 = 1;
+  };
+  Flags flags;
 
   void visitForGc(jsg::GcVisitor& visitor);
 
