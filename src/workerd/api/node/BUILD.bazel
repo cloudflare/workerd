@@ -46,6 +46,7 @@ wd_cc_library(
     deps = [
         ":node-core",
         "//src/node",
+        "//src/rust/api",
         "//src/workerd/io",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@ncrypto",
@@ -57,7 +58,6 @@ wd_cc_library(
     name = "node-core",
     srcs = [
         "buffer.c++",
-        "dns.c++",
         "i18n.c++",
         "sqlite.c++",
         "url.c++",
@@ -65,7 +65,6 @@ wd_cc_library(
     hdrs = [
         "buffer.h",
         "buffer-string-search.h",
-        "dns.h",
         "i18n.h",
         "node-version.h",
         "sqlite.h",
@@ -73,7 +72,6 @@ wd_cc_library(
     ],
     implementation_deps = [
         "//src/rust/cxx-integration",
-        "//src/rust/dns",
         "//src/rust/net",
         "@ada-url",
         "@nbytes",

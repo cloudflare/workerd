@@ -6,7 +6,6 @@
 
 #include <workerd/api/node/async-hooks.h>
 #include <workerd/api/node/buffer.h>
-#include <workerd/api/node/dns.h>
 #include <workerd/api/node/module.h>
 #include <workerd/api/node/process.h>
 #include <workerd/api/node/sqlite.h>
@@ -17,6 +16,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
+#include <workerd/rust/api/lib.rs.h>
 
 #include <node/node.capnp.h>
 
@@ -34,7 +34,6 @@ namespace workerd::api::node {
   V(DiagnosticsChannelModule, "node-internal:diagnostics_channel")                                 \
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(UrlUtil, "node-internal:url")                                                                  \
-  V(DnsUtil, "node-internal:dns")                                                                  \
   V(TimersUtil, "node-internal:timers")                                                            \
   V(SqliteUtil, "node-internal:sqlite")
 
@@ -207,6 +206,9 @@ void registerNodeJsCompatModules(Registry& registry, auto featureFlags) {
       }
     }
   }
+
+  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::api::register_nodejs_modules(r);
 }
 
 template <class TypeWrapper>
@@ -254,5 +256,5 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(auto fea
   EW_NODE_BUFFER_ISOLATE_TYPES, EW_NODE_CRYPTO_ISOLATE_TYPES,                                      \
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
-      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_DNS_ISOLATE_TYPES,          \
-      EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES
+      EW_NODE_URL_ISOLATE_TYPES, EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES,       \
+      EW_NODE_SQLITE_ISOLATE_TYPES
