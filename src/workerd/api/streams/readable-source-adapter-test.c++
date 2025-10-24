@@ -808,7 +808,7 @@ KJ_TEST("After read BackingStore maintains identity") {
 
 KJ_TEST("Read all text") {
   TestFixture fixture;
-  FiniteReadSource source(2);
+  FiniteReadSource source(4);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
@@ -820,7 +820,8 @@ KJ_TEST("Read all text") {
             adapter->readAllText(env.js).then(
                 env.js, [&adapter = *adapter](jsg::Lock& js, jsg::JsRef<jsg::JsString> result) {
       auto str = result.getHandle(js).toString(js);
-      KJ_ASSERT(str.size() == 8192);
+      // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
+      KJ_ASSERT(str.size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });
@@ -828,7 +829,7 @@ KJ_TEST("Read all text") {
 
 KJ_TEST("Read all bytes") {
   TestFixture fixture;
-  FiniteReadSource source(2);
+  FiniteReadSource source(4);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
@@ -839,7 +840,8 @@ KJ_TEST("Read all bytes") {
         .awaitJs(env.js,
             adapter->readAllBytes(env.js).then(
                 env.js, [&adapter = *adapter](jsg::Lock& js, jsg::BufferSource result) {
-      KJ_ASSERT(result.size() == 8192);
+      // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
+      KJ_ASSERT(result.size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });
@@ -1094,7 +1096,7 @@ KJ_TEST("KjAdapter constructor with valid normal ReadableStream") {
 
     // Teeing is unsupported so always throws
     try {
-      adapter->tee();
+      adapter->tee(1);
     } catch (...) {
       auto ex = kj::getCaughtExceptionAsKj();
       KJ_ASSERT(ex.getDescription().contains("not supported"));
@@ -1470,7 +1472,7 @@ KJ_TEST("KjAdapter pumpTo") {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return adapter->pumpTo(*writableSink, true).attach(kj::mv(adapter));
+    return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
   });
 
   kj::FixedArray<kj::byte, 10 * 1024> expected;
@@ -1502,7 +1504,7 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return adapter->pumpTo(*writableSink, false).attach(kj::mv(adapter));
+    return adapter->pumpTo(*writableSink, EndAfterPump::NO).attach(kj::mv(adapter));
   });
 
   kj::FixedArray<kj::byte, 10 * 1024> expected;
@@ -1534,7 +1536,7 @@ KJ_TEST("KjAdapter pumpTo (errored)") {
     auto stream = createErroredStream(env.js);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, false))
+    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
       KJ_FAIL_ASSERT("Should not have completed pumpTo on errored stream");
     }, [](kj::Exception exception) {
@@ -1555,7 +1557,7 @@ KJ_TEST("KjAdapter pumpTo (error sink)") {
     auto stream = createFiniteBytesReadableStream(env.js, 1000);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, false))
+    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
       KJ_FAIL_ASSERT("Should not have completed pumpTo on errored stream");
     }, [](kj::Exception exception) {

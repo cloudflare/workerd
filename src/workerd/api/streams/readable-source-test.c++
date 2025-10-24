@@ -245,7 +245,7 @@ KJ_TEST("ReadableStreamSource pumpTo with end") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
     KJ_ASSERT(sink.totalBytesWritten == 10);
     KJ_ASSERT(sink.isEnded);
     KJ_ASSERT(sink.writtenData == testData);
@@ -263,7 +263,7 @@ KJ_TEST("ReadableStreamSource pumpTo without end") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, false));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::NO));
     KJ_ASSERT(sink.totalBytesWritten == 10);
     KJ_ASSERT(!sink.isEnded);
     KJ_ASSERT(sink.writtenData == testData);
@@ -282,7 +282,7 @@ KJ_TEST("ReadableStreamSource large pumpTo with end") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
     KJ_ASSERT(sink.totalBytesWritten == 52 * 1024);
     KJ_ASSERT(sink.isEnded);
     KJ_ASSERT(sink.writtenData == testData);
@@ -301,7 +301,8 @@ KJ_TEST("ReadableStreamSource large pumpTo canceled") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    auto promise = environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    auto promise =
+        environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
     source->cancel(KJ_EXCEPTION(FAILED, "test abort"));
     try {
       co_await promise;
@@ -325,7 +326,8 @@ KJ_TEST("ReadableStreamSource large pumpTo canceled before") {
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     source->cancel(KJ_EXCEPTION(FAILED, "test abort"));
-    auto promise = environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    auto promise =
+        environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
     try {
       co_await promise;
     } catch (...) {
@@ -349,7 +351,7 @@ KJ_TEST("ReadableStreamSource large pumpTo closed") {
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     auto& context = environment.context;
     co_await source->readAllBytes(kj::maxValue);
-    co_await context.waitForDeferredProxy(source->pumpTo(sink, true));
+    co_await context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
     KJ_ASSERT(sink.totalBytesWritten == 0);
   });
 }
@@ -366,7 +368,8 @@ KJ_TEST("ReadableStreamSource large pumpTo, concurrent read fails") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    auto promise = environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    auto promise =
+        environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
 
     // Concurrent read should fail.
     try {
@@ -536,7 +539,7 @@ KJ_TEST("ReadableStreamSource tee (small, no limit)") {
   auto fakeOwn = kj::Own<MemoryAsyncInputStream>(&input, kj::NullDisposer::instance);
   auto source = newReadableStreamSource(kj::mv(fakeOwn));
 
-  auto tee = source->tee(kj::none);
+  auto tee = source->tee(200);
   auto branch1 = kj::mv(tee.branch1);
   auto branch2 = kj::mv(tee.branch2);
 
@@ -563,7 +566,7 @@ KJ_TEST("ReadableStreamSource tee (small, no limit, independent)") {
   auto fakeOwn = kj::Own<MemoryAsyncInputStream>(&input, kj::NullDisposer::instance);
   auto source = newReadableStreamSource(kj::mv(fakeOwn));
 
-  auto tee = source->tee(kj::none);
+  auto tee = source->tee(200);
   auto branch1 = kj::mv(tee.branch1);
   auto branch2 = kj::mv(tee.branch2);
   branch2->cancel(KJ_EXCEPTION(FAILED, "test abort"));
@@ -596,7 +599,7 @@ KJ_TEST("ReadableStreamSource tee (large, no limit)") {
   auto fakeOwn = kj::Own<MemoryAsyncInputStream>(&input, kj::NullDisposer::instance);
   auto source = newReadableStreamSource(kj::mv(fakeOwn));
 
-  auto tee = source->tee(kj::none);
+  auto tee = source->tee(0xffffffff);
   auto branch1 = kj::mv(tee.branch1);
   auto branch2 = kj::mv(tee.branch2);
 
@@ -655,7 +658,7 @@ KJ_TEST("ReadableStreamSource after read") {
     KJ_ASSERT(bytesRead == 512);
     KJ_ASSERT(buffer.asPtr().first(bytesRead) == testData.asPtr().first(bytesRead));
 
-    auto tee = source->tee(kj::none);
+    auto tee = source->tee(0xffffffff);
     auto branch1 = kj::mv(tee.branch1);
     auto branch2 = kj::mv(tee.branch2);
 
@@ -919,7 +922,7 @@ KJ_TEST("Gzip encoded stream (pumpTo)") {
   MockWritableStreamSink sink;
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, true));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(sink, EndAfterPump::YES));
   });
 
   KJ_ASSERT(sink.writtenData == "some data to gzip"_kjb);
@@ -937,7 +940,7 @@ KJ_TEST("Gzip encoded stream (pumpTo same encoding)") {
   auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, true));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, EndAfterPump::YES));
   });
 
   // The data should pass through unchanged.
@@ -956,7 +959,7 @@ KJ_TEST("Gzip encoded stream (pumpTo different encoding)") {
   auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::BROTLI, kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
-    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, true));
+    co_await environment.context.waitForDeferredProxy(source->pumpTo(*sink, EndAfterPump::YES));
   });
 
   // The data shuld be brotli compressed.
