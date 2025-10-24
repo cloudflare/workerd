@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/memory.h>
+#include <workerd/jsg/promise.h>
 #include <workerd/jsg/struct.h>
 
 #include <concepts>

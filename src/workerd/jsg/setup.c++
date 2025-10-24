@@ -377,7 +377,8 @@ IsolateBase::IsolateBase(V8System& system,
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::refcounted<AsyncContextFrame::StorageKey>()),
       heapTracer(ptr),
-      observer(kj::mv(observer)) {
+      observer(kj::mv(observer)),
+      rustIsolate(workerd::rust::jsg::isolate_created(ptr)) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     ptr->SetEmbedderRootsHandler(&heapTracer);
 

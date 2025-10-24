@@ -4,7 +4,13 @@ pub mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type LocalValue;
+        type V8Isolate;
+    }
+
+    extern "Rust" {
         type Isolate;
+
+        unsafe fn isolate_created(isolate: *mut V8Isolate) -> Box<Isolate>;
     }
 }
 
@@ -17,12 +23,12 @@ trait IsolateMember: Drop {
 /// Represents a V8 isolate.
 /// It needs to have the same lifetime as the v8 Isolate.
 pub struct Isolate {
-    ptr: *mut ffi::Isolate,
+    ptr: *mut ffi::V8Isolate,
     members: Vec<Box<dyn IsolateMember>>,
 }
 
 /// This method is called whenever a new isolate is created.
-pub fn isolate_created(isolate: *mut ffi::Isolate) -> Box<Isolate> {
+pub unsafe fn isolate_created(isolate: *mut ffi::V8Isolate) -> Box<Isolate> {
     Box::new(Isolate {
         ptr: isolate,
         members: Vec::new(),

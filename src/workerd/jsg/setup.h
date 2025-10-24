@@ -12,6 +12,7 @@
 #include <workerd/jsg/observer.h>
 #include <workerd/util/batch-queue.h>
 
+#include <rust/cxx.h>
 #include <v8-profiler.h>
 
 #include <kj/map.h>
@@ -24,6 +25,14 @@ namespace workerd::jsg {
 
 class Deserializer;
 class Serializer;
+
+}  // namespace workerd::jsg
+
+namespace workerd::rust::jsg {
+struct Isolate;
+}
+
+namespace workerd::jsg {
 
 // Construct a default V8 platform, with the given background thread pool size.
 //
@@ -415,6 +424,7 @@ class IsolateBase {
 
   HeapTracer heapTracer;
   kj::Own<IsolateObserver> observer;
+  ::rust::Box<workerd::rust::jsg::Isolate> rustIsolate;
 
   friend class Data;
   friend class Wrappable;

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules.h>
 #include <rust/cxx.h>
 #include <kj-rs/kj-rs.h>
 
 namespace workerd::rust::jsg {
   using LocalValue = v8::Local<v8::Value>;
+  using V8Isolate = v8::Isolate;
   using ModuleCallback = kj::Function<void>();
 
   struct ModuleRegistry {
