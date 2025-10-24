@@ -930,6 +930,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   jsg::UnhandledRejectionHandler unhandledRejections;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> processValue;
   kj::Maybe<jsg::JsRef<jsg::JsValue>> bufferValue;
+  kj::Maybe<jsg::Ref<Fetcher>> defaultFetcher;
 
   // Global properties such as scheduler, crypto, caches, self, and origin should
   // be monkeypatchable / mutable at the global scope.
