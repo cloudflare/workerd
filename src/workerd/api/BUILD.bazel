@@ -392,6 +392,12 @@ wd_test(
 )
 
 wd_test(
+    src = "container-entrypoint-test.wd-test",
+    args = ["--experimental"],
+    data = ["container-entrypoint-test.js"],
+)
+
+wd_test(
     src = "tail-worker-test.wd-test",
     args = [
         "--experimental",

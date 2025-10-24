@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityDate = "2025-01-01",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "container-entrypoint-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "MyContainer", uniqueKey = "container-test-unique-key-123"),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "MY_CONTAINER", durableObjectNamespace = "MyContainer"),
+  ],
+);

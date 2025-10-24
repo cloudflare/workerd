@@ -359,6 +359,7 @@ EntrypointClasses WorkerdApi::getEntrypointClasses(jsg::Lock& lock) const {
   return {
     .workerEntrypoint = typedLock.getConstructor<api::WorkerEntrypoint>(lock.v8Context()),
     .durableObject = typedLock.getConstructor<api::DurableObjectBase>(lock.v8Context()),
+    .containerEntrypoint = typedLock.getConstructor<api::ContainerEntrypoint>(lock.v8Context()),
     .workflowEntrypoint = typedLock.getConstructor<api::WorkflowEntrypoint>(lock.v8Context()),
   };
 }
