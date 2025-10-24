@@ -139,14 +139,16 @@ wd_cc_library(
     name = "worker-modules",
     srcs = ["worker-modules.c++"],
     hdrs = ["worker-modules.h"],
+    implementation_deps = [
+        "//src/pyodide:pyodide_static",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/api/node",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":io",
-        "//src/pyodide:pyodide_static",
         "//src/pyodide:python-entrypoint",
-        "//src/workerd/api:pyodide",
         "//src/workerd/api:rtti",
-        "//src/workerd/api/node",
         "//src/workerd/jsg",
     ],
 )

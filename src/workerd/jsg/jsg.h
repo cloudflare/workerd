@@ -3003,6 +3003,7 @@ inline Value SelfRef::asValue(Lock& js) const {
 
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
+#include "promise.h"
 #include "modules.h"
 #include "resource.h"
 #include "jsvalue.h"
