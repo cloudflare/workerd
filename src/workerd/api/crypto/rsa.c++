@@ -2,7 +2,6 @@
 
 #include "impl.h"
 #include "keys.h"
-#include "simdutf.h"
 #include "util.h"
 
 #include <openssl/bn.h>

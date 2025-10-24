@@ -8,8 +8,6 @@
 // Handling of various basic value types: numbers, booleans, strings, optionals, maybes, variants,
 // arrays, buffers, dicts.
 
-#include "simdutf.h"
-
 #include <workerd/jsg/fast-api.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/web-idl.h>

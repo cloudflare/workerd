@@ -48,7 +48,6 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
-        "@simdutf",
         "@workerd-v8//:v8",
     ],
 )
@@ -111,6 +110,7 @@ wd_cc_library(
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
+    implementation_deps = ["@simdutf"],
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [
         ":exception",
@@ -126,7 +126,6 @@ wd_cc_library(
         "//src/workerd/util:thread-scopes",
         "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
-        "@simdutf",
         "@ssl",
         "@workerd-v8//:v8",
     ],
@@ -156,15 +155,15 @@ wd_cc_library(
     hdrs = [
         "inspector.h",
     ],
-    local_defines = ["JSG_IMPLEMENTATION"],
-    # Some JSG headers can't be compiled on their own
-    visibility = ["//visibility:public"],
-    deps = [
+    implementation_deps = [
         ":jsg-core",
         "@capnp-cpp//src/kj",
         "@simdutf",
         "@workerd-v8//:v8",
     ],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Some JSG headers can't be compiled on their own
+    visibility = ["//visibility:public"],
 )
 
 wd_cc_library(
