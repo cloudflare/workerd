@@ -95,6 +95,22 @@ export function setDoAnImport(
   };
 }
 
+function handleSrcImport(pyodide: Pyodide, e: any): never {
+  // Users may be expecting to import local modules via the `src` directory, which for a default
+  // project structure will fail. This code will add some extra info to the error message to help
+  // them fix it.
+  pyodide.runPython(`
+    import sys
+    exc = sys.last_value
+    if exc.name == "src":
+      exc.add_note(
+        "If your main module is inside the 'src' directory then your import " +
+        "statement shouldn't include a 'src.' prefix")
+    raise exc
+  `);
+  throw e; // Shouldn't reach here, but to keep TS happy we may as well throw it.
+}
+
 async function pyimportMainModule(pyodide: Pyodide): Promise<PyModule> {
   if (!MAIN_MODULE_NAME.endsWith('.py')) {
     throw new PythonUserError(
@@ -243,6 +259,8 @@ function getMainModule(): Promise<PyModule> {
         return await enterJaegerSpan('pyimport_main_module', () =>
           pyimportMainModule(pyodide)
         );
+      } catch (e: any) {
+        handleSrcImport(pyodide, e);
       } finally {
         Limiter.finishStartup(LOADED_SNAPSHOT_TYPE);
       }
