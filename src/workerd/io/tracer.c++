@@ -39,12 +39,12 @@ void TailStreamWriter::report(
   auto& s = KJ_UNWRAP_OR_RETURN(state);
 
   // The onset event must be first and must only happen once.
-  if (event.is<tracing::Onset>()) {
+  if (event.is<Onset>()) {
     KJ_ASSERT(!onsetSeen, "Tail stream onset already provided");
     onsetSeen = true;
   } else {
     KJ_ASSERT(onsetSeen, "Tail stream onset was not reported");
-    if (event.is<tracing::Outcome>()) {
+    if (event.is<Outcome>()) {
       outcomeSeen = true;
     }
   }
@@ -52,9 +52,9 @@ void TailStreamWriter::report(
   // A zero spanId at the TailEvent level signifies that no spanId should be provided to the tail
   // worker (for Onset events). We go to great lengths to rule out getting an all-zero spanId by
   // chance (see SpanId::fromEntropy()), so this should be safe.
-  tracing::TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
-      context.getSpanId() == tracing::SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()),
-      timestamp, s.sequence++, kj::mv(event));
+  TailEvent tailEvent(context.getTraceId(), context.getInvocationId(),
+      context.getSpanId() == SpanId::nullId ? kj::none : kj::Maybe(context.getSpanId()), timestamp,
+      s.sequence++, kj::mv(event));
 
   // If the reporter returns false, then we will treat it as a close signal.
   if (!s.reporter(kj::mv(tailEvent))) state = kj::none;
@@ -191,7 +191,7 @@ void WorkerTracer::addLog(const tracing::InvocationSpanContext& context,
   }
 }
 
-void WorkerTracer::addSpan(CompleteSpan&& span) {
+void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   // This is where we'll actually encode the span.
   if (pipelineLogLevel == PipelineLogLevel::NONE) {
     return;
@@ -458,7 +458,7 @@ kj::Date BaseTracer::getTime() {
   return timestamp;
 }
 
-void BaseTracer::adjustSpanTime(CompleteSpan& span) {
+void BaseTracer::adjustSpanTime(tracing::CompleteSpan& span) {
   // To report I/O time, we need the IOContext to still be alive.
   // weakIoContext is only none if we are tracing via RPC (in this case span times have already been
   // adjusted) or if we failed to transmit an Onset event (in that case we'll get an error based on

@@ -125,7 +125,7 @@ class StringCache final {
 // and define a set of serializers to these types.
 
 // Serialize attribute value
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
+jsg::JsValue ToJs(jsg::Lock& js, const Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(str, kj::String) {
       return js.str(str);
@@ -144,7 +144,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute::Value& value) {
 }
 
 // Serialize attribute key:value(s) pair object
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Attribute& attribute, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, NAME_STR, cache.get(js, attribute.name));
 
@@ -160,8 +160,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Attribute& attribute, StringCach
 }
 
 // Serialize "attributes" event
-jsg::JsValue ToJs(
-    jsg::Lock& js, kj::ArrayPtr<const tracing::Attribute> attributes, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, kj::ArrayPtr<const Attribute> attributes, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ATTRIBUTES_STR));
   obj.set(js, INFO_STR, js.arr(attributes, [&cache](jsg::Lock& js, const auto& attr) {
@@ -170,13 +169,13 @@ jsg::JsValue ToJs(
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchResponseInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const FetchResponseInfo& info, StringCache& cache) {
   static kj::StringPtr keys[] = {TYPE_STR, STATUSCODE_STR};
   jsg::JsValue values[] = {cache.get(js, FETCH_STR), js.num(info.statusCode)};
   return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const FetchEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, FETCH_STR));
   obj.set(js, METHOD_STR, cache.get(js, kj::str(info.method)));
@@ -185,7 +184,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
     obj.set(js, CFJSON_STR, jsg::JsValue(js.parseJson(info.cfJson).getHandle(js)));
   }
 
-  auto ToJs = [](jsg::Lock& js, const tracing::FetchEventInfo::Header& header, StringCache& cache) {
+  auto ToJs = [](jsg::Lock& js, const FetchEventInfo::Header& header, StringCache& cache) {
     auto obj = js.obj();
     obj.set(js, NAME_STR, cache.get(js, header.name));
     obj.set(js, VALUE_STR, js.str(header.value));
@@ -199,13 +198,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::FetchEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::JsRpcEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const JsRpcEventInfo& info, StringCache& cache) {
   static kj::StringPtr keys[] = {TYPE_STR};
   jsg::JsValue values[] = {cache.get(js, JSRPC_STR)};
   return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const ScheduledEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SCHEDULED_STR));
   if (isPredictableModeForTest()) {
@@ -217,7 +216,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::ScheduledEventInfo& info, String
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const AlarmEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ALARM_STR));
   if (isPredictableModeForTest()) {
@@ -228,21 +227,21 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::AlarmEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::QueueEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const QueueEventInfo& info, StringCache& cache) {
   static kj::StringPtr keys[] = {TYPE_STR, QUEUENAME_STR, BATCHSIZE_STR};
   jsg::JsValue values[] = {
     cache.get(js, QUEUE_STR), js.str(info.queueName), js.num(info.batchSize)};
   return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::EmailEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const EmailEventInfo& info, StringCache& cache) {
   static kj::StringPtr keys[] = {TYPE_STR, MAILFROM_STR, RCPTTO_STR, RAWSIZE_STR};
   jsg::JsValue values[] = {
     cache.get(js, EMAIL_STR), js.str(info.mailFrom), js.str(info.rcptTo), js.num(info.rawSize)};
   return js.obj(kj::ArrayPtr<kj::StringPtr>(keys), kj::ArrayPtr<jsg::JsValue>(values));
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const TraceEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, TRACE_STR));
   obj.set(js, TRACES_STR,
@@ -255,23 +254,22 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TraceEventInfo& info, StringCach
   return obj;
 }
 
-jsg::JsValue ToJs(
-    jsg::Lock& js, const tracing::HibernatableWebSocketEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const HibernatableWebSocketEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, HIBERNATABLEWEBSOCKET_STR));
 
   KJ_SWITCH_ONEOF(info.type) {
-    KJ_CASE_ONEOF(message, tracing::HibernatableWebSocketEventInfo::Message) {
+    KJ_CASE_ONEOF(message, HibernatableWebSocketEventInfo::Message) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, MESSAGE_STR));
       obj.set(js, INFO_STR, mobj);
     }
-    KJ_CASE_ONEOF(error, tracing::HibernatableWebSocketEventInfo::Error) {
+    KJ_CASE_ONEOF(error, HibernatableWebSocketEventInfo::Error) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, ERROR_STR));
       obj.set(js, INFO_STR, mobj);
     }
-    KJ_CASE_ONEOF(close, tracing::HibernatableWebSocketEventInfo::Close) {
+    KJ_CASE_ONEOF(close, HibernatableWebSocketEventInfo::Close) {
       auto mobj = js.obj();
       mobj.set(js, TYPE_STR, cache.get(js, CLOSE_STR));
       mobj.set(js, CODE_STR, js.num(close.code));
@@ -283,7 +281,7 @@ jsg::JsValue ToJs(
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::CustomEventInfo& info, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const CustomEventInfo& info, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, CUSTOM_STR));
   return obj;
@@ -326,7 +324,7 @@ kj::String enumToStr(const Enum& var) {
   return kj::str(enums[i].getProto().getName());
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Onset& onset, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, ONSET_STR));
   obj.set(js, EXECUTIONMODEL_STR, cache.get(js, enumToStr(onset.workerInfo.executionModel)));
@@ -361,31 +359,31 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
   }
 
   KJ_SWITCH_ONEOF(onset.info) {
-    KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+    KJ_CASE_ONEOF(fetch, FetchEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, fetch, cache));
     }
-    KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+    KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
     }
-    KJ_CASE_ONEOF(scheduled, tracing::ScheduledEventInfo) {
+    KJ_CASE_ONEOF(scheduled, ScheduledEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, scheduled, cache));
     }
-    KJ_CASE_ONEOF(alarm, tracing::AlarmEventInfo) {
+    KJ_CASE_ONEOF(alarm, AlarmEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, alarm, cache));
     }
-    KJ_CASE_ONEOF(queue, tracing::QueueEventInfo) {
+    KJ_CASE_ONEOF(queue, QueueEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, queue, cache));
     }
-    KJ_CASE_ONEOF(email, tracing::EmailEventInfo) {
+    KJ_CASE_ONEOF(email, EmailEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, email, cache));
     }
-    KJ_CASE_ONEOF(trace, tracing::TraceEventInfo) {
+    KJ_CASE_ONEOF(trace, TraceEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, trace, cache));
     }
-    KJ_CASE_ONEOF(hws, tracing::HibernatableWebSocketEventInfo) {
+    KJ_CASE_ONEOF(hws, HibernatableWebSocketEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, hws, cache));
     }
-    KJ_CASE_ONEOF(custom, tracing::CustomEventInfo) {
+    KJ_CASE_ONEOF(custom, CustomEventInfo) {
       obj.set(js, INFO_STR, ToJs(js, custom, cache));
     }
   }
@@ -399,7 +397,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Onset& onset, StringCache& cache
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Outcome& outcome, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, OUTCOME_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, outcome.outcome, cache));
@@ -413,7 +411,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Outcome& outcome, StringCache& c
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const SpanOpen& spanOpen, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANOPEN_STR));
   obj.set(js, NAME_STR, js.str(spanOpen.operationName));
@@ -422,13 +420,13 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
 
   KJ_IF_SOME(info, spanOpen.info) {
     KJ_SWITCH_ONEOF(info) {
-      KJ_CASE_ONEOF(fetch, tracing::FetchEventInfo) {
+      KJ_CASE_ONEOF(fetch, FetchEventInfo) {
         obj.set(js, INFO_STR, ToJs(js, fetch, cache));
       }
-      KJ_CASE_ONEOF(jsrpc, tracing::JsRpcEventInfo) {
+      KJ_CASE_ONEOF(jsrpc, JsRpcEventInfo) {
         obj.set(js, INFO_STR, ToJs(js, jsrpc, cache));
       }
-      KJ_CASE_ONEOF(custom, tracing::CustomInfo) {
+      KJ_CASE_ONEOF(custom, CustomInfo) {
         obj.set(js, INFO_STR, ToJs(js, custom.asPtr(), cache));
       }
     }
@@ -436,14 +434,14 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanOpen& spanOpen, StringCache&
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::SpanClose& spanClose, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const SpanClose& spanClose, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, SPANCLOSE_STR));
   obj.set(js, OUTCOME_STR, ToJs(js, spanClose.outcome, cache));
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const DiagnosticChannelEvent& dce, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, DIAGNOSTICCHANNEL_STR));
   obj.set(js, CHANNEL_STR, cache.get(js, dce.channel));
@@ -455,7 +453,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::DiagnosticChannelEvent& dce, Str
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Exception& ex, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Exception& ex, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, EXCEPTION_STR));
   obj.set(js, NAME_STR, cache.get(js, ex.name));
@@ -470,7 +468,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const LogLevel& level, StringCache& cache) {
   return cache.get(js, toLower(enumToStr<LogLevel>(level)));
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Log& log, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, LOG_STR));
   obj.set(js, LEVEL_STR, ToJs(js, log.logLevel, cache));
@@ -479,7 +477,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Log& log, StringCache& cache) {
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const Return& ret, StringCache& cache) {
   auto obj = js.obj();
   obj.set(js, TYPE_STR, cache.get(js, RETURN_STR));
 
@@ -490,7 +488,7 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::Return& ret, StringCache& cache)
   return obj;
 }
 
-jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& cache) {
+jsg::JsValue ToJs(jsg::Lock& js, const TailEvent& event, StringCache& cache) {
   auto obj = js.obj();
 
   // Set SpanContext
@@ -506,28 +504,28 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
   obj.set(js, SEQUENCE_STR, js.num(event.sequence));
 
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(onset, tracing::Onset) {
+    KJ_CASE_ONEOF(onset, Onset) {
       obj.set(js, EVENT_STR, ToJs(js, onset, cache));
     }
-    KJ_CASE_ONEOF(outcome, tracing::Outcome) {
+    KJ_CASE_ONEOF(outcome, Outcome) {
       obj.set(js, EVENT_STR, ToJs(js, outcome, cache));
     }
-    KJ_CASE_ONEOF(spanOpen, tracing::SpanOpen) {
+    KJ_CASE_ONEOF(spanOpen, SpanOpen) {
       obj.set(js, EVENT_STR, ToJs(js, spanOpen, cache));
     }
-    KJ_CASE_ONEOF(spanClose, tracing::SpanClose) {
+    KJ_CASE_ONEOF(spanClose, SpanClose) {
       obj.set(js, EVENT_STR, ToJs(js, spanClose, cache));
     }
-    KJ_CASE_ONEOF(de, tracing::DiagnosticChannelEvent) {
+    KJ_CASE_ONEOF(de, DiagnosticChannelEvent) {
       obj.set(js, EVENT_STR, ToJs(js, de, cache));
     }
-    KJ_CASE_ONEOF(ex, tracing::Exception) {
+    KJ_CASE_ONEOF(ex, Exception) {
       obj.set(js, EVENT_STR, ToJs(js, ex, cache));
     }
-    KJ_CASE_ONEOF(log, tracing::Log) {
+    KJ_CASE_ONEOF(log, Log) {
       obj.set(js, EVENT_STR, ToJs(js, log, cache));
     }
-    KJ_CASE_ONEOF(ret, tracing::Return) {
+    KJ_CASE_ONEOF(ret, Return) {
       obj.set(js, EVENT_STR, ToJs(js, ret, cache));
     }
     KJ_CASE_ONEOF(attrs, CustomInfo) {
@@ -539,34 +537,34 @@ jsg::JsValue ToJs(jsg::Lock& js, const tracing::TailEvent& event, StringCache& c
 }
 
 // Returns the name of the handler function for this type of event.
-kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
+kj::Maybe<kj::StringPtr> getHandlerName(const TailEvent& event) {
   KJ_SWITCH_ONEOF(event.event) {
-    KJ_CASE_ONEOF(_, tracing::Onset) {
+    KJ_CASE_ONEOF(_, Onset) {
       KJ_FAIL_ASSERT("Onset event should only be provided to tailStream(), not returned handler");
       // return ONSET_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Outcome) {
+    KJ_CASE_ONEOF(_, Outcome) {
       return OUTCOME_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::SpanOpen) {
+    KJ_CASE_ONEOF(_, SpanOpen) {
       return SPANOPEN_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::SpanClose) {
+    KJ_CASE_ONEOF(_, SpanClose) {
       return SPANCLOSE_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::DiagnosticChannelEvent) {
+    KJ_CASE_ONEOF(_, DiagnosticChannelEvent) {
       return DIAGNOSTICCHANNEL_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Exception) {
+    KJ_CASE_ONEOF(_, Exception) {
       return EXCEPTION_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Log) {
+    KJ_CASE_ONEOF(_, Log) {
       return LOG_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::Return) {
+    KJ_CASE_ONEOF(_, Return) {
       return RETURN_STR;
     }
-    KJ_CASE_ONEOF(_, tracing::CustomInfo) {
+    KJ_CASE_ONEOF(_, CustomInfo) {
       return ATTRIBUTES_STR;
     }
   }
@@ -608,9 +606,9 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       auto params = reportContext.getParams();
       KJ_ASSERT(params.hasEvents(), "Events are required.");
       auto eventReaders = params.getEvents();
-      kj::Vector<tracing::TailEvent> events(eventReaders.size());
+      kj::Vector<TailEvent> events(eventReaders.size());
       for (auto reader: eventReaders) {
-        events.add(tracing::TailEvent(reader));
+        events.add(TailEvent(reader));
       }
 
       // If we have not yet received the onset event, the first event in the
@@ -682,11 +680,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   // shutdown.
   kj::Promise<void> handleOnset(Worker::Lock& lock,
       IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
+      kj::Array<TailEvent> events,
       kj::Rc<SharedResults> results) {
     // There should be only a single onset event in this batch.
-    KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
-        "Expected only a single onset event");
+    KJ_ASSERT(
+        events.size() == 1 && events[0].event.is<Onset>(), "Expected only a single onset event");
     auto& event = events[0];
 
     auto handler = KJ_REQUIRE_NONNULL(
@@ -786,7 +784,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   kj::Promise<void> handleEvents(Worker::Lock& lock,
       const jsg::JsValue& handler,
       IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
+      kj::Array<TailEvent> events,
       kj::Rc<SharedResults> results) {
     jsg::Lock& js = lock;
 
@@ -812,7 +810,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // If we already received an outcome event, we will stop processing any
       // further events.
       if (finishing) break;
-      if (event.event.is<tracing::Outcome>()) {
+      if (event.event.is<Outcome>()) {
         finishing = true;
         results->setStop(true);
         doneReceiving = true;
@@ -896,9 +894,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
-  return tracing::EventInfo(
-      tracing::TraceEventInfo(kj::Array<tracing::TraceEventInfo::TraceItem>(nullptr)));
+kj::Maybe<EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
+  return EventInfo(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
 }
 
 kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
@@ -990,109 +987,151 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sen
   }
 }
 
-void TailStreamWriterState::reportImpl(tracing::TailEvent&& event) {
-  // In reportImpl, our inner state must be active.
-  auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+namespace {
+// The TailStreamWriterState holds the current client-side state for a collection
+// of streaming tail workers that a worker is reporting events to.
+struct TailStreamWriterState {
+  // The initial state of our tail worker writer is that it is pending the first
+  // onset event. During this time we will only have a collection of WorkerInterface
+  // instances. When our first event is reported (the onset) we will arrange to acquire
+  // tailStream capabilities from each then use those to report the initial onset.
+  using Pending = kj::Array<kj::Own<WorkerInterface>>;
 
-  // We only care about sessions that are currently active.
-  kj::Vector<kj::Own<Active>> alive(actives.size());
-  for (auto& active: actives) {
-    if (active->capability != kj::none) {
-      alive.add(kj::mv(active));
+  // Instances of Active are refcounted. The TailStreamWriterState itself
+  // holds the initial ref. Whenever events are being dispatched, an additional
+  // ref will be held by the outstanding pump promise in order to keep the
+  // client stub alive long enough for the rpc calls to complete. It is possible
+  // that the TailStreamWriterState will be dropped while pump promises are still
+  // pending.
+  struct Active: public kj::Refcounted {
+    // Reference to keep the worker interface instance alive.
+    kj::Maybe<rpc::TailStreamTarget::Client> capability;
+    bool pumping = false;
+    bool onsetSeen = false;
+    workerd::util::Queue<TailEvent> queue;
+
+    Active(rpc::TailStreamTarget::Client capability): capability(kj::mv(capability)) {}
+  };
+
+  struct Closed {};
+
+  // The closing flag will be set when the Outcome event has been reported.
+  // Once closing is true, no further events will be accepted and the state
+  // will transition to closed once the currently active pump completes.
+  bool closing = false;
+  kj::OneOf<Pending, kj::Array<kj::Own<Active>>, Closed> inner;
+  kj::TaskSet& waitUntilTasks;
+
+  TailStreamWriterState(Pending pending, kj::TaskSet& waitUntilTasks)
+      : inner(kj::mv(pending)),
+        waitUntilTasks(waitUntilTasks) {}
+  KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriterState);
+
+  void reportImpl(TailEvent&& event) {
+    // In reportImpl, our inner state must be active.
+    auto& actives = KJ_ASSERT_NONNULL(inner.tryGet<kj::Array<kj::Own<Active>>>());
+
+    // We only care about sessions that are currently active.
+    kj::Vector<kj::Own<Active>> alive(actives.size());
+    for (auto& active: actives) {
+      if (active->capability != kj::none) {
+        alive.add(kj::mv(active));
+      }
+    }
+
+    if (alive.size() == 0) {
+      // Oh! We have no active sessions. Well, never mind then, let's
+      // transition to a closed state and drop everything on the floor.
+      inner = Closed{};
+
+      // Since we have no more living sessions (e.g. because all tail workers failed to return a valid
+      // handler), mark the state as closing as we can't handle future events anyway.
+      closing = true;
+      return;
+    }
+
+    // If we're already closing, no further events should be reported.
+    if (closing) return;
+    if (event.event.is<Outcome>()) {
+      closing = true;
+    }
+
+    // Deliver the event to the queue and make sure we are processing.
+    for (auto& active: alive) {
+      active->queue.push(event.clone());
+      if (!active->pumping) {
+        waitUntilTasks.add(pump(kj::addRef(*active)));
+      }
+    }
+
+    inner = alive.releaseAsArray();
+  }
+
+  // Delivers the queued tail events to a streaming tail worker.
+  kj::Promise<void> pump(kj::Own<Active> current) {
+    current->pumping = true;
+    KJ_DEFER(current->pumping = false);
+
+    if (!current->onsetSeen) {
+      // Our first event... yay! Our first job here will be to dispatch
+      // the onset event to the tail worker. If the tail worker wishes
+      // to handle the remaining events in the stream, then it will return
+      // a new capability to which those would be reported. This is done
+      // via the "result.getPipeline()" API below. If hasPipeline()
+      // returns false then that means the tail worker did not return
+      // a handler for this stream and no further attempts to deliver
+      // events should be made for this stream.
+      current->onsetSeen = true;
+      auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
+      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto eventsBuilder = builder.initEvents(1);
+      // When sending the onset event to the tail worker, the receiving end
+      // requires that the onset event be delivered separately, without any
+      // other events in the bundle. So here we'll separate it out and deliver
+      // just the one event...
+      onsetEvent.copyTo(eventsBuilder[0]);
+      auto result = co_await builder.send();
+      if (result.getStop()) {
+        // If our call to send returns a stop signal, then we'll clear
+        // the capability and be done.
+        current->queue.clear();
+        current->capability = kj::none;
+        co_return;
+      }
+    }
+
+    // If we got this far then we have a handler for all of our events.
+    // Deliver remaining streaming tail events in batches if possible.
+    while (!current->queue.empty()) {
+      auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
+      auto eventsBuilder = builder.initEvents(current->queue.size());
+      size_t n = 0;
+      current->queue.drainTo([&](TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
+
+      auto result = co_await builder.send();
+
+      // Note that although we cleared the current.queue above, it is
+      // possible/likely that additional events were added to the queue
+      // while the above builder.send() was being awaited. If the result
+      // comes back indicating that we should stop, then we'll stop here
+      // without any further processing. We'll defensively clear the
+      // queue again and drop the client stub. Otherwise, if result.getStop()
+      // is false, we'll loop back around to send any items that have since
+      // been added to the queue or exit this loop if there are no additional
+      // events waiting to be sent.
+      if (result.getStop()) {
+        current->queue.clear();
+        current->capability = kj::none;
+        co_return;
+      }
     }
   }
-
-  if (alive.size() == 0) {
-    // Oh! We have no active sessions. Well, never mind then, let's
-    // transition to a closed state and drop everything on the floor.
-    inner = Closed{};
-
-    // Since we have no more living sessions (e.g. because all tail workers failed to return a valid
-    // handler), mark the state as closing as we can't handle future events anyway.
-    closing = true;
-    return;
-  }
-
-  // If we're already closing, no further events should be reported.
-  if (closing) return;
-  if (event.event.is<tracing::Outcome>()) {
-    closing = true;
-  }
-
-  // Deliver the event to the queue and make sure we are processing.
-  for (auto& active: alive) {
-    active->queue.push(event.clone());
-    if (!active->pumping) {
-      waitUntilTasks.add(pump(kj::addRef(*active)));
-    }
-  }
-
-  inner = alive.releaseAsArray();
-}
-
-// Delivers the queued tail events to a streaming tail worker.
-kj::Promise<void> TailStreamWriterState::pump(kj::Own<Active> current) {
-  current->pumping = true;
-  KJ_DEFER(current->pumping = false);
-
-  if (!current->onsetSeen) {
-    // Our first event... yay! Our first job here will be to dispatch
-    // the onset event to the tail worker. If the tail worker wishes
-    // to handle the remaining events in the stream, then it will return
-    // a new capability to which those would be reported. This is done
-    // via the "result.getPipeline()" API below. If hasPipeline()
-    // returns false then that means the tail worker did not return
-    // a handler for this stream and no further attempts to deliver
-    // events should be made for this stream.
-    current->onsetSeen = true;
-    auto onsetEvent = KJ_ASSERT_NONNULL(current->queue.pop());
-    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-    auto eventsBuilder = builder.initEvents(1);
-    // When sending the onset event to the tail worker, the receiving end
-    // requires that the onset event be delivered separately, without any
-    // other events in the bundle. So here we'll separate it out and deliver
-    // just the one event...
-    onsetEvent.copyTo(eventsBuilder[0]);
-    auto result = co_await builder.send();
-    if (result.getStop()) {
-      // If our call to send returns a stop signal, then we'll clear
-      // the capability and be done.
-      current->queue.clear();
-      current->capability = kj::none;
-      co_return;
-    }
-  }
-
-  // If we got this far then we have a handler for all of our events.
-  // Deliver remaining streaming tail events in batches if possible.
-  while (!current->queue.empty()) {
-    auto builder = KJ_ASSERT_NONNULL(current->capability).reportRequest();
-    auto eventsBuilder = builder.initEvents(current->queue.size());
-    size_t n = 0;
-    current->queue.drainTo([&](tracing::TailEvent&& event) { event.copyTo(eventsBuilder[n++]); });
-
-    auto result = co_await builder.send();
-
-    // Note that although we cleared the current.queue above, it is
-    // possible/likely that additional events were added to the queue
-    // while the above builder.send() was being awaited. If the result
-    // comes back indicating that we should stop, then we'll stop here
-    // without any further processing. We'll defensively clear the
-    // queue again and drop the client stub. Otherwise, if result.getStop()
-    // is false, we'll loop back around to send any items that have since
-    // been added to the queue or exit this loop if there are no additional
-    // events waiting to be sent.
-    if (result.getStop()) {
-      current->queue.clear();
-      current->capability = kj::none;
-      co_return;
-    }
-  }
-}
+};
+}  // namespace
 
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
-kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
+kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
     kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
@@ -1100,12 +1139,12 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
 
   auto state = kj::heap<TailStreamWriterState>(kj::mv(streamingTailWorkers), waitUntilTasks);
 
-  return kj::refcounted<tracing::TailStreamWriter>(
+  return kj::refcounted<TailStreamWriter>(
       // This lambda is called for every streaming tail event that is reported. We use
       // the TailStreamWriterState for this stream to actually handle the event.
       // Pay attention to the ownership of state here. The lambda holds a bare
       // reference while the instance is attached to the kj::Own below.
-      [&state = *state, &waitUntilTasks](tracing::TailEvent&& event) mutable {
+      [&state = *state, &waitUntilTasks](TailEvent&& event) mutable {
     KJ_SWITCH_ONEOF(state.inner) {
       KJ_CASE_ONEOF(closed, TailStreamWriterState::Closed) {
         // The tail stream has already been closed because we have received an outcome event. The
@@ -1116,11 +1155,11 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
         // This is our first event! It has to be an onset event, which the writer
         // should have validated for us. Assert if it is not an onset then proceed
         // to start each of our tail working sessions.
-        KJ_ASSERT(event.event.is<tracing::Onset>(), "First event must be an onset.");
+        KJ_ASSERT(event.event.is<Onset>(), "First event must be an onset.");
 
         // Transitions into the active state by grabbing the pending client capability.
         state.inner = KJ_MAP(wi, pending) {
-          auto customEvent = kj::heap<tracing::TailStreamCustomEventImpl>();
+          auto customEvent = kj::heap<TailStreamCustomEventImpl>();
           auto result = customEvent->getCap();
           auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
 
@@ -1139,7 +1178,7 @@ kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
       }
       KJ_CASE_ONEOF(active, kj::Array<kj::Own<TailStreamWriterState::Active>>) {
         // Event cannot be a onset, which should have been validated by the writer.
-        KJ_ASSERT(!event.event.is<tracing::Onset>(), "Only the first event can be an onset");
+        KJ_ASSERT(!event.event.is<Onset>(), "Only the first event can be an onset");
       }
     }
     state.reportImpl(kj::mv(event));

@@ -1705,7 +1705,7 @@ class SpanSubmitter final: public kj::Refcounted {
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
-    CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
+    tracing::CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
         span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
