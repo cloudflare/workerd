@@ -1469,7 +1469,10 @@ SpanBuilder::SpanBuilder(kj::Maybe<kj::Own<SpanObserver>> observer,
   KJ_IF_SOME(obs, observer) {
     // TODO(o11y): Once we report the user tracing spanOpen event as soon as a span is created, we
     // should be able to fold this virtual call and just get the timestamp directly.
-    span.emplace(kj::mv(operationName), startTime.orDefault(obs->getTime()));
+    kj::Date time = startTime.orDefault([&]() { return obs->getTime(); });
+    // Report spanOpen event for user tracing spans
+    obs->reportStart(operationName, time);
+    span.emplace(kj::mv(operationName), time);
     this->observer = kj::mv(obs);
   }
 }
@@ -1612,7 +1615,6 @@ void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
   builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setEndTimeNs((endTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
   builder.setSpanId(spanId);
-  builder.setParentSpanId(parentSpanId);
 
   auto tagsParam = builder.initTags(tags.size());
   auto i = 0;
@@ -1622,10 +1624,15 @@ void CompleteSpan::copyTo(rpc::UserSpanData::Builder builder) const {
     serializeTagValue(tagParam.initValue(), tag.value);
   }
 }
+void SpanOpenData::copyTo(rpc::SpanOpenData::Builder builder) const {
+  builder.setOperationName(operationName.asPtr());
+  builder.setStartTimeNs((startTime - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+  builder.setSpanId(spanId);
+  builder.setParentSpanId(parentSpanId);
+}
 
 CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
     : spanId(reader.getSpanId()),
-      parentSpanId(reader.getParentSpanId()),
       operationName(kj::str(reader.getOperationName())),
       startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS),
       endTime(kj::UNIX_EPOCH + reader.getEndTimeNs() * kj::NANOSECONDS) {
@@ -1636,22 +1643,11 @@ CompleteSpan::CompleteSpan(rpc::UserSpanData::Reader reader)
         deserializeTagValue(tagParam.getValue()));
   }
 }
-
-CompleteSpan CompleteSpan::clone() const {
-  CompleteSpan copy(
-      spanId, parentSpanId, kj::ConstString(kj::str(operationName)), startTime, endTime);
-  copy.tags.reserve(tags.size());
-  for (auto& tag: tags) {
-    copy.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
-  }
-  return copy;
-}
-
-kj::String CompleteSpan::toString() const {
-  return kj::str("CompleteSpan: ", operationName,
-      kj::strArray(
-          KJ_MAP(tag, tags) { return kj::str("(", tag.key, ", ", tag.value, ")"); }, ", "));
-}
+SpanOpenData::SpanOpenData(rpc::SpanOpenData::Reader reader)
+    : spanId(reader.getSpanId()),
+      parentSpanId(reader.getParentSpanId()),
+      operationName(kj::str(reader.getOperationName())),
+      startTime(kj::UNIX_EPOCH + reader.getStartTimeNs() * kj::NANOSECONDS) {}
 
 ScopedDurationTagger::ScopedDurationTagger(
     SpanBuilder& span, kj::ConstString key, const kj::MonotonicClock& timer)
