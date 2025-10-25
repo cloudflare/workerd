@@ -526,58 +526,71 @@ class ReadableSourceImpl: public ReadableSource {
 
     auto readPromise = readImpl(*stream, buffer[currentReadBuf], minBytes);
     size_t iterationCount = 0;
+    bool readFailed = false;
 
-    while (true) {
-      // On each iteration, wait for the read to complete...
-      size_t amount = co_await readPromise;
-      iterationCount++;
-
-      // If we read less than minBytes, assume EOF.
-      if (amount < minBytes) {
-        // If any bytes were read...
-        if (amount > 0) {
-          // Write our final chunk...
-          co_await output.write(buffer[currentReadBuf].first(amount));
+    try {
+      while (true) {
+        // On each iteration, wait for the read to complete...
+        size_t amount;
+        {
+          KJ_ON_SCOPE_FAILURE(readFailed = true);
+          amount = co_await readPromise;
         }
-        // Then break out of the loop.
-        break;
-      }
+        iterationCount++;
 
-      // Set the write buffer to the one we just filled.
-      auto writeBuf = buffer[currentReadBuf];
-
-      // Then switch to the other buffer and start the next read.
-      currentReadBuf = 1 - currentReadBuf;
-
-      // Maybe adjust minBytes based on how much data we read this iteration.
-      if (iterationCount <= 3 || iterationCount % 10 == 0) {
-        if (amount == bufferSize) {
-          // Stream is filling buffer completely... Use smaller minBytes to
-          // increase responsiveness, should produce more reads with less data.
-          if (bufferSize >= 4 * DEFAULT_BUFFER_SIZE) {
-            // For large buffers (≥64KB), be more aggressive about responsiveness.
-            // 25% of a large buffer is still a substantial chunk (e.g., 32KB for 128KB).
-            minBytes = bufferSize >> 2;  // 25%
-          } else {
-            // For smaller buffers, 50% provides better balance, avoiding chunks
-            // that are too small for efficient processing (e.g., keeps 16KB → 8KB).
-            minBytes = bufferSize >> 1;  // 50%
+        // If we read less than minBytes, assume EOF.
+        if (amount < minBytes) {
+          // If any bytes were read...
+          if (amount > 0) {
+            // Write our final chunk...
+            co_await output.write(buffer[currentReadBuf].first(amount));
           }
-        } else {
-          // Stream didn't fill buffer - likely slower or at natural boundary.
-          // Use higher minBytes to accumulate larger chunks and reduce iteration overhead.
-          minBytes = (bufferSize >> 2) + (bufferSize >> 1);  // 75%
+          // Then break out of the loop.
+          break;
         }
+
+        // Set the write buffer to the one we just filled.
+        auto writeBuf = buffer[currentReadBuf];
+
+        // Then switch to the other buffer and start the next read.
+        currentReadBuf = 1 - currentReadBuf;
+
+        // Maybe adjust minBytes based on how much data we read this iteration.
+        if (iterationCount <= 3 || iterationCount % 10 == 0) {
+          if (amount == bufferSize) {
+            // Stream is filling buffer completely... Use smaller minBytes to
+            // increase responsiveness, should produce more reads with less data.
+            if (bufferSize >= 4 * DEFAULT_BUFFER_SIZE) {
+              // For large buffers (≥64KB), be more aggressive about responsiveness.
+              // 25% of a large buffer is still a substantial chunk (e.g., 32KB for 128KB).
+              minBytes = bufferSize >> 2;  // 25%
+            } else {
+              // For smaller buffers, 50% provides better balance, avoiding chunks
+              // that are too small for efficient processing (e.g., keeps 16KB → 8KB).
+              minBytes = bufferSize >> 1;  // 50%
+            }
+          } else {
+            // Stream didn't fill buffer - likely slower or at natural boundary.
+            // Use higher minBytes to accumulate larger chunks and reduce iteration overhead.
+            minBytes = (bufferSize >> 2) + (bufferSize >> 1);  // 75%
+          }
+        }
+
+        // Start our next read operation.
+        readPromise = readImpl(*stream, buffer[currentReadBuf], minBytes);
+
+        // Write out the chunk we just read in parallel with the next read.
+        // If the write fails, the exception will propagate and cancel the pump,
+        // including the read operation. If the read fails, it will be picked
+        // up at the start of the next loop iteration.
+        co_await output.write(writeBuf.first(amount));
       }
-
-      // Start our next read operation.
-      readPromise = readImpl(*stream, buffer[currentReadBuf], minBytes);
-
-      // Write out the chunk we just read in parallel with the next read.
-      // If the write fails, the exception will propagate and cancel the pump,
-      // including the read operation. If the read fails, it will be picked
-      // up at the start of the next loop iteration.
-      co_await output.write(writeBuf.first(amount));
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      if (readFailed) {
+        output.abort(kj::cp(exception));
+      }
+      kj::throwFatalException(kj::mv(exception));
     }
 
     if (end) {

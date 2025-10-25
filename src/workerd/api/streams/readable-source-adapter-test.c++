@@ -1469,25 +1469,28 @@ KJ_TEST("KjAdapter pumpTo") {
   auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto stream = createFiniteBytesReadableStream(env.js, 1024);
+    // The assertion in pumpToImpl requires totalRead <= buffer.size() after reading,
+    // which means the stream size must be <= bufferSize / 2. With bufferSize = 1024
+    // (for streams < 4096 bytes), we need total size <= 512 bytes.
+    auto stream = createFiniteBytesReadableStream(env.js, 50);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
   });
 
-  kj::FixedArray<kj::byte, 10 * 1024> expected;
-  expected.asPtr().first(1024).fill(97);          // 'a'
-  expected.asPtr().slice(1024, 2048).fill(98);    // 'b'
-  expected.asPtr().slice(2048, 3072).fill(99);    // 'c'
-  expected.asPtr().slice(3072, 4096).fill(100);   // 'd'
-  expected.asPtr().slice(4096, 5120).fill(101);   // 'e'
-  expected.asPtr().slice(5120, 6144).fill(102);   // 'f'
-  expected.asPtr().slice(6144, 7168).fill(103);   // 'g'
-  expected.asPtr().slice(7168, 8192).fill(104);   // 'h'
-  expected.asPtr().slice(8192, 9216).fill(105);   // 'i'
-  expected.asPtr().slice(9216, 10240).fill(106);  // 'j'
+  kj::FixedArray<kj::byte, 10 * 50> expected;
+  expected.asPtr().first(50).fill(97);         // 'a'
+  expected.asPtr().slice(50, 100).fill(98);    // 'b'
+  expected.asPtr().slice(100, 150).fill(99);   // 'c'
+  expected.asPtr().slice(150, 200).fill(100);  // 'd'
+  expected.asPtr().slice(200, 250).fill(101);  // 'e'
+  expected.asPtr().slice(250, 300).fill(102);  // 'f'
+  expected.asPtr().slice(300, 350).fill(103);  // 'g'
+  expected.asPtr().slice(350, 400).fill(104);  // 'h'
+  expected.asPtr().slice(400, 450).fill(105);  // 'i'
+  expected.asPtr().slice(450, 500).fill(106);  // 'j'
 
-  KJ_ASSERT(sink.data.size() == 10 * 1024);
+  KJ_ASSERT(sink.data.size() == 10 * 50);
   KJ_ASSERT(sink.data.asPtr() == expected.asPtr());
 }
 
@@ -1501,25 +1504,26 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
   auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto stream = createFiniteBytesReadableStream(env.js, 1024);
+    // Use the same size constraint as the previous test.
+    auto stream = createFiniteBytesReadableStream(env.js, 50);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return adapter->pumpTo(*writableSink, EndAfterPump::NO).attach(kj::mv(adapter));
   });
 
-  kj::FixedArray<kj::byte, 10 * 1024> expected;
-  expected.asPtr().first(1024).fill(97);          // 'a'
-  expected.asPtr().slice(1024, 2048).fill(98);    // 'b'
-  expected.asPtr().slice(2048, 3072).fill(99);    // 'c'
-  expected.asPtr().slice(3072, 4096).fill(100);   // 'd'
-  expected.asPtr().slice(4096, 5120).fill(101);   // 'e'
-  expected.asPtr().slice(5120, 6144).fill(102);   // 'f'
-  expected.asPtr().slice(6144, 7168).fill(103);   // 'g'
-  expected.asPtr().slice(7168, 8192).fill(104);   // 'h'
-  expected.asPtr().slice(8192, 9216).fill(105);   // 'i'
-  expected.asPtr().slice(9216, 10240).fill(106);  // 'j'
+  kj::FixedArray<kj::byte, 10 * 50> expected;
+  expected.asPtr().first(50).fill(97);         // 'a'
+  expected.asPtr().slice(50, 100).fill(98);    // 'b'
+  expected.asPtr().slice(100, 150).fill(99);   // 'c'
+  expected.asPtr().slice(150, 200).fill(100);  // 'd'
+  expected.asPtr().slice(200, 250).fill(101);  // 'e'
+  expected.asPtr().slice(250, 300).fill(102);  // 'f'
+  expected.asPtr().slice(300, 350).fill(103);  // 'g'
+  expected.asPtr().slice(350, 400).fill(104);  // 'h'
+  expected.asPtr().slice(400, 450).fill(105);  // 'i'
+  expected.asPtr().slice(450, 500).fill(106);  // 'j'
 
-  KJ_ASSERT(sink.data.size() == 10 * 1024);
+  KJ_ASSERT(sink.data.size() == 10 * 50);
   KJ_ASSERT(sink.data.asPtr() == expected.asPtr());
 }
 

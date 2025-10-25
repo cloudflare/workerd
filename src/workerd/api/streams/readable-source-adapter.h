@@ -272,7 +272,7 @@ class ReadableStreamSourceJsAdapter final {
 // there are some protections in place to avoid use-after-free if the caller
 // drops the adapter. There's nothing we can do if the caller drops the
 // buffer, however, so that is still a hard requirement.
-// TODO(safety): This can be made safer by having tryRead take a kj::Array
+// TODO(safety): This can be made safer by having read take a kj::Array
 // as input instead of a raw pointer and size, then having the read return
 // the filled in Array after the read completes, but that's a larger refactor.
 class ReadableStreamSourceKjAdapter final: public ReadableSource {
@@ -363,16 +363,33 @@ class ReadableStreamSourceKjAdapter final: public ReadableSource {
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
 
   kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
-  kj::Promise<void> pumpToImpl(WritableSink& output, EndAfterPump end);
+
+  static kj::Promise<void> pumpToImpl(
+      kj::Own<Active> active, WritableSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
       jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
 
   template <typename T>
   kj::Promise<kj::Array<T>> readAllImpl(size_t limit);
 
+  struct CancelationToken final {
+    kj::Rc<WeakRef<CancelationToken>> selfRef;
+    inline CancelationToken()
+        : selfRef(kj::rc<WeakRef<CancelationToken>>(kj::Badge<CancelationToken>{}, *this)) {}
+    inline ~CancelationToken() {
+      selfRef->invalidate();
+    }
+    inline kj::Rc<WeakRef<CancelationToken>> getWeakRef() {
+      return selfRef.addRef();
+    }
+  };
+
   template <typename T>
-  static jsg::Promise<kj::Array<T>> readAllReadImpl(
-      jsg::Lock& js, kj::Own<ReadContext> context, kj::Vector<T> accumulated, size_t limit);
+  static jsg::Promise<kj::Array<T>> readAllReadImpl(jsg::Lock& js,
+      IoOwn<Active> active,
+      kj::Vector<T> accumulated,
+      size_t limit,
+      kj::Rc<WeakRef<CancelationToken>> cancelationToken);
 };
 
 }  // namespace workerd::api::streams
