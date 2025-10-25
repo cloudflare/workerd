@@ -12,9 +12,9 @@ index 9a39f8ede92bad9acf1c390cde2048d7a9eb6a88..efdd0ec674f11a0e68a2e996f6ac0dc6
 @@ -918,7 +918,7 @@ class Internals {
    static const int kExternalTwoByteRepresentationTag = 0x02;
    static const int kExternalOneByteRepresentationTag = 0x0a;
- 
+
 -  static const uint32_t kNumIsolateDataSlots = 4;
-+  static const uint32_t kNumIsolateDataSlots = 5;
++  static const uint32_t kNumIsolateDataSlots = 6;
    static const int kStackGuardSize = 8 * kApiSystemPointerSize;
    static const int kNumberOfBooleanFlags = 6;
    static const int kErrorMessageParamSize = 1;
