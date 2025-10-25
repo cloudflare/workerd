@@ -91,9 +91,7 @@ class Cache: public jsg::Object {
 
   kj::Own<kj::HttpClient> getHttpClient(IoContext& context,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::LiteralStringConst operationName,
-      kj::StringPtr url,
-      kj::Maybe<jsg::ByteString> cacheControl,
+      TraceContext& traceContext,
       bool enableCompatFlags);
 };
 
