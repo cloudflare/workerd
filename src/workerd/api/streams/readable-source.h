@@ -33,18 +33,20 @@ WD_STRONG_BOOL(EndAfterPump);
 // API, it's a bit too late to change that now. Use the ReadableStreamSourceJsAdapter in the
 // readable-source-adapter.h file to wrap a ReadableStreamSource for use from JavaScript.
 //
-// Not all ReadableStreamSource implementations will be explicitly backed by a KJ stream;
-// some might be test implementations that generate data on the fly, for instance.
-//
 // A ReadableStreamSource must be treated like a KJ I/O object. Instances that are held
 // by any JS-heap objects must be held by an IoOwn.
 //
-// If the ReadableStreamSource is canceled or dropped, all pending read() and pumpTo()
-// promises will be canceled.
+// If the ReadableStreamSource is canceled or dropped, all pending read() reads will be
+// canceled.
 //
-// Only one read() or pumpTo() operation may be pending at a time. Attempting to
-// initiate a second read() or pumpTo() while one is already pending will result in
-// a rejected promise.
+// Only one read() may be pending at a time. Attempting to initiate a second read()
+// while one is already pending will result in a rejected promise.
+//
+// Calling pumpTo initiates a sequence of read() calls until the stream is fully consumed.
+// Ownership of the underlying AsyncInputStream is transferred to the pumpTo operation and
+// the ReadableStreamSource is put into a closed state. After calling pumpTo, no further
+// read() calls may be made directly on the ReadableStreamSource. Dropping the returned
+// promise before it resolves will cancel the pump operation.
 //
 // It is **NOT** intended that you should implement this interface for general use.
 // It is only intended to be implemented by specific classes within workerd for the

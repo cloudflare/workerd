@@ -816,8 +816,8 @@ kj::Own<ReadableStreamSource> newReadableStreamSourceFromBytes(
   }
 
   auto backing = kj::heapArray<kj::byte>(bytes);
-  auto inner = newMemoryInputStream(backing.asPtr());
-  return newReadableStreamSource(inner.attach(kj::mv(backing)));
+  auto inner = newMemoryInputStream(backing.asPtr(), kj::heap(kj::mv(backing)));
+  return newReadableStreamSource(kj::mv(inner));
 }
 
 kj::Own<ReadableStreamSource> newIoContextWrappedReadableStreamSource(
