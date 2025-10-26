@@ -493,8 +493,7 @@ RowCounts countRowsTouched(SqliteDatabase& db,
 
 template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
-  return countRowsTouched(
-      db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, kj::fwd<Params>(bindParams)...);
 }
 
 KJ_TEST("SQLite read row counters (basic)") {

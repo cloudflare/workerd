@@ -474,8 +474,6 @@ static constexpr PragmaInfo ALLOWED_PRAGMAS[] = {{"data_version"_kj, PragmaSigna
 
 SqliteObserver SqliteObserver::DEFAULT = SqliteObserver{};
 
-constexpr SqliteDatabase::Regulator SqliteDatabase::TRUSTED;
-
 SqliteDatabase::SqliteDatabase(const Vfs& vfs,
     kj::Path path,
     kj::Maybe<kj::WriteMode> maybeMode,

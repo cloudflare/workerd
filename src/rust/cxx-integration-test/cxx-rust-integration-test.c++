@@ -1,12 +1,12 @@
 #include <workerd/rust/cxx-integration-test/lib.rs.h>
 #include <workerd/rust/cxx-integration/lib.rs.h>
 
+#include <kj-rs/kj-rs.h>
 #include <rust/cxx.h>
 #include <signal.h>
 
 #include <kj/async.h>
 #include <kj/test.h>
-#include <kj-rs/kj-rs.h>
 
 using namespace kj_rs;
 
