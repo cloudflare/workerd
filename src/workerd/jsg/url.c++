@@ -314,13 +314,13 @@ void Url::setHash(kj::Maybe<kj::ArrayPtr<const char>> value) {
 }
 
 Url::SchemeType Url::getSchemeType() const {
-  uint8_t value = ada_get_scheme_type(const_cast<void*>(getInner<ada_url>(inner)));
+  uint8_t value = ada_get_scheme_type(getInner<ada_url>(inner));
   KJ_REQUIRE(value <= static_cast<uint8_t>(SchemeType::FILE));
   return static_cast<SchemeType>(value);
 }
 
 Url::HostType Url::getHostType() const {
-  uint8_t value = ada_get_host_type(const_cast<void*>(getInner<ada_url>(inner)));
+  uint8_t value = ada_get_host_type(getInner<ada_url>(inner));
   KJ_REQUIRE(value <= static_cast<uint8_t>(HostType::IPV6));
   return static_cast<HostType>(value);
 }

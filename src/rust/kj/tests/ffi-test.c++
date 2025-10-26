@@ -8,10 +8,10 @@
 #include <kj-rs/kj-rs.h>
 
 #include <kj/test.h>
+
 #include <cmath>
 
 using namespace kj_rs;
-
 
 static kj::StringPtr tlsHost;
 
@@ -28,8 +28,8 @@ class MockHttpService: public kj::HttpService {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
-        KJ_UNIMPLEMENTED("not exercised by test");
-      }
+    KJ_UNIMPLEMENTED("not exercised by test");
+  }
 
   kj::Promise<void> connect(kj::StringPtr host,
       const kj::HttpHeaders& headers,
@@ -55,8 +55,8 @@ class TestConnectResponse: public kj::HttpService::ConnectResponse {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
-        KJ_UNIMPLEMENTED("not exercised by test");
-      }
+    KJ_UNIMPLEMENTED("not exercised by test");
+  }
 };
 
 KJ_TEST("http connect settings") {
@@ -82,6 +82,6 @@ KJ_TEST("http connect settings") {
   settings.tls_starter = tlsStarter;
 
   auto promise = proxy->connect(host.asBytes().as<Rust>(), headers, connection, tunnel, settings);
-  KJ_ASSERT_NONNULL(*tlsStarter)(host).wait(waitScope);
+  KJ_ASSERT_NONNULL (*tlsStarter)(host).wait(waitScope);
   KJ_EXPECT(tlsHost == host);
 }

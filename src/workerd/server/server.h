@@ -287,8 +287,4 @@ class Server final: private kj::TaskSet::ErrorHandler {
   friend struct FutureActorClassChannel;
 };
 
-// An ActorStorage implementation which will always respond to reads as if the state is empty,
-// and will fail any writes.
-kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
-
 }  // namespace workerd::server

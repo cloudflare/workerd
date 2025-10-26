@@ -350,8 +350,8 @@ class WorkerdApi final: public Worker::Api {
 
 kj::Array<kj::String> getPythonRequirements(const Worker::Script::ModulesSource& source);
 
-// Helper method for defining actor storage server treating all reads as empty, defined here to be
-// used by test-fixture and server.
+// An ActorStorage implementation which will always respond to reads as if the state is empty,
+// and will fail any writes. Defined here to be used by test-fixture and server.
 kj::Own<rpc::ActorStorage::Stage::Server> newEmptyReadOnlyActorStorage();
 
 }  // namespace workerd::server

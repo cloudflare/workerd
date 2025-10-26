@@ -9,7 +9,8 @@
 #include <kj/compat/http.h>
 
 static_assert(sizeof(kj::rust::HttpConnectSettings) == 16, "HttpConnectSettings size mismatch");
-static_assert(alignof(kj::rust::HttpConnectSettings) == alignof(uint64_t), "HttpConnectSettings alignment mismatch");
+static_assert(alignof(kj::rust::HttpConnectSettings) == alignof(uint64_t),
+    "HttpConnectSettings alignment mismatch");
 
 namespace kj::rust {
 kj::Promise<void> connect(HttpService& service,

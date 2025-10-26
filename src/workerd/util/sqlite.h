@@ -715,7 +715,7 @@ class SqliteDatabase::Query final: private ResetListener {
   template <typename... T, size_t... i>
   void bindAll(std::index_sequence<i...>, T&&... value) {
     checkRequirements(sizeof...(T));
-    (bind(i, value), ...);
+    (bind(i, kj::fwd<T>(value)), ...);
     nextRow(/*first=*/true);
   }
 

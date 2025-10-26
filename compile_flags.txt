@@ -16,6 +16,8 @@
 -Iexternal/ncrypto/include
 -isystembazel-bin/external/sqlite3
 -Isrc
+-isystem/usr/lib/llvm-21/include/c++/v1
+-isystem/usr/lib/llvm-21/lib/clang/21/include
 -isystem/usr/lib/llvm-20/include/c++/v1
 -isystem/usr/lib/llvm-20/lib/clang/20/include
 -isystem/usr/lib/llvm-19/include/c++/v1
@@ -137,3 +139,13 @@
 -Wunused-variable
 -no-canonical-prefixes
 -fbracket-depth=512
+-D___COMMENT_0___="include paths needed while bzlmod and WORKSPACE are used together resulting in mangled path names, can drop after bzlmod transition is complete"
+-Iexternal/+_repo_rules2+simdutf/
+-Iexternal/+_repo_rules+nbytes/include/
+-Iexternal/+_repo_rules+ncrypto/include
+-Iexternal/workerd-google-benchmark++_repo_rules+codspeed/google_benchmark/include/
+-Iexternal/perfetto+/include/
+-Iexternal/perfetto+/include/perfetto/base/build_configs/bazel/
+-Ibazel-bin/external/perfetto+/
+-isystemexternal/+_repo_rules2+com_googlesource_chromium_icu/source/common
+-isystemexternal/+_repo_rules+v8/include

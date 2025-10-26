@@ -16,6 +16,7 @@ Checks: >
   misc-unused-alias-decls,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
+  modernize-type-traits,
   modernize-unary-static-assert,
   modernize-use-bool-literals,
   performance-for-range-copy,
@@ -23,18 +24,23 @@ Checks: >
   readability-container-contains,
   readability-duplicate-include,
   readability-redundant-access-specifiers,
+  readability-redundant-casting,
+  readability-redundant-declaration,
   readability-static-accessed-through-instance
 
-# TODO: Fix and re-enable
+# TODO: Fix and enable
+# bugprone-parent-virtual-call
 # bugprone-return-const-ref-from-parameter
-# modernize-type-traits
+# cppcoreguidelines-missing-std-forward
 # modernize-use-override
-# readability-redundant-casting
+# readability-avoid-const-params-in-decls
 
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/workerd/.*'
+HeaderFilterRegex: '.*src/workerd/.*'
 
 CheckOptions:
   # JSG has very entrenched include cycles
   - key: misc-header-include-cycle.IgnoredFilesList
     value: "jsg/jsg.h|jsg/dom-exception.h"
+  - key: cppcoreguidelines-missing-std-forward.ForwardFunction
+    value: "kj::fwd"
