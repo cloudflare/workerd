@@ -44,9 +44,9 @@ rust_library(
     deps = [
         "@crates_vendor__bumpalo-3.19.0//:bumpalo",
         "@crates_vendor__log-0.4.28//:log",
-        "@crates_vendor__proc-macro2-1.0.101//:proc_macro2",
+        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
         "@crates_vendor__quote-1.0.41//:quote",
-        "@crates_vendor__syn-2.0.107//:syn",
+        "@crates_vendor__syn-2.0.108//:syn",
         "@crates_vendor__wasm-bindgen-shared-0.2.104//:wasm_bindgen_shared",
     ],
 )

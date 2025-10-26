@@ -43,7 +43,7 @@ rust_library(
     ],
     version = "0.2.104",
     deps = [
-        "@crates_vendor__unicode-ident-1.0.19//:unicode_ident",
+        "@crates_vendor__unicode-ident-1.0.20//:unicode_ident",
         "@crates_vendor__wasm-bindgen-shared-0.2.104//:build_script_build",
     ],
 )
