@@ -9,7 +9,9 @@ build:ci --verbose_failures
 # increasing this closer towards the suggested value of 200. Note the number of maximum build jobs
 # is controlled by the --local_resources=cpu flag and still limited to the number of cores by
 # default.
-build:ci --jobs=32
+# TODO (build perf): Temporarily setting this to 16, that might help with CI freezing on macOS
+# release jobs?
+build:ci --jobs=16
 # Do not check for changes in external repository files, should speed up bazel invocations after the first one
 build:ci --noexperimental_check_external_repository_files
 # Only build runfile trees when needed. Runfile trees are useful for directly invoking bazel-built
@@ -23,6 +25,9 @@ build:ci --color=yes
 # Indicate support for more terminal columns, 100 is the line length recommended by KJ style.
 build:ci --terminal_columns=100
 
+# Emit build profile so that slow builds can be investigated
+build:ci --profile build.bazel-profile.gz
+test:ci --profile test.bazel-profile.gz
 test:ci --test_output=errors --test_summary=terse
 build:ci --disk_cache=~/bazel-disk-cache
 

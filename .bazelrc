@@ -30,8 +30,8 @@ build --incompatible_autoload_externally="+py_binary,+py_library,+ProtoInfo,+sh_
 # Import CI-specific configuration. As the amount of custom configuration settings we use grows,
 # consider moving more flags out to separate files.
 import %workspace%/build/ci.bazelrc
-
 import %workspace%/build/rust_lint.bazelrc
+import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 
 # Prevents bazel cache invalidation when switching terminals
 build --incompatible_strict_action_env
@@ -89,11 +89,6 @@ build:windows --per_file_copt=external/simdutf@/clang:-fno-exceptions
 # V8 torque is an exception from this policy, see v8 BUILD.gn.
 build:unix --per_file_copt=external/v8/src/torque@-fexceptions
 build:windows --per_file_copt=external/v8/src/torque@/clang:-fexceptions
-
-# Disable relaxing all jumps during LLVM codegen under -O0, which previously led to build
-# performance improvements but makes code size worse. This will be the default in LLVM19.
-# https://maskray.me/blog/2024-04-27-clang-o0-output-branch-displacement-and-size-increase
-build:unix --copt="-mno-relax-all" --host_copt="-mno-relax-all"
 
 # Limit transitive header includes within libc++. This improves compliance with IWYU, helps avoid
 # errors with downstream projects that implicitly define this already and reduces total include size.

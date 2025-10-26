@@ -30,9 +30,7 @@ def wd_cc_binary(
             "//conditions:default": [],
         }),
         visibility = visibility,
-        deps = deps + [
-            "//deps/rust:runtime",
-        ],
+        deps = deps,
         **kwargs
     )
 

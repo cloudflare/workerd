@@ -108,6 +108,7 @@ wpt_test(
 wpt_test(
     name = "streams",
     size = "large",
+    compat_flags = ["enable_fast_jsg_struct"],
     config = "streams-test.ts",
     wpt_directory = "@wpt//:streams@module",
 )

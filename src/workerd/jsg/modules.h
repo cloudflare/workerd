@@ -7,7 +7,6 @@
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/modules.capnp.h>
 #include <workerd/jsg/observer.h>
-#include <workerd/jsg/promise.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -17,6 +16,9 @@
 #include <kj/map.h>
 
 namespace workerd::jsg {
+
+template <typename T>
+class Promise;
 
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause

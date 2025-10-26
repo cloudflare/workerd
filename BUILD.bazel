@@ -1,3 +1,4 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_js//npm:defs.bzl", "npm_link_package")
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
@@ -21,7 +22,16 @@ wd_cc_embed(
 alias(
     name = "v8_icu",
     actual = "@v8//:v8_icu",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
+)
+
+# For convenience, less typing than the full label:
+# (assuming working directory is the root of the repository)
+#   bazel run format
+alias(
+    name = "format",
+    actual = "//build/deps/formatters:format",
 )
 
 npm_link_all_packages(name = "node_modules")
@@ -42,6 +52,12 @@ capnp_es_bins.capnpc_js_binary(
 capnp_es_bins.capnpc_ts_binary(
     name = "capnpc_ts_plugin",
     visibility = ["//visibility:public"],
+)
+
+js_library(
+    name = "prettierrc",
+    srcs = [":.prettierrc.json"],
+    visibility = ["//build/deps/formatters:__pkg__"],
 )
 
 # Platform definition for using clang-cl on Windows
@@ -106,4 +122,11 @@ selects.config_setting_group(
         ":set_dead_strip",
         ":not_dbg_build",
     ],
+)
+
+# Clang-tidy config to use
+label_flag(
+    name = "clang_tidy_config",
+    build_setting_default = ":.clang-tidy",
+    visibility = ["//visibility:public"],
 )

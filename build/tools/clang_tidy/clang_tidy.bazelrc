@@ -1,0 +1,5 @@
+# enable clang tidy checks with default configuration
+build:clang-tidy --aspects //build/tools/clang_tidy:clang_tidy.bzl%clang_tidy_aspect --output_groups=+clang_tidy_checks
+
+# enable clang tidy check with all issues reported as warnings
+build:clang-tidy-warnings --config=clang-tidy --aspects_parameters=clang_tidy_args=--warnings-as-errors=-*

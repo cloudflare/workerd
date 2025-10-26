@@ -14,7 +14,7 @@ use crate::io::AsyncIoStream;
 #[cxx::bridge(namespace = "kj::rust")]
 #[expect(clippy::missing_panics_doc)]
 #[expect(clippy::missing_safety_doc)]
-#[expect(clippy::needless_lifetimes)]
+#[expect(clippy::elidable_lifetime_names)]
 pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");

@@ -7,7 +7,7 @@ wd_test(
     data = glob(
         ["*.js"],
         exclude = ["d1-api-test-with-sessions.js"],
-    ),
+    ) + ["//src/cloudflare/internal/test:instrumentation-test-helper.js"],
 )
 
 wd_test(
@@ -25,4 +25,5 @@ py_wd_test(
         "*.js",
     ]),
     make_snapshot = False,
+    use_snapshot = None,
 )

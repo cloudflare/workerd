@@ -468,6 +468,7 @@ struct BuildRtti<Configuration, v8::Promise> {
   };
 
 #define FOR_EACH_BUILTIN_TYPE(F, ...)                                                              \
+  F(jsg::JsUint8Array, BuiltinType::Type::V8_UINT8_ARRAY)                                          \
   F(jsg::BufferSource, BuiltinType::Type::JSG_BUFFER_SOURCE)                                       \
   F(kj::Date, BuiltinType::Type::KJ_DATE)                                                          \
   F(v8::ArrayBufferView, BuiltinType::Type::V8_ARRAY_BUFFER_VIEW)                                  \

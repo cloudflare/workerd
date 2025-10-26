@@ -14,6 +14,8 @@
 #include <workerd/jsg/memory.h>
 #include <workerd/jsg/meta.h>
 #include <workerd/jsg/modules.capnp.h>
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
 #include <workerd/jsg/wrappable.h>

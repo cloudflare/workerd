@@ -25,6 +25,8 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
       return "streaming-tail-worker"_kj;
     case AutogateKey::TAIL_STREAM_REFACTOR:
       return "tail-stream-refactor"_kj;
+    case AutogateKey::WEBSOCKET_MAX_MESSAGE_SIZE_32M:
+      return "websocket-max-message-size-32m"_kj;
     case AutogateKey::NumOfKeys:
       KJ_FAIL_ASSERT("NumOfKeys should not be used in getName");
   }

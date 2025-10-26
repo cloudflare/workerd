@@ -298,7 +298,8 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     }
 
     Wrappable* wrappable = reinterpret_cast<Wrappable*>(
-        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+        object->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+            static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
 
     // HACK: Although we don't technically know yet that `wrappable` is an `Object`, we know that
     //   only subclasses of `Object` register serializers. So *if* a serializer is found, then this

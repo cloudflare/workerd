@@ -186,13 +186,11 @@ class LazyWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    throwIfInvalidHeaderValue(headers);
     ensureResolve();
     KJ_IF_SOME(w, worker) {
       co_await w->request(method, url, headers, requestBody, response);
     } else {
       co_await KJ_ASSERT_NONNULL(promise);
-      throwIfInvalidHeaderValue(headers);
       co_await KJ_ASSERT_NONNULL(worker)->request(method, url, headers, requestBody, response);
     }
   }

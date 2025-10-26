@@ -123,6 +123,7 @@ void requireValidHeaderValue(kj::StringPtr value) {
 Request::CacheMode getCacheModeFromName(kj::StringPtr value) {
   if (value == "no-store") return Request::CacheMode::NOSTORE;
   if (value == "no-cache") return Request::CacheMode::NOCACHE;
+  if (value == "reload") return Request::CacheMode::RELOAD;
   JSG_FAIL_REQUIRE(TypeError, kj::str("Unsupported cache mode: ", value));
 }
 
@@ -134,6 +135,8 @@ jsg::Optional<kj::StringPtr> getCacheModeName(Request::CacheMode mode) {
       return "no-cache"_kj;
     case (Request::CacheMode::NOSTORE):
       return "no-store"_kj;
+    case (Request::CacheMode::RELOAD):
+      return "reload"_kj;
   }
   KJ_UNREACHABLE;
 }
@@ -160,8 +163,6 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 }
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
-  // TODO(soon): Remove this. Throw if the any header values are invalid.
-  throwIfInvalidHeaderValue(other);
   other.forEach([this, &js](auto name, auto value) {
     append(js, jsg::ByteString(kj::str(name)), jsg::ByteString(kj::str(value)));
   });
@@ -1241,19 +1242,20 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   }
   auto obj = KJ_ASSERT_NONNULL(clone.get(js));
 
-  int ttl = 2;
+  constexpr int NOCACHE_TTL = -1;
   switch (cacheMode) {
     case CacheMode::NOSTORE:
-      ttl = -1;
-      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
       if (obj.has(js, "cacheTtl")) {
         jsg::JsValue oldTtl = obj.get(js, "cacheTtl");
-        JSG_REQUIRE(oldTtl == js.num(ttl), TypeError,
+        JSG_REQUIRE(oldTtl == js.num(NOCACHE_TTL), TypeError,
             kj::str("CacheTtl: ", oldTtl, ", is not compatible with cache: ",
                 getCacheModeName(cacheMode).orDefault("none"_kj), " header."));
       } else {
-        obj.set(js, "cacheTtl", js.num(ttl));
+        obj.set(js, "cacheTtl", js.num(NOCACHE_TTL));
       }
+      KJ_FALLTHROUGH;
+    case CacheMode::RELOAD:
+      obj.set(js, "cacheLevel", js.str("bypass"_kjc));
       break;
     case CacheMode::NOCACHE:
       obj.set(js, "cacheForceRevalidate", js.boolean(true));
@@ -1274,10 +1276,12 @@ void RequestInitializerDict::validate(jsg::Lock& js) {
     // Validate that the cache type is valid
     auto cacheMode = getCacheModeFromName(c);
 
-    if (!FeatureFlags::get(js).getCacheNoCache()) {
-      JSG_REQUIRE(cacheMode != Request::CacheMode::NOCACHE, TypeError,
-          kj::str("Unsupported cache mode: ", c));
-    }
+    bool invalidNoCache =
+        !FeatureFlags::get(js).getCacheNoCache() && (cacheMode == Request::CacheMode::NOCACHE);
+    bool invalidReload =
+        !FeatureFlags::get(js).getCacheReload() && (cacheMode == Request::CacheMode::RELOAD);
+    JSG_REQUIRE(
+        !invalidNoCache && !invalidReload, TypeError, kj::str("Unsupported cache mode: ", c));
   }
 
   KJ_IF_SOME(e, encodeResponseBody) {
@@ -1422,7 +1426,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
       KJ_IF_SOME(initHeaders, initDict.headers) {
         headers = Headers::constructor(js, kj::mv(initHeaders));
       } else {
-        headers = js.alloc<Headers>(js, jsg::Dict<jsg::ByteString, jsg::ByteString>());
+        headers = js.alloc<Headers>();
       }
 
       KJ_IF_SOME(newCf, initDict.cf) {
@@ -1532,7 +1536,7 @@ jsg::Ref<Response> Response::redirect(jsg::Lock& js, kj::String url, jsg::Option
     parsedUrl = kj::str(parsed.getHref());
   } else {
     auto urlOptions = kj::Url::Options{.percentDecode = false, .allowEmpty = true};
-    auto maybeParsedUrl = kj::Url::tryParse(kj::str(url), kj::Url::REMOTE_HREF, urlOptions);
+    auto maybeParsedUrl = kj::Url::tryParse(url.asPtr(), kj::Url::REMOTE_HREF, urlOptions);
     if (maybeParsedUrl == kj::none) {
       JSG_FAIL_REQUIRE(TypeError, kj::str("Unable to parse URL: ", url));
     }
@@ -1560,8 +1564,8 @@ jsg::Ref<Response> Response::json_(
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasLowerCase("content-type"_kj)) {
-      headers->set(js, jsg::ByteString(kj::str("content-type")),
-          jsg::ByteString(MimeType::JSON.toString()));
+      headers->setUnguarded(js, jsg::ByteString(kj::str("content-type")),
+        jsg::ByteString(MimeType::JSON.toString()));
     }
     return kj::mv(headers);
   };
@@ -1901,11 +1905,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
   jsRequest->shallowCopyHeadersTo(headers);
 
   // If the jsRequest has a CacheMode, we need to handle that here.
-  // Currently, the only cache mode we support is undefined and no-store (behind an autogate),
-  // but we will soon support no-cache.
+  // Currently, the only cache mode we support is undefined and no-store, no-cache, and reload
   auto headerIds = ioContext.getHeaderIds();
   const auto cacheMode = jsRequest->getCacheMode();
   switch (cacheMode) {
+    case Request::CacheMode::RELOAD:
+      KJ_FALLTHROUGH;
     case Request::CacheMode::NOSTORE:
       KJ_FALLTHROUGH;
     case Request::CacheMode::NOCACHE:
@@ -2012,6 +2017,12 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
         // We'd like to avoid this weird discontinuity, so let's set Content-Length explicitly to
         // 0.
         headers.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
+      }
+
+      KJ_IF_SOME(ctx, traceContext) {
+        KJ_IF_SOME(cfRay, headers.get(headerIds.cfRay)) {
+          ctx.userSpan.setTag("cloudflare.ray_id"_kjc, kj::str(cfRay));
+        }
       }
 
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);

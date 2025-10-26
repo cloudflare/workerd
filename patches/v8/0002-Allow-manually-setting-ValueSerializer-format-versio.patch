@@ -23,10 +23,10 @@ index 40ad805c7970cc9379e69f046205836dbd760373..596be18adeb3a5a81794aaa44b1d347d
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 42e5379a07826371a40c99b81dd1e5fbd23abdb4..5878974fb70297c2aef4a5d28740058e468b947a 100644
+index d1c3ebbf696d51d2ad8f37324f8c5eeb6d84166d..07291df51d7344b47a9ba6909048c0a844cd157c 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3344,6 +3344,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
+@@ -3348,6 +3348,10 @@ ValueSerializer::ValueSerializer(Isolate* v8_isolate, Delegate* delegate)
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  

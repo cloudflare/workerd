@@ -86,6 +86,7 @@ def _make_bundle_version_info(versions):
         name = entry["name"]
         if name != "development":
             entry["id"] = _bundle_id(**entry)
+            entry["real_pyodide_version"] = entry["pyodide_version"]
         entry["feature_flags"] = [entry["flag"]]
         entry["feature_string_flags"] = [entry["enable_flag_name"]]
         if "packages" in entry:
@@ -109,8 +110,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.26.0a2",
         "pyodide_date": "2024-03-01",
         "packages": PACKAGES_20240829_4,
-        "backport": "63",
-        "integrity": "sha256-xrG65VJvao9GYH07C73Uq2jA9DW7O1DP16fiZo36Xq0=",
+        "backport": "75",
+        "integrity": "sha256-E1OCAgukWZU6gchqkxgYlvMSieJ8xz6aPFhN/KeqhTw=",
         "flag": "pythonWorkers",
         "enable_flag_name": "python_workers",
         "emscripten_version": "3.1.52",
@@ -134,6 +135,16 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "abi": "3.12",
                 "sha256": "5e6e21dbeda7c1eaadb99e6e52aa2ce45325b51e9a417198701e68e0cfd12a4c",
             },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+            },
+            {
+                "name": "scipy",
+                "abi": "3.12",
+                "sha256": "787e45be6969a5609093b3df9cc2dba2afec9e10bace977f5045697cc329aa7c",
+            },
         ],
     },
     {
@@ -141,8 +152,8 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         "pyodide_version": "0.28.2",
         "pyodide_date": "2025-01-16",
         "packages": PACKAGES_20250808,
-        "backport": "3",
-        "integrity": "sha256-SCMwCLKzdE65vBQmdeUPs1enbE8TzOu57LBupZzwJY4=",
+        "backport": "6",
+        "integrity": "sha256-bsCa4xEXjgtTDJu7h28GzjJEGqCVawPMqlQqkauCVp8=",
         "flag": "pythonWorkers20250116",
         "enable_flag_name": "python_workers_20250116",
         "emscripten_version": "4.0.9",
@@ -164,6 +175,21 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
                 "name": "fastapi",
                 "abi": "3.13",
                 "sha256": "955091f1bd2eb33255ff2633df990bedc96e2f6294e78f2b416078777394f942",
+            },
+            {
+                "name": "python-workers-runtime-sdk",
+                "abi": None,
+                "sha256": "fc4fb50f73973c257277155b3cb113aa2cf68e9da8ef424ecb049b41bc463183",
+            },
+            # {
+            #     "name": "scipy",
+            #     "abi": "3.13",
+            #     "sha256": "4f1b6fc179bd5c6d3de68abc4aa9fca2aaecd09c5c8d357c2ecfedce7d621f3d",
+            # },
+            {
+                "name": "shapely",
+                "abi": "3.13",
+                "sha256": "2e5c462cb32ee8697b3647dfc9d5c88dcdfd0702da34a2d7dc6b07b8090dd321",
             },
         ],
     },

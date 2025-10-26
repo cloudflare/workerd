@@ -8,7 +8,7 @@
       "formatter": {
         "external": {
           "command": "bazel-bin/build/deps/formatters/clang-format",
-          "args": ["-i", "{buffer_path}"]
+          "arguments": ["-i", "{buffer_path}"]
         }
       }
     },
@@ -41,7 +41,8 @@
           "--header-insertion=never",
           "--query-driver=**",
           "--clang-tidy"
-        ]
+        ],
+        "path": "/bin/clangd-19"
       }
     },
     "rust-analyzer": {

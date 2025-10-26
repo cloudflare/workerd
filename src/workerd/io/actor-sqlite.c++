@@ -784,8 +784,10 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::onNoPendingFlush() {
   //
   // sync() should wait for ALL writes (both confirmed and unconfirmed) that are outstanding at the
   // time sync() is called. We use lastCommit which keeps track of the most recent commit to be
-  // formed.
-  return lastCommit.addBranch();
+  // formed. We join with the outputGate because there are a lot of edge cases where we break the
+  // output gate and it's easiest to catch all of those instances here rather than updating
+  // everything to also break lastCommit.
+  return kj::joinPromisesFailFast(kj::arr(lastCommit.addBranch(), outputGate.wait()));
 }
 
 kj::Promise<kj::String> ActorSqlite::getCurrentBookmark() {

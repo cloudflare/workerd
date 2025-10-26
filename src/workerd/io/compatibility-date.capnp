@@ -634,7 +634,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # correctly. The fix, however, can break existing implementations that don't account
   # for the bug so we need to put the fix behind a compat flag.
 
-  # Experimental support for exporting user spans to tail worker.
   obsolete69 @69 :Bool
       $compatEnableFlag("tail_worker_user_spans")
       $experimental;
@@ -1188,4 +1187,31 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableCtxExports @139 :Bool
     $compatEnableFlag("enable_ctx_exports");
   # Enable the ctx.exports API.
+
+  pythonExternalSDK @140 :Bool
+    $compatEnableFlag("enable_python_external_sdk")
+    $compatDisableFlag("disable_python_external_sdk")
+    $experimental;
+  # Don't include the Python sdk from the runtime, use a vendored copy.
+
+  fastJsgStruct @141 :Bool
+    $compatEnableFlag("enable_fast_jsg_struct")
+    $compatDisableFlag("disable_fast_jsg_struct");
+  # Enables the fast jsg::Struct optimization. With this enabled, JSG_STRUCTS
+  # will use a more efficient creation pattern that reduces construction time.
+  # However, optional fields will be explicitly set to undefined rather than
+  # being omitted, which is an observable behavior change.
+  # TODO(soon): Once proven in production, add a default on date
+
+  cacheReload @142 :Bool
+      $compatEnableFlag("cache_reload_enabled")
+      $compatDisableFlag("cache_reload_disabled")
+      $experimental;
+  # Enables the use of cache: reload in the fetch api.
+
+  streamsNodejsV24Compat @143 :Bool
+    $compatEnableFlag("enable_streams_nodejs_v24_compat")
+    $compatDisableFlag("disable_streams_nodejs_v24_compat")
+    $impliedByAfterDate(name = "nodeJsCompat", date = "2025-11-15");
+  # Enables breaking changes to Node.js streams done with the release of Node.js v24.
 }

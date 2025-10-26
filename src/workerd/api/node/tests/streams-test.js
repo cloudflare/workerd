@@ -1,16 +1,7 @@
 import {
-  deepEqual,
   deepStrictEqual,
-  doesNotMatch,
-  doesNotReject,
-  doesNotThrow,
-  equal,
   fail,
   ifError,
-  match,
-  notDeepEqual,
-  notDeepStrictEqual,
-  notEqual,
   notStrictEqual,
   ok,
   rejects,
@@ -6075,7 +6066,7 @@ export const writable_end_cb_error = {
       const finishCalled = Promise.withResolvers();
       writable.end('asd', (err) => {
         called = true;
-        strictEqual(err, undefined);
+        strictEqual(err, null);
         endCalled.resolve();
       });
       writable.on('error', (err) => {
@@ -7203,7 +7194,7 @@ export const uint8array = {
           ok(!(chunk instanceof Buffer));
           ok(chunk instanceof Uint8Array);
           strictEqual(chunk, ABC);
-          strictEqual(encoding, 'utf8');
+          strictEqual(encoding, undefined);
           cb();
           writeCalled.resolve();
         },

@@ -298,19 +298,20 @@ _NORMAL_DEPENDENCIES = {
         _COMMON_CONDITION: {
             "ada-url": Label("@crates_vendor//:ada-url-3.3.0"),
             "anyhow": Label("@crates_vendor//:anyhow-1.0.100"),
-            "capnp": Label("@crates_vendor//:capnp-0.21.6"),
+            "capnp": Label("@crates_vendor//:capnp-0.21.7"),
+            "capnp-rpc": Label("@crates_vendor//:capnp-rpc-0.21.0"),
             "capnpc": Label("@crates_vendor//:capnpc-0.21.4"),
-            "cc": Label("@crates_vendor//:cc-1.2.41"),
+            "cc": Label("@crates_vendor//:cc-1.2.43"),
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.35"),
-            "clap": Label("@crates_vendor//:clap-4.5.48"),
+            "clap": Label("@crates_vendor//:clap-4.5.50"),
             "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
-            "flate2": Label("@crates_vendor//:flate2-1.1.4"),
+            "flate2": Label("@crates_vendor//:flate2-1.1.5"),
             "foldhash": Label("@crates_vendor//:foldhash-0.2.0"),
             "futures": Label("@crates_vendor//:futures-0.3.31"),
             "lol_html_c_api": Label("@crates_vendor//:lol_html_c_api-1.3.0"),
             "nix": Label("@crates_vendor//:nix-0.30.1"),
             "pico-args": Label("@crates_vendor//:pico-args-0.5.0"),
-            "proc-macro2": Label("@crates_vendor//:proc-macro2-1.0.101"),
+            "proc-macro2": Label("@crates_vendor//:proc-macro2-1.0.103"),
             "quote": Label("@crates_vendor//:quote-1.0.41"),
             "ruff_python_ast": Label("@crates_vendor//:ruff_python_ast-0.0.0"),
             "ruff_python_parser": Label("@crates_vendor//:ruff_python_parser-0.0.0"),
@@ -320,9 +321,9 @@ _NORMAL_DEPENDENCIES = {
             "static_assertions": Label("@crates_vendor//:static_assertions-1.1.0"),
             "swc_core": Label("@crates_vendor//:swc_core-35.0.0"),
             "swc_ts_fast_strip": Label("@crates_vendor//:swc_ts_fast_strip-29.0.0"),
-            "syn": Label("@crates_vendor//:syn-2.0.106"),
+            "syn": Label("@crates_vendor//:syn-2.0.108"),
             "thiserror": Label("@crates_vendor//:thiserror-2.0.17"),
-            "tokio": Label("@crates_vendor//:tokio-1.47.1"),
+            "tokio": Label("@crates_vendor//:tokio-1.48.0"),
             "tracing": Label("@crates_vendor//:tracing-0.1.41"),
         },
     },
@@ -406,7 +407,6 @@ _CONDITIONS = {
     "cfg(all(target_arch = \"x86\", target_env = \"msvc\", not(windows_raw_dylib)))": [],
     "cfg(all(target_arch = \"x86_64\", target_env = \"gnu\", not(target_abi = \"llvm\"), not(windows_raw_dylib)))": ["@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(all(target_os = \"uefi\", getrandom_backend = \"efi_rng\"))": [],
-    "cfg(all(tokio_uring, target_os = \"linux\"))": [],
     "cfg(all(windows, not(target_arch = \"arm64ec\")))": ["@rules_rust//rust/platform:x86_64-pc-windows-msvc"],
     "cfg(any())": [],
     "cfg(any(target_arch = \"aarch64\", target_arch = \"x86\", target_arch = \"x86_64\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-pc-windows-msvc", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
@@ -414,18 +414,16 @@ _CONDITIONS = {
     "cfg(any(target_os = \"haiku\", target_os = \"redox\", target_os = \"nto\", target_os = \"aix\"))": [],
     "cfg(any(target_os = \"ios\", target_os = \"visionos\", target_os = \"watchos\", target_os = \"tvos\"))": [],
     "cfg(any(target_os = \"macos\", target_os = \"openbsd\", target_os = \"vita\", target_os = \"emscripten\"))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:x86_64-apple-darwin"],
-    "cfg(any(windows, target_os = \"cygwin\"))": ["@rules_rust//rust/platform:x86_64-pc-windows-msvc"],
     "cfg(not(all(target_arch = \"arm\", target_os = \"none\")))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-pc-windows-msvc", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
-    "cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(not(windows))": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(target_os = \"hermit\")": [],
     "cfg(target_os = \"netbsd\")": [],
     "cfg(target_os = \"solaris\")": [],
     "cfg(target_os = \"vxworks\")": [],
     "cfg(target_os = \"wasi\")": [],
-    "cfg(tokio_taskdump)": [],
     "cfg(unix)": ["@rules_rust//rust/platform:aarch64-apple-darwin", "@rules_rust//rust/platform:aarch64-unknown-linux-gnu", "@rules_rust//rust/platform:x86_64-apple-darwin", "@rules_rust//rust/platform:x86_64-unknown-linux-gnu"],
     "cfg(windows)": ["@rules_rust//rust/platform:x86_64-pc-windows-msvc"],
+    "cfg(windows_raw_dylib)": [],
     "i686-pc-windows-gnullvm": [],
     "x86_64-apple-darwin": ["@rules_rust//rust/platform:x86_64-apple-darwin"],
     "x86_64-pc-windows-gnullvm": [],
@@ -449,16 +447,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/ada-url/3.3.0/download"],
         strip_prefix = "ada-url-3.3.0",
         build_file = Label("//deps/rust/crates:BUILD.ada-url-3.3.0.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__addr2line-0.25.1",
-        sha256 = "1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/addr2line/0.25.1/download"],
-        strip_prefix = "addr2line-0.25.1",
-        build_file = Label("//deps/rust/crates:BUILD.addr2line-0.25.1.bazel"),
     )
 
     maybe(
@@ -573,16 +561,6 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__backtrace-0.3.76",
-        sha256 = "bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/backtrace/0.3.76/download"],
-        strip_prefix = "backtrace-0.3.76",
-        build_file = Label("//deps/rust/crates:BUILD.backtrace-0.3.76.bazel"),
-    )
-
-    maybe(
-        http_archive,
         name = "crates_vendor__base64-0.22.1",
         sha256 = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
         type = "tar.gz",
@@ -613,12 +591,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__bitflags-2.9.4",
-        sha256 = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394",
+        name = "crates_vendor__bitflags-2.10.0",
+        sha256 = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/bitflags/2.9.4/download"],
-        strip_prefix = "bitflags-2.9.4",
-        build_file = Label("//deps/rust/crates:BUILD.bitflags-2.9.4.bazel"),
+        urls = ["https://static.crates.io/crates/bitflags/2.10.0/download"],
+        strip_prefix = "bitflags-2.10.0",
+        build_file = Label("//deps/rust/crates:BUILD.bitflags-2.10.0.bazel"),
     )
 
     maybe(
@@ -663,16 +641,6 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__byteorder-1.5.0",
-        sha256 = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/byteorder/1.5.0/download"],
-        strip_prefix = "byteorder-1.5.0",
-        build_file = Label("//deps/rust/crates:BUILD.byteorder-1.5.0.bazel"),
-    )
-
-    maybe(
-        http_archive,
         name = "crates_vendor__bytes-1.10.1",
         sha256 = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a",
         type = "tar.gz",
@@ -703,12 +671,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__capnp-0.21.6",
-        sha256 = "555e876488c4f7a00e205ecacab4159d47062852108702ae07afb7aa4674785b",
+        name = "crates_vendor__capnp-0.21.7",
+        sha256 = "4e92edec8974fcd7ece90bb021db782abe14a61c10c817f197f700fef7430eb8",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/capnp/0.21.6/download"],
-        strip_prefix = "capnp-0.21.6",
-        build_file = Label("//deps/rust/crates:BUILD.capnp-0.21.6.bazel"),
+        urls = ["https://static.crates.io/crates/capnp/0.21.7/download"],
+        strip_prefix = "capnp-0.21.7",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-0.21.7.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__capnp-futures-0.21.0",
+        sha256 = "d04478adeb234836f886ec554a0d96e3af3a939ba7b3962af5addddf7ab71231",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnp-futures/0.21.0/download"],
+        strip_prefix = "capnp-futures-0.21.0",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-futures-0.21.0.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__capnp-rpc-0.21.0",
+        sha256 = "85e9c19ef52ff1b9c9822fb21bfa68a72bc58711676295ff06eb88e64c7877f7",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/capnp-rpc/0.21.0/download"],
+        strip_prefix = "capnp-rpc-0.21.0",
+        build_file = Label("//deps/rust/crates:BUILD.capnp-rpc-0.21.0.bazel"),
     )
 
     maybe(
@@ -753,22 +741,22 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__cc-1.2.41",
-        sha256 = "ac9fe6cdbb24b6ade63616c0a0688e45bb56732262c158df3c0c4bea4ca47cb7",
+        name = "crates_vendor__cc-1.2.43",
+        sha256 = "739eb0f94557554b3ca9a86d2d37bebd49c5e6d0c1d2bda35ba5bdac830befc2",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/cc/1.2.41/download"],
-        strip_prefix = "cc-1.2.41",
-        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.41.bazel"),
+        urls = ["https://static.crates.io/crates/cc/1.2.43/download"],
+        strip_prefix = "cc-1.2.43",
+        build_file = Label("//deps/rust/crates:BUILD.cc-1.2.43.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__cfg-if-1.0.3",
-        sha256 = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9",
+        name = "crates_vendor__cfg-if-1.0.4",
+        sha256 = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/cfg-if/1.0.3/download"],
-        strip_prefix = "cfg-if-1.0.3",
-        build_file = Label("//deps/rust/crates:BUILD.cfg-if-1.0.3.bazel"),
+        urls = ["https://static.crates.io/crates/cfg-if/1.0.4/download"],
+        strip_prefix = "cfg-if-1.0.4",
+        build_file = Label("//deps/rust/crates:BUILD.cfg-if-1.0.4.bazel"),
     )
 
     maybe(
@@ -793,42 +781,42 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap-4.5.48",
-        sha256 = "e2134bb3ea021b78629caa971416385309e0131b351b25e01dc16fb54e1b5fae",
+        name = "crates_vendor__clap-4.5.50",
+        sha256 = "0c2cfd7bf8a6017ddaa4e32ffe7403d547790db06bd171c1c53926faab501623",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap/4.5.48/download"],
-        strip_prefix = "clap-4.5.48",
-        build_file = Label("//deps/rust/crates:BUILD.clap-4.5.48.bazel"),
+        urls = ["https://static.crates.io/crates/clap/4.5.50/download"],
+        strip_prefix = "clap-4.5.50",
+        build_file = Label("//deps/rust/crates:BUILD.clap-4.5.50.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap_builder-4.5.48",
-        sha256 = "c2ba64afa3c0a6df7fa517765e31314e983f51dda798ffba27b988194fb65dc9",
+        name = "crates_vendor__clap_builder-4.5.50",
+        sha256 = "0a4c05b9e80c5ccd3a7ef080ad7b6ba7d6fc00a985b8b157197075677c82c7a0",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap_builder/4.5.48/download"],
-        strip_prefix = "clap_builder-4.5.48",
-        build_file = Label("//deps/rust/crates:BUILD.clap_builder-4.5.48.bazel"),
+        urls = ["https://static.crates.io/crates/clap_builder/4.5.50/download"],
+        strip_prefix = "clap_builder-4.5.50",
+        build_file = Label("//deps/rust/crates:BUILD.clap_builder-4.5.50.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap_derive-4.5.47",
-        sha256 = "bbfd7eae0b0f1a6e63d4b13c9c478de77c2eb546fba158ad50b4203dc24b9f9c",
+        name = "crates_vendor__clap_derive-4.5.49",
+        sha256 = "2a0b5487afeab2deb2ff4e03a807ad1a03ac532ff5a2cee5d86884440c7f7671",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap_derive/4.5.47/download"],
-        strip_prefix = "clap_derive-4.5.47",
-        build_file = Label("//deps/rust/crates:BUILD.clap_derive-4.5.47.bazel"),
+        urls = ["https://static.crates.io/crates/clap_derive/4.5.49/download"],
+        strip_prefix = "clap_derive-4.5.49",
+        build_file = Label("//deps/rust/crates:BUILD.clap_derive-4.5.49.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__clap_lex-0.7.5",
-        sha256 = "b94f61472cee1439c0b966b47e3aca9ae07e45d070759512cd390ea2bebc6675",
+        name = "crates_vendor__clap_lex-0.7.6",
+        sha256 = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/clap_lex/0.7.5/download"],
-        strip_prefix = "clap_lex-0.7.5",
-        build_file = Label("//deps/rust/crates:BUILD.clap_lex-0.7.5.bazel"),
+        urls = ["https://static.crates.io/crates/clap_lex/0.7.6/download"],
+        strip_prefix = "clap_lex-0.7.6",
+        build_file = Label("//deps/rust/crates:BUILD.clap_lex-0.7.6.bazel"),
     )
 
     maybe(
@@ -1103,12 +1091,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__flate2-1.1.4",
-        sha256 = "dc5a4e564e38c699f2880d3fda590bedc2e69f3f84cd48b457bd892ce61d0aa9",
+        name = "crates_vendor__flate2-1.1.5",
+        sha256 = "bfe33edd8e85a12a67454e37f8c75e730830d83e313556ab9ebf9ee7fbeb3bfb",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/flate2/1.1.4/download"],
-        strip_prefix = "flate2-1.1.4",
-        build_file = Label("//deps/rust/crates:BUILD.flate2-1.1.4.bazel"),
+        urls = ["https://static.crates.io/crates/flate2/1.1.5/download"],
+        strip_prefix = "flate2-1.1.5",
+        build_file = Label("//deps/rust/crates:BUILD.flate2-1.1.5.bazel"),
     )
 
     maybe(
@@ -1119,16 +1107,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/fnv/1.0.7/download"],
         strip_prefix = "fnv-1.0.7",
         build_file = Label("//deps/rust/crates:BUILD.fnv-1.0.7.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__foldhash-0.1.5",
-        sha256 = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/foldhash/0.1.5/download"],
-        strip_prefix = "foldhash-0.1.5",
-        build_file = Label("//deps/rust/crates:BUILD.foldhash-0.1.5.bazel"),
     )
 
     maybe(
@@ -1263,22 +1241,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__fxhash-0.2.1",
-        sha256 = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c",
+        name = "crates_vendor__generic-array-0.14.9",
+        sha256 = "4bb6743198531e02858aeaea5398fcc883e71851fcbcb5a2f773e2fb6cb1edf2",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/fxhash/0.2.1/download"],
-        strip_prefix = "fxhash-0.2.1",
-        build_file = Label("//deps/rust/crates:BUILD.fxhash-0.2.1.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__generic-array-0.14.7",
-        sha256 = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/generic-array/0.14.7/download"],
-        strip_prefix = "generic-array-0.14.7",
-        build_file = Label("//deps/rust/crates:BUILD.generic-array-0.14.7.bazel"),
+        urls = ["https://static.crates.io/crates/generic-array/0.14.9/download"],
+        strip_prefix = "generic-array-0.14.9",
+        build_file = Label("//deps/rust/crates:BUILD.generic-array-0.14.9.bazel"),
     )
 
     maybe(
@@ -1303,22 +1271,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__getrandom-0.3.3",
-        sha256 = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4",
+        name = "crates_vendor__getrandom-0.3.4",
+        sha256 = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/getrandom/0.3.3/download"],
-        strip_prefix = "getrandom-0.3.3",
-        build_file = Label("//deps/rust/crates:BUILD.getrandom-0.3.3.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__gimli-0.32.3",
-        sha256 = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/gimli/0.32.3/download"],
-        strip_prefix = "gimli-0.32.3",
-        build_file = Label("//deps/rust/crates:BUILD.gimli-0.32.3.bazel"),
+        urls = ["https://static.crates.io/crates/getrandom/0.3.4/download"],
+        strip_prefix = "getrandom-0.3.4",
+        build_file = Label("//deps/rust/crates:BUILD.getrandom-0.3.4.bazel"),
     )
 
     maybe(
@@ -1329,16 +1287,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/hashbrown/0.14.5/download"],
         strip_prefix = "hashbrown-0.14.5",
         build_file = Label("//deps/rust/crates:BUILD.hashbrown-0.14.5.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__hashbrown-0.15.5",
-        sha256 = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/hashbrown/0.15.5/download"],
-        strip_prefix = "hashbrown-0.15.5",
-        build_file = Label("//deps/rust/crates:BUILD.hashbrown-0.15.5.bazel"),
     )
 
     maybe(
@@ -1493,22 +1441,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__indexmap-2.11.4",
-        sha256 = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5",
+        name = "crates_vendor__indexmap-2.12.0",
+        sha256 = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/indexmap/2.11.4/download"],
-        strip_prefix = "indexmap-2.11.4",
-        build_file = Label("//deps/rust/crates:BUILD.indexmap-2.11.4.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__io-uring-0.7.10",
-        sha256 = "046fa2d4d00aea763528b4950358d0ead425372445dc8ff86312b3c69ff7727b",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/io-uring/0.7.10/download"],
-        strip_prefix = "io-uring-0.7.10",
-        build_file = Label("//deps/rust/crates:BUILD.io-uring-0.7.10.bazel"),
+        urls = ["https://static.crates.io/crates/indexmap/2.12.0/download"],
+        strip_prefix = "indexmap-2.12.0",
+        build_file = Label("//deps/rust/crates:BUILD.indexmap-2.12.0.bazel"),
     )
 
     maybe(
@@ -1603,17 +1541,17 @@ def crate_repositories():
 
     maybe(
         new_git_repository,
-        name = "crates_vendor__lol_html-2.6.0",
-        commit = "d64457d9ff0143deef025d5df7e8586092b9afb7",
+        name = "crates_vendor__lol_html-2.7.0",
+        commit = "810c0c0eb81f758f83dfc59e42e15c2385593db9",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html",
-        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.6.0.bazel"),
+        build_file = Label("//deps/rust/crates:BUILD.lol_html-2.7.0.bazel"),
     )
 
     maybe(
         new_git_repository,
         name = "crates_vendor__lol_html_c_api-1.3.0",
-        commit = "d64457d9ff0143deef025d5df7e8586092b9afb7",
+        commit = "810c0c0eb81f758f83dfc59e42e15c2385593db9",
         init_submodules = True,
         remote = "https://github.com/cloudflare/lol-html",
         build_file = Label("//deps/rust/crates:BUILD.lol_html_c_api-1.3.0.bazel"),
@@ -1652,12 +1590,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__mio-1.0.4",
-        sha256 = "78bed444cc8a2160f01cbcf811ef18cac863ad68ae8ca62092e8db51d51c761c",
+        name = "crates_vendor__mio-1.1.0",
+        sha256 = "69d83b0086dc8ecf3ce9ae2874b2d1290252e2a30720bea58a5c6639b0092873",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/mio/1.0.4/download"],
-        strip_prefix = "mio-1.0.4",
-        build_file = Label("//deps/rust/crates:BUILD.mio-1.0.4.bazel"),
+        urls = ["https://static.crates.io/crates/mio/1.1.0/download"],
+        strip_prefix = "mio-1.1.0",
+        build_file = Label("//deps/rust/crates:BUILD.mio-1.1.0.bazel"),
     )
 
     maybe(
@@ -1718,16 +1656,6 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/num_cpus/1.17.0/download"],
         strip_prefix = "num_cpus-1.17.0",
         build_file = Label("//deps/rust/crates:BUILD.num_cpus-1.17.0.bazel"),
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__object-0.37.3",
-        sha256 = "ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/object/0.37.3/download"],
-        strip_prefix = "object-0.37.3",
-        build_file = Label("//deps/rust/crates:BUILD.object-0.37.3.bazel"),
     )
 
     maybe(
@@ -1882,12 +1810,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__proc-macro2-1.0.101",
-        sha256 = "89ae43fd86e4158d6db51ad8e2b80f313af9cc74f5c0e03ccb87de09998732de",
+        name = "crates_vendor__proc-macro2-1.0.103",
+        sha256 = "5ee95bc4ef87b8d5ba32e8b7714ccc834865276eab0aed5c9958d00ec45f49e8",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/proc-macro2/1.0.101/download"],
-        strip_prefix = "proc-macro2-1.0.101",
-        build_file = Label("//deps/rust/crates:BUILD.proc-macro2-1.0.101.bazel"),
+        urls = ["https://static.crates.io/crates/proc-macro2/1.0.103/download"],
+        strip_prefix = "proc-macro2-1.0.103",
+        build_file = Label("//deps/rust/crates:BUILD.proc-macro2-1.0.103.bazel"),
     )
 
     maybe(
@@ -1962,32 +1890,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__regex-1.12.1",
-        sha256 = "4a52d8d02cacdb176ef4678de6c052efb4b3da14b78e4db683a4252762be5433",
+        name = "crates_vendor__regex-1.12.2",
+        sha256 = "843bc0191f75f3e22651ae5f1e72939ab2f72a4bc30fa80a066bd66edefc24d4",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/regex/1.12.1/download"],
-        strip_prefix = "regex-1.12.1",
-        build_file = Label("//deps/rust/crates:BUILD.regex-1.12.1.bazel"),
+        urls = ["https://static.crates.io/crates/regex/1.12.2/download"],
+        strip_prefix = "regex-1.12.2",
+        build_file = Label("//deps/rust/crates:BUILD.regex-1.12.2.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__regex-automata-0.4.12",
-        sha256 = "722166aa0d7438abbaa4d5cc2c649dac844e8c56d82fb3d33e9c34b5cd268fc6",
+        name = "crates_vendor__regex-automata-0.4.13",
+        sha256 = "5276caf25ac86c8d810222b3dbb938e512c55c6831a10f3e6ed1c93b84041f1c",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/regex-automata/0.4.12/download"],
-        strip_prefix = "regex-automata-0.4.12",
-        build_file = Label("//deps/rust/crates:BUILD.regex-automata-0.4.12.bazel"),
+        urls = ["https://static.crates.io/crates/regex-automata/0.4.13/download"],
+        strip_prefix = "regex-automata-0.4.13",
+        build_file = Label("//deps/rust/crates:BUILD.regex-automata-0.4.13.bazel"),
     )
 
     maybe(
         http_archive,
-        name = "crates_vendor__regex-syntax-0.8.7",
-        sha256 = "c3160422bbd54dd5ecfdca71e5fd59b7b8fe2b1697ab2baf64f6d05dcc66d298",
+        name = "crates_vendor__regex-syntax-0.8.8",
+        sha256 = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/regex-syntax/0.8.7/download"],
-        strip_prefix = "regex-syntax-0.8.7",
-        build_file = Label("//deps/rust/crates:BUILD.regex-syntax-0.8.7.bazel"),
+        urls = ["https://static.crates.io/crates/regex-syntax/0.8.8/download"],
+        strip_prefix = "regex-syntax-0.8.8",
+        build_file = Label("//deps/rust/crates:BUILD.regex-syntax-0.8.8.bazel"),
     )
 
     maybe(
@@ -2038,16 +1966,6 @@ def crate_repositories():
         remote = "https://github.com/astral-sh/ruff",
         build_file = Label("//deps/rust/crates:BUILD.ruff_text_size-0.0.0.bazel"),
         strip_prefix = "crates/ruff_text_size",
-    )
-
-    maybe(
-        http_archive,
-        name = "crates_vendor__rustc-demangle-0.1.26",
-        sha256 = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/rustc-demangle/0.1.26/download"],
-        strip_prefix = "rustc-demangle-0.1.26",
-        build_file = Label("//deps/rust/crates:BUILD.rustc-demangle-0.1.26.bazel"),
     )
 
     maybe(
@@ -2112,12 +2030,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__selectors-0.30.0",
-        sha256 = "3df44ba8a7ca7a4d28c589e04f526266ed76b6cc556e33fe69fa25de31939a65",
+        name = "crates_vendor__selectors-0.32.0",
+        sha256 = "09975d3195f34dce9c7b381cb0f00c3c13381d4d3735c0f1a9c894b283b302ab",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/selectors/0.30.0/download"],
-        strip_prefix = "selectors-0.30.0",
-        build_file = Label("//deps/rust/crates:BUILD.selectors-0.30.0.bazel"),
+        urls = ["https://static.crates.io/crates/selectors/0.32.0/download"],
+        strip_prefix = "selectors-0.32.0",
+        build_file = Label("//deps/rust/crates:BUILD.selectors-0.32.0.bazel"),
     )
 
     maybe(
@@ -2272,12 +2190,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__socket2-0.6.0",
-        sha256 = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807",
+        name = "crates_vendor__socket2-0.6.1",
+        sha256 = "17129e116933cf371d018bb80ae557e889637989d8638274fb25622827b03881",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/socket2/0.6.0/download"],
-        strip_prefix = "socket2-0.6.0",
-        build_file = Label("//deps/rust/crates:BUILD.socket2-0.6.0.bazel"),
+        urls = ["https://static.crates.io/crates/socket2/0.6.1/download"],
+        strip_prefix = "socket2-0.6.1",
+        build_file = Label("//deps/rust/crates:BUILD.socket2-0.6.1.bazel"),
     )
 
     maybe(
@@ -2542,12 +2460,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__syn-2.0.106",
-        sha256 = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6",
+        name = "crates_vendor__syn-2.0.108",
+        sha256 = "da58917d35242480a05c2897064da0a80589a2a0476c9a3f2fdc83b53502e917",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/syn/2.0.106/download"],
-        strip_prefix = "syn-2.0.106",
-        build_file = Label("//deps/rust/crates:BUILD.syn-2.0.106.bazel"),
+        urls = ["https://static.crates.io/crates/syn/2.0.108/download"],
+        strip_prefix = "syn-2.0.108",
+        build_file = Label("//deps/rust/crates:BUILD.syn-2.0.108.bazel"),
     )
 
     maybe(
@@ -2632,12 +2550,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__tokio-1.47.1",
-        sha256 = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038",
+        name = "crates_vendor__tokio-1.48.0",
+        sha256 = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/tokio/1.47.1/download"],
-        strip_prefix = "tokio-1.47.1",
-        build_file = Label("//deps/rust/crates:BUILD.tokio-1.47.1.bazel"),
+        urls = ["https://static.crates.io/crates/tokio/1.48.0/download"],
+        strip_prefix = "tokio-1.48.0",
+        build_file = Label("//deps/rust/crates:BUILD.tokio-1.48.0.bazel"),
     )
 
     maybe(
@@ -2702,12 +2620,12 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__unicode-ident-1.0.19",
-        sha256 = "f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d",
+        name = "crates_vendor__unicode-ident-1.0.20",
+        sha256 = "462eeb75aeb73aea900253ce739c8e18a67423fadf006037cd3ff27e82748a06",
         type = "tar.gz",
-        urls = ["https://static.crates.io/crates/unicode-ident/1.0.19/download"],
-        strip_prefix = "unicode-ident-1.0.19",
-        build_file = Label("//deps/rust/crates:BUILD.unicode-ident-1.0.19.bazel"),
+        urls = ["https://static.crates.io/crates/unicode-ident/1.0.20/download"],
+        strip_prefix = "unicode-ident-1.0.20",
+        build_file = Label("//deps/rust/crates:BUILD.unicode-ident-1.0.20.bazel"),
     )
 
     maybe(
@@ -2842,16 +2760,6 @@ def crate_repositories():
 
     maybe(
         http_archive,
-        name = "crates_vendor__wasi-0.14.7-wasi-0.2.4",
-        sha256 = "883478de20367e224c0090af9cf5f9fa85bed63a95c1abf3afc5c083ebc06e8c",
-        type = "tar.gz",
-        urls = ["https://static.crates.io/crates/wasi/0.14.7+wasi-0.2.4/download"],
-        strip_prefix = "wasi-0.14.7+wasi-0.2.4",
-        build_file = Label("//deps/rust/crates:BUILD.wasi-0.14.7+wasi-0.2.4.bazel"),
-    )
-
-    maybe(
-        http_archive,
         name = "crates_vendor__wasip2-1.0.1-wasi-0.2.4",
         sha256 = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7",
         type = "tar.gz",
@@ -2942,6 +2850,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows-sys-0.60.2",
+        sha256 = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows-sys/0.60.2/download"],
+        strip_prefix = "windows-sys-0.60.2",
+        build_file = Label("//deps/rust/crates:BUILD.windows-sys-0.60.2.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows-sys-0.61.2",
         sha256 = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
         type = "tar.gz",
@@ -2962,12 +2880,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows-targets-0.53.5",
+        sha256 = "4945f9f551b88e0d65f3db0bc25c33b8acea4d9e41163edf90dcd0b19f9069f3",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows-targets/0.53.5/download"],
+        strip_prefix = "windows-targets-0.53.5",
+        build_file = Label("//deps/rust/crates:BUILD.windows-targets-0.53.5.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows_aarch64_gnullvm-0.52.6",
         sha256 = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/windows_aarch64_gnullvm/0.52.6/download"],
         strip_prefix = "windows_aarch64_gnullvm-0.52.6",
         build_file = Label("//deps/rust/crates:BUILD.windows_aarch64_gnullvm-0.52.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__windows_aarch64_gnullvm-0.53.1",
+        sha256 = "a9d8416fa8b42f5c947f8482c43e7d89e73a173cead56d044f6a56104a6d1b53",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_aarch64_gnullvm/0.53.1/download"],
+        strip_prefix = "windows_aarch64_gnullvm-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_aarch64_gnullvm-0.53.1.bazel"),
     )
 
     maybe(
@@ -2982,12 +2920,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows_aarch64_msvc-0.53.1",
+        sha256 = "b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_aarch64_msvc/0.53.1/download"],
+        strip_prefix = "windows_aarch64_msvc-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_aarch64_msvc-0.53.1.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows_i686_gnu-0.52.6",
         sha256 = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/windows_i686_gnu/0.52.6/download"],
         strip_prefix = "windows_i686_gnu-0.52.6",
         build_file = Label("//deps/rust/crates:BUILD.windows_i686_gnu-0.52.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__windows_i686_gnu-0.53.1",
+        sha256 = "960e6da069d81e09becb0ca57a65220ddff016ff2d6af6a223cf372a506593a3",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_i686_gnu/0.53.1/download"],
+        strip_prefix = "windows_i686_gnu-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_i686_gnu-0.53.1.bazel"),
     )
 
     maybe(
@@ -3002,12 +2960,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows_i686_gnullvm-0.53.1",
+        sha256 = "fa7359d10048f68ab8b09fa71c3daccfb0e9b559aed648a8f95469c27057180c",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_i686_gnullvm/0.53.1/download"],
+        strip_prefix = "windows_i686_gnullvm-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_i686_gnullvm-0.53.1.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows_i686_msvc-0.52.6",
         sha256 = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/windows_i686_msvc/0.52.6/download"],
         strip_prefix = "windows_i686_msvc-0.52.6",
         build_file = Label("//deps/rust/crates:BUILD.windows_i686_msvc-0.52.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__windows_i686_msvc-0.53.1",
+        sha256 = "1e7ac75179f18232fe9c285163565a57ef8d3c89254a30685b57d83a38d326c2",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_i686_msvc/0.53.1/download"],
+        strip_prefix = "windows_i686_msvc-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_i686_msvc-0.53.1.bazel"),
     )
 
     maybe(
@@ -3022,6 +3000,16 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows_x86_64_gnu-0.53.1",
+        sha256 = "9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_x86_64_gnu/0.53.1/download"],
+        strip_prefix = "windows_x86_64_gnu-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_x86_64_gnu-0.53.1.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows_x86_64_gnullvm-0.52.6",
         sha256 = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d",
         type = "tar.gz",
@@ -3032,12 +3020,32 @@ def crate_repositories():
 
     maybe(
         http_archive,
+        name = "crates_vendor__windows_x86_64_gnullvm-0.53.1",
+        sha256 = "0ffa179e2d07eee8ad8f57493436566c7cc30ac536a3379fdf008f47f6bb7ae1",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_x86_64_gnullvm/0.53.1/download"],
+        strip_prefix = "windows_x86_64_gnullvm-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_x86_64_gnullvm-0.53.1.bazel"),
+    )
+
+    maybe(
+        http_archive,
         name = "crates_vendor__windows_x86_64_msvc-0.52.6",
         sha256 = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec",
         type = "tar.gz",
         urls = ["https://static.crates.io/crates/windows_x86_64_msvc/0.52.6/download"],
         strip_prefix = "windows_x86_64_msvc-0.52.6",
         build_file = Label("//deps/rust/crates:BUILD.windows_x86_64_msvc-0.52.6.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__windows_x86_64_msvc-0.53.1",
+        sha256 = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/windows_x86_64_msvc/0.53.1/download"],
+        strip_prefix = "windows_x86_64_msvc-0.53.1",
+        build_file = Label("//deps/rust/crates:BUILD.windows_x86_64_msvc-0.53.1.bazel"),
     )
 
     maybe(
@@ -3164,19 +3172,20 @@ def crate_repositories():
         struct(repo = "crates_vendor__ada-url-3.3.0", is_dev_dep = False),
         struct(repo = "crates_vendor__anyhow-1.0.100", is_dev_dep = False),
         struct(repo = "crates_vendor__async-trait-0.1.89", is_dev_dep = False),
-        struct(repo = "crates_vendor__capnp-0.21.6", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnp-0.21.7", is_dev_dep = False),
+        struct(repo = "crates_vendor__capnp-rpc-0.21.0", is_dev_dep = False),
         struct(repo = "crates_vendor__capnpc-0.21.4", is_dev_dep = False),
-        struct(repo = "crates_vendor__cc-1.2.41", is_dev_dep = False),
+        struct(repo = "crates_vendor__cc-1.2.43", is_dev_dep = False),
         struct(repo = "crates_vendor__clang-ast-0.1.35", is_dev_dep = False),
-        struct(repo = "crates_vendor__clap-4.5.48", is_dev_dep = False),
+        struct(repo = "crates_vendor__clap-4.5.50", is_dev_dep = False),
         struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
-        struct(repo = "crates_vendor__flate2-1.1.4", is_dev_dep = False),
+        struct(repo = "crates_vendor__flate2-1.1.5", is_dev_dep = False),
         struct(repo = "crates_vendor__foldhash-0.2.0", is_dev_dep = False),
         struct(repo = "crates_vendor__futures-0.3.31", is_dev_dep = False),
         struct(repo = "crates_vendor__lol_html_c_api-1.3.0", is_dev_dep = False),
         struct(repo = "crates_vendor__nix-0.30.1", is_dev_dep = False),
         struct(repo = "crates_vendor__pico-args-0.5.0", is_dev_dep = False),
-        struct(repo = "crates_vendor__proc-macro2-1.0.101", is_dev_dep = False),
+        struct(repo = "crates_vendor__proc-macro2-1.0.103", is_dev_dep = False),
         struct(repo = "crates_vendor__quote-1.0.41", is_dev_dep = False),
         struct(repo = "crates_vendor__ruff_python_ast-0.0.0", is_dev_dep = False),
         struct(repo = "crates_vendor__ruff_python_parser-0.0.0", is_dev_dep = False),
@@ -3187,8 +3196,8 @@ def crate_repositories():
         struct(repo = "crates_vendor__static_assertions-1.1.0", is_dev_dep = False),
         struct(repo = "crates_vendor__swc_core-35.0.0", is_dev_dep = False),
         struct(repo = "crates_vendor__swc_ts_fast_strip-29.0.0", is_dev_dep = False),
-        struct(repo = "crates_vendor__syn-2.0.106", is_dev_dep = False),
+        struct(repo = "crates_vendor__syn-2.0.108", is_dev_dep = False),
         struct(repo = "crates_vendor__thiserror-2.0.17", is_dev_dep = False),
-        struct(repo = "crates_vendor__tokio-1.47.1", is_dev_dep = False),
+        struct(repo = "crates_vendor__tokio-1.48.0", is_dev_dep = False),
         struct(repo = "crates_vendor__tracing-0.1.41", is_dev_dep = False),
     ]

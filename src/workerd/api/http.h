@@ -800,7 +800,16 @@ struct RequestInitializerDict {
   JSG_STRUCT(method, headers, body, redirect, fetcher, cf, cache, integrity, signal, encodeResponseBody);
   JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
     if(flags.getCacheOptionEnabled()) {
-      if(flags.getCacheNoCache()) {
+      if(flags.getCacheReload()) {
+        JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
+          headers?: HeadersInit;
+          body?: BodyInit | null;
+          cache?: 'no-store' | 'no-cache' | 'reload';
+          cf?: Cf;
+          encodeResponseBody?: "automatic" | "manual";
+        });
+
+      } else if(flags.getCacheNoCache()) {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
@@ -848,6 +857,7 @@ public:
     NONE,
     NOSTORE,
     NOCACHE,
+    RELOAD,
   };
 
   Request(jsg::Lock& js, kj::HttpMethod method, kj::StringPtr url, Redirect redirect,
@@ -936,7 +946,7 @@ public:
   // the response. There are currently a proposal to add a "full" option which is the model
   // we support. Once "full" is added, we need to update this to accept either undefined or
   // "full", and possibly decide if we want to support the "half" option.
-  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.v8Undefined(); }
+  // jsg::JsValue getDuplex(jsg::Lock& js) { return js.undefined(); }
   // TODO(conform): Might implement?
 
   // These relate to CORS support, which we do not implement. WinterTC has determined that
@@ -994,7 +1004,14 @@ public:
       JSG_READONLY_PROTOTYPE_PROPERTY(keepalive, getKeepalive);
       if(flags.getCacheOptionEnabled()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(cache, getCache);
-        if(flags.getCacheNoCache()) {
+        if(flags.getCacheReload()) {
+          JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
+            constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
+            clone(): Request<CfHostMetadata, Cf>;
+            cache?: "no-store" | "no-cache" | "reload";
+            get cf(): Cf | undefined;
+          });
+        } else if(flags.getCacheNoCache()) {
           JSG_TS_OVERRIDE(<CfHostMetadata = unknown, Cf = CfProperties<CfHostMetadata>> {
             constructor(input: RequestInfo<CfProperties> | URL, init?: RequestInit<Cf>);
             clone(): Request<CfHostMetadata, Cf>;

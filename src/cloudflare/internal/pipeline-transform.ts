@@ -18,6 +18,7 @@ import entrypoints from 'cloudflare-internal:workers';
 async function* readLines(
   stream: ReadableStream<Uint8Array>
 ): AsyncGenerator<string> {
+  // @ts-expect-error TS2345 TODO(soon): Fix this.
   const textStream = stream.pipeThrough(new TextDecoderStream());
   const reader = textStream.getReader();
 

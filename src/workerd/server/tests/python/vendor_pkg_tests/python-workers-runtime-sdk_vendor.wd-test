@@ -1,0 +1,16 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "workers-sdk-vendor-test",
+      worker = (
+        modules = [
+          (name = "main.py", pythonModule = embed "python-workers-runtime-sdk.py"),
+          %PYTHON_VENDORED_MODULES%
+        ],
+        compatibilityDate = "2024-01-15",
+        compatibilityFlags = [%PYTHON_FEATURE_FLAGS, "enable_python_external_sdk"],
+      )
+    ),
+  ],
+);

@@ -1,6 +1,6 @@
 import type { getRandomValues as getRandomValuesType } from 'pyodide-internal:topLevelEntropy/lib';
 import type { default as UnsafeEvalType } from 'internal:unsafe-eval';
-import { PythonRuntimeError } from 'pyodide-internal:util';
+import { PythonWorkersInternalError } from 'pyodide-internal:util';
 
 if (typeof FinalizationRegistry === 'undefined') {
   // @ts-expect-error cannot assign to globalThis
@@ -45,11 +45,24 @@ export function reportUndefinedSymbolsPatched(Module: Module): void {
 }
 
 export function patchDynlibLookup(Module: Module, libName: string): Uint8Array {
+  // This function is for 0.26.0a2 only. In newer versions, we set LD_LIBRARY_PATH instead.
+  if (Module.API.version !== '0.26.0a2') {
+    throw new Error('Should not happen');
+  }
   try {
     return Module.FS.readFile('/usr/lib/' + libName);
   } catch (e) {
-    console.error('Failed to read ', libName, e);
-    throw e;
+    try {
+      // For scipy and similar libraries that depend on Pyodide's dynamic library deps, we may need
+      // extra "system libraries". These we'll put in python_modules/lib. So try loading system
+      // libraries from there too.
+      return Module.FS.readFile(
+        '/session/metadata/python_modules/lib/' + libName
+      );
+    } catch (e) {
+      console.error('Failed to read ', libName, e);
+      throw e;
+    }
   }
 }
 
@@ -183,7 +196,9 @@ function checkCallee(): void {
   }
   if (!isOkay) {
     console.warn('Invalid call to `WebAssembly.Module`', funcName);
-    throw new PythonRuntimeError('Invalid call to `WebAssembly.Module`');
+    throw new PythonWorkersInternalError(
+      'Invalid call to `WebAssembly.Module`'
+    );
   }
 }
 

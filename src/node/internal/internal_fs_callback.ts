@@ -295,7 +295,6 @@ export function cp(
     dereference = false,
     errorOnExist = false,
     force = true,
-    filter,
     mode = 0,
     preserveTimestamps = false,
     recursive = false,
@@ -317,9 +316,13 @@ export function cp(
     );
   }
 
-  if (filter !== undefined) {
-    if (typeof filter !== 'function') {
-      throw new ERR_INVALID_ARG_TYPE('options.filter', 'function', filter);
+  if (options.filter !== undefined) {
+    if (typeof options.filter !== 'function') {
+      throw new ERR_INVALID_ARG_TYPE(
+        'options.filter',
+        'function',
+        options.filter
+      );
     }
     // We do not implement the filter option currently. There's a bug in the Node.js
     // implementation of fs.cp and the option.filter in which non-UTF-8 encoded file

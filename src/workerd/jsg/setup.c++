@@ -230,6 +230,11 @@ void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
 }
 
 void IsolateBase::deferDestruction(Item item) {
+  KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
+  if (queueState != QueueState::ACTIVE) {
+    KJ_LOG(ERROR, "tried to defer destruction during isolate shutdown", queueState,
+        kj::getStackTrace());
+  }
   queue.lockExclusive()->push(kj::mv(item));
 }
 
@@ -304,8 +309,8 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   v8::HandleScope scope(isolate);
   auto& wrappable = *static_cast<Wrappable*>(
       handle.As<v8::Object>().Get(isolate)->GetAlignedPointerFromInternalField(
-          Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
-
+          Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+          static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
   // V8 gets angry if we do not EXPLICITLY call `Reset()` on the wrapper. If we merely destroy it
   // (which is what `detachWrapper()` will do) it is not satisfied, and will come back and try to
   // visit the reference again, but it will DCHECK-fail on that second attempt because the
@@ -393,11 +398,6 @@ IsolateBase::IsolateBase(V8System& system,
 
     ptr->SetModifyCodeGenerationFromStringsCallback(&modifyCodeGenCallback);
     ptr->SetAllowWasmCodeGenerationCallback(&allowWasmCallback);
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-    // JSPI was stabilized in V8 version 14.2, and this API removed.
-    // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-    ptr->SetWasmJSPIEnabledCallback(&jspiEnabledCallback);
-#endif
 
     // We don't support SharedArrayBuffer so Atomics.wait() doesn't make sense, and might allow DoS
     // attacks.
@@ -450,6 +450,7 @@ IsolateBase::~IsolateBase() noexcept(false) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
     ptr->Dispose();
+    ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });
@@ -461,6 +462,8 @@ v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isol
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
+  KJ_REQUIRE(queueState == QueueState::ACTIVE);
+  queueState = QueueState::DROPPING;
   // Delete all wrappers.
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::Locker lock(ptr);
@@ -483,6 +486,7 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
 
     // Destroy all wrappers.
     heapTracer.clearWrappers();
+    queueState = QueueState::DROPPED;
   });
 }
 
@@ -521,16 +525,6 @@ bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
   return self->evalAllowed;
 }
-
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-// JSPI was stabilized in V8 version 14.2, and this API removed.
-// TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-bool IsolateBase::jspiEnabledCallback(v8::Local<v8::Context> context) {
-  IsolateBase* self =
-      static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));
-  return self->jspiEnabled;
-}
-#endif
 
 void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
   // We register this callback with V8 in order to build a mapping of code addresses to source

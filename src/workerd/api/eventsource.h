@@ -4,6 +4,7 @@
 
 #pragma once
 #include "basics.h"
+#include "http.h"
 
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/url.h>

@@ -1065,6 +1065,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getEnhancedErrorSerialization()) {
       lock->setUsingEnhancedErrorSerialization();
     }
+    if (features.getFastJsgStruct()) {
+      lock->setUsingFastJsgStruct();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
@@ -2023,9 +2026,9 @@ void Worker::handleLog(jsg::Lock& js,
     auto formatLog = formatLogVal.As<v8::Function>();
 
     auto levelStr = logLevelToString(level);
-    args[length] = v8::Boolean::New(js.v8Isolate, colors);
-    args[length + 1] = v8::Boolean::New(js.v8Isolate, bool(loggingOptions.structuredLogging));
-    args[length + 2] = jsg::v8StrIntern(js.v8Isolate, levelStr);
+    args[length] = js.boolean(colors);
+    args[length + 1] = js.boolean(loggingOptions.structuredLogging.toBool());
+    args[length + 2] = js.strIntern(levelStr);
     auto formatted = js.toString(
         jsg::check(formatLog->Call(context, js.v8Undefined(), length + 3, args.data())));
     fprintf(fd, "%s\n", formatted.cStr());
@@ -4309,7 +4312,6 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
     const kj::HttpHeaders& headers,
     kj::AsyncInputStream& requestBody,
     kj::HttpService::Response& response) {
-  throwIfInvalidHeaderValue(headers);
   using InspectorLock = InspectorChannelImpl::InspectorLock;
 
   auto signalRequest = [this, method, urlCopy = kj::str(url),
@@ -4498,7 +4500,6 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
 
   // While we checked above that the headers are valid, let's check again
   // after the co_await...
-  throwIfInvalidHeaderValue(headers);
   KJ_IF_SOME(rid, maybeRequestId) {
     ResponseWrapper wrapper(response, kj::mv(rid), kj::mv(signalResponse));
     co_await inner->request(method, url, headers, requestBody, wrapper);

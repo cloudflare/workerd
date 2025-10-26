@@ -4,13 +4,35 @@
 # TODO: these checks are in progress of cleaning up
 Checks: >
   -*,
+  bugprone-argument-comment,
   bugprone-capturing-this-in-member-variable,
+  bugprone-forward-declaration-namespace,
   bugprone-move-forwarding-reference,
-  bugprone-return-const-ref-from-parameter,
   bugprone-use-after-move,
+  cppcoreguidelines-misleading-capture-default-by-value,
+  misc-confusable-identifiers,
   misc-header-include-cycle,
+  misc-throw-by-value-catch-by-reference,
+  misc-unused-alias-decls,
+  modernize-macro-to-enum,
+  modernize-redundant-void-arg,
+  modernize-unary-static-assert,
+  modernize-use-bool-literals,
+  performance-for-range-copy,
+  performance-move-constructor-init,
+  readability-container-contains,
   readability-duplicate-include,
+  readability-redundant-access-specifiers,
+  readability-static-accessed-through-instance
+
+# TODO: Fix and re-enable
+# bugprone-return-const-ref-from-parameter
+# modernize-type-traits
+# modernize-use-override
+# readability-redundant-casting
+
 WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/workerd/.*'
 
 CheckOptions:
   # JSG has very entrenched include cycles

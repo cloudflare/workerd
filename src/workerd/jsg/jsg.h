@@ -717,6 +717,14 @@ struct HasStructTypeScriptDefine<T, decltype(T::_JSG_STRUCT_TS_DEFINE_DO_NOT_USE
   template <typename TypeWrapper, typename Self>                                                   \
   using JsgFieldWrappers =                                                                         \
       ::workerd::jsg::TypeTuple<JSG_FOR_EACH(JSG_STRUCT_FIELD, , __VA_ARGS__)>;                    \
+  template <typename Self>                                                                         \
+  static v8::Local<v8::DictionaryTemplate> jsgGetTemplate(v8::Isolate* isolate) {                  \
+    kj::Vector<std::string_view> names;                                                            \
+    JSG_FOR_EACH(JSG_STRUCT_FIELD_COL, , __VA_ARGS__);                                             \
+    auto namesPtr = names.asPtr().asConst();                                                       \
+    return v8::DictionaryTemplate::New(                                                            \
+        isolate, v8::MemorySpan<const std::string_view>(namesPtr.begin(), namesPtr.size()));       \
+  }                                                                                                \
   template <typename Registry, typename Self, typename Config>                                     \
   static void registerMembersInternal(Registry& registry, Config arg) {                            \
     JSG_FOR_EACH(JSG_STRUCT_REGISTER_MEMBER, , __VA_ARGS__);                                       \
@@ -760,6 +768,10 @@ consteval size_t prefixLengthToStrip(const char (&s)[N]) {
 // this value will still contain the `$` even though the `FieldWrapper` template argument will have
 // it stripped.
 #define JSG_STRUCT_FIELD_NAME(_, name) name##_JSG_NAME_DO_NOT_USE_DIRECTLY[] = #name
+
+#define JSG_STRUCT_FIELD_COL(_, name)                                                              \
+  ::workerd::jsg::jsgAddToStructNames<decltype(::kj::instance<Self>().name),                       \
+      name##_JSG_NAME_DO_NOT_USE_DIRECTLY, ::workerd::jsg::prefixLengthToStrip(#name)>(names)
 
 // (Internal implementation details for JSG_STRUCT.)
 #define JSG_STRUCT_FIELD(_, name)                                                                  \
@@ -1061,6 +1073,16 @@ class SelfRef: public V8Ref<v8::Object> {
   inline Value asValue(Lock& js) const;
 };
 
+template <typename U>
+static constexpr bool isUsableStructField = !kj::isSameType<U, SelfRef>() &&
+    !kj::isSameType<U, Unimplemented>() && !kj::isSameType<U, WontImplement>();
+
+template <typename T, const char* name, size_t prefix>
+void jsgAddToStructNames(auto& names) {
+  constexpr const char* exportedName = name + prefix;
+  if constexpr (isUsableStructField<T>) names.add(exportedName);
+}
+
 // TODO(cleanup): This class was meant to be a ByteString (characters in the range [0,255]), but
 //   its only use so far is in api::Headers. But making the Headers class use ByteStrings turned
 //   out to be unwise. Nevertheless, it is still useful to keep around in order to provide
@@ -1104,7 +1126,7 @@ class USVString: public kj::String {
   }
 
  private:
-  // This is a separate method to avoid including simdutf8 in the header file.
+  // This is a separate method to avoid including simdutf in the header file.
   bool isValidUtf8() const;
 };
 
@@ -2213,7 +2235,8 @@ class JsMessage;
   V(Set)                                                                                           \
   V(Promise)                                                                                       \
   V(Proxy)                                                                                         \
-  V(Function)
+  V(Function)                                                                                      \
+  V(Uint8Array)
 
 #define V(Name) class Js##Name;
 JS_TYPE_CLASSES(V)
@@ -2624,16 +2647,10 @@ class Lock {
   // Use to enable/disable dynamic code evaluation (via eval(), new Function(), or WebAssembly).
   void setAllowEval(bool allow);
 
-#if V8_MAJOR_VERSION < 14 || V8_MINOR_VERSION < 2
-  // Install JSPI on the current context. Currently used only for Python workers.
-  //
-  // JSPI was stabilized in V8 version 14.2, and this API removed.
-  // TODO(cleanup): Remove this when workerd's V8 version is updated to 14.2.
-  void installJspi();
-#endif
-
   void setCaptureThrowsAsRejections(bool capture);
   void setUsingEnhancedErrorSerialization();
+  void setUsingFastJsgStruct();
+  bool isUsingFastJsgStruct() const;
   bool isUsingEnhancedErrorSerialization() const;
 
   void setNodeJsCompatEnabled();
@@ -2986,8 +3003,11 @@ inline Value SelfRef::asValue(Lock& js) const {
 
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
+#include "promise.h"
 #include "modules.h"
 #include "resource.h"
+// JSG has very entrenched include cycles
+// NOLINTNEXTLINE(misc-header-include-cycle)
 #include "jsvalue.h"
 // clang-format on
 

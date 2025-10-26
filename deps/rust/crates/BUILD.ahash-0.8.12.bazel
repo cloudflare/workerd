@@ -44,7 +44,7 @@ rust_library(
     version = "0.8.12",
     deps = [
         "@crates_vendor__ahash-0.8.12//:build_script_build",
-        "@crates_vendor__cfg-if-1.0.3//:cfg_if",
+        "@crates_vendor__cfg-if-1.0.4//:cfg_if",
         "@crates_vendor__zerocopy-0.8.27//:zerocopy",
     ] + select({
         "@rules_rust//rust/platform:aarch64-apple-darwin": [

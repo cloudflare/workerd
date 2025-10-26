@@ -88,10 +88,7 @@ cc_library(
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
-    deps = select({
-        "@platforms//os:windows": [":empty_lib"],
-        "//conditions:default": [],
-    }),
+    deps = [":empty_lib"],
 )
 
 write_file(
@@ -110,4 +107,9 @@ rust_static_library(
     },
     stamp = -1,  # default to bazel --stamp flag
     tags = ["manual"],
+)
+
+cc_library(
+    name = "allocator",
+    visibility = ["//visibility:public"],
 )

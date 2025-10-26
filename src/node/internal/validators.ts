@@ -77,6 +77,16 @@ export function validateInteger(
   }
 }
 
+export function validateObject<T extends object>(
+  value: T | null | undefined,
+  name: string,
+  options?: number
+): asserts value is T;
+export function validateObject(
+  value: unknown,
+  name: string,
+  options?: number
+): asserts value is Record<string, unknown>;
 export function validateObject(
   value: unknown,
   name: string,
@@ -214,11 +224,11 @@ export function validateBoolean(
   }
 }
 
-export function validateOneOf(
-  value: unknown,
+export function validateOneOf<T>(
+  value: T,
   name: string,
-  oneOf: unknown[]
-): void {
+  oneOf: T[]
+): asserts value is T {
   if (!Array.prototype.includes.call(oneOf, value)) {
     const allowed = Array.prototype.join.call(
       Array.prototype.map.call(oneOf, (v) =>

@@ -71,6 +71,9 @@ export const cacheMode = {
     if (env.NO_CACHE_ENABLED) {
       enabledCacheModes.add('no-cache');
     }
+    if (env.RELOAD_ENABLED) {
+      enabledCacheModes.add('reload');
+    }
 
     const failureCacheModes = allowedCacheModes.difference(enabledCacheModes);
     for (const cacheMode of failureCacheModes) {
