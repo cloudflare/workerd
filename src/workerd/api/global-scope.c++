@@ -165,8 +165,6 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
 
   CfProperty cf(cfBlobJson);
 
-  auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
-
   // We only create the body stream if there is a body to read.
   kj::Maybe<jsg::Ref<ReadableStream>> maybeJsStream = kj::none;
 
@@ -190,9 +188,10 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   //
   // TODO(cleanup): Should KJ HTTP interfaces explicitly communicate the difference between a
   //   missing body and an empty one?
+  auto newHeaders = headers.cloneShallow();
   kj::Maybe<Body::ExtractedBody> body;
-  if (headers.get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
-      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
+  if (newHeaders.get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
+      newHeaders.get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
       requestBody.tryGetLength().orDefault(1) > 0) {
     // We do not automatically decode gzipped request bodies because the fetch() standard doesn't
     // specify any automatic encoding of requests. https://github.com/whatwg/fetch/issues/589
@@ -205,16 +204,13 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   // If the request doesn't specify "Content-Length" or "Transfer-Encoding", set "Content-Length"
   // to the body length if it's known. This ensures handlers for worker-to-worker requests can
   // access known body lengths if they're set, without buffering bodies.
-  if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
-      headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
-    // We can't use headers.set() here as headers is marked const. Instead, we call set() on the
-    // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
+  // TODO(cleanup): It would be nice if kj::HttpHeaders had an inlined has method
+  if (body != kj::none && newHeaders.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+      newHeaders.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
     KJ_IF_SOME(l, requestBody.tryGetLength()) {
-      jsHeaders->setUnguarded(
-          js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+      newHeaders.set(kj::HttpHeaderId::CONTENT_LENGTH, kj::str(l));
     } else {
-      jsHeaders->setUnguarded(
-          js, jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+      newHeaders.setPtr(kj::HttpHeaderId::TRANSFER_ENCODING, "chunked");
     }
   }
 
@@ -228,7 +224,8 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
         js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES);
   }
 
-  auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+  auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL,
+      js.alloc<Headers>(js, newHeaders, Headers::Guard::REQUEST),
       KJ_ASSERT_NONNULL(defaultFetcher).addRef(),
       /* signal */ kj::mv(abortSignal), kj::mv(cf), kj::mv(body),
       /* thisSignal */ kj::none, Request::CacheMode::NONE);

@@ -88,9 +88,11 @@ BENCHMARK_F(Response, arrayBufferBody)(benchmark::State& state) {
 BENCHMARK_F(Response, jsonResponse)(benchmark::State& state) {
   fixture->runInIoContext([&](const TestFixture::Environment& env) {
     auto& js = env.js;
+    // Prepare object to serialize. Do this outside the loop to avoid measuring its repeated
+    // construction cost. What we want to measure is just the cost of the api::Response::json_ call.
+    auto obj = js.obj();
+    obj.set(js, "key"_kj, js.str("value"_kj));
     for (auto _: state) {
-      auto obj = js.obj();
-      obj.set(js, js.str("key"_kj), js.str("value"_kj));
       benchmark::DoNotOptimize(api::Response::json_(js, obj, kj::none));
     }
   });

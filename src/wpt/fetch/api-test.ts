@@ -392,15 +392,8 @@ export default {
   'headers/headers-errors.any.js': {
     comment: 'Our validation of header names is too lax',
     expectedFailures: [
-      'Create headers giving bad header name as init argument',
       'Create headers giving bad header value as init argument',
-      'Check headers get with an invalid name invalidĀ',
-      'Check headers delete with an invalid name invalidĀ',
-      'Check headers has with an invalid name invalidĀ',
-      'Check headers set with an invalid name invalidĀ',
       'Check headers set with an invalid value invalidĀ',
-      'Check headers append with an invalid name invalidĀ',
-      'Check headers append with an invalid name [object Object]',
       'Check headers append with an invalid value invalidĀ',
     ],
   },
