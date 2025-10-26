@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config")
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 
 js_library(
     name = "base-eslint",
@@ -17,5 +18,19 @@ js_library(
 ts_config(
     name = "base-tsconfig",
     src = "base.tsconfig.json",
+    visibility = ["//visibility:public"],
+)
+
+native_binary(
+    name = "clang-tidy",
+    src = select(
+        {
+            "@bazel_tools//src/conditions:linux_x86_64": "@clang_tidy_linux_amd64//file:downloaded",
+            "@bazel_tools//src/conditions:linux_aarch64": "@clang_tidy_linux_arm64//file:downloaded",
+            "@bazel_tools//src/conditions:darwin_arm64": "@clang_tidy_macos_arm64//file:downloaded",
+            "@bazel_tools//src/conditions:windows_x64": "@clang_tidy_windows_amd64//file:downloaded",
+        },
+    ),
+    out = "clang_tidy",
     visibility = ["//visibility:public"],
 )

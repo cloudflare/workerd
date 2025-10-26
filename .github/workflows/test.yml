@@ -98,7 +98,7 @@ jobs:
   lint:
     uses: ./.github/workflows/_bazel.yml
     with:
-      extra_bazel_args: '--config=lint --config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=lint --config=clang-tidy --config=ci-test --config=ci-linux'
       run_tests: false
       parse_headers: true
     secrets:
