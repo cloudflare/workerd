@@ -1,1 +1,2 @@
 samples/nodejs-compat-streams-split2/split2.js
+types/generated-snapshot/**/*.ts
