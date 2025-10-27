@@ -3,13 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 const dir = await navigator.storage.getDirectory();
-const bundle = await dir.getDirectoryHandle("tmp");
-const file = await bundle.getFileHandle("foo", { create: true });
+const bundle = await dir.getDirectoryHandle('tmp');
+const file = await bundle.getFileHandle('foo', { create: true });
 const handle = await file.createSyncAccessHandle();
 
 const enc = new TextEncoder();
-handle.write(enc.encode("Hello World"));
-handle.write(enc.encode("!!!\n"));
+handle.write(enc.encode('Hello World'));
+handle.write(enc.encode('!!!\n'));
 console.log(handle.getSize());
 handle.close();
 
@@ -18,6 +18,6 @@ console.log(await data.text());
 
 export default {
   async fetch(req, env) {
-    return new Response("Hello World\n");
-  }
+    return new Response('Hello World\n');
+  },
 };

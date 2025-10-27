@@ -10,7 +10,7 @@ const server = createServer((req, res) => {
   console.log(req.headers['x-resolve-method']);
 
   // The req.url query params tell us what we are importing
-  const url = new URL(req.url, "http://example.org");
+  const url = new URL(req.url, 'http://example.org');
   const specifier = url.searchParams.get('specifier');
   const referrer = url.searchParams.get('referrer');
   console.log(specifier, referrer);
@@ -18,14 +18,14 @@ const server = createServer((req, res) => {
   // The fallback service can tell the client to map the request
   // specifier to another specifier using a 301 redirect, using
   // the location header to specify the alternative specifier.
-  if (specifier == "/foo") {
+  if (specifier == '/foo') {
     console.log('Redirecting /foo to /baz');
     res.writeHead(301, { location: '/baz' });
     res.end();
     return;
   }
 
-  if (specifier == "/bar") {
+  if (specifier == '/bar') {
     res.writeHead(404);
     res.end();
     return;
