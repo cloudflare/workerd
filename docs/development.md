@@ -34,7 +34,7 @@ just prepare-ubuntu
 
 ## Code Formatting
 
-workerd code is automatically formatted by clang-format. Run `python ./tools/cross/format.py` to reformat the code
+workerd code is automatically formatted by clang-format. Run `bazel run //build/deps/formatters:format` to reformat the code
 or use the appropriate IDE extension.
 While building workerd currently requires LLVM 19 or above, formatting requires clang-format 18.1.8 as different
 versions result in different format suggestions. This is automatically fetched using Bazel and does not need to be
