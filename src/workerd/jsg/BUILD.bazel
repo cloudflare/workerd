@@ -111,8 +111,6 @@ wd_cc_library(
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
     implementation_deps = [
-        ":memory-tracker",
-        "//src/workerd/util:uuid",
         "@simdutf",
         "@ssl",
     ],
@@ -121,6 +119,7 @@ wd_cc_library(
     deps = [
         ":exception",
         ":macro-meta",
+        ":memory-tracker",
         ":meta",
         ":modules_capnp",
         ":observer",
