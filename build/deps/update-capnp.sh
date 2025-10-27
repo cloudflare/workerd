@@ -2,10 +2,23 @@
 
 set -o errexit -o nounset -o pipefail
 
-freeze_commit="${COMMIT:-164284a476eee4bfbcf7cce2a9a82fb156504210}"
-sha256="${SHA256:-03f11165d64c0941c66e749554d3eaf0ea29b6ebe445a82e21557dc68caf6e28}"
+# Get the most recent commit from the v2 branch
+freeze_commit="${COMMIT:-$(git ls-remote https://github.com/capnproto/capnproto.git refs/heads/v2 | cut -f1)}"
+tarball_url="https://github.com/capnproto/capnproto/tarball/${freeze_commit}"
+
+# Calculate SHA256 of the tarball
+if [ -z "${SHA256:-}" ]; then
+  echo "Fetching tarball to calculate SHA256..."
+  temp_file=$(mktemp)
+  curl -sL "$tarball_url" -o "$temp_file"
+  sha256=$(shasum -a 256 "$temp_file" | cut -d' ' -f1)
+  rm "$temp_file"
+  echo "Calculated SHA256: $sha256"
+else
+  sha256="$SHA256"
+fi
 target="//build/deps/cpp.MODULE.bazel:capnp-cpp"
 
-buildozer "set url \"https://github.com/capnproto/capnproto/tarball/${freeze_commit}\"" $target
+buildozer "set url \"$tarball_url\"" $target
 buildozer "set strip_prefix \"capnproto-capnproto-${freeze_commit:0:7}/c++\"" $target
 buildozer "set sha256 \"${sha256}\"" $target
