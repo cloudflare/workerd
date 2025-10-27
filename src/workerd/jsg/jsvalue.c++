@@ -171,6 +171,88 @@ JsValue JsObject::getPrototype(Lock& js) {
   return JsValue(inner->GetPrototypeV2());
 }
 
+kj::String JsSymbol::description(Lock& js) const {
+  auto desc = inner->Description(js.v8Isolate);
+  if (desc.IsEmpty() || desc->IsUndefined()) {
+    return kj::String();
+  }
+  return kj::str(desc);
+}
+
+void JsSet::add(Lock& js, const JsValue& value) {
+  check(inner->Add(js.v8Context(), value.inner));
+}
+
+bool JsSet::has(Lock& js, const JsValue& value) const {
+  return check(inner->Has(js.v8Context(), value.inner));
+}
+
+bool JsSet::delete_(Lock& js, const JsValue& value) {
+  return check(inner->Delete(js.v8Context(), value.inner));
+}
+
+void JsSet::addAll(Lock& js, kj::ArrayPtr<const JsValue> values) {
+  for (const JsValue& value: values) {
+    check(inner->Add(js.v8Context(), value.inner));
+  }
+}
+
+void JsSet::clear() {
+  inner->Clear();
+}
+
+size_t JsSet::size() const {
+  return inner->Size();
+}
+
+JsSet::operator JsArray() const {
+  return JsArray(inner->AsArray());
+}
+
+kj::Maybe<int32_t> JsInt32::value(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  int32_t value;
+  // The Int32Value(...) operation can fail with a JS exception, in which case
+  // we return kj::none and the error should be allowed to propagate.
+  if (inner->Int32Value(js.v8Context()).To(&value)) {
+    return value;
+  }
+  return kj::none;
+}
+
+kj::Maybe<uint32_t> JsUint32::value(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  uint32_t value;
+  // The Uint32Value(...) operation can fail with a JS exception, in which case
+  // we return kj::none and the error should be allowed to propagate.
+  if (inner->Uint32Value(js.v8Context()).To(&value)) {
+    return value;
+  }
+  return kj::none;
+};
+
+kj::Maybe<int64_t> JsBigInt::toInt64(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  bool lossless = false;
+  int64_t value = inner->Int64Value(&lossless);
+  if (!lossless) {
+    js.v8Isolate->ThrowException(js.rangeError("BigInt value does not fit in int64_t"));
+    return kj::none;
+  }
+  return value;
+}
+
+kj::Maybe<uint64_t> JsBigInt::toUint64(Lock& js) const {
+  KJ_ASSERT(!inner.IsEmpty());
+  bool lossless = false;
+  uint64_t value = inner->Uint64Value(&lossless);
+  if (!lossless) {
+    js.v8Isolate->ThrowException(js.rangeError("BigInt value does not fit in uint64_t"));
+    return kj::none;
+  }
+  return value;
+}
+
 kj::Maybe<double> JsNumber::value(Lock& js) const {
   KJ_ASSERT(!inner.IsEmpty());
   double value;
