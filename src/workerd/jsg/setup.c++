@@ -231,10 +231,8 @@ void IsolateBase::jsgGetMemoryInfo(MemoryTracker& tracker) const {
 
 void IsolateBase::deferDestruction(Item item) {
   KJ_REQUIRE_NONNULL(ptr, "tried to defer destruction after V8 isolate was destroyed");
-  if (queueState != QueueState::ACTIVE) {
-    KJ_LOG(ERROR, "tried to defer destruction during isolate shutdown", queueState,
-        kj::getStackTrace());
-  }
+  KJ_REQUIRE(queueState == QueueState::ACTIVE, "tried to defer destruction during isolate shutdown",
+      queueState);
   queue.lockExclusive()->push(kj::mv(item));
 }
 
