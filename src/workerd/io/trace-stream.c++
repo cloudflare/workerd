@@ -1,5 +1,6 @@
 #include <workerd/api/global-scope.h>
 #include <workerd/io/io-context.h>
+#include <workerd/io/io-own.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
@@ -618,7 +619,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // We will only dispatch the remaining events if a handler is returned.
       auto result = ([&]() -> kj::Promise<void> {
         KJ_IF_SOME(handler, maybeHandler) {
-          auto h = handler.getHandle(lock);
+          auto h = handler->getHandle(lock);
           return handleEvents(lock, h, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
         } else {
           return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
@@ -745,7 +746,8 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
         if (handle->IsFunction() || handle->IsObject()) {
           // Sweet! Our tail worker wants to keep receiving events. Let's store
           // the handler and return.
-          maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
+          maybeHandler = ioContext.addObjectReverse(
+              kj::heap<jsg::JsRef<jsg::JsValue>>(js, jsg::JsValue(handle)));
           return;
         }
 
@@ -888,7 +890,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
   // The maybeHandler will be empty until we receive and process the
   // onset event.
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+  kj::Maybe<ReverseIoOwn<jsg::JsRef<jsg::JsValue>>> maybeHandler;
 
   // Indicates that we told (or should have told) the client that we want no further events, used
   // to debug events arriving when the IoContext is no longer valid.
