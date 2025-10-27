@@ -17,7 +17,6 @@ extern "C" {
 #include <kj/vector.h>
 
 #include <algorithm>
-#include <map>
 #include <regex>
 #include <string>
 #include <vector>
