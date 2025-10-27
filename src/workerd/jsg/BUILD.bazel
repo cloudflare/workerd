@@ -110,7 +110,10 @@ wd_cc_library(
     ],
     # Some JSG headers can't be compiled on their own
     features = ["-parse_headers"],
-    implementation_deps = ["@simdutf"],
+    implementation_deps = [
+        "@simdutf",
+        "@ssl",
+    ],
     local_defines = ["JSG_IMPLEMENTATION"],
     tags = ["no-clang-tidy"],
     deps = [
@@ -121,13 +124,11 @@ wd_cc_library(
         ":modules_capnp",
         ":observer",
         ":url",
-        "//src/workerd/util",
+        "//src/workerd/util",  # Required for util/batch-queue.h
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
-        "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj",
-        "@ssl",
         "@workerd-v8//:v8",
     ],
 )
@@ -195,12 +196,12 @@ wd_cc_library(
         "url.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:strings",
         "@ada-url",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":memory-tracker",
-        "//src/workerd/util:strings",
         "@capnp-cpp//src/kj",
     ],
 )

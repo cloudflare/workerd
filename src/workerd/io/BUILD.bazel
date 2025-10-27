@@ -1,4 +1,3 @@
-load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
@@ -30,11 +29,15 @@ wd_cc_library(
     name = "trace-stream",
     srcs = ["trace-stream.c++"],
     hdrs = ["trace-stream.h"],
+    implementation_deps = [
+        "//src/workerd/util:completion-membrane",
+        "//src/workerd/util:strings",
+        "//src/workerd/util:uuid",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":io",
         "//src/workerd/util:checked-queue",
-        "//src/workerd/util:completion-membrane",
     ],
 )
 
@@ -84,8 +87,12 @@ wd_cc_library(
         ],
     }),
     implementation_deps = [
+        "//src/workerd/api:data-url",
+        "//src/workerd/api/node:exceptions",
+        "//src/workerd/util:completion-membrane",
         "//src/workerd/util:perfetto",
         "//src/workerd/util:string-buffer",
+        "//src/workerd/util:uuid",
         "@capnp-cpp//src/kj/compat:kj-brotli",
         "@capnp-cpp//src/kj/compat:kj-gzip",
         "@nbytes",
@@ -108,25 +115,18 @@ wd_cc_library(
         ":worker-interface",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
-        "//src/workerd/api:data-url",
         "//src/workerd/api:deferred-proxy",
         "//src/workerd/api:encoding",
         "//src/workerd/api:url",
-        "//src/workerd/api:urlpattern",
-        "//src/workerd/api:urlpattern-standard",
-        "//src/workerd/api/node:exceptions",
         "//src/workerd/jsg",
         "//src/workerd/jsg:inspector",
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
-        "//src/workerd/util:completion-membrane",
         "//src/workerd/util:exception",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",
         "//src/workerd/util:strong-bool",
-        "//src/workerd/util:thread-scopes",
-        "//src/workerd/util:uuid",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
         "@capnp-cpp//src/kj:kj-async",
@@ -150,6 +150,7 @@ wd_cc_library(
         "//src/pyodide:python-entrypoint",
         "//src/workerd/api:rtti",
         "//src/workerd/jsg",
+        "//src/workerd/util:strong-bool",
     ],
 )
 
@@ -206,11 +207,9 @@ wd_cc_library(
         ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg:memory-tracker",
-        "//src/workerd/util",
         "//src/workerd/util:own-util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
-        "@capnp-cpp//src/kj:kj-async",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
     ],
@@ -220,11 +219,13 @@ wd_cc_library(
     name = "observer",
     srcs = ["observer.c++"],
     hdrs = ["observer.h"],
+    implementation_deps = [
+        ":worker-interface",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":features_capnp",
         ":trace",
-        ":worker-interface",
         "//src/workerd/jsg:observer",
         "//src/workerd/util:sqlite",
     ],
@@ -255,10 +256,13 @@ wd_cc_library(
     name = "worker-entrypoint",
     srcs = ["worker-entrypoint.c++"],
     hdrs = ["worker-entrypoint.h"],
+    implementation_deps = [
+        "//src/workerd/util:perfetto",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":io",
-        "//src/workerd/util:perfetto",
     ],
 )
 
@@ -388,6 +392,8 @@ kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/util:strings",
         "@capnp-cpp//src/capnp:capnpc",
     ],
 )

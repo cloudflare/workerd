@@ -52,6 +52,7 @@ native_binary(
         "//conditions:default": "@clang-format-linux-amd64//file:file",
     }),
     out = "clang-format",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -64,6 +65,7 @@ native_binary(
         "//conditions:default": "@ruff-linux-amd64//:file",
     }),
     out = "ruff",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -71,6 +73,8 @@ copy_file(
     name = "buildifier@rule",
     src = "@buildifier_prebuilt//:buildifier",
     out = "buildifier",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
 )
 
 prettier.prettier_binary(

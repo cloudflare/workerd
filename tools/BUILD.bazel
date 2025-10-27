@@ -32,5 +32,6 @@ native_binary(
         },
     ),
     out = "clang_tidy",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )

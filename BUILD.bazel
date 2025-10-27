@@ -32,6 +32,7 @@ alias(
 alias(
     name = "format",
     actual = "//build/deps/formatters:format",
+    tags = ["manual"],
 )
 
 npm_link_all_packages(name = "node_modules")
