@@ -10,7 +10,7 @@
       "repo": "ruff",
       "file_regex": "^ruff-aarch64-apple-darwin.tar.gz$",
       "build_file_content": "filegroup(name='file', srcs=['ruff'], visibility=['//visibility:public'])",
-      "freeze_version": "0.12.1"
+      "freeze_version": "0.12.1",
     },
     {
       "name": "ruff-linux-arm64",
@@ -19,7 +19,7 @@
       "repo": "ruff",
       "file_regex": "^ruff-aarch64-unknown-linux-gnu.tar.gz$",
       "build_file_content": "filegroup(name='file', srcs=['ruff'], visibility=['//visibility:public'])",
-      "freeze_version": "0.12.1"
+      "freeze_version": "0.12.1",
     },
     {
       "name": "ruff-linux-amd64",
@@ -28,7 +28,7 @@
       "repo": "ruff",
       "file_regex": "^ruff-x86_64-unknown-linux-gnu.tar.gz$",
       "build_file_content": "filegroup(name='file', srcs=['ruff'], visibility=['//visibility:public'])",
-      "freeze_version": "0.12.1"
+      "freeze_version": "0.12.1",
     },
     //clang-format
     // Version is frozen to keep formatting consistent.
@@ -39,7 +39,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-amd64-clang-format",
       "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
+      "freeze_version": "llvm-18.1.8",
     },
     {
       "name": "clang-format-linux-arm64",
@@ -48,7 +48,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-linux-arm64-clang-format",
       "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
+      "freeze_version": "llvm-18.1.8",
     },
     {
       "name": "clang-format-darwin-arm64",
@@ -57,7 +57,7 @@
       "repo": "workerd-tools",
       "file_regex": "llvm-.*-darwin-arm64-clang-format",
       "file_type": "executable",
-      "freeze_version": "llvm-18.1.8"
+      "freeze_version": "llvm-18.1.8",
     },
     //wpt
     {
@@ -67,7 +67,7 @@
       "repo": "workerd-tools",
       "file_regex": "wpt-.*.tar.gz",
       "build_file": "@workerd//:build/BUILD.wpt",
-      "freeze_version": "wpt-c1ad85a22"
+      "freeze_version": "wpt-c1ad85a22",
     },
     {
       "name": "workerd-cxx",
@@ -75,8 +75,8 @@
       "owner": "cloudflare",
       "repo": "workerd-cxx",
       "repo_mapping": {
-        "@crates.io": "@crates_vendor"
-      }
-    }
-  ]
+        "@crates.io": "@crates_vendor",
+      },
+    },
+  ],
 }
