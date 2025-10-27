@@ -12,5 +12,5 @@ export default {
     ok(!existsSync('/tmp/hello.txt'));
     writeFileSync('/tmp/hello.txt', 'Hello, World!', 'utf8');
     return new Response(readFileSync('/tmp/hello.txt'));
-  }
+  },
 };

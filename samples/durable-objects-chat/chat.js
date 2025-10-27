@@ -63,7 +63,7 @@
 // serve our app's static asset without relying on any separate storage. (However, the space
 // available for assets served this way is very limited; larger sites should continue to use Workers
 // KV to serve assets.)
-import HTML from "./chat.html";
+import HTML from './chat.html';
 
 // `handleErrors()` is a little utility function that can wrap an HTTP request handler in a
 // try/catch and return errors to the client. You probably wouldn't want to use this in production
@@ -72,17 +72,17 @@ async function handleErrors(request, func) {
   try {
     return await func();
   } catch (err) {
-    if (request.headers.get("Upgrade") == "websocket") {
+    if (request.headers.get('Upgrade') == 'websocket') {
       // Annoyingly, if we return an HTTP error in response to a WebSocket request, Chrome devtools
       // won't show us the response body! So... let's send a WebSocket response with an error
       // frame instead.
       let pair = new WebSocketPair();
       pair[1].accept();
-      pair[1].send(JSON.stringify({error: err.stack}));
-      pair[1].close(1011, "Uncaught exception during session setup");
+      pair[1].send(JSON.stringify({ error: err.stack }));
+      pair[1].close(1011, 'Uncaught exception during session setup');
       return new Response(null, { status: 101, webSocket: pair[0] });
     } else {
-      return new Response(err.stack, {status: 500});
+      return new Response(err.stack, { status: 500 });
     }
   }
 }
@@ -105,32 +105,33 @@ export default {
 
       if (!path[0]) {
         // Serve our HTML at the root path.
-        return new Response(HTML, {headers: {"Content-Type": "text/html;charset=UTF-8"}});
+        return new Response(HTML, {
+          headers: { 'Content-Type': 'text/html;charset=UTF-8' },
+        });
       }
 
       switch (path[0]) {
-        case "api":
+        case 'api':
           // This is a request for `/api/...`, call the API handler.
           return handleApiRequest(path.slice(1), request, env);
 
         default:
-          return new Response("Not found", {status: 404});
+          return new Response('Not found', { status: 404 });
       }
     });
-  }
-}
-
+  },
+};
 
 async function handleApiRequest(path, request, env) {
   // We've received at API request. Route the request based on the path.
 
   switch (path[0]) {
-    case "room": {
+    case 'room': {
       // Request for `/api/room/...`.
 
       if (!path[1]) {
         // The request is for just "/api/room", with no ID.
-        if (request.method == "POST") {
+        if (request.method == 'POST') {
           // POST to /api/room creates a private room.
           //
           // Incidentally, this code doesn't actually store anything. It just generates a valid
@@ -145,7 +146,9 @@ async function handleApiRequest(path, request, env) {
           // could coincidentally create the same ID at the same time, because unique IDs are,
           // well, unique!
           let id = env.rooms.newUniqueId();
-          return new Response(id.toString(), {headers: {"Access-Control-Allow-Origin": "*"}});
+          return new Response(id.toString(), {
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          });
         } else {
           // If we wanted to support returning a list of public rooms, this might be a place to do
           // it. The list of room names might be a good thing to store in KV, though a singleton
@@ -156,7 +159,7 @@ async function handleApiRequest(path, request, env) {
           //
           // For this demo, though, we're not implementing a public room list, mainly because
           // inevitably some trolls would probably register a bunch of offensive room names. Sigh.
-          return new Response("Method not allowed", {status: 405});
+          return new Response('Method not allowed', { status: 405 });
         }
       }
 
@@ -177,7 +180,7 @@ async function handleApiRequest(path, request, env) {
         // derives an ID from a string.
         id = env.rooms.idFromName(name);
       } else {
-        return new Response("Name too long", {status: 404});
+        return new Response('Name too long', { status: 404 });
       }
 
       // Get the Durable Object stub for this room! The stub is a client object that can be used
@@ -191,7 +194,7 @@ async function handleApiRequest(path, request, env) {
       // Compute a new URL with `/api/room/<name>` removed. We'll forward the rest of the path
       // to the Durable Object.
       let newUrl = new URL(request.url);
-      newUrl.pathname = "/" + path.slice(2).join("/");
+      newUrl.pathname = '/' + path.slice(2).join('/');
 
       // Send the request to the object. The `fetch()` method of a Durable Object stub has the
       // same signature as the global `fetch()` function, but the request is always sent to the
@@ -200,7 +203,7 @@ async function handleApiRequest(path, request, env) {
     }
 
     default:
-      return new Response("Not found", {status: 404});
+      return new Response('Not found', { status: 404 });
   }
 }
 
@@ -239,15 +242,15 @@ export class ChatRoom {
       let url = new URL(request.url);
 
       switch (url.pathname) {
-        case "/websocket": {
+        case '/websocket': {
           // The request is to `/api/room/<name>/websocket`. A client is trying to establish a new
           // WebSocket session.
-          if (request.headers.get("Upgrade") != "websocket") {
-            return new Response("expected websocket", {status: 400});
+          if (request.headers.get('Upgrade') != 'websocket') {
+            return new Response('expected websocket', { status: 400 });
           }
 
           // Get the client's IP address for use with the rate limiter.
-          let ip = request.headers.get("CF-Connecting-IP");
+          let ip = request.headers.get('CF-Connecting-IP');
 
           // To accept the WebSocket request, we create a WebSocketPair (which is like a socketpair,
           // i.e. two WebSockets that talk to each other), we return one end of the pair in the
@@ -264,7 +267,7 @@ export class ChatRoom {
         }
 
         default:
-          return new Response("Not found", {status: 404});
+          return new Response('Not found', { status: 404 });
       }
     });
   }
@@ -278,34 +281,37 @@ export class ChatRoom {
     // Set up our rate limiter client.
     let limiterId = this.env.limiters.idFromName(ip);
     let limiter = new RateLimiterClient(
-        () => this.env.limiters.get(limiterId),
-        err => webSocket.close(1011, err.stack));
+      () => this.env.limiters.get(limiterId),
+      (err) => webSocket.close(1011, err.stack)
+    );
 
     // Create our session and add it to the sessions list.
     // We don't send any messages to the client until it has sent us the initial user info
     // message. Until then, we will queue messages in `session.blockedMessages`.
-    let session = {webSocket, blockedMessages: []};
+    let session = { webSocket, blockedMessages: [] };
     this.sessions.push(session);
 
     // Queue "join" messages for all online users, to populate the client's roster.
-    this.sessions.forEach(otherSession => {
+    this.sessions.forEach((otherSession) => {
       if (otherSession.name) {
-        session.blockedMessages.push(JSON.stringify({joined: otherSession.name}));
+        session.blockedMessages.push(
+          JSON.stringify({ joined: otherSession.name })
+        );
       }
     });
 
     // Load the last 100 messages from the chat history stored on disk, and send them to the
     // client.
-    let storage = await this.storage.list({reverse: true, limit: 100});
+    let storage = await this.storage.list({ reverse: true, limit: 100 });
     let backlog = [...storage.values()];
     backlog.reverse();
-    backlog.forEach(value => {
+    backlog.forEach((value) => {
       session.blockedMessages.push(value);
     });
 
     // Set event handlers to receive messages.
     let receivedUserInfo = false;
-    webSocket.addEventListener("message", async msg => {
+    webSocket.addEventListener('message', async (msg) => {
       try {
         if (session.quit) {
           // Whoops, when trying to send to this WebSocket in the past, it threw an exception and
@@ -313,15 +319,17 @@ export class ChatRoom {
           // close(), which might throw, in which case we'll try to send an error, which will also
           // throw, and whatever, at least we won't accept the message. (This probably can't
           // actually happen. This is defensive coding.)
-          webSocket.close(1011, "WebSocket broken.");
+          webSocket.close(1011, 'WebSocket broken.');
           return;
         }
 
         // Check if the user is over their rate limit and reject the message if so.
         if (!limiter.checkLimit()) {
-          webSocket.send(JSON.stringify({
-            error: "Your IP is being rate-limited, please try again later."
-          }));
+          webSocket.send(
+            JSON.stringify({
+              error: 'Your IP is being rate-limited, please try again later.',
+            })
+          );
           return;
         }
 
@@ -331,26 +339,26 @@ export class ChatRoom {
         if (!receivedUserInfo) {
           // The first message the client sends is the user info message with their name. Save it
           // into their session object.
-          session.name = "" + (data.name || "anonymous");
+          session.name = '' + (data.name || 'anonymous');
 
           // Don't let people use ridiculously long names. (This is also enforced on the client,
           // so if they get here they are not using the intended client.)
           if (session.name.length > 32) {
-            webSocket.send(JSON.stringify({error: "Name too long."}));
-            webSocket.close(1009, "Name too long.");
+            webSocket.send(JSON.stringify({ error: 'Name too long.' }));
+            webSocket.close(1009, 'Name too long.');
             return;
           }
 
           // Deliver all the messages we queued up since the user connected.
-          session.blockedMessages.forEach(queued => {
+          session.blockedMessages.forEach((queued) => {
             webSocket.send(queued);
           });
           delete session.blockedMessages;
 
           // Broadcast to all other connections that this user has joined.
-          this.broadcast({joined: session.name});
+          this.broadcast({ joined: session.name });
 
-          webSocket.send(JSON.stringify({ready: true}));
+          webSocket.send(JSON.stringify({ ready: true }));
 
           // Note that we've now received the user info message.
           receivedUserInfo = true;
@@ -359,12 +367,12 @@ export class ChatRoom {
         }
 
         // Construct sanitized message for storage and broadcast.
-        data = { name: session.name, message: "" + data.message };
+        data = { name: session.name, message: '' + data.message };
 
         // Block people from sending overly long messages. This is also enforced on the client,
         // so to trigger this the user must be bypassing the client code.
         if (data.message.length > 256) {
-          webSocket.send(JSON.stringify({error: "Message too long."}));
+          webSocket.send(JSON.stringify({ error: 'Message too long.' }));
           return;
         }
 
@@ -384,33 +392,33 @@ export class ChatRoom {
       } catch (err) {
         // Report any exceptions directly back to the client. As with our handleErrors() this
         // probably isn't what you'd want to do in production, but it's convenient when testing.
-        webSocket.send(JSON.stringify({error: err.stack}));
+        webSocket.send(JSON.stringify({ error: err.stack }));
       }
     });
 
     // On "close" and "error" events, remove the WebSocket from the sessions list and broadcast
     // a quit message.
-    let closeOrErrorHandler = evt => {
+    let closeOrErrorHandler = (evt) => {
       session.quit = true;
-      this.sessions = this.sessions.filter(member => member !== session);
+      this.sessions = this.sessions.filter((member) => member !== session);
       if (session.name) {
-        this.broadcast({quit: session.name});
+        this.broadcast({ quit: session.name });
       }
     };
-    webSocket.addEventListener("close", closeOrErrorHandler);
-    webSocket.addEventListener("error", closeOrErrorHandler);
+    webSocket.addEventListener('close', closeOrErrorHandler);
+    webSocket.addEventListener('error', closeOrErrorHandler);
   }
 
   // broadcast() broadcasts a message to all clients.
   broadcast(message) {
     // Apply JSON if we weren't given a string to start with.
-    if (typeof message !== "string") {
+    if (typeof message !== 'string') {
       message = JSON.stringify(message);
     }
 
     // Iterate over all the sessions sending them messages.
     let quitters = [];
-    this.sessions = this.sessions.filter(session => {
+    this.sessions = this.sessions.filter((session) => {
       if (session.name) {
         try {
           session.webSocket.send(message);
@@ -430,9 +438,9 @@ export class ChatRoom {
       }
     });
 
-    quitters.forEach(quitter => {
+    quitters.forEach((quitter) => {
       if (quitter.name) {
-        this.broadcast({quit: quitter.name});
+        this.broadcast({ quit: quitter.name });
       }
     });
   }
@@ -464,7 +472,7 @@ export class RateLimiter {
 
       this.nextAllowedTime = Math.max(now, this.nextAllowedTime);
 
-      if (request.method == "POST") {
+      if (request.method == 'POST') {
         // POST request means the user performed an action.
         // We allow one action per 5 seconds.
         this.nextAllowedTime += 5;
@@ -476,7 +484,7 @@ export class RateLimiter {
       // in a quick burst before they start being limited.
       let cooldown = Math.max(0, this.nextAllowedTime - now - 20);
       return new Response(cooldown);
-    })
+    });
   }
 }
 
@@ -519,7 +527,9 @@ class RateLimiterClient {
         // Currently, fetch() needs a valid URL even though it's not actually going to the
         // internet. We may loosen this in the future to accept an arbitrary string. But for now,
         // we have to provide a dummy URL that will be ignored at the other end anyway.
-        response = await this.limiter.fetch("https://dummy-url", {method: "POST"});
+        response = await this.limiter.fetch('https://dummy-url', {
+          method: 'POST',
+        });
       } catch (err) {
         // `fetch()` threw an exception. This is probably because the limiter has been
         // disconnected. Stubs implement E-order semantics, meaning that calls to the same stub
@@ -531,12 +541,14 @@ class RateLimiterClient {
         // Anyway, get a new limiter and try again. If it fails again, something else is probably
         // wrong.
         this.limiter = this.getLimiterStub();
-        response = await this.limiter.fetch("https://dummy-url", {method: "POST"});
+        response = await this.limiter.fetch('https://dummy-url', {
+          method: 'POST',
+        });
       }
 
       // The response indicates how long we want to pause before accepting more requests.
       let cooldown = +(await response.text());
-      await new Promise(resolve => setTimeout(resolve, cooldown * 1000));
+      await new Promise((resolve) => setTimeout(resolve, cooldown * 1000));
 
       // Done waiting.
       this.inCooldown = false;

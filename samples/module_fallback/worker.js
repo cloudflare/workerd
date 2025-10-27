@@ -13,13 +13,13 @@ try {
   throw new Error('bar should not have been imported');
 } catch {
   console.log('tried to import bar which does not exist');
-};
+}
 
 console.log(foo, baz, vm);
 
 export default {
   async fetch(req, env) {
     strictEqual(1 + 1, 2);
-    return new Response("Hello World\n");
-  }
+    return new Response('Hello World\n');
+  },
 };
