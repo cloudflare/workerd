@@ -86,6 +86,7 @@ wd_cc_library(
         "//src/workerd/api:crypto-crc-impl",
         "//src/workerd/api:data-url",
         "//src/workerd/api/node:exceptions",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:completion-membrane",
         "//src/workerd/util:entropy",
         "//src/workerd/util:perfetto",
@@ -98,8 +99,9 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":actor",
+        ":actor-cache",
         ":actor-id",
+        ":actor-sqlite",
         ":actor-storage_capnp",
         ":cdp_capnp",
         ":container_capnp",
@@ -186,31 +188,53 @@ wd_cc_library(
     ],
 )
 
-# TODO(cleanup): Split this up further.
 wd_cc_library(
-    name = "actor",
-    srcs = [
-        "actor-cache.c++",
-        "actor-sqlite.c++",
-        "actor-storage.c++",
-    ],
-    hdrs = [
-        "actor-cache.h",
-        "actor-sqlite.h",
-        "actor-storage.h",
+    name = "actor-cache",
+    srcs = ["actor-cache.c++"],
+    hdrs = ["actor-cache.h"],
+    implementation_deps = [
+        ":actor-storage",
+        ":io-gate",
+        "//src/workerd/util:duration-exceeded-logger",
+        "//src/workerd/util:sentry",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-storage_capnp",
-        ":io-gate",
         ":trace",
         "//src/workerd/jsg:exception",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:duration-exceeded-logger",
-        "//src/workerd/util:sqlite",
-        "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-async",
     ],
+)
+
+wd_cc_library(
+    name = "actor-sqlite",
+    srcs = ["actor-sqlite.c++"],
+    hdrs = ["actor-sqlite.h"],
+    implementation_deps = [
+        ":io-gate",
+        "//src/workerd/jsg:exception",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:sentry",
+        "@capnp-cpp//src/kj",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":actor-cache",
+        "//src/workerd/util:sqlite",
+    ],
+)
+
+wd_cc_library(
+    name = "actor-storage",
+    srcs = ["actor-storage.c++"],
+    hdrs = ["actor-storage.h"],
+    implementation_deps = [
+        ":actor-storage_capnp",
+        "//src/workerd/jsg:exception",
+    ],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
 )
 
 wd_cc_library(
@@ -389,7 +413,7 @@ kj_test(
 kj_test(
     src = "actor-cache-test.c++",
     deps = [
-        ":actor",
+        ":actor-cache",
         ":io-gate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
@@ -399,8 +423,9 @@ kj_test(
 kj_test(
     src = "actor-sqlite-test.c++",
     deps = [
-        ":actor",
+        ":actor-sqlite",
         ":io-gate",
+        "//src/workerd/util:autogate",
         "//src/workerd/util:test",
         "//src/workerd/util:test-util",
     ],
