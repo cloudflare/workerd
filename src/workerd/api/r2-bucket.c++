@@ -12,7 +12,6 @@
 #include <workerd/api/r2-api.capnp.h>
 #include <workerd/api/streams.h>
 #include <workerd/util/http-util.h>
-#include <workerd/util/mimetype.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
