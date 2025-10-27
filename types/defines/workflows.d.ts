@@ -65,8 +65,8 @@ interface WorkflowInstanceCreateOptions<PARAMS = unknown> {
    * Defaults to the maximum retention period available for the owner's account.
    */
   retention?: {
-    successRetention?: WorkflowRetentionDuration,
-    errorRetention?: WorkflowRetentionDuration,
+    successRetention?: WorkflowRetentionDuration;
+    errorRetention?: WorkflowRetentionDuration;
   };
 }
 

@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import ts from "typescript";
-import { ensureStatementModifiers } from "./helpers";
+import ts from 'typescript';
+import { ensureStatementModifiers } from './helpers';
 
 // This ensures that all top-level nodes have the `declare` keyword, but no
 // nodes inside `declare modules` blocks do. It also ensures no top-level

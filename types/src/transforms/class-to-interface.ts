@@ -1,4 +1,4 @@
-import ts from "typescript";
+import ts from 'typescript';
 
 /**
  * Transforms an array of classes to an interface/variable pair, preserving the ability to construct the class
@@ -368,7 +368,7 @@ function createPrototypeProperty(
 ): ts.PropertySignature {
   return context.factory.createPropertySignature(
     undefined,
-    "prototype",
+    'prototype',
     undefined,
     context.factory.createTypeReferenceNode(node.name, undefined)
   );
