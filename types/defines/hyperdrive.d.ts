@@ -32,7 +32,7 @@ interface Hyperdrive {
   readonly port: number;
   /*
    * The username to use when authenticating to your database via Hyperdrive.
-   * Unlike the host and password, this will be the same every time 
+   * Unlike the host and password, this will be the same every time
    */
   readonly user: string;
   /*

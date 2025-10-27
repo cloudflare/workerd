@@ -73,11 +73,11 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
 
     // FIRST (col)
     {
-      const result = await stmt.bind(1).first("col1");
+      const result = await stmt.bind(1).first('col1');
       expectType<unknown | null>(result);
     }
     {
-      const result = await stmt.bind(1).first<string>("col1");
+      const result = await stmt.bind(1).first<string>('col1');
       expectType<string | null>(result);
     }
 
@@ -105,7 +105,7 @@ export const handler: ExportedHandler<{ DB: D1Database }> = {
     // WITHSESSION
     {
       expectType<D1DatabaseSession>(env.DB.withSession());
-      const session = env.DB.withSession("first-primary");
+      const session = env.DB.withSession('first-primary');
       expectType<D1DatabaseSession>(session);
 
       const bookmark = session.getBookmark();

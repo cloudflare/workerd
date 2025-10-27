@@ -33,13 +33,13 @@ interface BasicImageTransformations {
    *  - squeeze: Stretches and deforms to the width and height given, even if it
    *    breaks aspect ratio
    */
-  fit?: "scale-down" | "contain" | "cover" | "crop" | "pad" | "squeeze";
+  fit?: 'scale-down' | 'contain' | 'cover' | 'crop' | 'pad' | 'squeeze';
   /**
    * Image segmentation using artificial intelligence models. Sets pixels not
    * within selected segment area to transparent e.g "foreground" sets every
    * background pixel as transparent.
    */
-  segment?: "foreground";
+  segment?: 'foreground';
   /**
    * When cropping with fit: "cover", this defines the side or point that should
    * be left uncropped. The value is either a string
@@ -124,7 +124,7 @@ interface RequestInitCfProperties extends Record<string, unknown> {
   image?: RequestInitCfPropertiesImage;
   minify?: RequestInitCfPropertiesImageMinify;
   mirage?: boolean;
-  polish?: "lossy" | "lossless" | "off";
+  polish?: 'lossy' | 'lossless' | 'off';
   r2?: RequestInitCfPropertiesR2;
   /**
    * Redirects the request to an alternate origin server. You can use this,
@@ -162,7 +162,7 @@ interface RequestInitCfPropertiesImageDraw extends BasicImageTransformations {
    * - If set to "y", the overlay image will be tiled vertically only
    *   (form a line).
    */
-  repeat?: true | "x" | "y";
+  repeat?: true | 'x' | 'y';
   /**
    * Position of the overlay image relative to a given edge. Each property is
    * an offset in pixels. 0 aligns exactly to the edge. For example, left: 10
@@ -201,27 +201,29 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    *    - tolerance: difference from color to treat as color
    *    - keep: the number of pixels of border to keep
    */
-  trim?: "border" | {
-    top?: number;
-    bottom?: number;
-    left?: number;
-    right?: number;
-    width?: number;
-    height?: number;
-    border?:
-      | boolean
-      | {
-          color?: string;
-          tolerance?: number;
-          keep?: number;
-        };
-  };
+  trim?:
+    | 'border'
+    | {
+        top?: number;
+        bottom?: number;
+        left?: number;
+        right?: number;
+        width?: number;
+        height?: number;
+        border?:
+          | boolean
+          | {
+              color?: string;
+              tolerance?: number;
+              keep?: number;
+            };
+      };
   /**
    * Quality setting from 1-100 (useful values are in 60-90 range). Lower values
    * make images look worse, but load faster. The default is 85. It applies only
    * to JPEG and WebP images. It doesn’t have any effect on PNG.
    */
-  quality?: number | "low" | "medium-low" | "medium-high" | "high";
+  quality?: number | 'low' | 'medium-low' | 'medium-high' | 'high';
   /**
    * Output format to generate. It can be:
    *  - avif: generate images in AVIF format.
@@ -233,7 +235,15 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * - jpeg: generate images in JPEG format.
    * - png: generate images in PNG format.
    */
-  format?: "avif" | "webp" | "json" | "jpeg" | "png" | "baseline-jpeg" | "png-force" | "svg";
+  format?:
+    | 'avif'
+    | 'webp'
+    | 'json'
+    | 'jpeg'
+    | 'png'
+    | 'baseline-jpeg'
+    | 'png-force'
+    | 'svg';
   /**
    * Whether to preserve animation frames from input files. Default is true.
    * Setting it to false reduces animations to still images. This setting is
@@ -256,7 +266,7 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    *  - none: Discard all invisible EXIF metadata. Currently WebP and PNG
    *    output formats always discard metadata.
    */
-  metadata?: "keep" | "copyright" | "none";
+  metadata?: 'keep' | 'copyright' | 'none';
   /**
    * Strength of sharpening filter to apply to the image. Floating-point
    * number between 0 (no sharpening, default) and 10 (maximum). 1.0 is a
@@ -278,7 +288,7 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * pass authentication headers (Authorization, Cookie, etc.) through to
    * the origin.
    */
-  "origin-auth"?: "share-publicly";
+  'origin-auth'?: 'share-publicly';
   /**
    * Adds a border around the image. The border is added after resizing. Border
    * width takes dpr into account, and can be specified either using a single
@@ -326,7 +336,7 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * rotation, so if you apply flip=h,rotate=90 then the image will be flipped
    * horizontally, then rotated by 90 degrees.
    */
-  flip?: 'h' | 'v' | 'hv',
+  flip?: 'h' | 'v' | 'hv';
 
   /**
    * Slightly reduces latency on a cache miss by selecting a
@@ -336,7 +346,7 @@ interface RequestInitCfPropertiesImage extends BasicImageTransformations {
    * unusual circumstances like resizing uncacheable dynamically-generated
    * images.
    */
-  compression?: "fast";
+  compression?: 'fast';
 }
 
 interface RequestInitCfPropertiesImageMinify {
@@ -571,13 +581,13 @@ interface IncomingRequestCfPropertiesGeographicInformation {
    *
    * @example "GB"
    */
-  country?: Iso3166Alpha2Code | "T1";
+  country?: Iso3166Alpha2Code | 'T1';
   /**
    * If present, this property indicates that the request originated in the EU
    *
    * @example "1"
    */
-  isEUCountry?: "1";
+  isEUCountry?: '1';
   /**
    * A two-letter code indicating the continent the request originated from.
    *
@@ -639,19 +649,19 @@ interface IncomingRequestCfPropertiesGeographicInformation {
 /** Data about the incoming request's TLS certificate */
 interface IncomingRequestCfPropertiesTLSClientAuth {
   /** Always `"1"`, indicating that the certificate was presented */
-  certPresented: "1";
+  certPresented: '1';
   /**
    * Result of certificate verification.
    *
    * @example "FAILED:self signed certificate"
    */
-  certVerified: Exclude<CertVerificationStatus, "NONE">;
+  certVerified: Exclude<CertVerificationStatus, 'NONE'>;
   /** The presented certificate's revokation status.
    *
    * - A value of `"1"` indicates the certificate has been revoked
    * - A value of `"0"` indicates the certificate has not been revoked
    */
-  certRevoked: "1" | "0";
+  certRevoked: '1' | '0';
   /**
    * The certificate issuer's [distinguished name](https://knowledge.digicert.com/generalinformation/INFO1745.html)
    *
@@ -732,41 +742,41 @@ interface IncomingRequestCfPropertiesTLSClientAuth {
 
 /** Placeholder values for TLS Client Authorization */
 interface IncomingRequestCfPropertiesTLSClientAuthPlaceholder {
-  certPresented: "0";
-  certVerified: "NONE";
-  certRevoked: "0";
-  certIssuerDN: "";
-  certSubjectDN: "";
-  certIssuerDNRFC2253: "";
-  certSubjectDNRFC2253: "";
-  certIssuerDNLegacy: "";
-  certSubjectDNLegacy: "";
-  certSerial: "";
-  certIssuerSerial: "";
-  certSKI: "";
-  certIssuerSKI: "";
-  certFingerprintSHA1: "";
-  certFingerprintSHA256: "";
-  certNotBefore: "";
-  certNotAfter: "";
+  certPresented: '0';
+  certVerified: 'NONE';
+  certRevoked: '0';
+  certIssuerDN: '';
+  certSubjectDN: '';
+  certIssuerDNRFC2253: '';
+  certSubjectDNRFC2253: '';
+  certIssuerDNLegacy: '';
+  certSubjectDNLegacy: '';
+  certSerial: '';
+  certIssuerSerial: '';
+  certSKI: '';
+  certIssuerSKI: '';
+  certFingerprintSHA1: '';
+  certFingerprintSHA256: '';
+  certNotBefore: '';
+  certNotAfter: '';
 }
 
 /** Possible outcomes of TLS verification */
 declare type CertVerificationStatus =
   /** Authentication succeeded */
-  | "SUCCESS"
+  | 'SUCCESS'
   /** No certificate was presented */
-  | "NONE"
+  | 'NONE'
   /** Failed because the certificate was self-signed */
-  | "FAILED:self signed certificate"
+  | 'FAILED:self signed certificate'
   /** Failed because the certificate failed a trust chain check */
-  | "FAILED:unable to verify the first certificate"
+  | 'FAILED:unable to verify the first certificate'
   /** Failed because the certificate not yet valid */
-  | "FAILED:certificate is not yet valid"
+  | 'FAILED:certificate is not yet valid'
   /** Failed because the certificate is expired */
-  | "FAILED:certificate has expired"
+  | 'FAILED:certificate has expired'
   /** Failed for another unspecified reason */
-  | "FAILED";
+  | 'FAILED';
 
 /**
  * An upstream endpoint's response to a TCP `keepalive` message from Cloudflare.
@@ -781,258 +791,258 @@ declare type IncomingRequestCfPropertiesEdgeRequestKeepAliveStatus =
 
 /** ISO 3166-1 Alpha-2 codes */
 declare type Iso3166Alpha2Code =
-  | "AD"
-  | "AE"
-  | "AF"
-  | "AG"
-  | "AI"
-  | "AL"
-  | "AM"
-  | "AO"
-  | "AQ"
-  | "AR"
-  | "AS"
-  | "AT"
-  | "AU"
-  | "AW"
-  | "AX"
-  | "AZ"
-  | "BA"
-  | "BB"
-  | "BD"
-  | "BE"
-  | "BF"
-  | "BG"
-  | "BH"
-  | "BI"
-  | "BJ"
-  | "BL"
-  | "BM"
-  | "BN"
-  | "BO"
-  | "BQ"
-  | "BR"
-  | "BS"
-  | "BT"
-  | "BV"
-  | "BW"
-  | "BY"
-  | "BZ"
-  | "CA"
-  | "CC"
-  | "CD"
-  | "CF"
-  | "CG"
-  | "CH"
-  | "CI"
-  | "CK"
-  | "CL"
-  | "CM"
-  | "CN"
-  | "CO"
-  | "CR"
-  | "CU"
-  | "CV"
-  | "CW"
-  | "CX"
-  | "CY"
-  | "CZ"
-  | "DE"
-  | "DJ"
-  | "DK"
-  | "DM"
-  | "DO"
-  | "DZ"
-  | "EC"
-  | "EE"
-  | "EG"
-  | "EH"
-  | "ER"
-  | "ES"
-  | "ET"
-  | "FI"
-  | "FJ"
-  | "FK"
-  | "FM"
-  | "FO"
-  | "FR"
-  | "GA"
-  | "GB"
-  | "GD"
-  | "GE"
-  | "GF"
-  | "GG"
-  | "GH"
-  | "GI"
-  | "GL"
-  | "GM"
-  | "GN"
-  | "GP"
-  | "GQ"
-  | "GR"
-  | "GS"
-  | "GT"
-  | "GU"
-  | "GW"
-  | "GY"
-  | "HK"
-  | "HM"
-  | "HN"
-  | "HR"
-  | "HT"
-  | "HU"
-  | "ID"
-  | "IE"
-  | "IL"
-  | "IM"
-  | "IN"
-  | "IO"
-  | "IQ"
-  | "IR"
-  | "IS"
-  | "IT"
-  | "JE"
-  | "JM"
-  | "JO"
-  | "JP"
-  | "KE"
-  | "KG"
-  | "KH"
-  | "KI"
-  | "KM"
-  | "KN"
-  | "KP"
-  | "KR"
-  | "KW"
-  | "KY"
-  | "KZ"
-  | "LA"
-  | "LB"
-  | "LC"
-  | "LI"
-  | "LK"
-  | "LR"
-  | "LS"
-  | "LT"
-  | "LU"
-  | "LV"
-  | "LY"
-  | "MA"
-  | "MC"
-  | "MD"
-  | "ME"
-  | "MF"
-  | "MG"
-  | "MH"
-  | "MK"
-  | "ML"
-  | "MM"
-  | "MN"
-  | "MO"
-  | "MP"
-  | "MQ"
-  | "MR"
-  | "MS"
-  | "MT"
-  | "MU"
-  | "MV"
-  | "MW"
-  | "MX"
-  | "MY"
-  | "MZ"
-  | "NA"
-  | "NC"
-  | "NE"
-  | "NF"
-  | "NG"
-  | "NI"
-  | "NL"
-  | "NO"
-  | "NP"
-  | "NR"
-  | "NU"
-  | "NZ"
-  | "OM"
-  | "PA"
-  | "PE"
-  | "PF"
-  | "PG"
-  | "PH"
-  | "PK"
-  | "PL"
-  | "PM"
-  | "PN"
-  | "PR"
-  | "PS"
-  | "PT"
-  | "PW"
-  | "PY"
-  | "QA"
-  | "RE"
-  | "RO"
-  | "RS"
-  | "RU"
-  | "RW"
-  | "SA"
-  | "SB"
-  | "SC"
-  | "SD"
-  | "SE"
-  | "SG"
-  | "SH"
-  | "SI"
-  | "SJ"
-  | "SK"
-  | "SL"
-  | "SM"
-  | "SN"
-  | "SO"
-  | "SR"
-  | "SS"
-  | "ST"
-  | "SV"
-  | "SX"
-  | "SY"
-  | "SZ"
-  | "TC"
-  | "TD"
-  | "TF"
-  | "TG"
-  | "TH"
-  | "TJ"
-  | "TK"
-  | "TL"
-  | "TM"
-  | "TN"
-  | "TO"
-  | "TR"
-  | "TT"
-  | "TV"
-  | "TW"
-  | "TZ"
-  | "UA"
-  | "UG"
-  | "UM"
-  | "US"
-  | "UY"
-  | "UZ"
-  | "VA"
-  | "VC"
-  | "VE"
-  | "VG"
-  | "VI"
-  | "VN"
-  | "VU"
-  | "WF"
-  | "WS"
-  | "YE"
-  | "YT"
-  | "ZA"
-  | "ZM"
-  | "ZW";
+  | 'AD'
+  | 'AE'
+  | 'AF'
+  | 'AG'
+  | 'AI'
+  | 'AL'
+  | 'AM'
+  | 'AO'
+  | 'AQ'
+  | 'AR'
+  | 'AS'
+  | 'AT'
+  | 'AU'
+  | 'AW'
+  | 'AX'
+  | 'AZ'
+  | 'BA'
+  | 'BB'
+  | 'BD'
+  | 'BE'
+  | 'BF'
+  | 'BG'
+  | 'BH'
+  | 'BI'
+  | 'BJ'
+  | 'BL'
+  | 'BM'
+  | 'BN'
+  | 'BO'
+  | 'BQ'
+  | 'BR'
+  | 'BS'
+  | 'BT'
+  | 'BV'
+  | 'BW'
+  | 'BY'
+  | 'BZ'
+  | 'CA'
+  | 'CC'
+  | 'CD'
+  | 'CF'
+  | 'CG'
+  | 'CH'
+  | 'CI'
+  | 'CK'
+  | 'CL'
+  | 'CM'
+  | 'CN'
+  | 'CO'
+  | 'CR'
+  | 'CU'
+  | 'CV'
+  | 'CW'
+  | 'CX'
+  | 'CY'
+  | 'CZ'
+  | 'DE'
+  | 'DJ'
+  | 'DK'
+  | 'DM'
+  | 'DO'
+  | 'DZ'
+  | 'EC'
+  | 'EE'
+  | 'EG'
+  | 'EH'
+  | 'ER'
+  | 'ES'
+  | 'ET'
+  | 'FI'
+  | 'FJ'
+  | 'FK'
+  | 'FM'
+  | 'FO'
+  | 'FR'
+  | 'GA'
+  | 'GB'
+  | 'GD'
+  | 'GE'
+  | 'GF'
+  | 'GG'
+  | 'GH'
+  | 'GI'
+  | 'GL'
+  | 'GM'
+  | 'GN'
+  | 'GP'
+  | 'GQ'
+  | 'GR'
+  | 'GS'
+  | 'GT'
+  | 'GU'
+  | 'GW'
+  | 'GY'
+  | 'HK'
+  | 'HM'
+  | 'HN'
+  | 'HR'
+  | 'HT'
+  | 'HU'
+  | 'ID'
+  | 'IE'
+  | 'IL'
+  | 'IM'
+  | 'IN'
+  | 'IO'
+  | 'IQ'
+  | 'IR'
+  | 'IS'
+  | 'IT'
+  | 'JE'
+  | 'JM'
+  | 'JO'
+  | 'JP'
+  | 'KE'
+  | 'KG'
+  | 'KH'
+  | 'KI'
+  | 'KM'
+  | 'KN'
+  | 'KP'
+  | 'KR'
+  | 'KW'
+  | 'KY'
+  | 'KZ'
+  | 'LA'
+  | 'LB'
+  | 'LC'
+  | 'LI'
+  | 'LK'
+  | 'LR'
+  | 'LS'
+  | 'LT'
+  | 'LU'
+  | 'LV'
+  | 'LY'
+  | 'MA'
+  | 'MC'
+  | 'MD'
+  | 'ME'
+  | 'MF'
+  | 'MG'
+  | 'MH'
+  | 'MK'
+  | 'ML'
+  | 'MM'
+  | 'MN'
+  | 'MO'
+  | 'MP'
+  | 'MQ'
+  | 'MR'
+  | 'MS'
+  | 'MT'
+  | 'MU'
+  | 'MV'
+  | 'MW'
+  | 'MX'
+  | 'MY'
+  | 'MZ'
+  | 'NA'
+  | 'NC'
+  | 'NE'
+  | 'NF'
+  | 'NG'
+  | 'NI'
+  | 'NL'
+  | 'NO'
+  | 'NP'
+  | 'NR'
+  | 'NU'
+  | 'NZ'
+  | 'OM'
+  | 'PA'
+  | 'PE'
+  | 'PF'
+  | 'PG'
+  | 'PH'
+  | 'PK'
+  | 'PL'
+  | 'PM'
+  | 'PN'
+  | 'PR'
+  | 'PS'
+  | 'PT'
+  | 'PW'
+  | 'PY'
+  | 'QA'
+  | 'RE'
+  | 'RO'
+  | 'RS'
+  | 'RU'
+  | 'RW'
+  | 'SA'
+  | 'SB'
+  | 'SC'
+  | 'SD'
+  | 'SE'
+  | 'SG'
+  | 'SH'
+  | 'SI'
+  | 'SJ'
+  | 'SK'
+  | 'SL'
+  | 'SM'
+  | 'SN'
+  | 'SO'
+  | 'SR'
+  | 'SS'
+  | 'ST'
+  | 'SV'
+  | 'SX'
+  | 'SY'
+  | 'SZ'
+  | 'TC'
+  | 'TD'
+  | 'TF'
+  | 'TG'
+  | 'TH'
+  | 'TJ'
+  | 'TK'
+  | 'TL'
+  | 'TM'
+  | 'TN'
+  | 'TO'
+  | 'TR'
+  | 'TT'
+  | 'TV'
+  | 'TW'
+  | 'TZ'
+  | 'UA'
+  | 'UG'
+  | 'UM'
+  | 'US'
+  | 'UY'
+  | 'UZ'
+  | 'VA'
+  | 'VC'
+  | 'VE'
+  | 'VG'
+  | 'VI'
+  | 'VN'
+  | 'VU'
+  | 'WF'
+  | 'WS'
+  | 'YE'
+  | 'YT'
+  | 'ZA'
+  | 'ZM'
+  | 'ZW';
 
 /** The 2-letter continent codes Cloudflare uses */
-declare type ContinentCode = "AF" | "AN" | "AS" | "EU" | "NA" | "OC" | "SA";
+declare type ContinentCode = 'AF' | 'AN' | 'AS' | 'EU' | 'NA' | 'OC' | 'SA';
 
 type CfProperties<HostMetadata = unknown> =
   | IncomingRequestCfProperties<HostMetadata>

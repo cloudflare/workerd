@@ -2,11 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import ts, { factory as f } from "typescript";
+import ts, { factory as f } from 'typescript';
 
 const placeholderFile = ts.createSourceFile(
-  "placeholder.ts", // File name doesn't matter here
-  "",
+  'placeholder.ts', // File name doesn't matter here
+  '',
   ts.ScriptTarget.ESNext,
   false,
   ts.ScriptKind.TS

@@ -12,7 +12,7 @@ export function installParameterNames(newData: ParameterNamesData): void {
   data = newData;
 }
 
-const reservedKeywords = ["function", "number", "string"];
+const reservedKeywords = ['function', 'number', 'string'];
 
 export function getParameterName(
   fullyQualifiedParentName: string,
@@ -20,7 +20,7 @@ export function getParameterName(
   index: number
 ): string {
   // `constructor` is a reserved property name
-  if (functionName === "constructor") functionName = `$${functionName}`;
+  if (functionName === 'constructor') functionName = `$${functionName}`;
   const name = data?.[fullyQualifiedParentName]?.[functionName]?.[index];
   if (name === undefined) return `param${index}`;
   if (reservedKeywords.includes(name)) return `$${name}`;

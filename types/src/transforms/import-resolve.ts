@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
+import assert from 'node:assert';
+import ts from 'typescript';
 
 // Adapted from https://github.com/cloudflare/workerd/blob/2182afdd8ca9ac35fb18b76205308fabd5000d01/src/node/tsconfig.json#L27-L32.
 // Maps import specifier patterns to target path pattern. Sorted by target path
@@ -11,8 +11,8 @@ import ts from "typescript";
 // specifiers, the most specific will be checked first. Note all target paths
 // must be absolute (i.e. start with "/").
 const TSCONFIG_PATHS: Record<string, string> = {
-  "node-internal:*": "/internal/*",
-  "node:*": "/*",
+  'node-internal:*': '/internal/*',
+  'node:*': '/*',
 };
 
 // Resolves all relative imports in `declare module` blocks constructed from
@@ -62,13 +62,16 @@ export function createImportResolveTransformer(): ts.TransformerFactory<ts.Sourc
 // `RegExp` in wildcard rule may optionally contain single capturing group
 type WildcardRule = [/* from */ RegExp, /* to */ string];
 function entryWildcardRule([from, to]: [string, string]): WildcardRule {
-  return [new RegExp(`^${from.replace("*", "(.+)")}$`), to];
+  return [new RegExp(`^${from.replace('*', '(.+)')}$`), to];
 }
-function maybeApplyWildcardRule(rules: WildcardRule[], text: string): string | undefined {
+function maybeApplyWildcardRule(
+  rules: WildcardRule[],
+  text: string
+): string | undefined {
   for (const [from, to] of rules) {
     const match = from.exec(text);
     if (match === null) continue;
-    return match.at(1) === undefined ? to : to.replaceAll("*", match[1]);
+    return match.at(1) === undefined ? to : to.replaceAll('*', match[1]);
   }
 }
 
@@ -103,9 +106,9 @@ function createModuleImportResolveVisitor(
   ctx: ts.TransformationContext,
   referencingPath: string
 ): ts.Visitor {
-  assert(referencingPath.startsWith("/"), "Expected absolute referencing path");
+  assert(referencingPath.startsWith('/'), 'Expected absolute referencing path');
   // `file:` protocol isn't important here, just need something for a valid URL
-  const referencingURL = new URL(referencingPath, "file:");
+  const referencingURL = new URL(referencingPath, 'file:');
 
   const visitor: ts.Visitor = (node) => {
     if (
@@ -115,7 +118,7 @@ function createModuleImportResolveVisitor(
     ) {
       const relativeSpecifier = node.argument.literal.text;
       // If import isn't relative, no need to resolve it, so leave it as is
-      if (!relativeSpecifier.startsWith(".")) return node;
+      if (!relativeSpecifier.startsWith('.')) return node;
       // Resolve specifier relative to referencing module
       const resolvedURL = new URL(relativeSpecifier, referencingURL);
       const resolvedPath = resolvedURL.pathname;
