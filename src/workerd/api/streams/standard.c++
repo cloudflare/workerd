@@ -4095,32 +4095,35 @@ jsg::Ref<ReadableStream> ReadableStream::from(
     jsg::AsyncGenerator<jsg::Value> generator;
     RefcountedGenerator(jsg::AsyncGenerator<jsg::Value> generator): generator(kj::mv(generator)) {}
   };
-  auto rcGenerator = kj::refcounted<RefcountedGenerator>(kj::mv(generator));
+  auto rcGenerator = kj::rc<RefcountedGenerator>(kj::mv(generator));
 
   // clang-format off
   return constructor(js, UnderlyingSource{
-    .pull = [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto controller) mutable {
+    .pull = [generator = rcGenerator.addRef()](jsg::Lock& js, auto controller) mutable {
       auto& c = controller.template get<DefaultController>();
       return generator->generator.next(js).then(js,
-          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
+          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = generator.addRef()),
               (controller),
               (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
                 KJ_IF_SOME(v, value) {
-                controller->enqueue(js, v.getHandle(js));
+                  controller->enqueue(js, v.getHandle(js));
                 } else {
-                controller->close(js);
+                  controller->close(js);
                 }
                 return js.resolvedPromise();
               }),
-          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = kj::addRef(*generator)),
+          JSG_VISITABLE_LAMBDA((controller = c.addRef(), generator = generator.addRef()),
               (controller), (jsg::Lock& js, jsg::Value reason) {
                 controller->error(js, reason.getHandle(js));
                 return js.rejectedPromise<void>(kj::mv(reason));
               }));
     },
-    .cancel = [generator = kj::addRef(*rcGenerator)](jsg::Lock& js, auto reason) mutable {
+    .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, auto reason) mutable {
       return generator->generator.return_(js, kj::none)
-          .then(js, [generator = kj::mv(generator)](auto& lock) {});
+          .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
+        // The generator might produce a value on return and might even want to continue,
+        // but the stream has been canceled at this point, so we stop here.
+      });
     },
   }, StreamQueuingStrategy{ .highWaterMark = 0 });
   // clang-format on

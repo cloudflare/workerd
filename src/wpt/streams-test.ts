@@ -466,7 +466,6 @@ export default {
       // To be investigated
       'ReadableStream.from: cancel() rejects when return() is not a method',
       'ReadableStream.from accepts a string',
-      'ReadableStream.from: cancel() rejects when return() throws synchronously',
       'ReadableStream.from accepts an array of promises',
       'ReadableStream.from accepts a sync iterable of promises',
       'ReadableStream.from ignores a null @@asyncIterator',
