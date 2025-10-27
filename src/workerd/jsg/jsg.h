@@ -3001,6 +3001,10 @@ inline Value SelfRef::asValue(Lock& js) const {
 
 }  // namespace workerd::jsg
 
+inline constexpr workerd::jsg::ByteString operator""_bs(const char* str, size_t size) {
+  return workerd::jsg::ByteString(kj::str(str, size));
+}
+
 // clang-format off
 // These includes are needed for the JSG type glue macros to work.
 #include "promise.h"
