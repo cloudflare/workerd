@@ -18,6 +18,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId) {}
+  ~TailStreamCustomEventImpl();
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -50,6 +51,8 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
  private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
+  // Reference used to deallocate the JSG handler to ensure it does not outlive the isolate.
+  kj::Maybe<kj::Own<TailStreamTarget>> target;
   uint16_t typeId;
 };
 

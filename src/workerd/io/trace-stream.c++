@@ -572,8 +572,9 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
   }
   return kj::none;
 }
+}  // namespace
 
-class TailStreamTarget final: public rpc::TailStreamTarget::Server {
+class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::Refcounted {
  public:
   TailStreamTarget(IoContext& ioContext,
       kj::Maybe<kj::StringPtr> entrypointNamePtr,
@@ -592,6 +593,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
   }
 
   kj::Promise<void> report(ReportContext reportContext) override {
+    if (hasDestroyedHandler) {
+      KJ_LOG(
+          ERROR, "tail worker event reported after customEvent has shut down", kj::getStackTrace());
+      return kj::READY_NOW;
+    }
     IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
         "The destination object for this tail session no longer exists.", doneReceiving);
 
@@ -888,13 +894,39 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 
   // The maybeHandler will be empty until we receive and process the
   // onset event.
+ public:
   kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+  bool hasDestroyedHandler = false;
 
+ private:
   // Indicates that we told (or should have told) the client that we want no further events, used
   // to debug events arriving when the IoContext is no longer valid.
   bool doneReceiving = false;
 };
-}  // namespace
+
+TailStreamCustomEventImpl::~TailStreamCustomEventImpl() {
+  // Hack: When the tail stream customEvent gets deallocated, we must also deallocate any JsRefs
+  // allocated by it so that they are not outliving the tail worker isolate (they are not allowed
+  // to be deallocated afterwards/by a different isolate). The JSG handler used for tail events
+  // after the Onset event (maybeHandler) is owned by TailStreamTarget and must be deallocated as
+  // part of the tail worker isolate. However, TailStreamTarget is both attached to the tail worker
+  // customEvent and co-owned by the tailed worker (through capability in
+  // TailStreamWriterState::Active). For the handler to be deallocated in the right isolate, we'd
+  // accordingly need the tailed worker isolate to be deallocated before the tail worker isolate,
+  // but this doesn't always seem to happen. Deallocate the handler so that the handler never
+  // outlives the isolate here to ensure memory safety. The TailStreamTarget will report an error
+  // if any events are reported after the handler has been deallocated.
+  // TODO(o11y): See if we can enforce that the tail worker isolate lives longer than the tailed
+  // worker isolate so that TailStreamTarget is always destroyed within this isolate. Alternatively,
+  // we could forcibly disconnect the capnp RPC connection here to deallocate TailStreamTarget, but
+  // this would result in exceptions on the tailed worker side if we try to deliver any events after
+  // the connection has been disconnected; with the current approach this merely results in errors
+  // being logged on the tail worker side.
+  KJ_IF_SOME(t, target) {
+    t->maybeHandler = kj::none;
+    t->hasDestroyedHandler = true;
+  }
+}
 
 kj::Maybe<tracing::EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
   return tracing::EventInfo(
@@ -910,8 +942,10 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   incomingRequest->delivered();
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
-  capFulfiller->fulfill(kj::heap<TailStreamTarget>(
-      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller)));
+  kj::Own<TailStreamTarget> target = kj::refcounted<TailStreamTarget>(
+      ioContext, kj::mv(entrypointName), kj::mv(props), kj::mv(doneFulfiller));
+  this->target = kj::addRef(*target);
+  capFulfiller->fulfill(kj::mv(target));
 
   donePromise = donePromise.attach(ioContext.registerPendingEvent());
 
