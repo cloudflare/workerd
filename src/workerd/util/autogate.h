@@ -53,7 +53,7 @@ class Autogate {
   static void deinitAutogate();
 
  private:
-  bool gates[(unsigned long)AutogateKey::NumOfKeys];
+  bool gates[static_cast<unsigned long>(AutogateKey::NumOfKeys)];
 
   Autogate(capnp::List<capnp::Text>::Reader autogates);
 };

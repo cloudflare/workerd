@@ -46,11 +46,10 @@ void warnIfBadHeaderString(const jsg::ByteString& byteString) {
         // spec correctly, and the string that is actually going get serialized onto the wire.
         auto rawHex = kj::strArray(KJ_MAP(b, fastEncodeUtf16(byteString.asArray())) {
           KJ_ASSERT(b < 256);  // Guaranteed by StringWrapper having set CONTAINS_EXTENDED_ASCII.
-          return kj::str("\\x", kj::hex(kj::byte(b)));
+          return kj::str("\\x", kj::hex(static_cast<kj::byte>(b)));
         }, "");
-        auto utf8Hex =
-            kj::strArray(
-                KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(kj::byte(b))); }, "");
+        auto utf8Hex = kj::strArray(
+            KJ_MAP(b, byteString) { return kj::str("\\x", kj::hex(static_cast<kj::byte>(b))); }, "");
 
         context.logWarning(kj::str("Problematic header name or value: \"", byteString,
             "\" (raw bytes: \"", rawHex,
@@ -1703,7 +1702,7 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
     return jsBody->pumpTo(js, kj::mv(stream), true);
   } else {
-    outer.send(statusCode, statusText, outHeaders, uint64_t(0));
+    outer.send(statusCode, statusText, outHeaders, static_cast<uint64_t>(0));
     return addNoopDeferredProxy(kj::READY_NOW);
   }
 }
@@ -1997,7 +1996,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       auto maybeLength = jsBody->tryGetLength(StreamEncoding::IDENTITY);
       KJ_IF_SOME(ctx, traceContext) {
         KJ_IF_SOME(length, maybeLength) {
-          ctx.userSpan.setTag("http.request.body.size"_kjc, int64_t(length));
+          ctx.userSpan.setTag("http.request.body.size"_kjc, static_cast<int64_t>(length));
         }
       }
 
@@ -2049,7 +2048,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
               js, signal, ioContext.waitForDeferredProxy(jsBody->pumpTo(js, kj::mv(stream), true))),
           jsBody.addRef()));
     } else {
-      nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, uint64_t(0));
+      nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
     }
     return ioContext.awaitIo(js,
         AbortSignal::maybeCancelWrap(js, signal, kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response))
@@ -2066,9 +2065,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(client));
       KJ_IF_SOME(ctx, traceContext) {
-        ctx.userSpan.setTag("http.response.status_code"_kjc, int64_t(response.statusCode));
+        ctx.userSpan.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
         KJ_IF_SOME(length, response.body->tryGetLength()) {
-          ctx.userSpan.setTag("http.response.body.size"_kjc, int64_t(length));
+          ctx.userSpan.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
         }
       }
       return handleHttpResponse(

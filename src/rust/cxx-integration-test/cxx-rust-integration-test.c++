@@ -163,7 +163,7 @@ KJ_TEST("opaque rust type") {
 
   // ::rust::Str is _not_ null-terminated so kj::StringPtr can't be created from
   // it. need to allocate to create c++-string (or use it as ArrayPtr).
-  auto strName = (std::string)name;
+  auto strName = std::string(name);
   KJ_EXPECT("test_name"_kj == kj::StringPtr(strName.c_str()));
 
   s->set_name("another_name");

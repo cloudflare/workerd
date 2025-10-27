@@ -508,8 +508,8 @@ namespace workerd::jsg {
 // An isDetected() operation which detects if the expression t.getTemplate(isolate, &u) is available
 // for instances `t`, `u` of types T and U.
 template <typename T, typename U>
-using HasGetTemplateOverload =
-    decltype(kj::instance<T&>().getTemplate((v8::Isolate*)nullptr, (U*)nullptr));
+using HasGetTemplateOverload = decltype(kj::instance<T&>().getTemplate(
+    static_cast<v8::Isolate*>(nullptr), static_cast<U*>(nullptr)));
 
 // Use inside a JSG_RESOURCE_TYPE block to declare that the given type should be visible as a
 // static member of this type. Typically, your "global" type would use several of these
@@ -1814,7 +1814,7 @@ constexpr bool hasPublicVisitForGc_(T*) {
 
 template <typename T>
 constexpr bool hasPublicVisitForGc() {
-  return hasPublicVisitForGc_((T*)nullptr);
+  return hasPublicVisitForGc_(static_cast<T*>(nullptr));
 }
 
 // Visitor used during garbage collection. Any resource class that holds `Ref`s should
@@ -1934,7 +1934,7 @@ constexpr bool isGcVisitable_(T*) {
 
 template <typename T>
 constexpr bool isGcVisitable() {
-  return isGcVisitable_((T*)nullptr);
+  return isGcVisitable_(static_cast<T*>(nullptr));
 }
 
 // TypeHandler translates between V8 values and local values for a particular type T.
@@ -2167,7 +2167,7 @@ constexpr bool isV8Ref(V8Ref<T>*) {
 
 template <typename T>
 constexpr bool isV8Ref() {
-  return isV8Ref((T*)nullptr);
+  return isV8Ref(static_cast<T*>(nullptr));
 }
 
 template <typename T>
@@ -2181,7 +2181,7 @@ constexpr bool isV8Local(v8::Local<T>*) {
 
 template <typename T>
 constexpr bool isV8Local() {
-  return isV8Local((T*)nullptr);
+  return isV8Local(static_cast<T*>(nullptr));
 }
 
 template <typename T>
@@ -2195,7 +2195,7 @@ constexpr bool isV8MaybeLocal(v8::MaybeLocal<T>*) {
 
 template <typename T>
 constexpr bool isV8MaybeLocal() {
-  return isV8MaybeLocal((T*)nullptr);
+  return isV8MaybeLocal(static_cast<T*>(nullptr));
 }
 
 class AsyncContextFrame;

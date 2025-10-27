@@ -1011,10 +1011,10 @@ KJ_TEST("SQLite failed statement reset") {
 
   // Same as above but with ValuePtrs, since these use a different path.
   using ValuePtr = SqliteDatabase::Query::ValuePtr;
-  ValuePtr value = int64_t(1);
+  ValuePtr value = static_cast<int64_t>(1);
   KJ_EXPECT_THROW_MESSAGE(
       "UNIQUE constraint failed: things.id", stmt.run(kj::arrayPtr<const ValuePtr>(value)));
-  value = int64_t(4);
+  value = static_cast<int64_t>(4);
   stmt.run(kj::arrayPtr<const ValuePtr>(value));
 
   // Sanity check that those queries were doing something.

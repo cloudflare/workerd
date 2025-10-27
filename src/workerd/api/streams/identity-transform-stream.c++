@@ -104,7 +104,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         // This is fine.
       }
       KJ_CASE_ONEOF(request, ReadRequest) {
-        request.fulfiller->fulfill(size_t(0));
+        request.fulfiller->fulfill(static_cast<size_t>(0));
       }
       KJ_CASE_ONEOF(request, WriteRequest) {
         request.fulfiller->reject(kj::cp(reason));
@@ -210,7 +210,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
         return kj::cp(exception);
       }
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return size_t(0);
+        return static_cast<size_t>(0);
       }
     }
 
@@ -247,7 +247,7 @@ class IdentityTransformStreamImpl final: public kj::Refcounted,
 
         if (bytes.size() == 0) {
           // This is a close operation.
-          request.fulfiller->fulfill(size_t(0));
+          request.fulfiller->fulfill(static_cast<size_t>(0));
           state = StreamStates::Closed();
           return kj::READY_NOW;
         }

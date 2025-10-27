@@ -84,7 +84,8 @@ struct CompatDate {
     struct tm t;
     KJ_ASSERT(gmtime_r(&now, &t) == &t);
 #endif
-    return {(uint)(t.tm_year + 1900), (uint)(t.tm_mon + 1), (uint)t.tm_mday};
+    return {static_cast<uint>(t.tm_year + 1900), static_cast<uint>(t.tm_mon + 1),
+      static_cast<uint>(t.tm_mday)};
   }
 
   kj::String toString() {

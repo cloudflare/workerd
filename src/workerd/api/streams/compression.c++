@@ -299,7 +299,7 @@ class CompressionStreamImpl: public kj::Refcounted,
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(ended, Ended) {
         // There might still be data in the output buffer remaining to read.
-        if (output.empty()) return size_t(0);
+        if (output.empty()) return static_cast<size_t>(0);
         return tryReadInternal(
             kj::arrayPtr(reinterpret_cast<kj::byte*>(buffer), maxBytes), minBytes);
       }

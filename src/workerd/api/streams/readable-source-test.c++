@@ -833,7 +833,7 @@ KJ_TEST("newReadableSourceFromDelegate") {
 
   auto producer = [&](kj::ArrayPtr<kj::byte> buffer, size_t minBytes) -> kj::Promise<size_t> {
     if (position >= 5) {
-      return size_t(0);  // EOF
+      return static_cast<size_t>(0);  // EOF
     }
 
     size_t available = 5 - position;
@@ -868,7 +868,7 @@ KJ_TEST("newReadableSourceFromDelegate (not enough bytes)") {
 
   auto producer = [&](kj::ArrayPtr<kj::byte> buffer, size_t minBytes) -> kj::Promise<size_t> {
     if (position >= 5) {
-      return size_t(0);  // EOF
+      return static_cast<size_t>(0);  // EOF
     }
 
     size_t available = 5 - position;

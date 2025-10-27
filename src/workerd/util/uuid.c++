@@ -24,8 +24,8 @@ kj::String randomUUID(kj::Maybe<kj::EntropySource&> optionalEntropySource) {
   } else {
     KJ_ASSERT(RAND_bytes(buffer, sizeof(buffer)) == 1);
   }
-  buffer[6] = kj::byte((buffer[6] & 0x0f) | 0x40);
-  buffer[8] = kj::byte((buffer[8] & 0x3f) | 0x80);
+  buffer[6] = static_cast<kj::byte>((buffer[6] & 0x0f) | 0x40);
+  buffer[8] = static_cast<kj::byte>((buffer[8] & 0x3f) | 0x80);
 
 #define HEX(b) (char)(HEX_DIGITS[(b >> 4) & 0xf]), (char)(HEX_DIGITS[b & 0xf])
 

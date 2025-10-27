@@ -32,8 +32,9 @@ kj::StringPtr KJ_STRINGIFY(AutogateKey key) {
 
 Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
   // Init all gates to false.
-  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
-    gates[(unsigned long)i] = false;
+  for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+       i = AutogateKey(static_cast<int>(i) + 1)) {
+    gates[static_cast<unsigned long>(i)] = false;
   }
 
   for (auto name: autogates) {
@@ -44,9 +45,10 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
     auto sliced = name.slice(17);
 
     // Parse the gate name into a AutogateKey.
-    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys; i = AutogateKey((int)i + 1)) {
+    for (AutogateKey i = AutogateKey(0); i < AutogateKey::NumOfKeys;
+         i = AutogateKey(static_cast<int>(i) + 1)) {
       if (kj::str(i) == sliced) {
-        gates[(unsigned long)i] = true;
+        gates[static_cast<unsigned long>(i)] = true;
         break;
       }
     }
@@ -55,7 +57,7 @@ Autogate::Autogate(capnp::List<capnp::Text>::Reader autogates) {
 
 bool Autogate::isEnabled(AutogateKey key) {
   KJ_IF_SOME(a, globalAutogate) {
-    return a.gates[(unsigned long)key];
+    return a.gates[static_cast<unsigned long>(key)];
   }
 
   static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
