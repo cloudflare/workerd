@@ -73,8 +73,6 @@ copy_file(
     name = "buildifier@rule",
     src = "@buildifier_prebuilt//:buildifier",
     out = "buildifier",
-    tags = ["manual"],
-    visibility = ["//visibility:public"],
 )
 
 prettier.prettier_binary(
