@@ -50,10 +50,10 @@ jsg::Ref<SyncKvStorage::ListIterator> SyncKvStorage::list(
       userSpan.setTag("cloudflare.durable_object.kv.query.prefix"_kjc, kj::str(prefix));
     }
     KJ_IF_SOME(reverse, o.reverse) {
-      userSpan.setTag("cloudflare.durable_object.kv.query.reverse"_kjc, kj::str(reverse));
+      userSpan.setTag("cloudflare.durable_object.kv.query.reverse"_kjc, reverse);
     }
     KJ_IF_SOME(limit, o.limit) {
-      userSpan.setTag("cloudflare.kv.query.limit"_kjc, static_cast<int64_t>(limit));
+      userSpan.setTag("cloudflare.durable_object.kv.query.limit"_kjc, static_cast<int64_t>(limit));
     }
   }
 
