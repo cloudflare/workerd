@@ -1,54 +1,6 @@
 {
   "$schema": "deps.schema.json",
   "repositories": [
-    //buildifier
-    // Version is frozen to avoid to keep formatting consistent.
-    {
-      "name": "buildifier-linux-amd64",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "buildtools",
-      "file_regex": "^buildifier-linux-amd64$",
-      "file_type": "executable",
-      "freeze_version": "v8.2.1"
-    },
-    {
-      "name": "buildifier-linux-arm64",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "buildtools",
-      "file_regex": "^buildifier-linux-arm64$",
-      "file_type": "executable",
-      "freeze_version": "v8.2.1"
-
-    },
-    {
-      "name": "buildifier-darwin-amd64",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "buildtools",
-      "file_regex": "^buildifier-darwin-amd64$",
-      "file_type": "executable",
-      "freeze_version": "v8.2.1"
-    },
-    {
-      "name": "buildifier-darwin-arm64",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "buildtools",
-      "file_regex": "^buildifier-darwin-arm64$",
-      "file_type": "executable",
-      "freeze_version": "v8.2.1"
-    },
-    {
-      "name": "buildifier-windows-amd64",
-      "type": "github_release",
-      "owner": "bazelbuild",
-      "repo": "buildtools",
-      "file_regex": "^buildifier-windows-amd64.exe$",
-      "file_type": "executable",
-      "freeze_version": "v8.2.1"
-    },
     //ruff
     // Version is frozen to keep formatting consistent.
     {

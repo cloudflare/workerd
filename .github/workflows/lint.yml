@@ -24,6 +24,4 @@ jobs:
         # Configure git to quell an irrelevant warning for runners (they never commit / push).
         run: git config core.hooksPath githooks
       - name: Lint
-        run: |
-          bazel info output_base # Ensure bazel is initialized before proceeding
-          python3 ./tools/cross/format.py --check
+        run: bazel run //build/deps/formatters:format.check
