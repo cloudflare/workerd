@@ -455,21 +455,13 @@ export default {
     comment: 'See comments on tests',
     disabledTests: [
       // A hanging promise was cancelled
-      'ReadableStream.from: cancel() resolves when return() method is missing',
       'ReadableStream.from: cancel() rejects when return() rejects',
       'ReadableStream.from: cancel() rejects when return() fulfills with a non-object',
-      // Heap use-after-free
-      'ReadableStream.from: reader.cancel() inside return()',
-      'ReadableStream.from: reader.cancel() inside next()',
     ],
     expectedFailures: [
-      // To be investigated
+      // TODO(soon): This one is a bit pedantic. We ignore the case where return() is not
+      // a method whereas the spec expects us to return a rejected promise in this case.
       'ReadableStream.from: cancel() rejects when return() is not a method',
-      'ReadableStream.from accepts a string',
-      'ReadableStream.from accepts an array of promises',
-      'ReadableStream.from accepts a sync iterable of promises',
-      'ReadableStream.from ignores a null @@asyncIterator',
-      'ReadableStream.from: cancelling the returned stream calls and awaits return()',
     ],
   },
   'readable-streams/garbage-collection.any.js': {

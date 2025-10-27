@@ -721,6 +721,7 @@ class ReadableStreamJsController final: public ReadableStreamController {
       state = StreamStates::Closed();
 
   kj::Maybe<uint64_t> expectedLength = kj::none;
+  bool canceling = false;
 
   // The lock state is separate because a closed or errored stream can still be locked.
   ReadableLockImpl lock;
@@ -1607,6 +1608,8 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
 
   using State = ReadableState<DefaultController, ValueQueue>;
   kj::Maybe<State> state;
+  bool reading = false;
+  bool pendingCancel = false;
 
   JSG_MEMORY_INFO(ValueReadable) {
     KJ_IF_SOME(s, state) {
@@ -1647,10 +1650,17 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
   jsg::Promise<ReadResult> read(jsg::Lock& js) {
     KJ_IF_SOME(s, state) {
       auto prp = js.newPromiseAndResolver<ReadResult>();
+      reading = true;
       s.consumer->read(js,
           ValueQueue::ReadRequest{
             .resolver = kj::mv(prp.resolver),
           });
+      reading = false;
+      if (pendingCancel) {
+        // If we were canceled while reading, we need to drop our state now.
+        state = kj::none;
+        pendingCancel = false;
+      }
       return kj::mv(prp.promise);
     }
 
@@ -1666,10 +1676,17 @@ struct ValueReadable final: private api::ValueQueue::ConsumerImpl::StateListener
     // the underlying controller only when the last reader is canceled.
     // Here, we rely on the controller implementing the correct behavior since it owns
     // the queue that knows about all of the attached consumers.
+    if (pendingCancel) return js.resolvedPromise();
     KJ_IF_SOME(s, state) {
       s.consumer->cancel(js, maybeReason);
       auto promise = s.controller->cancel(js, kj::mv(maybeReason));
-      state = kj::none;
+      // If we're currently in a read, we need to wait for that to finish
+      // before dropping our state.
+      if (reading) {
+        pendingCancel = true;
+      } else {
+        state = kj::none;
+      }
       return kj::mv(promise);
     }
 
@@ -2251,9 +2268,13 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
       return js.rejectedPromise<void>(errored.addRef(js));
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ValueReadable>) {
+      if (canceling) return js.resolvedPromise();
+      canceling = true;
       return doCancel(consumer);
     }
     KJ_CASE_ONEOF(consumer, kj::Own<ByteReadable>) {
+      if (canceling) return js.resolvedPromise();
+      canceling = true;
       return doCancel(consumer);
     }
   }
@@ -4106,6 +4127,22 @@ jsg::Ref<ReadableStream> ReadableStream::from(
               (controller),
               (jsg::Lock& js, kj::Maybe<jsg::Value> value) {
                 KJ_IF_SOME(v, value) {
+                  auto handle = v.getHandle(js);
+                  // Per the ReadableStream.from spec, if the value is a promise,
+                  // the stream should wait for it to resolve and enqueue the
+                  // resolved value...
+                  // ... yes, this means that ReadableStream.from where the inputs
+                  // are promises will be slow, but that's the spec.
+                  if (handle->IsPromise()) {
+                    return js.toPromise(handle.As<v8::Promise>()).then(js,
+                        JSG_VISITABLE_LAMBDA(
+                            (controller=controller.addRef()),
+                            (controller),
+                            (jsg::Lock& js, jsg::Value val) mutable {
+                      controller->enqueue(js, val.getHandle(js));
+                      return js.resolvedPromise();
+                    }));
+                  }
                   controller->enqueue(js, v.getHandle(js));
                 } else {
                   controller->close(js);
@@ -4119,7 +4156,7 @@ jsg::Ref<ReadableStream> ReadableStream::from(
               }));
     },
     .cancel = [generator = rcGenerator.addRef()](jsg::Lock& js, auto reason) mutable {
-      return generator->generator.return_(js, kj::none)
+      return generator->generator.return_(js, js.v8Ref(reason))
           .then(js, [generator = kj::mv(generator)](auto& lock, auto) {
         // The generator might produce a value on return and might even want to continue,
         // but the stream has been canceled at this point, so we stop here.

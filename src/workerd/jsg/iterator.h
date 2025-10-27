@@ -389,6 +389,13 @@ class GeneratorWrapper {
       v8::Local<v8::Value> handle,
       Generator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsString()) {
+      // In order to be able to treat a string as a generator, we need to first
+      // convert it to a String object. Yes, this means that each call to next
+      // will yield a single character from the string, which is terrible but
+      // that's the spec.
+      handle = check(handle->ToObject(context));
+    }
     if (handle->IsObject()) {
       auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
@@ -410,12 +417,21 @@ class GeneratorWrapper {
       v8::Local<v8::Value> handle,
       AsyncGenerator<T>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
+    if (handle->IsString()) {
+      // In order to be able to treat a string as a generator, we need to first
+      // convert it to a String object. Yes, this means that each call to next
+      // will yield a single character from the string, which is terrible but
+      // that's the spec.
+      handle = check(handle->ToObject(context));
+    }
     if (handle->IsObject()) {
       auto isolate = js.v8Isolate;
       auto object = handle.As<v8::Object>();
       auto iter = check(object->Get(context, v8::Symbol::GetAsyncIterator(isolate)));
-      // If there is no async iterator, let's try a sync iterator
-      if (iter->IsUndefined()) iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
+      // If there is no async iterator, let's try a sync iterator.
+      if (iter->IsNullOrUndefined()) {
+        iter = check(object->Get(context, v8::Symbol::GetIterator(isolate)));
+      }
       if (iter->IsFunction()) {
         auto func = iter.As<v8::Function>();
         auto iterObj = check(func->Call(context, object, 0, nullptr));
@@ -488,6 +504,11 @@ class SequenceWrapper {
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
     auto isolate = js.v8Isolate;
     auto& typeWrapper = TypeWrapper::from(isolate);
+    // In this case, if handle is a string, we likely do not want to treat it as
+    // a sequence of characters, which the Generator case would do. If someone
+    // really wants to treat a string as a sequence of characters, then they
+    // should use the Generator interface directly.
+    if (handle->IsString()) return kj::none;
     KJ_IF_SOME(gen,
         typeWrapper.tryUnwrap(js, context, handle, (Generator<U>*)nullptr, parentObject)) {
       // The generator gives us no indication of how many items there might be, so we
