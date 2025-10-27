@@ -678,7 +678,7 @@ class Isolate: public IsolateBase {
     jsg::JsObject getConstructor(v8::Local<v8::Context> context) {
       v8::EscapableHandleScope scope(v8Isolate);
       v8::Local<v8::FunctionTemplate> tpl =
-          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, (T*)nullptr);
+          jsgIsolate.getWrapperByContext(context)->getTemplate(v8Isolate, static_cast<T*>(nullptr));
       v8::Local<v8::Object> prototype = check(tpl->GetFunction(context));
       return jsg::JsObject(scope.Escape(prototype));
     }

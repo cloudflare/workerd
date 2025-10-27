@@ -1073,7 +1073,7 @@ jsg::Optional<jsg::Ref<ActorState>> ExtendableEvent::getActorState(jsg::Lock& js
 }
 
 CustomEvent::CustomEvent(kj::String ownType, CustomEventInit init)
-    : Event(kj::mv(ownType), (Event::Init)init),
+    : Event(kj::mv(ownType), Event::Init(init)),
       detail(kj::mv(init.detail)) {}
 
 jsg::Ref<CustomEvent> CustomEvent::constructor(

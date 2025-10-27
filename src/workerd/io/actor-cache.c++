@@ -2000,7 +2000,7 @@ ActorCache::DeleteAllResults ActorCache::deleteAll(WriteOptions options) {
   options.noCache = options.noCache || lru.options.noCache;
   requireNotTerminal();
 
-  kj::Promise<uint> result{(uint)0};
+  kj::Promise<uint> result{static_cast<uint>(0)};
 
   {
     auto lock = lru.cleanList.lockExclusive();

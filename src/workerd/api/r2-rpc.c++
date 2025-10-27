@@ -117,7 +117,8 @@ kj::Promise<R2Result> doR2HTTPGetRequest(kj::Own<kj::HttpClient> client,
       .stream = kj::mv(stream)};
   };
 
-  auto request = client->request(kj::HttpMethod::GET, url, requestHeaders, (uint64_t)0);
+  auto request =
+      client->request(kj::HttpMethod::GET, url, requestHeaders, static_cast<uint64_t>(0));
 
   auto response = co_await request.response;
 
@@ -197,7 +198,7 @@ kj::Promise<R2Result> doR2HTTPPutRequest(kj::Own<kj::HttpClient> client,
       }
     }
   } else {
-    expectedBodySize = uint64_t(0);
+    expectedBodySize = static_cast<uint64_t>(0);
     KJ_REQUIRE(streamSize == kj::none);
   }
 

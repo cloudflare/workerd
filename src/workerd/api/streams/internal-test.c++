@@ -24,7 +24,7 @@ class FooStream: public ReadableStreamSource {
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     maxMaxBytesSeen_ = kj::max(maxMaxBytesSeen_, maxBytes);
     numreads_++;
-    if (remaining_ == 0) return (size_t)0;
+    if (remaining_ == 0) return static_cast<size_t>(0);
     KJ_ASSERT(minBytes == maxBytes);
     KJ_ASSERT(maxBytes <= size);
     auto amount = kj::min(remaining_, maxBytes);
@@ -145,10 +145,10 @@ KJ_TEST("zero-length stream") {
   class Zero: public ReadableStreamSource {
    public:
     kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-      return (size_t)0;
+      return static_cast<size_t>(0);
     }
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-      return (size_t)0;
+      return static_cast<size_t>(0);
     }
   };
 
@@ -165,7 +165,7 @@ KJ_TEST("lying stream") {
   class Dishonest: public FooStream<10000> {
    public:
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-      return (size_t)10;
+      return static_cast<size_t>(10);
     }
   };
 
@@ -188,7 +188,7 @@ KJ_TEST("honest small stream") {
   class HonestSmall: public FooStream<100> {
    public:
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-      return (size_t)100;
+      return static_cast<size_t>(100);
     }
   };
 

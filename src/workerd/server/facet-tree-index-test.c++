@@ -151,7 +151,9 @@ KJ_TEST("FacetTreeIndex corruption handling") {
   {
     // Write valid header and some valid entries
     constexpr uint64_t MAGIC_NUMBER = 0xc4cdce5bc5b0ef57;
-    file->write(0, kj::ArrayPtr<const byte>((const byte*)&MAGIC_NUMBER, sizeof(MAGIC_NUMBER)));
+    file->write(0,
+        kj::ArrayPtr<const byte>(
+            reinterpret_cast<const byte*>(&MAGIC_NUMBER), sizeof(MAGIC_NUMBER)));
 
     // Write valid entry: parent=0, name="valid"
     uint16_t parent = 0;
@@ -267,8 +269,9 @@ KJ_TEST("FacetTreeIndex handles truncated files correctly") {
 
   // Write an impossibly large nameLength value
   uint16_t hugeNameLength = 65000;  // Much larger than any valid name in our test file
-  file->write(
-      offset, kj::ArrayPtr<const byte>((const byte*)&hugeNameLength, sizeof(hugeNameLength)));
+  file->write(offset,
+      kj::ArrayPtr<const byte>(
+          reinterpret_cast<const byte*>(&hugeNameLength), sizeof(hugeNameLength)));
 
   // Step 3: Re-read the index and add a new entry
   {

@@ -241,7 +241,7 @@ void FormData::parseFormDataImpl(
 
     if (message.size() > 0) {
       // If we skipped a CR, we must avoid including it in the message data.
-      message = message.first(message.size() - uint(message.back() == '\r'));
+      message = message.first(message.size() - static_cast<uint>(message.back() == '\r'));
     }
 
     callback(name, filename.map([](auto& str) { return str.asPtr(); }), type, message.asBytes());
