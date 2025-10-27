@@ -574,335 +574,307 @@ kj::Maybe<kj::StringPtr> getHandlerName(const tracing::TailEvent& event) {
 }
 }  // namespace
 
-class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::Refcounted {
- public:
-  TailStreamTarget(IoContext& ioContext,
-      kj::Maybe<kj::StringPtr> entrypointNamePtr,
-      Frankenvalue props,
-      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
-      : weakIoContext(ioContext.getWeakRef()),
-        entrypointNamePtr(kj::mv(entrypointNamePtr)),
-        props(kj::mv(props)),
-        doneFulfiller(kj::mv(doneFulfiller)) {}
+TailStreamTarget::TailStreamTarget(IoContext& ioContext,
+    kj::Maybe<kj::StringPtr> entrypointNamePtr,
+    Frankenvalue props,
+    kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
+    : weakIoContext(ioContext.getWeakRef()),
+      entrypointNamePtr(kj::mv(entrypointNamePtr)),
+      props(kj::mv(props)),
+      doneFulfiller(kj::mv(doneFulfiller)) {}
 
-  KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
-  ~TailStreamTarget() {
-    if (doneFulfiller->isWaiting()) {
-      doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled."));
-    }
+TailStreamTarget::~TailStreamTarget() {
+  if (doneFulfiller->isWaiting()) {
+    doneFulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "Streaming tail session canceled."));
   }
+}
 
-  kj::Promise<void> report(ReportContext reportContext) override {
-    if (hasDestroyedHandler) {
-      KJ_LOG(
-          ERROR, "tail worker event reported after customEvent has shut down", kj::getStackTrace());
-      return kj::READY_NOW;
-    }
-    IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
-        "The destination object for this tail session no longer exists.", doneReceiving);
+// Used to share the results builder (and send the stop signal) from both the main code path and
+// the exception handler.
+struct TailStreamTarget::SharedResults: public kj::Refcounted,
+                                        rpc::TailStreamTarget::TailStreamResults::Builder {
+  SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
+      : rpc::TailStreamTarget::TailStreamResults::Builder(kj::mv(results)) {}
+};
 
-    ioContext.getLimitEnforcer().topUpActor();
-
-    auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
-    // We need to be able to access the results builder from both the promise below and its
-    // exception handler.
-    auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
-
-    auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
-                                     reportContext, ownReportContext = ownReportContext->addRef()](
-                                     Worker::Lock& lock) mutable -> kj::Promise<void> {
-      auto params = reportContext.getParams();
-      KJ_ASSERT(params.hasEvents(), "Events are required.");
-      auto eventReaders = params.getEvents();
-      kj::Vector<tracing::TailEvent> events(eventReaders.size());
-      for (auto reader: eventReaders) {
-        events.add(tracing::TailEvent(reader));
-      }
-
-      // If we have not yet received the onset event, the first event in the
-      // received collection must be an Onset event and must be handled separately.
-      // We will only dispatch the remaining events if a handler is returned.
-      auto result = ([&]() -> kj::Promise<void> {
-        KJ_IF_SOME(handler, maybeHandler) {
-          auto h = handler.getHandle(lock);
-          return handleEvents(lock, h, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
-        } else {
-          return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
-        }
-      })();
-
-      if (ioContext.hasOutputGate()) {
-        return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
-          return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
-        });
-      } else {
-        return kj::mv(result);
-      }
-    });
-
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
-        [&, &fulfiller = *paf.fulfiller, ownReportContext = kj::mv(ownReportContext),
-            results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
-      // This is the top level exception catcher for tail events being delivered. We do not want to
-      // propagate JS exceptions to the client side here, all exceptions should stay within this
-      // customEvent. Instead, we propagate the exception to the doneFulfiller, where it is used to
-      // set the right outcome code and re-thrown if appropriate. By rejecting the doneFulfiller, we
-      // also ensure that no more tail events get delivered.
-      if (jsg::isTunneledException(e.getDescription())) {
-        auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
-        if (!description.startsWith("remote.")) {
-          e.setDescription(kj::str("remote.", description));
-        }
-      }
-      // We still fulfill this fulfiller to disarm the cancellation check below
-      fulfiller.fulfill();
-      results->setStop(true);
-      doneReceiving = true;
-      doneFulfiller->reject(kj::mv(e));
-    });
-    promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
-      if (fulfiller->isWaiting()) {
-        fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
-            "The destination execution context for this tail session was canceled while the "
-            "call was still running."));
-      }
-    }));
-    ioContext.addTask(kj::mv(promise));
-
-    return kj::mv(paf.promise);
+kj::Promise<void> TailStreamTarget::report(ReportContext reportContext) {
+  if (hasDestroyedHandler) {
+    KJ_LOG(
+        ERROR, "tail worker event reported after customEvent has shut down", kj::getStackTrace());
+    return kj::READY_NOW;
   }
+  IoContext& ioContext = KJ_REQUIRE_NONNULL(weakIoContext->tryGet(),
+      "The destination object for this tail session no longer exists.", doneReceiving);
 
- private:
-  // Used to share the results builder (and send the stop signal) from both the main code path and
-  // the exception handler.
-  struct SharedResults: public kj::Refcounted, rpc::TailStreamTarget::TailStreamResults::Builder {
-    SharedResults(rpc::TailStreamTarget::TailStreamResults::Builder results)
-        : rpc::TailStreamTarget::TailStreamResults::Builder(kj::mv(results)) {}
-  };
-  // Handles the very first (onset) event in the tail stream. This will cause
-  // the exported tailStream handler to be called, passing the onset event
-  // as the initial argument. If the tail stream wishes to continue receiving
-  // events for this invocation, it will return a handler in the form of an
-  // object or a function. If no handler is returned, the tail session is
-  // shutdown.
-  kj::Promise<void> handleOnset(Worker::Lock& lock,
-      IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
-      kj::Rc<SharedResults> results) {
-    // There should be only a single onset event in this batch.
-    KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
-        "Expected only a single onset event");
-    auto& event = events[0];
+  ioContext.getLimitEnforcer().topUpActor();
 
-    auto handler = KJ_REQUIRE_NONNULL(
-        lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
-        "Failed to get handler to worker.");
-    StringCache stringCache;
+  auto ownReportContext = capnp::CallContextHook::from(reportContext).addRef();
+  // We need to be able to access the results builder from both the promise below and its
+  // exception handler.
+  auto sharedResults = kj::rc<SharedResults>(reportContext.initResults());
 
-    jsg::Lock& js = lock;
-    auto target = jsg::JsObject(handler->self.getHandle(js));
-    v8::Local<v8::Value> maybeFn = target.get(js, "tailStream"_kj);
-
-    // If there's no actual tailStream handler, or if the tailStream export is
-    // something other than a function, we will emit a warning for the user
-    // then immediately return.
-    if (!maybeFn->IsFunction()) {
-      ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
-                               "not export a tailStream() handler.");
-      results->setStop(true);
-      doneReceiving = true;
-      doneFulfiller->fulfill();
-      return kj::READY_NOW;
+  auto promise = ioContext.run([this, &ioContext, sharedResults = sharedResults.addRef(),
+                                   reportContext, ownReportContext = ownReportContext->addRef()](
+                                   Worker::Lock& lock) mutable -> kj::Promise<void> {
+    auto params = reportContext.getParams();
+    KJ_ASSERT(params.hasEvents(), "Events are required.");
+    auto eventReaders = params.getEvents();
+    kj::Vector<tracing::TailEvent> events(eventReaders.size());
+    for (auto reader: eventReaders) {
+      events.add(tracing::TailEvent(reader));
     }
 
-    // Invoke the tailStream handler function.
-    v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
-    kj::Maybe<v8::Local<v8::Object>> maybeCtx;
-    KJ_IF_SOME(hCtx, handler->getCtx()) {
-      maybeCtx = hCtx.tryGetHandle(js);
-    }
-    v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
-    handlerArgs[0] = ToJs(js, event, stringCache);
-    handlerArgs[1] = handler->env.getHandle(js);
-    KJ_IF_SOME(ctx, maybeCtx) {
-      handlerArgs[2] = ctx;
-    }
-
-    try {
-      auto result =
-          jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
-
-      // The handler can return a function, an object, undefined, or a promise
-      // for any of these. We will convert the result to a promise for consistent
-      // handling...
-      return ioContext.awaitJs(js,
-          js.toPromise(result).then(js,
-              ioContext.addFunctor([this, results = results.addRef(), &ioContext](
-                                       jsg::Lock& js, jsg::Value value) mutable {
-        // The value here can be one of a function, an object, or undefined.
-        // Any value other than these will result in a warning but will otherwise
-        // be treated like undefined.
-
-        // If a function or object is returned, then our tail worker wishes to
-        // keep receiving events! Yay! Otherwise, we will stop the stream by
-        // setting the stop field in the results.
-        auto handle = value.getHandle(js);
-        if (handle->IsFunction() || handle->IsObject()) {
-          // Sweet! Our tail worker wants to keep receiving events. Let's store
-          // the handler and return.
-          maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
-          return;
-        }
-
-        // If the handler returned any other kind of value, let's be nice and
-        // at least warn the user about it.
-        if (!handle->IsUndefined()) {
-          ioContext.logWarningOnce(
-              kj::str("tailStream() handler returned an unusable value. "
-                      "The tailStream() handler is expected to return either a function, an "
-                      "object, or undefined. Received ",
-                  jsg::JsValue(handle).typeOf(js)));
-        }
-        // And finally, we'll stop the stream since the tail worker did not return
-        // a handler for us to continue with.
-        results->setStop(true);
-        doneReceiving = true;
-        doneFulfiller->fulfill();
-      }),
-              ioContext.addFunctor(
-                  [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
-        // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
-        // the exception later.
-        results->setStop(true);
-        doneReceiving = true;
-        js.throwException(kj::mv(error));
-      })));
-    } catch (...) {
-      ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
-                               "not return a valid tailStream() handler.");
-      results->setStop(true);
-      doneReceiving = true;
-      doneFulfiller->fulfill();
-      return kj::READY_NOW;
-    }
-    KJ_UNREACHABLE;
-  }
-
-  kj::Promise<void> handleEvents(Worker::Lock& lock,
-      const jsg::JsValue& handler,
-      IoContext& ioContext,
-      kj::Array<tracing::TailEvent> events,
-      kj::Rc<SharedResults> results) {
-    jsg::Lock& js = lock;
-
-    // Should not ever happen but let's handle it anyway.
-    if (events.size() == 0) return kj::READY_NOW;
-
-    // Take the received set of events and dispatch them to the correct handler.
-
-    v8::Local<v8::Value> h = handler;
-    v8::LocalVector<v8::Value> returnValues(js.v8Isolate);
-    StringCache stringCache;
-
-    // If any of the events delivered are an outcome event, we will signal that
-    // the stream should be stopped and will fulfill the done promise.
-    bool finishing = false;
-
-    // When a tail worker receives its outcome event, we need to ensure that the final tail worker
-    // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
-    // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
-    bool doFulfill = false;
-
-    for (auto& event: events) {
-      // If we already received an outcome event, we will stop processing any
-      // further events.
-      if (finishing) break;
-      if (event.event.is<tracing::Outcome>()) {
-        finishing = true;
-        results->setStop(true);
-        doneReceiving = true;
-        // We set doFulfill to indicate that the outcome event has been received via RPC and no more
-        // events are expected.
-        doFulfill = true;
-      };
-
-      v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
-      if (h->IsFunction()) {
-        // If the handler is a function, then we'll just pass all of the events to that
-        // function. If the function returns a promise and there are multiple events we
-        // will not wait for each promise to resolve before calling the next iteration.
-        // But we will wait for all promises to settle before returning the resolved
-        // kj promise.
-        auto fn = h.As<v8::Function>();
-        returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+    // If we have not yet received the onset event, the first event in the
+    // received collection must be an Onset event and must be handled separately.
+    // We will only dispatch the remaining events if a handler is returned.
+    auto result = ([&]() -> kj::Promise<void> {
+      KJ_IF_SOME(handler, maybeHandler) {
+        auto h = handler.getHandle(lock);
+        return handleEvents(lock, h, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
       } else {
-        // If the handler is an object, then we need to know what kind of events
-        // we have and look for a specific handler function for each.
-        KJ_ASSERT(h->IsObject());
-        KJ_IF_SOME(name, getHandlerName(event)) {
-          jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
-          v8::Local<v8::Value> val = obj.get(js, name);
-          // If the value is not a function, we'll ignore it entirely.
-          if (val->IsFunction()) {
-            auto fn = val.As<v8::Function>();
-            returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
-          }
-        }
+        return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
       }
-    }
-    // We want the equivalent behavior to Promise.all([...]) here but v8 does not
-    // give us a C++ equivalent of Promise.all([...]) so we need to approximate it.
-    // We do so by chaining all of the promises together.
-    kj::Maybe<jsg::Promise<void>> promise;
-    for (auto& val: returnValues) {
-      KJ_IF_SOME(p, promise) {
-        promise = p.then(js,
-            [p = js.toPromise(val).whenResolved(js)](jsg::Lock& js) mutable { return kj::mv(p); });
-      } else {
-        promise = js.toPromise(val).whenResolved(js);
-      }
-    }
+    })();
 
-    KJ_IF_SOME(p, promise) {
-      // When doFulfill is set, the last promise refers to the outcome event. In that case the chain
-      // of promises provides all remaining events to the user tail handler, so we should fulfill
-      // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
-      // the stream and has done all its work, that the stream self-evidently did not get canceled
-      // prematurely. This applies even if promises were rejected.
-      // No need to catch exceptions here: They will be handled in report() alongside exceptions
-      // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
-      // identifier for them.
-      if (doFulfill) {
-        p = p.then(js, [&](jsg::Lock& js) {
-          doneReceiving = true;
-          doneFulfiller->fulfill();
-        });
-      }
-      return ioContext.awaitJs(js, kj::mv(p));
+    if (ioContext.hasOutputGate()) {
+      return result.then([weakIoContext = weakIoContext->addRef()]() mutable {
+        return KJ_REQUIRE_NONNULL(weakIoContext->tryGet()).waitForOutputLocks();
+      });
+    } else {
+      return kj::mv(result);
     }
+  });
+
+  auto paf = kj::newPromiseAndFulfiller<void>();
+  promise = promise.then([&fulfiller = *paf.fulfiller]() { fulfiller.fulfill(); },
+      [&, &fulfiller = *paf.fulfiller, ownReportContext = kj::mv(ownReportContext),
+          results = kj::mv(sharedResults)](kj::Exception&& e) mutable {
+    // This is the top level exception catcher for tail events being delivered. We do not want to
+    // propagate JS exceptions to the client side here, all exceptions should stay within this
+    // customEvent. Instead, we propagate the exception to the doneFulfiller, where it is used to
+    // set the right outcome code and re-thrown if appropriate. By rejecting the doneFulfiller, we
+    // also ensure that no more tail events get delivered.
+    if (jsg::isTunneledException(e.getDescription())) {
+      auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
+      if (!description.startsWith("remote.")) {
+        e.setDescription(kj::str("remote.", description));
+      }
+    }
+    // We still fulfill this fulfiller to disarm the cancellation check below
+    fulfiller.fulfill();
+    results->setStop(true);
+    doneReceiving = true;
+    doneFulfiller->reject(kj::mv(e));
+  });
+  promise = promise.attach(kj::defer([fulfiller = kj::mv(paf.fulfiller)]() mutable {
+    if (fulfiller->isWaiting()) {
+      fulfiller->reject(JSG_KJ_EXCEPTION(FAILED, Error,
+          "The destination execution context for this tail session was canceled while the "
+          "call was still running."));
+    }
+  }));
+  ioContext.addTask(kj::mv(promise));
+
+  return kj::mv(paf.promise);
+}
+
+kj::Promise<void> TailStreamTarget::handleOnset(Worker::Lock& lock,
+    IoContext& ioContext,
+    kj::Array<tracing::TailEvent> events,
+    kj::Rc<SharedResults> results) {
+  // There should be only a single onset event in this batch.
+  KJ_ASSERT(events.size() == 1 && events[0].event.is<tracing::Onset>(),
+      "Expected only a single onset event");
+  auto& event = events[0];
+
+  auto handler = KJ_REQUIRE_NONNULL(
+      lock.getExportedHandler(entrypointNamePtr, kj::mv(props), ioContext.getActor()),
+      "Failed to get handler to worker.");
+  StringCache stringCache;
+
+  jsg::Lock& js = lock;
+  auto target = jsg::JsObject(handler->self.getHandle(js));
+  v8::Local<v8::Value> maybeFn = target.get(js, "tailStream"_kj);
+
+  // If there's no actual tailStream handler, or if the tailStream export is
+  // something other than a function, we will emit a warning for the user
+  // then immediately return.
+  if (!maybeFn->IsFunction()) {
+    ioContext.logWarningOnce("A worker configured to act as a streaming tail worker does "
+                             "not export a tailStream() handler.");
+    results->setStop(true);
+    doneReceiving = true;
+    doneFulfiller->fulfill();
     return kj::READY_NOW;
   }
 
-  kj::Own<IoContext::WeakRef> weakIoContext;
-  kj::Maybe<kj::StringPtr> entrypointNamePtr;
-  Frankenvalue props;
-  // The done fulfiller is resolved when we receive the outcome event
-  // or rejected if the capability is dropped before receiving the outcome
-  // event.
-  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+  // Invoke the tailStream handler function.
+  v8::Local<v8::Function> fn = maybeFn.As<v8::Function>();
+  kj::Maybe<v8::Local<v8::Object>> maybeCtx;
+  KJ_IF_SOME(hCtx, handler->getCtx()) {
+    maybeCtx = hCtx.tryGetHandle(js);
+  }
+  v8::LocalVector<v8::Value> handlerArgs(js.v8Isolate, maybeCtx != kj::none ? 3 : 2);
+  handlerArgs[0] = ToJs(js, event, stringCache);
+  handlerArgs[1] = handler->env.getHandle(js);
+  KJ_IF_SOME(ctx, maybeCtx) {
+    handlerArgs[2] = ctx;
+  }
 
-  // The maybeHandler will be empty until we receive and process the
-  // onset event.
- public:
-  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
-  bool hasDestroyedHandler = false;
+  try {
+    auto result =
+        jsg::check(fn->Call(js.v8Context(), target, handlerArgs.size(), handlerArgs.data()));
 
- private:
-  // Indicates that we told (or should have told) the client that we want no further events, used
-  // to debug events arriving when the IoContext is no longer valid.
-  bool doneReceiving = false;
-};
+    // The handler can return a function, an object, undefined, or a promise
+    // for any of these. We will convert the result to a promise for consistent
+    // handling...
+    return ioContext.awaitJs(js,
+        js.toPromise(result).then(js,
+            ioContext.addFunctor([this, results = results.addRef(), &ioContext](
+                                     jsg::Lock& js, jsg::Value value) mutable {
+      // The value here can be one of a function, an object, or undefined.
+      // Any value other than these will result in a warning but will otherwise
+      // be treated like undefined.
+
+      // If a function or object is returned, then our tail worker wishes to
+      // keep receiving events! Yay! Otherwise, we will stop the stream by
+      // setting the stop field in the results.
+      auto handle = value.getHandle(js);
+      if (handle->IsFunction() || handle->IsObject()) {
+        // Sweet! Our tail worker wants to keep receiving events. Let's store
+        // the handler and return.
+        maybeHandler = jsg::JsRef(js, jsg::JsValue(handle));
+        return;
+      }
+
+      // If the handler returned any other kind of value, let's be nice and
+      // at least warn the user about it.
+      if (!handle->IsUndefined()) {
+        ioContext.logWarningOnce(
+            kj::str("tailStream() handler returned an unusable value. "
+                    "The tailStream() handler is expected to return either a function, an "
+                    "object, or undefined. Received ",
+                jsg::JsValue(handle).typeOf(js)));
+      }
+      // And finally, we'll stop the stream since the tail worker did not return
+      // a handler for us to continue with.
+      results->setStop(true);
+      doneReceiving = true;
+      doneFulfiller->fulfill();
+    }),
+            ioContext.addFunctor(
+                [&, results = results.addRef()](jsg::Lock& js, jsg::Value&& error) mutable {
+      // Received a JS error. Do not reject doneFulfiller yet, this will be handled when we catch
+      // the exception later.
+      results->setStop(true);
+      doneReceiving = true;
+      js.throwException(kj::mv(error));
+    })));
+  } catch (...) {
+    ioContext.logWarningOnce("A worker configured to act as a streaming tail worker did "
+                             "not return a valid tailStream() handler.");
+    results->setStop(true);
+    doneReceiving = true;
+    doneFulfiller->fulfill();
+    return kj::READY_NOW;
+  }
+  KJ_UNREACHABLE;
+}
+
+kj::Promise<void> TailStreamTarget::handleEvents(Worker::Lock& lock,
+    const jsg::JsValue& handler,
+    IoContext& ioContext,
+    kj::Array<tracing::TailEvent> events,
+    kj::Rc<SharedResults> results) {
+  jsg::Lock& js = lock;
+
+  // Should not ever happen but let's handle it anyway.
+  if (events.size() == 0) return kj::READY_NOW;
+
+  // Take the received set of events and dispatch them to the correct handler.
+
+  v8::Local<v8::Value> h = handler;
+  v8::LocalVector<v8::Value> returnValues(js.v8Isolate);
+  StringCache stringCache;
+
+  // If any of the events delivered are an outcome event, we will signal that
+  // the stream should be stopped and will fulfill the done promise.
+  bool finishing = false;
+
+  // When a tail worker receives its outcome event, we need to ensure that the final tail worker
+  // invocation is completed before destroying the tail worker customEvent and incomingRequest. To
+  // achieve this, we only fulfill the doneFulfiller after JS execution has completed.
+  bool doFulfill = false;
+
+  for (auto& event: events) {
+    // If we already received an outcome event, we will stop processing any
+    // further events.
+    if (finishing) break;
+    if (event.event.is<tracing::Outcome>()) {
+      finishing = true;
+      results->setStop(true);
+      doneReceiving = true;
+      // We set doFulfill to indicate that the outcome event has been received via RPC and no more
+      // events are expected.
+      doFulfill = true;
+    };
+
+    v8::Local<v8::Value> eventObj = ToJs(js, event, stringCache);
+    if (h->IsFunction()) {
+      // If the handler is a function, then we'll just pass all of the events to that
+      // function. If the function returns a promise and there are multiple events we
+      // will not wait for each promise to resolve before calling the next iteration.
+      // But we will wait for all promises to settle before returning the resolved
+      // kj promise.
+      auto fn = h.As<v8::Function>();
+      returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+    } else {
+      // If the handler is an object, then we need to know what kind of events
+      // we have and look for a specific handler function for each.
+      KJ_ASSERT(h->IsObject());
+      KJ_IF_SOME(name, getHandlerName(event)) {
+        jsg::JsObject obj = jsg::JsObject(h.As<v8::Object>());
+        v8::Local<v8::Value> val = obj.get(js, name);
+        // If the value is not a function, we'll ignore it entirely.
+        if (val->IsFunction()) {
+          auto fn = val.As<v8::Function>();
+          returnValues.push_back(jsg::check(fn->Call(js.v8Context(), h, 1, &eventObj)));
+        }
+      }
+    }
+  }
+  // We want the equivalent behavior to Promise.all([...]) here but v8 does not
+  // give us a C++ equivalent of Promise.all([...]) so we need to approximate it.
+  // We do so by chaining all of the promises together.
+  kj::Maybe<jsg::Promise<void>> promise;
+  for (auto& val: returnValues) {
+    KJ_IF_SOME(p, promise) {
+      promise = p.then(js,
+          [p = js.toPromise(val).whenResolved(js)](jsg::Lock& js) mutable { return kj::mv(p); });
+    } else {
+      promise = js.toPromise(val).whenResolved(js);
+    }
+  }
+
+  KJ_IF_SOME(p, promise) {
+    // When doFulfill is set, the last promise refers to the outcome event. In that case the chain
+    // of promises provides all remaining events to the user tail handler, so we should fulfill
+    // the doneFulfiller afterwards, indicating that TailStreamTarget has received all events over
+    // the stream and has done all its work, that the stream self-evidently did not get canceled
+    // prematurely. This applies even if promises were rejected.
+    // No need to catch exceptions here: They will be handled in report() alongside exceptions
+    // from the onset event etc. JSG knows how JS exceptions look like, so we don't need an
+    // identifier for them.
+    if (doFulfill) {
+      p = p.then(js, [&](jsg::Lock& js) {
+        doneReceiving = true;
+        doneFulfiller->fulfill();
+      });
+    }
+    return ioContext.awaitJs(js, kj::mv(p));
+  }
+  return kj::READY_NOW;
+}
 
 TailStreamCustomEventImpl::~TailStreamCustomEventImpl() {
   // Hack: When the tail stream customEvent gets deallocated, we must also deallocate any JsRefs
