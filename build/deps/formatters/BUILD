@@ -51,6 +51,7 @@ native_binary(
         "//conditions:default": "@clang-format-linux-amd64//file:file",
     }),
     out = "clang-format",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -63,6 +64,7 @@ native_binary(
         "//conditions:default": "@ruff-linux-amd64//:file",
     }),
     out = "ruff",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -77,6 +79,7 @@ native_binary(
         "//conditions:default": "@buildifier-linux-amd64//file:file",
     }),
     out = "buildifier",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
