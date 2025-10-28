@@ -45,6 +45,10 @@ const auto kIllegalInvocation =
 
 class Serializer;
 class Deserializer;
+class IsolateBase;
+
+// Forward declaration for snapshot support - implemented in setup.c++
+void addTemplateToSnapshot(v8::Isolate* isolate, v8::Local<v8::FunctionTemplate> tmpl);
 
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
@@ -1914,6 +1918,10 @@ class ResourceWrapper {
 
       auto result = scope.Escape(constructor);
       slot.Reset(isolate, result);
+
+      // Register this FunctionTemplate with the snapshot
+      addTemplateToSnapshot(isolate, result);
+
       return result;
     } else {
       return slot.Get(isolate);

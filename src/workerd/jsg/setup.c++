@@ -461,6 +461,9 @@ IsolateBase::IsolateBase(V8System& system,
       auto opaqueTemplate = v8::FunctionTemplate::New(ptr, &throwIllegalConstructor);
       opaqueTemplate->InstanceTemplate()->SetInternalFieldCount(Wrappable::INTERNAL_FIELD_COUNT);
       this->opaqueTemplate.Reset(ptr, opaqueTemplate);
+
+      // Register the opaqueTemplate with the snapshot
+      snapshotCreator->AddData(opaqueTemplate);
     }
   });
 }
@@ -483,6 +486,12 @@ IsolateBase::~IsolateBase() noexcept(false) {
 v8::Local<v8::FunctionTemplate> IsolateBase::getOpaqueTemplate(v8::Isolate* isolate) {
   return static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE))
       ->opaqueTemplate.Get(isolate);
+}
+
+void addTemplateToSnapshot(v8::Isolate* isolate, v8::Local<v8::FunctionTemplate> tmpl) {
+  auto* isolateBase = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+  // Assume we're always in snapshot creation mode
+  isolateBase->getSnapshotCreator()->AddData(tmpl);
 }
 
 void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
