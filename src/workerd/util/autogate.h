@@ -28,6 +28,8 @@ enum class AutogateKey {
   IDENTITY_TRANSFORM_STREAM_USE_STATE_MACHINE,
   // Use ExternalPusher instead of StreamSink to handle streams in RPC.
   RPC_USE_EXTERNAL_PUSHER,
+  // Switch Blob stream() to use streams::newMemorySource instead of Blob::BlobInputStream
+  BLOB_USE_STREAMS_NEW_MEMORY_SOURCE,
   NumOfKeys  // Reserved for iteration.
 };
 
