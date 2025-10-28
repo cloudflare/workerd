@@ -122,7 +122,7 @@ class WritableStreamSinkJsAdapter final {
 
   WritableStreamSinkJsAdapter(jsg::Lock& js,
       IoContext& ioContext,
-      kj::Own<WritableStreamSink> sink,
+      kj::Own<WritableSink> sink,
       kj::Maybe<Options> options = kj::none);
   WritableStreamSinkJsAdapter(jsg::Lock& js,
       IoContext& ioContext,
@@ -383,7 +383,7 @@ class WritableStreamSinkJsAdapter final {
 //     │  • locked, state properties               │
 //     └───────────────────────────────────────────┘
 //
-class WritableStreamSinkKjAdapter final: public WritableStreamSink {
+class WritableStreamSinkKjAdapter final: public WritableSink {
  public:
   WritableStreamSinkKjAdapter(jsg::Lock& js, IoContext& ioContext, jsg::Ref<WritableStream> stream);
   ~WritableStreamSinkKjAdapter() noexcept(false);

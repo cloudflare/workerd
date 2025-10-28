@@ -87,7 +87,7 @@ KJ_TEST("Test successful construction with valid ReadableStreamSource") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -104,7 +104,7 @@ KJ_TEST("Adapter shutdown with no reads") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -136,7 +136,7 @@ KJ_TEST("Adapter cancel with no reads") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -170,7 +170,7 @@ KJ_TEST("Adapter cancel (kj::Exception) with no reads") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -194,7 +194,7 @@ KJ_TEST("Adapter with single read (ArrayBuffer)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -230,7 +230,7 @@ KJ_TEST("Adapter with single read (Uint8Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -266,7 +266,7 @@ KJ_TEST("Adapter with single read (Int32Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -302,7 +302,7 @@ KJ_TEST("Adapter with single large read (ArrayBuffer)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -337,7 +337,7 @@ KJ_TEST("Adapter with single small read (ArrayBuffer)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -372,7 +372,7 @@ KJ_TEST("Adapter with minimal reads (Uint8Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -408,7 +408,7 @@ KJ_TEST("Adapter with minimal reads (Uint32Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -444,7 +444,7 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -477,7 +477,7 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto source = newReadableStreamSource(newNullInputStream());
+    auto source = newReadableSource(newNullInputStream());
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
@@ -510,7 +510,7 @@ KJ_TEST("Adapter with multiple reads (Uint8Array)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -565,7 +565,7 @@ KJ_TEST("Adapter with multiple reads shutdown") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -626,7 +626,7 @@ KJ_TEST("Adapter with multiple reads cancel") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -697,7 +697,7 @@ KJ_TEST("Adapter close after read") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
@@ -727,7 +727,7 @@ KJ_TEST("Adapter close") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
     auto closePromise = adapter->close(env.js);
 
     // reads after close should be resoved immediately.
@@ -754,7 +754,7 @@ KJ_TEST("Adapter close superseded by cancel") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     auto closePromise = adapter->close(env.js);
 
@@ -779,7 +779,7 @@ KJ_TEST("After read BackingStore maintains identity") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     std::unique_ptr<v8::BackingStore> backing =
         v8::ArrayBuffer::NewBackingStore(env.js.v8Isolate, 10);
@@ -813,7 +813,7 @@ KJ_TEST("Read all text") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -834,7 +834,7 @@ KJ_TEST("Read all bytes") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -854,7 +854,7 @@ KJ_TEST("Read all text (limit)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -875,7 +875,7 @@ KJ_TEST("Read all bytes (limit)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
-        env.js, env.context, newReadableStreamSource(kj::mv(fake)));
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -892,7 +892,7 @@ KJ_TEST("tryGetLength") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto source = newReadableStreamSource(newNullInputStream());
+    auto source = newReadableSource(newNullInputStream());
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
     auto length = KJ_ASSERT_NONNULL(adapter->tryGetLength(StreamEncoding::IDENTITY));
     KJ_ASSERT(length == 0, "Length of empty stream should be 0");
@@ -911,7 +911,7 @@ KJ_TEST("tee successful") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto dataSource = newMemoryInputStream("hello world"_kjb);
-    auto source = newReadableStreamSource(kj::mv(dataSource));
+    auto source = newReadableSource(kj::mv(dataSource));
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
 
     auto [branch1, branch2] = KJ_ASSERT_NONNULL(adapter->tryTee(env.js));
@@ -1466,7 +1466,7 @@ KJ_TEST("KjAdapter pumpTo") {
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
   kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
-  auto writableSink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
@@ -1498,7 +1498,7 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
   kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
-  auto writableSink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
@@ -1530,7 +1530,7 @@ KJ_TEST("KjAdapter pumpTo (errored)") {
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
   kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
-  auto writableSink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createErroredStream(env.js);
@@ -1551,7 +1551,7 @@ KJ_TEST("KjAdapter pumpTo (error sink)") {
   TestFixture fixture({.featureFlags = flags.asReader()});
   ErrorSink sink;
   kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
-  auto writableSink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1000);

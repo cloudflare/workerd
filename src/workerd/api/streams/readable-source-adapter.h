@@ -114,7 +114,7 @@ namespace workerd::api::streams {
 class ReadableStreamSourceJsAdapter final {
  public:
   ReadableStreamSourceJsAdapter(
-      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> source);
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamSourceJsAdapter);
   ~ReadableStreamSourceJsAdapter() noexcept(false);
 
@@ -275,7 +275,7 @@ class ReadableStreamSourceJsAdapter final {
 // TODO(safety): This can be made safer by having tryRead take a kj::Array
 // as input instead of a raw pointer and size, then having the read return
 // the filled in Array after the read completes, but that's a larger refactor.
-class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
+class ReadableStreamSourceKjAdapter final: public ReadableSource {
  public:
   enum class MinReadPolicy {
     // The read will complete as soon as at least minBytes have been read,
@@ -333,7 +333,7 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // Per the contract of pumpTo, it is the caller's responsibility to ensure
   // that both the WritableStreamSink and this adapter remain alive until
   // the returned promise resolves!
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, EndAfterPump end) override;
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableSink& output, EndAfterPump end) override;
 
   // If the stream is still active, tries to get the total length,
   // if known. If the length is not known, the encoding does not
@@ -363,7 +363,7 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
 
   kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
-  kj::Promise<void> pumpToImpl(WritableStreamSink& output, EndAfterPump end);
+  kj::Promise<void> pumpToImpl(WritableSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
       jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
 

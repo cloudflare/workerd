@@ -12,11 +12,11 @@
 namespace workerd::api::streams {
 namespace {
 
-// Mock WritableStreamSink for testing wrapper functionality
-class MockWritableStreamSink final: public WritableStreamSink {
+// Mock WritableSink for testing wrapper functionality
+class MockWritableSink final: public WritableSink {
  public:
-  MockWritableStreamSink() = default;
-  ~MockWritableStreamSink() = default;
+  MockWritableSink() = default;
+  ~MockWritableSink() = default;
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
     writeCallCount++;
@@ -161,11 +161,11 @@ struct MockEndable final: public EndableAsyncOutputStream {
 };
 
 // ======================================================================================
-// Core WritableStreamSink Interface Tests
+// Core WritableSink Interface Tests
 
-KJ_TEST("WritableStreamSink basic write operations") {
+KJ_TEST("WritableSink basic write operations") {
   TestFixture fixture;
-  MockWritableStreamSink sink;
+  MockWritableSink sink;
   kj::byte testData[] = {1, 2, 3, 4, 5};
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -184,9 +184,9 @@ KJ_TEST("WritableStreamSink basic write operations") {
   KJ_ASSERT(sink.isEnded);
 }
 
-KJ_TEST("WritableStreamSink multi-piece write operations") {
+KJ_TEST("WritableSink multi-piece write operations") {
   TestFixture fixture;
-  MockWritableStreamSink sink;
+  MockWritableSink sink;
 
   // Test multi-piece write
   kj::byte data1[] = {1, 2, 3};
@@ -210,9 +210,9 @@ KJ_TEST("WritableStreamSink multi-piece write operations") {
   KJ_ASSERT(sink.writtenData == kj::ArrayPtr<const kj::byte>(expected, 9));
 }
 
-KJ_TEST("WritableStreamSink end operation") {
+KJ_TEST("WritableSink end operation") {
   TestFixture fixture;
-  MockWritableStreamSink sink;
+  MockWritableSink sink;
 
   fixture.runInIoContext(
       [&](const auto& environment) -> kj::Promise<void> { co_await sink.end(); });
@@ -221,8 +221,8 @@ KJ_TEST("WritableStreamSink end operation") {
   KJ_ASSERT(sink.isEnded);
 }
 
-KJ_TEST("WritableStreamSink abort operation") {
-  MockWritableStreamSink sink;
+KJ_TEST("WritableSink abort operation") {
+  MockWritableSink sink;
 
   sink.abort(KJ_EXCEPTION(DISCONNECTED, "Abort reason"));
 
@@ -230,8 +230,8 @@ KJ_TEST("WritableStreamSink abort operation") {
   KJ_ASSERT(sink.abortReason != kj::none);
 }
 
-KJ_TEST("WritableStreamSink encoding operations") {
-  MockWritableStreamSink sink;
+KJ_TEST("WritableSink encoding operations") {
+  MockWritableSink sink;
 
   auto encoding = sink.getEncoding();
   KJ_ASSERT(encoding == rpc::StreamEncoding::IDENTITY);
@@ -243,15 +243,15 @@ KJ_TEST("WritableStreamSink encoding operations") {
 }
 
 // ======================================================================================
-// WritableStreamSinkWrapper Tests
+// WritableSinkWrapper Tests
 
-KJ_TEST("WritableStreamSinkWrapper write/end delegation") {
+KJ_TEST("WritableSinkWrapper write/end delegation") {
   TestFixture fixture;
-  auto innerSink = kj::heap<MockWritableStreamSink>();
+  auto innerSink = kj::heap<MockWritableSink>();
   auto& sink = *innerSink;
-  class TestWrapper: public WritableStreamSinkWrapper {
+  class TestWrapper: public WritableSinkWrapper {
    public:
-    TestWrapper(kj::Own<WritableStreamSink> inner): WritableStreamSinkWrapper(kj::mv(inner)) {}
+    TestWrapper(kj::Own<WritableSink> inner): WritableSinkWrapper(kj::mv(inner)) {}
   };
   auto wrapper = kj::heap<TestWrapper>(kj::mv(innerSink));
   kj::byte testData[] = {1, 2, 3};
@@ -270,13 +270,13 @@ KJ_TEST("WritableStreamSinkWrapper write/end delegation") {
   KJ_ASSERT(sink.isEnded);
 }
 
-KJ_TEST("WritableStreamSinkWrapper abort delegation") {
+KJ_TEST("WritableSinkWrapper abort delegation") {
   TestFixture fixture;
-  auto innerSink = kj::heap<MockWritableStreamSink>();
+  auto innerSink = kj::heap<MockWritableSink>();
   auto& sink = *innerSink;
-  class TestWrapper: public WritableStreamSinkWrapper {
+  class TestWrapper: public WritableSinkWrapper {
    public:
-    TestWrapper(kj::Own<WritableStreamSink> inner): WritableStreamSinkWrapper(kj::mv(inner)) {}
+    TestWrapper(kj::Own<WritableSink> inner): WritableSinkWrapper(kj::mv(inner)) {}
   };
   auto wrapper = kj::heap<TestWrapper>(kj::mv(innerSink));
   wrapper->abort(KJ_EXCEPTION(FAILED, "test abort"));
@@ -284,14 +284,14 @@ KJ_TEST("WritableStreamSinkWrapper abort delegation") {
   KJ_ASSERT(sink.abortReason != kj::none);
 }
 
-KJ_TEST("WritableStreamSinkWrapper encoding delegation") {
+KJ_TEST("WritableSinkWrapper encoding delegation") {
   TestFixture fixture;
-  auto innerSink = kj::heap<MockWritableStreamSink>();
+  auto innerSink = kj::heap<MockWritableSink>();
   auto& sink = *innerSink;
   sink.encoding = rpc::StreamEncoding::GZIP;
-  class TestWrapper: public WritableStreamSinkWrapper {
+  class TestWrapper: public WritableSinkWrapper {
    public:
-    TestWrapper(kj::Own<WritableStreamSink> inner): WritableStreamSinkWrapper(kj::mv(inner)) {}
+    TestWrapper(kj::Own<WritableSink> inner): WritableSinkWrapper(kj::mv(inner)) {}
   };
   auto wrapper = kj::heap<TestWrapper>(kj::mv(innerSink));
 
@@ -304,13 +304,13 @@ KJ_TEST("WritableStreamSinkWrapper encoding delegation") {
   KJ_ASSERT(sink.disownCallCount == 1);
 }
 
-KJ_TEST("WritableStreamSinkWrapper release functionality") {
-  auto innerSink = kj::heap<MockWritableStreamSink>();
+KJ_TEST("WritableSinkWrapper release functionality") {
+  auto innerSink = kj::heap<MockWritableSink>();
   auto innerPtr = innerSink.get();
 
-  class TestWrapper: public WritableStreamSinkWrapper {
+  class TestWrapper: public WritableSinkWrapper {
    public:
-    TestWrapper(kj::Own<WritableStreamSink> inner): WritableStreamSinkWrapper(kj::mv(inner)) {}
+    TestWrapper(kj::Own<WritableSink> inner): WritableSinkWrapper(kj::mv(inner)) {}
   };
 
   auto wrapper = kj::heap<TestWrapper>(kj::mv(innerSink));
@@ -332,11 +332,11 @@ KJ_TEST("WritableStreamSinkWrapper release functionality") {
 // ======================================================================================
 // Factory Function Tests
 
-KJ_TEST("newWritableStreamSink with AsyncOutputStream") {
+KJ_TEST("newWritableSink with AsyncOutputStream") {
   TestFixture fixture;
   MemoryAsyncOutputStream inner;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto sink = newWritableSink(kj::mv(fakeOwn));
   kj::byte testData[] = {1, 2, 3, 4, 5};
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -349,9 +349,9 @@ KJ_TEST("newWritableStreamSink with AsyncOutputStream") {
   KJ_ASSERT(inner.data == kj::arrayPtr(testData, sizeof(testData)));
 }
 
-KJ_TEST("newClosedWritableStreamSink (write)") {
+KJ_TEST("newClosedWritableSink (write)") {
   TestFixture fixture;
-  auto sink = newClosedWritableStreamSink();
+  auto sink = newClosedWritableSink();
   kj::byte testData[] = {1, 2, 3};
 
   try {
@@ -368,9 +368,9 @@ KJ_TEST("newClosedWritableStreamSink (write)") {
   // Should not throw, write should be a no-op
 }
 
-KJ_TEST("newClosedWritableStreamSink (end)") {
+KJ_TEST("newClosedWritableSink (end)") {
   TestFixture fixture;
-  auto sink = newClosedWritableStreamSink();
+  auto sink = newClosedWritableSink();
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     // Test write on closed sink
@@ -380,10 +380,10 @@ KJ_TEST("newClosedWritableStreamSink (end)") {
   // Should not throw, write should be a no-op
 }
 
-KJ_TEST("newClosedWritableStreamSink (aborted)") {
+KJ_TEST("newClosedWritableSink (aborted)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto sink = newClosedWritableStreamSink();
+  auto sink = newClosedWritableSink();
   sink->abort(kj::cp(exception));
 
   try {
@@ -398,10 +398,10 @@ KJ_TEST("newClosedWritableStreamSink (aborted)") {
   }
 }
 
-KJ_TEST("newErroredWritableStreamSink (write)") {
+KJ_TEST("newErroredWritableSink (write)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto sink = newErroredWritableStreamSink(kj::cp(exception));
+  auto sink = newErroredWritableSink(kj::cp(exception));
 
   try {
     fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -415,10 +415,10 @@ KJ_TEST("newErroredWritableStreamSink (write)") {
   }
 }
 
-KJ_TEST("newErroredWritableStreamSink (end)") {
+KJ_TEST("newErroredWritableSink (end)") {
   TestFixture fixture;
   auto exception = KJ_EXCEPTION(FAILED, "test error");
-  auto sink = newErroredWritableStreamSink(kj::cp(exception));
+  auto sink = newErroredWritableSink(kj::cp(exception));
 
   try {
     fixture.runInIoContext(
@@ -430,9 +430,9 @@ KJ_TEST("newErroredWritableStreamSink (end)") {
   }
 }
 
-KJ_TEST("newNullWritableStreamSink") {
+KJ_TEST("newNullWritableSink") {
   TestFixture fixture;
-  auto sink = newNullWritableStreamSink();
+  auto sink = newNullWritableSink();
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     // Test writing data
@@ -445,12 +445,12 @@ KJ_TEST("newNullWritableStreamSink") {
 // ======================================================================================
 // Error Handling Tests
 
-KJ_TEST("WritableStreamSink error propagation") {
+KJ_TEST("WritableSink error propagation") {
   TestFixture fixture;
   MemoryAsyncOutputStream inner;
   inner.writeShouldError = true;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto sink = newWritableSink(kj::mv(fakeOwn));
   kj::byte testData[] = {1, 2, 3, 4, 5};
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
@@ -479,19 +479,19 @@ KJ_TEST("WritableStreamSink error propagation") {
 // ======================================================================================
 // Encoding Tests
 
-KJ_TEST("WritableStreamSink encoding responsibility transfer") {
+KJ_TEST("WritableSink encoding responsibility transfer") {
   TestFixture fixture;
   MemoryAsyncOutputStream inner;
   inner.writeShouldError = true;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto sink = newWritableSink(kj::mv(fakeOwn));
   KJ_ASSERT(sink->getEncoding() == rpc::StreamEncoding::IDENTITY);
   KJ_ASSERT(sink->disownEncodingResponsibility() == rpc::StreamEncoding::IDENTITY);
   KJ_ASSERT(sink->getEncoding() == rpc::StreamEncoding::IDENTITY);
 }
 
 // ======================================================================================
-// Encoding-Aware WritableStreamSink Implementation
+// Encoding-Aware WritableSink Implementation
 
 KJ_TEST("Gzip-encoding sink") {
   auto ctx = kj::setupAsyncIo();
@@ -500,7 +500,7 @@ KJ_TEST("Gzip-encoding sink") {
   });
   MemoryAsyncOutputStream inner;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     co_await sink->write("some data to gzip"_kjb);
@@ -523,7 +523,7 @@ KJ_TEST("Gzip-encoding sink (identity)") {
   TestFixture fixture;
   MemoryAsyncOutputStream inner;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newEncodedWritableStreamSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
+  auto sink = newEncodedWritableSink(rpc::StreamEncoding::GZIP, kj::mv(fakeOwn));
 
   static const kj::byte check[] = {31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 43, 206, 207, 77, 85, 72, 73,
     44, 73, 84, 40, 201, 87, 72, 175, 202, 44, 0, 0, 40, 58, 113, 128, 17, 0, 0, 0};
@@ -540,17 +540,17 @@ KJ_TEST("Gzip-encoding sink (identity)") {
 }
 
 // ======================================================================================
-// IoContext-aware WritableStreamSinkWrapper Tests
+// IoContext-aware WritableSinkWrapper Tests
 
 KJ_TEST("IoContext aware wrapper") {
   TestFixture fixture;
   MemoryAsyncOutputStream inner;
   auto fakeOwn = kj::Own<MemoryAsyncOutputStream>(&inner, kj::NullDisposer::instance);
-  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto sink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     IoContext& ioContext = environment.context;
-    auto wrapper = newIoContextWrappedWritableStreamSink(ioContext, kj::mv(sink));
+    auto wrapper = newIoContextWrappedWritableSink(ioContext, kj::mv(sink));
     co_await wrapper->write("some data"_kjb);
     co_await wrapper->end();
   });
@@ -565,7 +565,7 @@ KJ_TEST("EndableAsyncOutputStream") {
   TestFixture fixture;
   MockEndable inner;
   auto fakeOwn = kj::Own<MockEndable>(&inner, kj::NullDisposer::instance);
-  auto sink = newWritableStreamSink(kj::mv(fakeOwn));
+  auto sink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const auto& environment) -> kj::Promise<void> {
     co_await sink->write("some data"_kjb);

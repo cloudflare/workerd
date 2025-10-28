@@ -42,7 +42,7 @@ struct ReadableStreamSourceJsAdapter::Active {
   };
   using TaskQueue = workerd::util::Queue<kj::Own<Task>>;
 
-  kj::Own<ReadableStreamSource> source;
+  kj::Own<ReadableSource> source;
   kj::Canceler canceler;
   TaskQueue queue;
   bool canceled = false;
@@ -50,7 +50,7 @@ struct ReadableStreamSourceJsAdapter::Active {
   bool closePending = false;
   kj::Maybe<kj::Exception> pendingCancel;
 
-  Active(kj::Own<ReadableStreamSource> source): source(kj::mv(source)) {}
+  Active(kj::Own<ReadableSource> source): source(kj::mv(source)) {}
   KJ_DISALLOW_COPY_AND_MOVE(Active);
   ~Active() noexcept(false) {
     // When the Active is dropped, we cancel any remaining pending reads and
@@ -122,7 +122,7 @@ struct ReadableStreamSourceJsAdapter::Active {
 };
 
 ReadableStreamSourceJsAdapter::ReadableStreamSourceJsAdapter(
-    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source)
+    jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> source)
     : state(ioContext.addObject(kj::heap<Active>(kj::mv(source)))),
       selfRef(kj::rc<WeakRef<ReadableStreamSourceJsAdapter>>(
           kj::Badge<ReadableStreamSourceJsAdapter>{}, *this)) {}
@@ -996,7 +996,7 @@ void ReadableStreamSourceKjAdapter::cancel(kj::Exception reason) {
 }
 
 kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(
-    WritableStreamSink& output, EndAfterPump end) {
+    WritableSink& output, EndAfterPump end) {
   static constexpr size_t kMinRead = 8192;
   static constexpr size_t kMaxRead = 16384;
   kj::FixedArray<kj::byte, kMaxRead> buffer;
@@ -1076,7 +1076,7 @@ kj::Promise<void> ReadableStreamSourceKjAdapter::pumpToImpl(
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
-    WritableStreamSink& output, EndAfterPump end) {
+    WritableSink& output, EndAfterPump end) {
   // The pumpTo operation continually reads from the stream and writes
   // to the output until the stream is closed or an error occurs. While
   // pumping, the adapter is considered active but read() calls will
@@ -1137,7 +1137,7 @@ kj::Promise<DeferredProxy<void>> ReadableStreamSourceKjAdapter::pumpTo(
   KJ_UNREACHABLE;
 }
 
-ReadableStreamSource::Tee ReadableStreamSourceKjAdapter::tee(size_t) {
+ReadableSource::Tee ReadableStreamSourceKjAdapter::tee(size_t) {
   KJ_UNIMPLEMENTED("Teeing a ReadableStreamSourceKjAdapter is not supported.");
   // Explanation: Teeing a ReadableStream must be done under the isolate lock,
   // as does creating a new ReadableStreamSourceKjAdapter. However, when tee()

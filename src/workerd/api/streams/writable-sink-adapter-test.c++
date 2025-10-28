@@ -69,8 +69,8 @@ KJ_TEST("Basic construction with default options") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
@@ -92,8 +92,8 @@ KJ_TEST("Construction with custom highWaterMark option") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{.highWaterMark = 100});
 
@@ -106,8 +106,8 @@ KJ_TEST("Construction with detachOnWrite=true option") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{
           .detachOnWrite = true,
@@ -121,8 +121,8 @@ KJ_TEST("Construction with all custom options combined") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 100,
@@ -138,8 +138,8 @@ KJ_TEST("Basic end() operation completes successfully") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     auto endPromise = adapter->end(env.js);
@@ -194,8 +194,8 @@ KJ_TEST("Basic abort() operation") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     adapter->abort(env.js, env.js.str("Abort reason"_kj));
@@ -234,8 +234,8 @@ KJ_TEST("Abort from closing state supersedes close") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     auto endPromise = adapter->end(env.js);
@@ -281,8 +281,8 @@ KJ_TEST("Abort from closed state") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     auto endPromise = adapter->end(env.js);
@@ -302,8 +302,8 @@ KJ_TEST("Abort rejects ready promise with abort reason") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 1,
@@ -335,8 +335,8 @@ KJ_TEST("Abort aborts underlying sink") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     SimpleEventRecordingSink sink;
     kj::Own<SimpleEventRecordingSink> fake(&sink, kj::NullDisposer::instance);
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(fake)));
+    auto adapter =
+        kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
     adapter->abort(env.js, env.js.str("Abort reason"_kj));
     KJ_ASSERT_NONNULL(adapter->isErrored(), "Underlying sink's abort() should have been called");
   });
@@ -346,7 +346,7 @@ KJ_TEST("Abort rejects in-flight operations") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto neverDoneSink = newWritableStreamSink(kj::heap<NeverReadySink>());
+    auto neverDoneSink = newWritableSink(kj::heap<NeverReadySink>());
     auto adapter =
         kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(neverDoneSink));
 
@@ -380,8 +380,8 @@ KJ_TEST("end() waits for all pending writes to complete") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<SimpleEventRecordingSink> fake(&sink, kj::NullDisposer::instance);
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(fake)));
+    auto adapter =
+        kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
 
     adapter->write(env.js, env.js.str("data1"_kj));
     adapter->write(env.js, env.js.str("data2"_kj));
@@ -406,8 +406,8 @@ KJ_TEST("end() waits for all pending flushes to complete") {
   SimpleEventRecordingSink sink;
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<SimpleEventRecordingSink> fake(&sink, kj::NullDisposer::instance);
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(fake)));
+    auto adapter =
+        kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
 
     auto flush1 = adapter->flush(env.js);
     auto flush2 = adapter->flush(env.js);
@@ -434,8 +434,8 @@ KJ_TEST("end() with large queue of pending operations") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<SimpleEventRecordingSink> fake(&sink, kj::NullDisposer::instance);
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(fake)));
+    auto adapter =
+        kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
 
     for (int i = 0; i < 1024; i++) {
       adapter->write(env.js, env.js.str("data"_kj));
@@ -457,7 +457,7 @@ KJ_TEST("end() when underlyink sink.end() fails should error adapter") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto throwingSink = newWritableStreamSink(kj::heap<ThrowingSink>());
+    auto throwingSink = newWritableSink(kj::heap<ThrowingSink>());
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(throwingSink));
 
     auto writePromise = adapter->write(env.js, env.js.str("hello"_kj));
@@ -481,7 +481,7 @@ KJ_TEST("flush() completes after all prior writes") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     adapter->write(env.js, env.js.str("data1"_kj));
     adapter->write(env.js, env.js.str("data2"_kj));
@@ -504,7 +504,7 @@ KJ_TEST("flush() with no writes completes immediately") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     auto flushPromise = adapter->flush(env.js);
 
@@ -518,7 +518,7 @@ KJ_TEST("multiple sequential flush() calls") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     auto flush1 = adapter->flush(env.js);
     auto flush2 = adapter->flush(env.js);
@@ -534,7 +534,7 @@ KJ_TEST("write() when underlyink sink.write() fails should error adapter") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto throwingSink = newWritableStreamSink(kj::heap<ThrowingSink>());
+    auto throwingSink = newWritableSink(kj::heap<ThrowingSink>());
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(throwingSink));
 
     auto writePromise = adapter->write(env.js, env.js.str("data"_kj));
@@ -563,7 +563,7 @@ KJ_TEST("multiple writes() should only error adapter once") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto throwingSink = newWritableStreamSink(kj::heap<ThrowingSink>());
+    auto throwingSink = newWritableSink(kj::heap<ThrowingSink>());
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(throwingSink));
 
     auto write1 = adapter->write(env.js, env.js.str("data"_kj));
@@ -591,7 +591,7 @@ KJ_TEST("zero-length writes are a non-op (string)") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     auto writePromise = adapter->write(env.js, env.js.str(""_kj));
     KJ_ASSERT(state.writeCalled == 0, "Underlying sink's write() should not have been called");
@@ -610,7 +610,7 @@ KJ_TEST("zero-length writes are a non-op (ArrayBuffer)") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 0);
     jsg::BufferSource source(env.js, kj::mv(backing));
@@ -633,7 +633,7 @@ KJ_TEST("writing small ArrayBuffer") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 10,
         });
@@ -663,7 +663,7 @@ KJ_TEST("writing medium ArrayBuffer") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 5 * 1024,
         });
@@ -693,7 +693,7 @@ KJ_TEST("writing large ArrayBuffer") {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto& state = recordingSink->getState();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 8 * 1024,
         });
@@ -722,7 +722,7 @@ KJ_TEST("writing the wrong types reject") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(recordingSink)));
+        env.js, env.context, newWritableSink(kj::mv(recordingSink)));
 
     auto writeNull = adapter->write(env.js, env.js.null());
     KJ_ASSERT(writeNull.getState(env.js) == jsg::Promise<void>::State::REJECTED,
@@ -752,8 +752,8 @@ KJ_TEST("large number of large writes") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     kj::Own<SimpleEventRecordingSink> fake(&sink, kj::NullDisposer::instance);
-    auto adapter = kj::heap<WritableStreamSinkJsAdapter>(
-        env.js, env.context, newWritableStreamSink(kj::mv(fake)));
+    auto adapter =
+        kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, newWritableSink(kj::mv(fake)));
 
     for (int i = 0; i < 1000; i++) {
       auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(env.js, 16 * 1024);
@@ -778,7 +778,7 @@ KJ_TEST("ready promise signals backpressure correctly") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .highWaterMark = 10,
         });
@@ -808,7 +808,7 @@ KJ_TEST("detachOnWrite option detaches ArrayBuffer before write") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .detachOnWrite = true,
         });
@@ -833,7 +833,7 @@ KJ_TEST("detachOnWrite option detaches Uint8Array before write") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto recordingSink = kj::heap<SimpleEventRecordingSink>();
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context,
-        newWritableStreamSink(kj::mv(recordingSink)),
+        newWritableSink(kj::mv(recordingSink)),
         WritableStreamSinkJsAdapter::Options{
           .detachOnWrite = true,
         });
@@ -856,8 +856,8 @@ KJ_TEST("Creating adapter and dropping it with pending operations") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     auto adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
 
     adapter->write(env.js, env.js.str("data"_kj));
@@ -873,8 +873,8 @@ KJ_TEST("Dropping the IoContext with pending operations and using the adapter in
   kj::Maybe<kj::Own<WritableStreamSinkJsAdapter>> adapter;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto sink = newIoContextWrappedWritableStreamSink(
-        env.context, newWritableStreamSink(newNullOutputStream()));
+    auto sink =
+        newIoContextWrappedWritableSink(env.context, newWritableSink(newNullOutputStream()));
     adapter = kj::heap<WritableStreamSinkJsAdapter>(env.js, env.context, kj::mv(sink));
     auto& adapterRef = *KJ_ASSERT_NONNULL(adapter);
 

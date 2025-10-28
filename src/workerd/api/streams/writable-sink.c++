@@ -14,21 +14,21 @@ namespace workerd::api::streams {
 namespace {
 struct Closed {};
 
-// The base implementation of WritableStreamSink. This is not exposed publicly.
-class WritableStreamSinkImpl: public WritableStreamSink {
+// The base implementation of WritableSink. This is not exposed publicly.
+class WritableSinkImpl: public WritableSink {
  public:
-  WritableStreamSinkImpl(kj::Own<kj::AsyncOutputStream> inner,
+  WritableSinkImpl(kj::Own<kj::AsyncOutputStream> inner,
       rpc::StreamEncoding encoding = rpc::StreamEncoding::IDENTITY)
       : state(kj::mv(inner)),
         encoding(encoding) {}
-  WritableStreamSinkImpl(): state(Closed()), encoding(rpc::StreamEncoding::IDENTITY) {}
-  WritableStreamSinkImpl(kj::Exception reason)
+  WritableSinkImpl(): state(Closed()), encoding(rpc::StreamEncoding::IDENTITY) {}
+  WritableSinkImpl(kj::Exception reason)
       : state(kj::cp(reason)),
         encoding(rpc::StreamEncoding::IDENTITY) {}
 
-  KJ_DISALLOW_COPY_AND_MOVE(WritableStreamSinkImpl);
+  KJ_DISALLOW_COPY_AND_MOVE(WritableSinkImpl);
 
-  virtual ~WritableStreamSinkImpl() noexcept(false) {
+  virtual ~WritableSinkImpl() noexcept(false) {
     if (!canceler.isEmpty()) {
       canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "stream was dropped"));
     }
@@ -182,11 +182,11 @@ class WritableStreamSinkImpl: public WritableStreamSink {
 // inner may be extended past when it should. Eventually, kj::AsyncOutputStream should
 // probably have a distinct end() method of its own that we can defer to, but until it
 // does, it is important for us to release it as soon as end() or abort() are called.
-class EncodedAsyncOutputStream final: public WritableStreamSinkImpl {
+class EncodedAsyncOutputStream final: public WritableSinkImpl {
  public:
   explicit EncodedAsyncOutputStream(
       kj::Own<kj::AsyncOutputStream> inner, rpc::StreamEncoding encoding)
-      : WritableStreamSinkImpl(kj::mv(inner), encoding) {}
+      : WritableSinkImpl(kj::mv(inner), encoding) {}
 
   kj::Promise<void> endImpl(kj::AsyncOutputStream& output) override {
     if (auto gzip = dynamic_cast<kj::GzipAsyncOutputStream*>(&output)) {
@@ -217,11 +217,11 @@ class EncodedAsyncOutputStream final: public WritableStreamSinkImpl {
   }
 };
 
-// A wrapper around a WritableStreamSink that registers pending events with an IoContext.
-class IoContextWritableStreamSinkWrapper: public WritableStreamSinkWrapper {
+// A wrapper around a WritableSink that registers pending events with an IoContext.
+class IoContextWritableSinkWrapper: public WritableSinkWrapper {
  public:
-  IoContextWritableStreamSinkWrapper(IoContext& ioContext, kj::Own<WritableStreamSink> inner)
-      : WritableStreamSinkWrapper(kj::mv(inner)),
+  IoContextWritableSinkWrapper(IoContext& ioContext, kj::Own<WritableSink> inner)
+      : WritableSinkWrapper(kj::mv(inner)),
         ioContext(ioContext) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
@@ -253,30 +253,30 @@ class IoContextWritableStreamSinkWrapper: public WritableStreamSinkWrapper {
 };
 }  // namespace
 
-kj::Own<WritableStreamSink> newWritableStreamSink(kj::Own<kj::AsyncOutputStream> inner) {
-  return kj::heap<WritableStreamSinkImpl>(kj::mv(inner));
+kj::Own<WritableSink> newWritableSink(kj::Own<kj::AsyncOutputStream> inner) {
+  return kj::heap<WritableSinkImpl>(kj::mv(inner));
 }
 
-kj::Own<WritableStreamSink> newClosedWritableStreamSink() {
-  return kj::heap<WritableStreamSinkImpl>();
+kj::Own<WritableSink> newClosedWritableSink() {
+  return kj::heap<WritableSinkImpl>();
 }
 
-kj::Own<WritableStreamSink> newErroredWritableStreamSink(kj::Exception reason) {
-  return kj::heap<WritableStreamSinkImpl>(kj::mv(reason));
+kj::Own<WritableSink> newErroredWritableSink(kj::Exception reason) {
+  return kj::heap<WritableSinkImpl>(kj::mv(reason));
 }
 
-kj::Own<WritableStreamSink> newNullWritableStreamSink() {
-  return kj::heap<WritableStreamSinkImpl>(newNullOutputStream());
+kj::Own<WritableSink> newNullWritableSink() {
+  return kj::heap<WritableSinkImpl>(newNullOutputStream());
 }
 
-kj::Own<WritableStreamSink> newEncodedWritableStreamSink(
+kj::Own<WritableSink> newEncodedWritableSink(
     rpc::StreamEncoding encoding, kj::Own<kj::AsyncOutputStream> inner) {
   return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding);
 }
 
-kj::Own<WritableStreamSink> newIoContextWrappedWritableStreamSink(
-    IoContext& ioContext, kj::Own<WritableStreamSink> inner) {
-  return kj::heap<IoContextWritableStreamSinkWrapper>(ioContext, kj::mv(inner));
+kj::Own<WritableSink> newIoContextWrappedWritableSink(
+    IoContext& ioContext, kj::Own<WritableSink> inner) {
+  return kj::heap<IoContextWritableSinkWrapper>(ioContext, kj::mv(inner));
 }
 
 }  // namespace workerd::api::streams

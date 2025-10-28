@@ -14,17 +14,17 @@ class IoContext;
 
 namespace api::streams {
 
-// A WritableStreamSink is primarily intended to serve as a bridge between kj::AsyncOutputStream
+// A WritableSink is primarily intended to serve as a bridge between kj::AsyncOutputStream
 // and the WritableStream API. However, it can also be used directly by KJ-space code. While
-// WritableStreamSink should probably have been a more JS-friendly API, it's a bit too late
-// to change that now. Use the WritableStreamSinkJsAdapter in the writable-sink-adapter.h file
-// to wrap a WritableStreamSink for use from JavaScript.
+// WritableSink should probably have been a more JS-friendly API, it's a bit too late
+// to change that now. Use the WritableSinkJsAdapter in the writable-sink-adapter.h file
+// to wrap a WritableSink for use from JavaScript.
 //
-// Not all WritableStreamSink implementations will be explicitly backed by a KJ stream;
+// Not all WritableSink implementations will be explicitly backed by a KJ stream;
 // some might be test implementations that discard data or accumulate it in memory, for
 // instance.
 //
-// A WritableStreamSink must be treated like a KJ I/O object. Instances that are held
+// A WritableSink must be treated like a KJ I/O object. Instances that are held
 // by any JS-heap objects must be held by an IoOwn.
 //
 // The sink permits only one write() or end() operation to be pending at a time. If
@@ -34,7 +34,7 @@ namespace api::streams {
 //
 // If the sink is aborted or dropped, any pending write() or end() operations will be
 // canceled.
-class WritableStreamSink {
+class WritableSink {
  public:
   // Write the given buffer to the stream, returning a promise that resolves when the write
   // completes.
@@ -62,12 +62,12 @@ class WritableStreamSink {
   virtual rpc::StreamEncoding getEncoding() = 0;
 };
 
-// Utility base class for WritableStreamSink wrappers that delegate all
-// operations to an inner WritableStreamSink while selectively overriding
+// Utility base class for WritableSink wrappers that delegate all
+// operations to an inner WritableSink while selectively overriding
 // some operations.
-class WritableStreamSinkWrapper: public WritableStreamSink {
+class WritableSinkWrapper: public WritableSink {
  public:
-  virtual ~WritableStreamSinkWrapper() noexcept(false) {
+  virtual ~WritableSinkWrapper() noexcept(false) {
     canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "Dropped"));
   }
 
@@ -95,9 +95,9 @@ class WritableStreamSinkWrapper: public WritableStreamSink {
     return getInner().getEncoding();
   }
 
-  // Releases ownership of the inner WritableStreamSink. After calling this,
+  // Releases ownership of the inner WritableSink. After calling this,
   // this instance is no longer usable.
-  kj::Own<WritableStreamSink> release() {
+  kj::Own<WritableSink> release() {
     auto ret = kj::mv(KJ_ASSERT_NONNULL(inner));
     inner = kj::none;
     canceler.cancel(KJ_EXCEPTION(DISCONNECTED, "Released"));
@@ -105,38 +105,38 @@ class WritableStreamSinkWrapper: public WritableStreamSink {
   }
 
  protected:
-  WritableStreamSinkWrapper(kj::Own<WritableStreamSink> inner): inner(kj::mv(inner)) {}
-  KJ_DISALLOW_COPY_AND_MOVE(WritableStreamSinkWrapper);
+  WritableSinkWrapper(kj::Own<WritableSink> inner): inner(kj::mv(inner)) {}
+  KJ_DISALLOW_COPY_AND_MOVE(WritableSinkWrapper);
 
-  WritableStreamSink& getInner() {
+  WritableSink& getInner() {
     return *KJ_ASSERT_NONNULL(inner);
   }
 
  private:
   kj::Canceler canceler;
-  kj::Maybe<kj::Own<WritableStreamSink>> inner;
+  kj::Maybe<kj::Own<WritableSink>> inner;
 };
 
-// Creates a WritableStreamSink that wraps a kj::AsyncOutputStream.
-kj::Own<WritableStreamSink> newWritableStreamSink(kj::Own<kj::AsyncOutputStream> inner);
+// Creates a WritableSink that wraps a kj::AsyncOutputStream.
+kj::Own<WritableSink> newWritableSink(kj::Own<kj::AsyncOutputStream> inner);
 
-// Creates a WritableStreamSink that is in the closed state.
-kj::Own<WritableStreamSink> newClosedWritableStreamSink();
+// Creates a WritableSink that is in the closed state.
+kj::Own<WritableSink> newClosedWritableSink();
 
-// Creates a WritableStreamSink that is permanently in the errored state.
-kj::Own<WritableStreamSink> newErroredWritableStreamSink(kj::Exception reason);
+// Creates a WritableSink that is permanently in the errored state.
+kj::Own<WritableSink> newErroredWritableSink(kj::Exception reason);
 
-// Creates a WritableStreamSink that discards all data written to it.
-kj::Own<WritableStreamSink> newNullWritableStreamSink();
+// Creates a WritableSink that discards all data written to it.
+kj::Own<WritableSink> newNullWritableSink();
 
-// Creates a WritableStreamSink that encodes data written to it.
-kj::Own<WritableStreamSink> newEncodedWritableStreamSink(
+// Creates a WritableSink that encodes data written to it.
+kj::Own<WritableSink> newEncodedWritableSink(
     rpc::StreamEncoding encoding, kj::Own<kj::AsyncOutputStream> inner);
 
-// Wraps a WritableStreamSink such that each write()/end() call on the returned sink will
+// Wraps a WritableSink such that each write()/end() call on the returned sink will
 // register as a pending event on the IoContext.
-kj::Own<WritableStreamSink> newIoContextWrappedWritableStreamSink(
-    IoContext& ioContext, kj::Own<WritableStreamSink> inner);
+kj::Own<WritableSink> newIoContextWrappedWritableSink(
+    IoContext& ioContext, kj::Own<WritableSink> inner);
 
 }  // namespace api::streams
 }  // namespace workerd

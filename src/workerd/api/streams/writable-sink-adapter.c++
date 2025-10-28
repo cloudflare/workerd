@@ -31,7 +31,7 @@ struct WritableStreamSinkJsAdapter::Active final {
   };
   using TaskQueue = workerd::util::Queue<kj::Own<Task>>;
 
-  kj::Own<WritableStreamSink> sink;
+  kj::Own<WritableSink> sink;
   const Options options;
   kj::Canceler canceler;
   TaskQueue queue;
@@ -41,7 +41,7 @@ struct WritableStreamSinkJsAdapter::Active final {
   size_t bytesInFlight = 0;
   kj::Maybe<kj::Exception> pendingAbort;
 
-  Active(kj::Own<WritableStreamSink> sink, Options options)
+  Active(kj::Own<WritableSink> sink, Options options)
       : sink(kj::mv(sink)),
         options(kj::mv(options)) {
     KJ_DASSERT(this->sink.get() != nullptr, "WritableStreamSink cannot be null");
@@ -127,10 +127,8 @@ struct WritableStreamSinkJsAdapter::Active final {
   }
 };
 
-WritableStreamSinkJsAdapter::WritableStreamSinkJsAdapter(jsg::Lock& js,
-    IoContext& ioContext,
-    kj::Own<WritableStreamSink> sink,
-    kj::Maybe<Options> options)
+WritableStreamSinkJsAdapter::WritableStreamSinkJsAdapter(
+    jsg::Lock& js, IoContext& ioContext, kj::Own<WritableSink> sink, kj::Maybe<Options> options)
     : state(ioContext.addObject(kj::heap<Active>(kj::mv(sink), kj::mv(options).orDefault({})))),
       backpressureState(newBackpressureState(js)),
       selfRef(kj::rc<WeakRef<WritableStreamSinkJsAdapter>>(
@@ -146,8 +144,8 @@ WritableStreamSinkJsAdapter::WritableStreamSinkJsAdapter(jsg::Lock& js,
     kj::Maybe<Options> options)
     : WritableStreamSinkJsAdapter(js,
           ioContext,
-          newIoContextWrappedWritableStreamSink(
-              ioContext, newEncodedWritableStreamSink(encoding, kj::mv(stream))),
+          newIoContextWrappedWritableSink(
+              ioContext, newEncodedWritableSink(encoding, kj::mv(stream))),
           kj::mv(options)) {}
 
 WritableStreamSinkJsAdapter::~WritableStreamSinkJsAdapter() noexcept(false) {
