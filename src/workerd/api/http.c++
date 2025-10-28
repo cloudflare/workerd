@@ -210,13 +210,12 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
-    : impl(kj::mv(init).map([&headers, &js](auto i) -> Impl {
+    : impl(kj::mv(init).map([&headers](auto i) -> Impl {
         KJ_IF_SOME(ct, i.contentType) {
           if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
-            headers.setCommon(
-                js, capnp::CommonHeaderName::CONTENT_TYPE, jsg::ByteString(kj::mv(ct)));
+            headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, jsg::ByteString(kj::mv(ct)));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.
@@ -366,7 +365,7 @@ jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
   return arrayBuffer(js).then(js, [this](jsg::Lock& js, jsg::BufferSource buffer) {
     kj::String contentType = headersRef.getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)
-                                 .map([](jsg::ByteString&& b) -> kj::String {
+                                 .map([](auto&& b) -> kj::String {
       return kj::mv(b);
     }).orDefault(nullptr);
 
@@ -1044,8 +1043,7 @@ jsg::Ref<Response> Response::json_(
 
   const auto maybeSetContentType = [](jsg::Lock& js, auto headers) {
     if (!headers->hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
-      headers->setCommon(js, capnp::CommonHeaderName::CONTENT_TYPE,
-        jsg::ByteString(MimeType::JSON.toString()));
+      headers->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, MimeType::JSON.toString());
     }
     return kj::mv(headers);
   };
@@ -1701,7 +1699,7 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
       // <https://fetch.spec.whatwg.org/#http-redirect-fetch>
       //  (NB: "CORS non-wildcard request-header name" consists solely of "Authorization")
 
-      jsRequest->getHeaders(js)->delete_(jsg::ByteString(kj::str("authorization")));
+      jsRequest->getHeaders(js)->deleteCommon(capnp::CommonHeaderName::AUTHORIZATION);
     }
   }
 
@@ -1851,8 +1849,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
       }
 
       auto headers = js.alloc<Headers>();
-      headers->setCommon(js, capnp::CommonHeaderName::CONTENT_TYPE,
-          jsg::ByteString(dataUrl.getMimeType().toString()));
+      headers->setCommon(capnp::CommonHeaderName::CONTENT_TYPE, dataUrl.getMimeType().toString());
       return js.resolvedPromise(Response::constructor(js, kj::mv(maybeResponseBody),
           Response::InitializerDict{
             .status = 200,
