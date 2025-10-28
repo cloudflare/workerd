@@ -628,7 +628,10 @@ struct Worker::Isolate::Impl {
         i.get()->contextCreated(
             v8_inspector::V8ContextInfo(context, 1, jsg::toInspectorStringView("Worker")));
       }
-      Worker::setupContext(*lock, context, loggingOptions);
+      // Get the SnapshotCreator if we're in snapshot creation mode
+      auto& isolateBase = jsg::IsolateBase::from(lock->v8Isolate);
+      auto* snapshotCreator = isolateBase.getSnapshotCreator();
+      Worker::setupContext(*lock, context, loggingOptions, snapshotCreator);
     }
 
     void disposeContext(jsg::JsContext<api::ServiceWorkerGlobalScope> context) {
@@ -1548,8 +1551,10 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       module->DefineOwnProperty(context, v8::Symbol::GetHasInstance(lock.v8Isolate), function));
 }
 
-void Worker::setupContext(
-    jsg::Lock& lock, v8::Local<v8::Context> context, const LoggingOptions& loggingOptions) {
+void Worker::setupContext(jsg::Lock& lock,
+    v8::Local<v8::Context> context,
+    const LoggingOptions& loggingOptions,
+    v8::SnapshotCreator* snapshotCreator) {
   // Set WebAssembly.Module @@HasInstance
   //setWebAssemblyModuleHasInstance(lock, context);  SnapshotCreator's isolate doesn't have access to WebAssembly
 
@@ -1563,6 +1568,11 @@ void Worker::setupContext(
     auto methodStr = jsg::v8StrIntern(lock.v8Isolate, method);
     v8::Global<v8::Function> original(
         lock.v8Isolate, jsg::check(console->Get(context, methodStr)).As<v8::Function>());
+
+    // Add the original function to the snapshot if we're creating one
+    if (snapshotCreator != nullptr) {
+      snapshotCreator->AddData(context, original.Get(lock.v8Isolate));
+    }
 
     auto f = lock.wrapSimpleFunction(context,
         [loggingOptions, level, original = kj::mv(original)](
