@@ -1,5 +1,6 @@
 #include "headers.h"
 
+#include "simdutf.h"
 #include "util.h"
 
 #include <workerd/io/features.h>
@@ -70,14 +71,6 @@ constexpr size_t MAX_COMMON_HEADER_ID =
 // and must be kept in sync with the ordinal values defined in http-over-capnp.capnp). Since
 // it is extremely unlikely that those will change often, we hardcode them here for runtime
 // efficiency.
-//
-// TODO(perf): We can potentially optimize this further by using the mechanisms within
-// http-over-capnp, which also has a mapping of common header names to kj::HttpHeaderIds.
-// However, accessing that functionality requires some amount of new API to be added to
-// capnproto which needs to be carefully weighed. There's also the fact that, currently,
-// the HttpOverCapnpFactory is accessed via IoContext and the Headers object can be
-// created outside of an IoContext. Some amount of additional refactoring would be needed
-// to make it work. For now, this hardcoded table is sufficient and efficient enough.
 #define V(Name) Name##_kj,
 constexpr kj::StringPtr COMMON_HEADER_NAMES[] = {nullptr,  // 0: invalid
   COMMON_HEADERS(V)};
@@ -164,16 +157,6 @@ static_assert(HEADER_HASH_TABLE.find("AcCePt-ChArSeT"_kj) == 1);
 
 static_assert(std::size(COMMON_HEADER_NAMES) == (MAX_COMMON_HEADER_ID + 1));
 
-inline constexpr void requireValidHeaderName(kj::StringPtr name) {
-  if (HEADER_HASH_TABLE.find(name) != 0) {
-    // Known common header, always valid
-    return;
-  }
-  for (char c: name) {
-    JSG_REQUIRE(util::isHttpTokenChar(c), TypeError, "Invalid header name.");
-  }
-}
-
 void maybeWarnIfBadHeaderString(kj::StringPtr str) {
   if (IoContext::hasCurrent()) {
     auto& context = IoContext::current();
@@ -239,6 +222,10 @@ constexpr Headers::HeaderKey getHeaderKeyFor(kj::StringPtr name) {
   if (uint commonId = HEADER_HASH_TABLE.find(name)) {
     KJ_DASSERT(commonId > 0 && commonId <= MAX_COMMON_HEADER_ID);
     return commonId;
+  }
+
+  for (char c: name) {
+    JSG_REQUIRE(util::isHttpTokenChar(c), TypeError, "Invalid header name.");
   }
 
   // Not a common header, so allocate lowercase copy for uncommon header
@@ -336,6 +323,9 @@ Headers::Headers(jsg::Lock& js, const Headers& other): guard(Guard::NONE) {
 
 Headers::Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard): guard(Guard::NONE) {
   headers.reserve(other.size());
+  // TODO(perf): Once kj::HttpHeaders supports an API for getting the CommonHeaderName directly
+  // from the headers, we can optimize this to avoid looking up the common header IDs again,
+  // making this constructor more efficient when copying common headers from kj::HttpHeaders.
   other.forEach([this, &js](auto name, auto value) {
     // We have to copy the strings here but we can avoid normalizing and validating since
     // they presumably already went through that process when they were added to the
@@ -355,6 +345,8 @@ jsg::Ref<Headers> Headers::clone(jsg::Lock& js) const {
 // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
 // reference, so the output must be consumed immediately.
 void Headers::shallowCopyTo(kj::HttpHeaders& out) {
+  // TODO(perf): Once kj::HttpHeaders supports an API for setting headers by CommonHeaderName,
+  // we can optimize this to avoid the additional lookup of the header name and use of addPtrPtr.
   for (auto& entry: headers) {
     for (auto& value: entry.values) {
       out.addPtrPtr(entry.getHeaderName(), value);
@@ -463,8 +455,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
 }
 
 kj::Maybe<kj::String> Headers::get(jsg::Lock& js, kj::String name) {
-  requireValidHeaderName(name);
-  return getUnguarded(js, name.asPtr());
+  return getUnguarded(js, name);
 }
 
 kj::Maybe<kj::String> Headers::getUnguarded(jsg::Lock&, kj::StringPtr name) {
@@ -490,8 +481,6 @@ kj::Array<kj::StringPtr> Headers::getSetCookie() {
 }
 
 kj::Array<kj::StringPtr> Headers::getAll(kj::String name) {
-  requireValidHeaderName(name);
-
   if (!strcaseeq(name, "set-cookie"_kj)) {
     JSG_FAIL_REQUIRE(TypeError, "getAll() can only be used with the header name \"Set-Cookie\".");
   }
@@ -503,7 +492,6 @@ kj::Array<kj::StringPtr> Headers::getAll(kj::String name) {
 }
 
 bool Headers::has(kj::String name) {
-  requireValidHeaderName(name);
   return headers.find(getHeaderKeyFor(name)) != kj::none;
 }
 
@@ -514,7 +502,6 @@ bool Headers::hasCommon(capnp::CommonHeaderName idx) {
 
 void Headers::set(jsg::Lock& js, kj::String name, kj::String value) {
   checkGuard();
-  requireValidHeaderName(name);
   setUnguarded(js, kj::mv(name), normalizeHeaderValue(kj::mv(value)));
 }
 
@@ -542,7 +529,6 @@ void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
 
 void Headers::append(jsg::Lock& js, kj::String name, kj::String value) {
   checkGuard();
-  requireValidHeaderName(name);
   appendUnguarded(js, kj::mv(name), normalizeHeaderValue(kj::mv(value)));
 }
 
@@ -561,7 +547,6 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
 
 void Headers::delete_(kj::String name) {
   checkGuard();
-  requireValidHeaderName(name);
   headers.eraseMatch(getHeaderKeyFor(name));
 }
 

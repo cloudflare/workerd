@@ -9,6 +9,9 @@
 
 #include <cstdint>
 
+// clang-tidy doesn't like some of our use of intrinsics here.
+// NOLINTBEGIN
+
 // Platform-specific intrinsics headers
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -261,3 +264,4 @@ inline constexpr bool isHttpTokenChar(char c) {
 static_assert(isHttpTokenChar('A'));
 static_assert(!isHttpTokenChar(' '));
 }  // namespace workerd::util
+// NOLINTEND

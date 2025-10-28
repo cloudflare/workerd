@@ -71,8 +71,6 @@ public:
   static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
   kj::Maybe<kj::String> get(jsg::Lock& js, kj::String name);
 
-  kj::Maybe<kj::String> getUnguarded(jsg::Lock& js, kj::StringPtr name);
-
   // getAll is a legacy non-standard extension API that we introduced before
   // getSetCookie() was defined. We continue to support it for backwards
   // compatibility but users really ought to be using getSetCookie() now.
@@ -88,6 +86,7 @@ public:
   void append(jsg::Lock& js, kj::String name, kj::String value);
   void delete_(kj::String name);
 
+  kj::Maybe<kj::String> getUnguarded(jsg::Lock& js, kj::StringPtr name);
   void setUnguarded(jsg::Lock& js, kj::String name, kj::String value);
   void appendUnguarded(jsg::Lock& js, kj::String name, kj::String value);
 
@@ -161,6 +160,9 @@ public:
   // A header is identified by either a common header ID or an uncommon header name.
   // The header key name is always identifed in lower-case form, while the original
   // casing is preserved in the actual Header struct to support case-preserving display.
+  // TODO(perf): We can likely optimize this further by interning uncommon header names
+  // so that we avoid repeated allocations of the same uncommon header name. Unless
+  // it proves to be a performance problem, however, we can leave that for future work.
   using HeaderKey = kj::OneOf<uint, kj::String>;
 
 private:
