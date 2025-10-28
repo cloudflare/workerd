@@ -2,24 +2,67 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 import * as assert from 'node:assert';
-import {
-  createInstrumentationState,
-  createTailStreamHandler,
-  runInstrumentationTest,
-} from '../../cloudflare/internal/test/instrumentation-test-helper.js';
 
-// Create module-level state using the helper
-const state = createInstrumentationState();
+// tailStream is going to be invoked multiple times, but we want to wait
+// to run the test until all executions are done. Collect promises for
+// each
+let invocationPromises = [];
+let spans = new Map();
 
 export default {
-  tailStream: createTailStreamHandler(state),
+  tailStream(event, env, ctx) {
+    // For each "onset" event, store a promise which we will resolve when
+    // we receive the equivalent "outcome" event
+    let resolveFn;
+    invocationPromises.push(
+      new Promise((resolve, reject) => {
+        resolveFn = resolve;
+      })
+    );
+
+    // Accumulate the span info for easier testing
+    return (event) => {
+      // span ids are simple counters for tests, but invocation ID allows us to differentiate them
+      let spanKey = event.invocationId + event.spanContext.spanId;
+      switch (event.event.type) {
+        case 'spanOpen':
+          spans.set(event.invocationId + event.event.spanId, {
+            name: event.event.name,
+          });
+          break;
+        case 'attributes': {
+          let span = spans.get(spanKey);
+          if (span) {
+            for (let { name, value } of event.event.info) {
+              span[name] = value;
+            }
+            spans.set(spanKey, span);
+          }
+          break;
+        }
+        case 'spanClose': {
+          let span = spans.get(spanKey);
+          span['closed'] = true;
+          spans.set(spanKey, span);
+          break;
+        }
+        case 'outcome':
+          resolveFn();
+          break;
+      }
+    };
+  },
 };
 
 export const test = {
   async test() {
-    await runInstrumentationTest(state, expectedSpans, {
-      testName: 'Sync KV instrumentation',
-    });
+    // Wait for all the tailStream executions to finish
+    await Promise.allSettled(invocationPromises);
+
+    // Recorded streaming tail worker events, in insertion order.
+    let received = Array.from(spans.values());
+
+    assert.deepStrictEqual(received, expectedSpans);
   },
 };
 
