@@ -8,10 +8,14 @@ Checks: >
   bugprone-capturing-this-in-member-variable,
   bugprone-forward-declaration-namespace,
   bugprone-move-forwarding-reference,
+  bugprone-undefined-memory-manipulation,
+  bugprone-unhandled-self-assignment,
+  bugprone-unused-raii,
   bugprone-use-after-move,
   cppcoreguidelines-misleading-capture-default-by-value,
   misc-confusable-identifiers,
   misc-header-include-cycle,
+  misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
   modernize-macro-to-enum,
@@ -19,6 +23,10 @@ Checks: >
   modernize-type-traits,
   modernize-unary-static-assert,
   modernize-use-bool-literals,
+  modernize-use-constraints,
+  modernize-use-emplace,
+  modernize-use-equals-delete,
+  modernize-use-nullptr,
   performance-for-range-copy,
   performance-move-constructor-init,
   readability-container-contains,
@@ -26,6 +34,7 @@ Checks: >
   readability-redundant-access-specifiers,
   readability-redundant-casting,
   readability-redundant-declaration,
+  readability-redundant-member-init,
   readability-static-accessed-through-instance
 
 # TODO: Fix and enable
@@ -33,7 +42,9 @@ Checks: >
 # bugprone-return-const-ref-from-parameter
 # cppcoreguidelines-missing-std-forward
 # modernize-use-override
+# modernize-use-ranges
 # readability-avoid-const-params-in-decls
+# readability-redundant-smartptr-get
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*src/workerd/.*'

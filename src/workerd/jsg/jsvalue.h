@@ -756,7 +756,7 @@ struct JsValueWrapper {
 class JsMessage final {
  public:
   static JsMessage create(Lock& js, const JsValue& exception);
-  explicit inline JsMessage(): inner(v8::Local<v8::Message>()) {
+  explicit inline JsMessage() {
     requireOnStack(this);
   }
   explicit inline JsMessage(v8::Local<v8::Message> inner): inner(inner) {
