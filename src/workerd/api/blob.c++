@@ -4,11 +4,15 @@
 
 #include "blob.h"
 
+#include "system-streams.h"
 #include "util.h"
 
+#include <workerd/api/streams/readable-source.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/observer.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/mimetype.h>
+#include <workerd/util/stream-utils.h>
 
 namespace workerd::api {
 
@@ -206,6 +210,7 @@ jsg::Promise<kj::String> Blob::text(jsg::Lock& js) {
   return js.resolvedPromise(kj::str(data.asChars()));
 }
 
+// TODO(soon): Remove once the BLOB_USE_STREAMS_NEW_MEMORY_SOURCE autogate is completely rolled out
 class Blob::BlobInputStream final: public ReadableStreamSource {
  public:
   BlobInputStream(jsg::Ref<Blob> blob): unread(blob->data), blob(kj::mv(blob)) {}
@@ -261,7 +266,15 @@ class Blob::BlobInputStream final: public ReadableStreamSource {
 
 jsg::Ref<ReadableStream> Blob::stream(jsg::Lock& js) {
   FeatureObserver::maybeRecordUse(FeatureObserver::Feature::BLOB_AS_STREAM);
-  return js.alloc<ReadableStream>(IoContext::current(), kj::heap<BlobInputStream>(JSG_THIS));
+
+  if (util::Autogate::isEnabled(util::AutogateKey::BLOB_USE_STREAMS_NEW_MEMORY_SOURCE)) {
+    return js.alloc<ReadableStream>(
+        IoContext::current(), streams::newMemorySource(data, kj::heap(JSG_THIS)));
+  }
+
+  // TODO(soon): Remove once the autogate is completely rolled out
+  return js.alloc<ReadableStream>(IoContext::current(),
+      newSystemStream(newMemoryInputStream(data, kj::heap(JSG_THIS)), StreamEncoding::IDENTITY));
 }
 
 // =======================================================================================
