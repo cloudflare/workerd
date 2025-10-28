@@ -1,6 +1,12 @@
 // Copyright (c) 2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
+// 
+// When testing the REPRL interface it's important to see whether Fuzzilli can
+// observe a crash. 
+// The IMMEDIATE_CRASH macro is being used to test crashes in fuzzilli function
+// which can be called from within JavaScript as fuzzilli("FUZZILLI_CRASH",0).
+//
 
 #pragma once
 

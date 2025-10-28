@@ -4,14 +4,15 @@
 
 #include "global-scope.h"
 
-#include "fuzzilli.h"
 #include "simdutf.h"
 
 #include <workerd/api/cache.h>
 #include <workerd/api/crypto/crypto.h>
 #include <workerd/api/events.h>
 #include <workerd/api/eventsource.h>
+#ifdef WORKERD_FUZZILLI
 #include <workerd/api/fuzzilli.h>
+#endif
 #include <workerd/api/hibernatable-web-socket.h>
 #include <workerd/api/scheduled.h>
 #include <workerd/api/system-streams.h>
