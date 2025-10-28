@@ -73,7 +73,7 @@ kj::Array<const char> normalizePathEncoding(kj::ArrayPtr<const char> pathname) {
 
   while (true) {
     if (input.size() == 0) {
-      parts.push_back("");
+      parts.emplace_back("");
       break;
     }
     KJ_IF_SOME(pos, findNext(input)) {

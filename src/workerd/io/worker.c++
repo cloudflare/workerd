@@ -353,7 +353,7 @@ uint64_t getCurrentThreadId() {
 #else
   // Assume MacOS or BSD
   uint64_t tid;
-  pthread_threadid_np(NULL, &tid);
+  pthread_threadid_np(nullptr, &tid);
   return tid;
 #endif
 }

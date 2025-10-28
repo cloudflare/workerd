@@ -161,11 +161,11 @@ class Queue final {
     inner.swap(other.inner);
   }
 
- private:
-  std::list<T> inner;
-
   // Delete the new and delete operators to prevent heap allocation.
   void* operator new(size_t) = delete;
   void operator delete(void*) = delete;
+
+ private:
+  std::list<T> inner;
 };
 }  // namespace workerd::util

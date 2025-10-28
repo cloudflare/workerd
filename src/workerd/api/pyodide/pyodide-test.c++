@@ -293,7 +293,7 @@ kj::Array<kj::String> filterPythonScriptImports(
   auto contentsBuilder = kj::heapArrayBuilder<kj::Array<kj::byte>>(names.size());
   for (auto _: kj::zeroTo(names.size())) {
     (void)_;
-    contentsBuilder.add(kj::Array<kj::byte>(0));
+    contentsBuilder.add(kj::Array<kj::byte>(nullptr));
   }
   auto modInfo = pyodide::PythonModuleInfo(kj::mv(names), contentsBuilder.finish());
   auto modSet = modInfo.getWorkerModuleSet();

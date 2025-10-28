@@ -193,7 +193,7 @@ class EventSource: public EventTarget {
   kj::Maybe<FetchImpl> impl;
   jsg::Ref<AbortController> abortController;
   State readyState;
-  kj::String lastEventId = kj::String();
+  kj::String lastEventId;
 
   // Indicates that the close method has been previously called.
   bool closeCalled = false;
