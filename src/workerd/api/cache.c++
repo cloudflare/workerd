@@ -532,7 +532,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     kj::Maybe<kj::String> cfBlobJson,
     kj::LiteralStringConst operationName,
     kj::StringPtr url,
-    kj::Maybe<jsg::ByteString> cacheControl,
+    kj::Maybe<kj::String> cacheControl,
     bool enableCompatFlags) {
   auto span = context.makeTraceSpan(operationName);
   auto userSpan = context.makeUserTraceSpan(operationName);

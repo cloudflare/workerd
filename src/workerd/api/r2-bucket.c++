@@ -50,11 +50,11 @@ static kj::Date parseDate(jsg::Lock& js, kj::StringPtr value) {
   return js.date(value);
 }
 
-static jsg::ByteString toUTCString(jsg::Lock& js, kj::Date date) {
+static kj::String toUTCString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toUTCString(js);
 }
 
-static jsg::ByteString toISOString(jsg::Lock& js, kj::Date date) {
+static kj::String toISOString(jsg::Lock& js, kj::Date date) {
   return js.date(date).toISOString(js);
 }
 

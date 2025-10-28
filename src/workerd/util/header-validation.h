@@ -185,7 +185,7 @@ inline bool isValidHeaderValueScalar(const char* ptr, size_t len) {
 }
 
 // Main entry point: Automatically dispatches to the best available implementation
-inline bool isValidHeaderValue(kj::StringPtr value) {
+inline bool isValidHeaderValue(kj::ArrayPtr<char> value) {
   const char* ptr = value.begin();
   size_t len = value.size();
 

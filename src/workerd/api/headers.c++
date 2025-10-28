@@ -164,15 +164,39 @@ static_assert(HEADER_HASH_TABLE.find("AcCePt-ChArSeT"_kj) == 1);
 
 static_assert(std::size(COMMON_HEADER_NAMES) == (MAX_COMMON_HEADER_ID + 1));
 
-inline constexpr void requireValidHeaderName(const jsg::ByteString& name) {
+inline constexpr void requireValidHeaderName(kj::StringPtr name) {
+  if (HEADER_HASH_TABLE.find(name) != 0) {
+    // Known common header, always valid
+    return;
+  }
   for (char c: name) {
     JSG_REQUIRE(util::isHttpTokenChar(c), TypeError, "Invalid header name.");
   }
 }
 
+void maybeWarnIfBadHeaderString(kj::StringPtr str) {
+  if (IoContext::hasCurrent()) {
+    auto& context = IoContext::current();
+    if (context.isInspectorEnabled()) {
+      if (!simdutf::validate_ascii(str.begin(), str.size())) {
+        // The string contains non-ASCII characters. While any 8-bit value is technically valid
+        // in HTTP headers, we encode header strings as UTF-8, so we want to warn the user that
+        // their header name/value may not be what they may expect based on what browsers do.
+        auto utf8Hex =
+            kj::strArray(KJ_MAP(b, str) { return kj::str("\\x", kj::hex(kj::byte(b))); }, "");
+        context.logWarning(kj::str("A header value contains non-ASCII characters: \"", str,
+            "\" (raw bytes: \"", utf8Hex,
+            "\"). As a quirk to support Unicode, we are encoding "
+            "values as UTF-8 in the header, but in a browser this would likely result in a "
+            "TypeError exception. Consider encoding this string in ASCII for compatibility with "
+            "browser implementations of the Fetch specification."));
+      }
+    }
+  }
+}
+
 // Left- and right-trim HTTP whitespace from `value`.
-kj::String normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
-  JSG_REQUIRE(workerd::util::isValidHeaderValue(value), TypeError, "Invalid header value.");
+kj::String normalizeHeaderValue(kj::String value) {
   // Fast path: if empty, return as-is
   if (value.size() == 0) return kj::mv(value);
 
@@ -183,9 +207,18 @@ kj::String normalizeHeaderValue(jsg::Lock& js, jsg::ByteString value) {
   while (begin < end && util::isHttpWhitespace(*(end - 1))) --end;
 
   size_t newSize = end - begin;
-  if (newSize == value.size()) return kj::mv(value);
+  if (newSize == value.size()) {
+    JSG_REQUIRE(workerd::util::isValidHeaderValue(value), TypeError, "Invalid header value.");
+    maybeWarnIfBadHeaderString(value);
+    return kj::mv(value);
+  }
 
-  return kj::str(kj::ArrayPtr(begin, newSize));
+  auto trimmed = kj::ArrayPtr(begin, newSize);
+  JSG_REQUIRE(workerd::util::isValidHeaderValue(trimmed), TypeError, "Invalid header value.");
+  maybeWarnIfBadHeaderString(value);
+  // By attaching the original array to the trimmed view, we keep the original allocation alive
+  // and prevent an unnecessary copy.
+  return kj::str(trimmed.attach(value.releaseArray()));
 }
 
 constexpr bool isSetCookie(const Headers::HeaderKey& key) {
@@ -285,8 +318,7 @@ kj::uint Headers::HeaderCallbacks::hashCode(capnp::CommonHeaderName commondId) {
   return kj::hashCode(commondId);
 }
 
-Headers::Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict)
-    : guard(Guard::NONE) {
+Headers::Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict): guard(Guard::NONE) {
   headers.reserve(dict.fields.size());
   for (auto& field: dict.fields) {
     append(js, kj::mv(field.name), kj::mv(field.value));
@@ -386,7 +418,7 @@ kj::Array<Headers::DisplayedHeader> Headers::getDisplayedHeaders(jsg::Lock& js) 
 }
 
 jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer> init) {
-  using StringDict = jsg::Dict<jsg::ByteString, jsg::ByteString>;
+  using StringDict = jsg::Dict<kj::String, kj::String>;
 
   KJ_IF_SOME(i, init) {
     KJ_SWITCH_ONEOF(kj::mv(i)) {
@@ -398,7 +430,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
         // It's important to note here that we are treating the Headers object
         // as a special case here. Per the fetch spec, we *should* be grabbing
         // the Symbol.iterator off the Headers object and interpreting it as
-        // a Sequence<Sequence<ByteString>> (as in the ByteStringPairs case
+        // a Sequence<Sequence<kj::String>> (as in the StringPairs case
         // below). However, special casing Headers like we do here is more
         // performant and has other side effects such as preserving the casing
         // of header names that have been received.
@@ -415,7 +447,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
         // implementation here, however, we are ignoring the Symbol.iterator so
         // the test fails.
       }
-      KJ_CASE_ONEOF(pairs, ByteStringPairs) {
+      KJ_CASE_ONEOF(pairs, StringPairs) {
         auto dict = KJ_MAP(entry, pairs) {
           JSG_REQUIRE(entry.size() == 2, TypeError,
               "To initialize a Headers object from a sequence, each inner sequence "
@@ -430,7 +462,7 @@ jsg::Ref<Headers> Headers::constructor(jsg::Lock& js, jsg::Optional<Initializer>
   return js.alloc<Headers>();
 }
 
-kj::Maybe<kj::String> Headers::get(jsg::Lock& js, jsg::ByteString name) {
+kj::Maybe<kj::String> Headers::get(jsg::Lock& js, kj::String name) {
   requireValidHeaderName(name);
   return getUnguarded(js, name.asPtr());
 }
@@ -457,7 +489,7 @@ kj::Array<kj::StringPtr> Headers::getSetCookie() {
   return nullptr;
 }
 
-kj::Array<kj::StringPtr> Headers::getAll(jsg::ByteString name) {
+kj::Array<kj::StringPtr> Headers::getAll(kj::String name) {
   requireValidHeaderName(name);
 
   if (!strcaseeq(name, "set-cookie"_kj)) {
@@ -470,7 +502,7 @@ kj::Array<kj::StringPtr> Headers::getAll(jsg::ByteString name) {
   return getSetCookie();
 }
 
-bool Headers::has(jsg::ByteString name) {
+bool Headers::has(kj::String name) {
   requireValidHeaderName(name);
   return headers.find(getHeaderKeyFor(name)) != kj::none;
 }
@@ -480,23 +512,24 @@ bool Headers::hasCommon(capnp::CommonHeaderName idx) {
   return headers.find(idx) != kj::none;
 }
 
-void Headers::set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
+void Headers::set(jsg::Lock& js, kj::String name, kj::String value) {
   checkGuard();
   requireValidHeaderName(name);
-  setUnguarded(js, kj::mv(name), normalizeHeaderValue(js, kj::mv(value)));
+  setUnguarded(js, kj::mv(name), normalizeHeaderValue(kj::mv(value)));
 }
 
 void Headers::setUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
   auto key = getHeaderKeyFor(name);
   auto& header = headers.findOrCreate(key, [&]() {
     Header header(kj::mv(key));
-    if (header.getHeaderName() != name) {
+    auto keyName = header.getKeyName();
+    if (keyName.size() != name.size() || keyName != name) {
       header.name = kj::mv(name);
     }
     return kj::mv(header);
   });
-  header.values.clear();
-  header.values.add(kj::mv(value));
+  header.values.resize(1);
+  header.values[0] = kj::mv(value);
 }
 
 void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
@@ -507,17 +540,18 @@ void Headers::setCommon(capnp::CommonHeaderName idx, kj::String value) {
   header.values.add(kj::mv(value));
 }
 
-void Headers::append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value) {
+void Headers::append(jsg::Lock& js, kj::String name, kj::String value) {
   checkGuard();
   requireValidHeaderName(name);
-  appendUnguarded(js, kj::mv(name), normalizeHeaderValue(js, kj::mv(value)));
+  appendUnguarded(js, kj::mv(name), normalizeHeaderValue(kj::mv(value)));
 }
 
 void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) {
   auto key = getHeaderKeyFor(name);
   auto& header = headers.findOrCreate(key, [&]() {
     Header header(kj::mv(key));
-    if (header.getHeaderName() != name) {
+    auto keyName = header.getKeyName();
+    if (keyName.size() != name.size() || keyName != name) {
       header.name = kj::mv(name);
     }
     return kj::mv(header);
@@ -525,7 +559,7 @@ void Headers::appendUnguarded(jsg::Lock& js, kj::String name, kj::String value) 
   header.values.add(kj::mv(value));
 }
 
-void Headers::delete_(jsg::ByteString name) {
+void Headers::delete_(kj::String name) {
   checkGuard();
   requireValidHeaderName(name);
   headers.eraseMatch(getHeaderKeyFor(name));

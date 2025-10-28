@@ -16,8 +16,8 @@ struct ApiHeaders: public benchmark::Fixture {
 
   struct Header {
     bool append;
-    jsg::ByteString name;
-    jsg::ByteString value;
+    kj::StringPtr name;
+    kj::StringPtr value;
   };
 
   void SetUp(benchmark::State& state) noexcept(true) override {
@@ -51,22 +51,22 @@ struct ApiHeaders: public benchmark::Fixture {
   kj::Own<TestFixture> fixture;
   kj::Own<kj::HttpHeaderTable> table;
   kj::Own<kj::HttpHeaders> kjHeaders;
-  Header kHeaders[13] = {Header{false, "Host"_bs, "example.com"_bs},
-    Header{false, "User-Agent"_bs,
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"_bs},
-    Header{false, "Accept"_bs,
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"_bs},
-    Header{false, "Accept-Language"_bs, "en-US,en;q=0.9"_bs},
-    Header{false, "Accept-Encoding"_bs, "gzip, deflate, br"_bs},
-    Header{false, "Content-Type"_bs, "application/json; charset=utf-8"_bs},
-    Header{false, "Authorization"_bs,
-      "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0"_bs},
-    Header{false, "Cache-Control"_bs, "no-cache, no-store, must-revalidate"_bs},
-    Header{false, "Content-Length"_bs, "1234"_bs},
-    Header{false, "Referer"_bs, "https://www.example.com/page?query=value&other=param"_bs},
-    Header{false, "X-Forwarded-For"_bs, "203.0.113.1, 198.51.100.17"_bs},
-    Header{true, "Set-Cookie"_bs, "new_session=token123; Path=/; Secure; HttpOnly"_bs},
-    Header{true, "Set-Cookie"_bs, "new_session=token124; Path=/abc; Secure; HttpOnly"_bs}};
+  Header kHeaders[13] = {Header{false, "Host"_kj, "example.com"_kj},
+    Header{false, "User-Agent"_kj,
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"_kj},
+    Header{false, "Accept"_kj,
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"_kj},
+    Header{false, "Accept-Language"_kj, "en-US,en;q=0.9"_kj},
+    Header{false, "Accept-Encoding"_kj, "gzip, deflate, br"_kj},
+    Header{false, "Content-Type"_kj, "application/json; charset=utf-8"_kj},
+    Header{false, "Authorization"_kj,
+      "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0"_kj},
+    Header{false, "Cache-Control"_kj, "no-cache, no-store, must-revalidate"_kj},
+    Header{false, "Content-Length"_kj, "1234"_kj},
+    Header{false, "Referer"_kj, "https://www.example.com/page?query=value&other=param"_kj},
+    Header{false, "X-Forwarded-For"_kj, "203.0.113.1, 198.51.100.17"_kj},
+    Header{true, "Set-Cookie"_kj, "new_session=token123; Path=/; Secure; HttpOnly"_kj},
+    Header{true, "Set-Cookie"_kj, "new_session=token124; Path=/abc; Secure; HttpOnly"_kj}};
 };
 
 // initialization performs a lot of copying, benchmark it
@@ -93,11 +93,9 @@ BENCHMARK_F(ApiHeaders, set_append)(benchmark::State& state) {
         for (int n = 0; n < 13; n++) {
           auto& h = kHeaders[n];
           if (h.append) {
-            headers->append(
-                env.js, jsg::ByteString(kj::str(h.name)), jsg::ByteString(kj::str(h.value)));
+            headers->append(env.js, kj::str(h.name), kj::str(h.value));
           } else {
-            headers->set(
-                env.js, jsg::ByteString(kj::str(h.name)), jsg::ByteString(kj::str(h.value)));
+            headers->set(env.js, kj::str(h.name), kj::str(h.value));
           }
         }
         benchmark::DoNotOptimize(i);

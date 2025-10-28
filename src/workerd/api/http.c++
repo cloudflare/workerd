@@ -215,7 +215,7 @@ Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
           if (!headers.hasCommon(capnp::CommonHeaderName::CONTENT_TYPE)) {
             // The spec allows the user to override the Content-Type, if they wish, so we only set
             // the Content-Type if it doesn't already exist.
-            headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, jsg::ByteString(kj::mv(ct)));
+            headers.setCommon(capnp::CommonHeaderName::CONTENT_TYPE, kj::mv(ct));
           } else if (MimeType::FORM_DATA == ct) {
             // Custom content-type request/responses with FormData are broken since they require a
             // boundary parameter only the FormData serializer can provide. Let's warn if a dev does this.

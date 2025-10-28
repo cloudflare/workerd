@@ -32,7 +32,7 @@ public:
   };
 
   Headers(): guard(Guard::NONE) {}
-  explicit Headers(jsg::Lock& js, jsg::Dict<jsg::ByteString, jsg::ByteString> dict);
+  explicit Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
   KJ_DISALLOW_COPY_AND_MOVE(Headers);
@@ -51,13 +51,13 @@ public:
   // Returns headers with lower-case name and comma-concatenated duplicates.
   kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
 
-  using ByteStringPair = jsg::Sequence<jsg::ByteString>;
-  using ByteStringPairs = jsg::Sequence<ByteStringPair>;
+  using StringPair = jsg::Sequence<kj::String>;
+  using StringPairs = jsg::Sequence<StringPair>;
 
   // Per the fetch specification, it is possible to initialize a Headers object
   // from any other object that has a Symbol.iterator implementation. Those are
-  // handled in this Initializer definition using the ByteStringPairs definition
-  // that aliases jsg::Sequence<jsg::Sequence<jsg::ByteString>>. Technically,
+  // handled in this Initializer definition using the StringPairs definition
+  // that aliases jsg::Sequence<jsg::Sequence<kj::String>>. Technically,
   // the Headers object itself falls under that definition as well. However, treating
   // a Headers object as a jsg::Sequence<jsg::Sequence<T>> is nowhere near as
   // performant and has the side effect of forcing all header names to be lower-cased
@@ -65,28 +65,28 @@ public:
   // choose to special case creating a Header object from another Header object.
   // This is an intentional departure from the spec.
   using Initializer = kj::OneOf<jsg::Ref<Headers>,
-                                ByteStringPairs,
-                                jsg::Dict<jsg::ByteString, jsg::ByteString>>;
+                                StringPairs,
+                                jsg::Dict<kj::String, kj::String>>;
 
   static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
-  kj::Maybe<kj::String> get(jsg::Lock& js, jsg::ByteString name);
+  kj::Maybe<kj::String> get(jsg::Lock& js, kj::String name);
 
   kj::Maybe<kj::String> getUnguarded(jsg::Lock& js, kj::StringPtr name);
 
   // getAll is a legacy non-standard extension API that we introduced before
   // getSetCookie() was defined. We continue to support it for backwards
   // compatibility but users really ought to be using getSetCookie() now.
-  kj::Array<kj::StringPtr> getAll(jsg::ByteString name);
+  kj::Array<kj::StringPtr> getAll(kj::String name);
 
   // The Set-Cookie header is special in that it is the only HTTP header that
   // is not permitted to be combined into a single instance.
   kj::Array<kj::StringPtr> getSetCookie();
 
-  bool has(jsg::ByteString name);
+  bool has(kj::String name);
 
-  void set(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
-  void append(jsg::Lock& js, jsg::ByteString name, jsg::ByteString value);
-  void delete_(jsg::ByteString name);
+  void set(jsg::Lock& js, kj::String name, kj::String value);
+  void append(jsg::Lock& js, kj::String name, kj::String value);
+  void delete_(kj::String name);
 
   void setUnguarded(jsg::Lock& js, kj::String name, kj::String value);
   void appendUnguarded(jsg::Lock& js, kj::String name, kj::String value);

@@ -362,8 +362,6 @@ void EventSource::start(jsg::Lock& js) {
             js, self, kj::str("The response status code was ", response->getStatus(), "."));
         }
 
-        // TODO(cleanup): Using jsg::ByteString here is really annoying. It would be nice to have
-        // an internal alternative that doesn't require an allocation.
         KJ_IF_SOME(contentType,
             response->getHeaders(js)->getCommon(js, capnp::CommonHeaderName::CONTENT_TYPE)) {
         bool invalid = false;
