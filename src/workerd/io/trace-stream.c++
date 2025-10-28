@@ -619,8 +619,16 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
       // We will only dispatch the remaining events if a handler is returned.
       auto result = ([&]() -> kj::Promise<void> {
         KJ_IF_SOME(handler, maybeHandler) {
-          auto h = handler->getHandle(lock);
-          return handleEvents(lock, h, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+          KJ_IF_SOME(h, handler.tryGet()) {
+            auto handle = h.getHandle(lock);
+            return handleEvents(
+                lock, handle, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
+          } else {
+            KJ_LOG(ERROR, "tail stream handler was destroyed while processing events");
+            sharedResults->setStop(true);
+            doneReceiving = true;
+            return kj::READY_NOW;
+          }
         } else {
           return handleOnset(lock, ioContext, events.releaseAsArray(), kj::mv(sharedResults));
         }
