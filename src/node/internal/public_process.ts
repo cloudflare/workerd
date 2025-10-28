@@ -738,13 +738,16 @@ Object.defineProperty(process, Symbol.toStringTag, {
 // We lazily attach unhandled rejection and rejection handled listeners
 // to ensure performance optimizations remain in the no listener case
 let addedUnhandledRejection = false,
-  addedRejectionHandled = false;
+  addedRejectionHandled = false,
+  addedUncaughtException = false;
 process.on('newListener', (name) => {
   if (name === 'unhandledRejection' && !addedUnhandledRejection) {
     addEventListener(
       'unhandledrejection',
       function (evt: Event & { reason: unknown; promise: Promise<unknown> }) {
         process.emit('unhandledRejection', evt.reason, evt.promise);
+        // we do not emit uncaughtException with the assumption that
+        // unhandled rejections are not critical like in Node.js.
       }
     );
     addedUnhandledRejection = true;
@@ -757,6 +760,12 @@ process.on('newListener', (name) => {
       }
     );
     addedRejectionHandled = true;
+  }
+  if (name === 'uncaughtException' && !addedUncaughtException) {
+    addEventListener('error', function (evt: Event & { error: unknown }) {
+      process.emit('uncaughtException', evt.error, 'uncaughtException');
+    });
+    addedUncaughtException = true;
   }
 });
 
