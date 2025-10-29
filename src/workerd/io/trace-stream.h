@@ -8,6 +8,57 @@
 
 namespace workerd::tracing {
 
+class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::Refcounted {
+ public:
+  TailStreamTarget(IoContext& ioContext,
+      kj::Maybe<kj::StringPtr> entrypointNamePtr,
+      Frankenvalue props,
+      kj::Own<kj::PromiseFulfiller<void>> doneFulfiller);
+
+  KJ_DISALLOW_COPY_AND_MOVE(TailStreamTarget);
+  ~TailStreamTarget();
+
+  kj::Promise<void> report(ReportContext reportContext) override;
+
+ private:
+  struct SharedResults;
+  // Handles the very first (onset) event in the tail stream. This will cause
+  // the exported tailStream handler to be called, passing the onset event
+  // as the initial argument. If the tail stream wishes to continue receiving
+  // events for this invocation, it will return a handler in the form of an
+  // object or a function. If no handler is returned, the tail session is
+  // shutdown.
+  kj::Promise<void> handleOnset(Worker::Lock& lock,
+      IoContext& ioContext,
+      kj::Array<tracing::TailEvent> events,
+      kj::Rc<SharedResults> results);
+
+  kj::Promise<void> handleEvents(Worker::Lock& lock,
+      const jsg::JsValue& handler,
+      IoContext& ioContext,
+      kj::Array<tracing::TailEvent> events,
+      kj::Rc<SharedResults> results);
+
+  kj::Own<IoContext::WeakRef> weakIoContext;
+  kj::Maybe<kj::StringPtr> entrypointNamePtr;
+  Frankenvalue props;
+  // The done fulfiller is resolved when we receive the outcome event
+  // or rejected if the capability is dropped before receiving the outcome
+  // event.
+  kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
+
+  // The maybeHandler will be empty until we receive and process the
+  // onset event.
+ public:
+  kj::Maybe<jsg::JsRef<jsg::JsValue>> maybeHandler;
+  bool hasDestroyedHandler = false;
+
+ private:
+  // Indicates that we told (or should have told) the client that we want no further events, used
+  // to debug events arriving when the IoContext is no longer valid.
+  bool doneReceiving = false;
+};
+
 // A WorkerInterface::CustomEvent implementation used to deliver streaming tail
 // events to a tail worker.
 class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
@@ -18,6 +69,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
       : capFulfiller(kj::mv(paf.fulfiller)),
         clientCap(kj::mv(paf.promise)),
         typeId(typeId) {}
+  ~TailStreamCustomEventImpl();
 
   kj::Promise<Result> run(kj::Own<IoContext::IncomingRequest> incomingRequest,
       kj::Maybe<kj::StringPtr> entrypointName,
@@ -50,6 +102,8 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
  private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
+  // Reference used to deallocate the JSG handler to ensure it does not outlive the isolate.
+  kj::Maybe<kj::Own<TailStreamTarget>> target;
   uint16_t typeId;
 };
 
