@@ -254,6 +254,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   bool useDefaultHandling;
   KJ_IF_SOME(h, exportedHandler) {
     KJ_IF_SOME(f, h.fetch) {
+      TRACE_EVENT("workerd", "WorkerEntrypoint::request() calling fetch handler");
       auto promise = f(lock, event->getRequest(), h.env.addRef(js), h.getCtx());
       event->respondWith(lock, kj::mv(promise));
       useDefaultHandling = false;
@@ -313,6 +314,9 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     };
     auto canceled = kj::refcounted<RefcountedBool>(false);
 
+    TRACE_EVENT_BEGIN("workerd", "WorkerEntrypoint::request() wait for fetch handler",
+        PERFETTO_TRACK_FROM_POINTER(&ioContext), PERFETTO_FLOW_FROM_POINTER(&response));
+
     return ioContext
         .awaitJs(lock,
             promise.then(kj::implicitCast<jsg::Lock&>(lock),
@@ -321,10 +325,13 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
                         canceled = kj::addRef(*canceled), &headers, span = kj::mv(span)](
                         jsg::Lock& js, jsg::Ref<Response> innerResponse) mutable
                     -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      auto& context = IoContext::current();
+      TRACE_EVENT_END(
+          "workerd", PERFETTO_TRACK_FROM_POINTER(&context), PERFETTO_FLOW_FROM_POINTER(&response));
+      TRACE_EVENT("workerd", "WorkerEntrypoint::request() fetch handler returned response");
       JSG_REQUIRE(innerResponse->getType() != "error"_kj, TypeError,
           "Return value from serve handler must not be an error response (like Response.error())");
 
-      auto& context = IoContext::current();
       // Drop our fetch_handler span now that the promise has resolved.
       span = kj::none;
       if (canceled->value) {
@@ -340,11 +347,13 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
         .then(
             [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
                 DeferredProxy<void> deferredProxy) mutable {
+      TRACE_EVENT("workerd", "WorkerEntrypoint::request() finished sending response");
       // In the case of bidirectional streaming, the request body stream needs to remain valid
       // while proxying the response. So, arrange for neutering to happen only after the proxy
       // task finishes.
       deferredProxy.proxyTask = deferredProxy.proxyTask
                                     .then([body = kj::addRef(*ownRequestBody)]() mutable {
+        TRACE_EVENT("workerd", "WorkerEntrypoint::request() finished proxying response");
         body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
       }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
         body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));

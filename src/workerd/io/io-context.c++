@@ -1120,7 +1120,12 @@ void IoContext::runInContextScope(Worker::LockType lockType,
   SuppressIoContextScope previousRequest;
   threadLocalRequest = this;
 
+  TRACE_EVENT_BEGIN("workerd", "IoContext::runInContextScope entering worker lock",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+
   worker->runInLockScope(lockType, [&](Worker::Lock& lock) {
+    TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+    TRACE_EVENT("workerd", "IoContext::runInContextScope running in worker lock");
     KJ_REQUIRE(currentInputLock == kj::none);
     KJ_REQUIRE(currentLock == kj::none);
     KJ_DEFER(currentLock = kj::none; currentInputLock = kj::none);
@@ -1157,7 +1162,12 @@ void IoContext::runImpl(Runnable& runnable,
 
   getIoChannelFactory().getTimer().syncTime();
 
+  TRACE_EVENT_BEGIN("workerd", "IoContext::runImpl entering context scope",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
+    TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
+    TRACE_EVENT("workerd", "IoContext::runImpl running in context scope");
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();

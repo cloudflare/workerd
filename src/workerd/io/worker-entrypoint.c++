@@ -311,6 +311,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
 
     if (featureFlags.getEnableRequestSignal()) {
+      TRACE_EVENT("workerd", "WorkerEntrypoint::request() creating AbortController");
       auto abortSignalFlag = featureFlags.getRequestSignalPassthrough()
           ? api::AbortSignal::Flag::NONE
           : api::AbortSignal::Flag::IGNORE_FOR_SUBREQUESTS;
