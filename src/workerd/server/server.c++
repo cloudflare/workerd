@@ -1702,11 +1702,11 @@ class SpanSubmitter final: public kj::Refcounted {
   SpanSubmitter(kj::Own<WorkerTracer> workerTracer)
       : predictableSpanId(0),
         workerTracer(kj::mv(workerTracer)) {}
-  void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
+  void submitSpan(tracing::SpanId spanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
-    CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
-        span.startTime, span.endTime);
+    CompleteSpan span2(
+        spanId, kj::ConstString(kj::str(span.operationName)), span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
       span2.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
@@ -1716,6 +1716,15 @@ class SpanSubmitter final: public kj::Refcounted {
     }
 
     workerTracer->addSpan(kj::mv(span2));
+  }
+  void submitSpanStart(tracing::SpanId spanId,
+      tracing::SpanId parentSpanId,
+      kj::ConstString& operationName,
+      kj::Date startTime) {
+    if (isPredictableModeForTest()) {
+      startTime = kj::UNIX_EPOCH;
+    }
+    workerTracer->addSpanOpen(spanId, parentSpanId, operationName, startTime);
   }
 
   tracing::SpanId makeSpanId() {
@@ -1743,7 +1752,10 @@ class WorkerTracerSpanObserver: public SpanObserver {
   }
 
   void report(const Span& span) override {
-    spanSubmitter->submitSpan(spanId, parentSpanId, span);
+    spanSubmitter->submitSpan(spanId, span);
+  }
+  void reportStart(kj::ConstString& operationName, kj::Date startTime) override {
+    spanSubmitter->submitSpanStart(spanId, parentSpanId, operationName, startTime);
   }
 
   // Provide I/O time to the tracing system for user spans.
