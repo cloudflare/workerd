@@ -3,6 +3,7 @@
 
 #include <workerd/api/util.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/util/immediate-crash.h>
 
 #include <errno.h>
 #include <string.h>

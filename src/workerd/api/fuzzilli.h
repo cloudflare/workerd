@@ -1,7 +1,6 @@
 #pragma once
 
 #ifdef __linux__
-#include <workerd/util/immediate-crash.h>
 #include <workerd/jsg/jsg.h>
 
 #include <assert.h>
