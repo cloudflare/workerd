@@ -2957,7 +2957,9 @@ class Server::WorkerService final: public Service,
           : alarmScheduler(alarmScheduler),
             actor(actor) {}
 
-      kj::Promise<void> scheduleRun(kj::Maybe<kj::Date> newAlarmTime) override {
+      // We ignore the priorTask in workerd because everything should run synchronously.
+      kj::Promise<void> scheduleRun(
+          kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
         KJ_IF_SOME(scheduledTime, newAlarmTime) {
           alarmScheduler.setAlarm(actor, scheduledTime);
         } else {
