@@ -316,7 +316,7 @@ int32_t indexOfOffset(size_t length, int32_t offset, int32_t needle_length, bool
     }
   } else {
     // cast to int64_t to avoid overflow.
-    if ((int64_t)offset + needle_length <= len) {
+    if (static_cast<int64_t>(offset) + needle_length <= len) {
       // Valid positive offset.
       return offset;
     } else if (needle_length == 0) {

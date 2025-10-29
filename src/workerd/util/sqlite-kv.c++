@@ -90,15 +90,15 @@ kj::Own<SqliteKv::ListCursor> SqliteKv::list(
   if (order == Order::FORWARD) {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e,
+            static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
         return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, (int64_t)l);
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
       }
@@ -106,16 +106,16 @@ kj::Own<SqliteKv::ListCursor> SqliteKv::list(
   } else {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse, begin, e, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse,
+            begin, e, static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(
             kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin, (int64_t)l);
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin,
+            static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
       }

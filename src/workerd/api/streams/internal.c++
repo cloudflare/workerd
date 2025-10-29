@@ -800,11 +800,11 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
       class NullSource final: public ReadableStreamSource {
        public:
         kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-          return size_t(0);
+          return static_cast<size_t>(0);
         }
 
         kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
-          return uint64_t(0);
+          return static_cast<uint64_t>(0);
         }
       };
 
@@ -2146,7 +2146,7 @@ jsg::Promise<kj::String> ReadableStreamInternalController::readAllText(
 kj::Maybe<uint64_t> ReadableStreamInternalController::tryGetLength(StreamEncoding encoding) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-      return uint64_t(0);
+      return static_cast<uint64_t>(0);
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       return kj::none;

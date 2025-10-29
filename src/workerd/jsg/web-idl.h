@@ -169,17 +169,21 @@ constexpr bool hasDuplicateTypes<T, U, V...> =
 
 template <typename... T>
 struct FlattenedTypeTraits_ {
-  static constexpr size_t dictionaryTypeCount = ((size_t)isDictionaryType<T> + ...);
+  static constexpr size_t dictionaryTypeCount = (static_cast<size_t>(isDictionaryType<T>) + ...);
 
-  static constexpr size_t booleanTypeCount = ((size_t)isBooleanType<T> + ...);
-  static constexpr size_t numericTypeCount = ((size_t)isNumericType<T> + ...);
-  static constexpr size_t stringTypeCount = ((size_t)isStringType<T> + ...);
-  static constexpr size_t objectTypeCount = ((size_t)isObjectType<T> + ...);
-  static constexpr size_t symbolTypeCount = ((size_t)isSymbolType<T> + ...);
-  static constexpr size_t interfaceLikeTypeCount = ((size_t)isInterfaceLikeType<T> + ...);
-  static constexpr size_t callbackFunctionTypeCount = ((size_t)isCallbackFunctionType<T> + ...);
-  static constexpr size_t dictionaryLikeTypeCount = ((size_t)isDictionaryLikeType<T> + ...);
-  static constexpr size_t sequenceLikeTypeCount = ((size_t)isSequenceLikeType<T> + ...);
+  static constexpr size_t booleanTypeCount = (static_cast<size_t>(isBooleanType<T>) + ...);
+  static constexpr size_t numericTypeCount = (static_cast<size_t>(isNumericType<T>) + ...);
+  static constexpr size_t stringTypeCount = (static_cast<size_t>(isStringType<T>) + ...);
+  static constexpr size_t objectTypeCount = (static_cast<size_t>(isObjectType<T>) + ...);
+  static constexpr size_t symbolTypeCount = (static_cast<size_t>(isSymbolType<T>) + ...);
+  static constexpr size_t interfaceLikeTypeCount =
+      (static_cast<size_t>(isInterfaceLikeType<T>) + ...);
+  static constexpr size_t callbackFunctionTypeCount =
+      (static_cast<size_t>(isCallbackFunctionType<T>) + ...);
+  static constexpr size_t dictionaryLikeTypeCount =
+      (static_cast<size_t>(isDictionaryLikeType<T>) + ...);
+  static constexpr size_t sequenceLikeTypeCount =
+      (static_cast<size_t>(isSequenceLikeType<T>) + ...);
 
   static constexpr size_t hasDuplicateTypes = webidl::hasDuplicateTypes<T...>;
   static constexpr size_t hasIndistinguishableTypes = (isIndistinguishableType<T> || ...);

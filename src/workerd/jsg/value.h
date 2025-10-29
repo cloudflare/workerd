@@ -86,11 +86,13 @@ class PrimitiveWrapper {
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
-    JSG_REQUIRE(value <= int8_t(kj::maxValue) && value >= int8_t(kj::minValue), TypeError,
-        kj::str("Value out of range. Must be between ", int8_t(kj::minValue), " and ",
-            int8_t(kj::maxValue), " (inclusive)."));
+    JSG_REQUIRE(
+        value <= static_cast<int8_t>(kj::maxValue) && value >= static_cast<int8_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int8_t>(kj::minValue), " and ",
+            static_cast<int8_t>(kj::maxValue), " (inclusive)."));
 
-    return int8_t(value);
+    return static_cast<int8_t>(value);
   }
 
   static constexpr const char* getName(uint8_t*) {
@@ -122,10 +124,11 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive number.");
 
-    JSG_REQUIRE(value <= uint8_t(kj::maxValue), TypeError,
-        kj::str("Value out of range. Must be less than or equal to ", uint8_t(kj::maxValue), "."));
+    JSG_REQUIRE(value <= static_cast<uint8_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint8_t>(kj::maxValue), "."));
 
-    return uint8_t(value);
+    return static_cast<uint8_t>(value);
   }
 
   static constexpr const char* getName(int16_t*) {
@@ -154,11 +157,13 @@ class PrimitiveWrapper {
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
-    JSG_REQUIRE(value <= int16_t(kj::maxValue) && value >= int16_t(kj::minValue), TypeError,
-        kj::str("Value out of range. Must be between ", int16_t(kj::minValue), " and ",
-            int16_t(kj::maxValue), " (inclusive)."));
+    JSG_REQUIRE(
+        value <= static_cast<int16_t>(kj::maxValue) && value >= static_cast<int16_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int16_t>(kj::minValue), " and ",
+            static_cast<int16_t>(kj::maxValue), " (inclusive)."));
 
-    return int16_t(value);
+    return static_cast<int16_t>(value);
   }
 
   static constexpr const char* getName(uint16_t*) {
@@ -190,10 +195,11 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive number.");
 
-    JSG_REQUIRE(value <= uint16_t(kj::maxValue), TypeError,
-        kj::str("Value out of range. Must be less than or equal to ", uint16_t(kj::maxValue), "."));
+    JSG_REQUIRE(value <= static_cast<uint16_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint16_t>(kj::maxValue), "."));
 
-    return uint16_t(value);
+    return static_cast<uint16_t>(value);
   }
 
   static constexpr const char* getName(int*) {
@@ -228,11 +234,12 @@ class PrimitiveWrapper {
 
     // One would think that RangeError is more appropriate than TypeError,
     // but WebIDL says it should be TypeError.
-    JSG_REQUIRE(value <= int(kj::maxValue) && value >= int(kj::minValue), TypeError,
-        kj::str("Value out of range. Must be between ", int(kj::minValue), " and ",
-            int(kj::maxValue), " (inclusive)."));
+    JSG_REQUIRE(value <= static_cast<int>(kj::maxValue) && value >= static_cast<int>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int>(kj::minValue), " and ",
+            static_cast<int>(kj::maxValue), " (inclusive)."));
 
-    return int(value);
+    return static_cast<int>(value);
   }
 
   static constexpr const char* getName(uint32_t*) {
@@ -268,10 +275,11 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive number.");
 
-    JSG_REQUIRE(value <= uint32_t(kj::maxValue), TypeError,
-        kj::str("Value out of range. Must be less than or equal to ", uint32_t(kj::maxValue), "."));
+    JSG_REQUIRE(value <= static_cast<uint32_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint32_t>(kj::maxValue), "."));
 
-    return uint32_t(value);
+    return static_cast<uint32_t>(value);
   }
 
   static constexpr const char* getName(uint64_t*) {
@@ -313,10 +321,11 @@ class PrimitiveWrapper {
         "The value cannot be converted because it is negative and this "
         "API expects a positive bigint.");
 
-    JSG_REQUIRE(value <= uint64_t(kj::maxValue), TypeError,
-        kj::str("Value out of range. Must be less than or equal to ", uint64_t(kj::maxValue), "."));
+    JSG_REQUIRE(value <= static_cast<uint64_t>(kj::maxValue), TypeError,
+        kj::str("Value out of range. Must be less than or equal to ",
+            static_cast<uint64_t>(kj::maxValue), "."));
 
-    return uint64_t(value);
+    return static_cast<uint64_t>(value);
   }
 
   static constexpr const char* getName(int64_t*) {
@@ -353,11 +362,13 @@ class PrimitiveWrapper {
     JSG_REQUIRE(
         isFinite(value), TypeError, "The value cannot be converted because it is not an integer.");
 
-    JSG_REQUIRE(value <= int64_t(kj::maxValue) && value >= int64_t(kj::minValue), TypeError,
-        kj::str("Value out of range. Must be between ", int64_t(kj::minValue), " and ",
-            int64_t(kj::maxValue), " (inclusive)."));
+    JSG_REQUIRE(
+        value <= static_cast<int64_t>(kj::maxValue) && value >= static_cast<int64_t>(kj::minValue),
+        TypeError,
+        kj::str("Value out of range. Must be between ", static_cast<int64_t>(kj::minValue), " and ",
+            static_cast<int64_t>(kj::maxValue), " (inclusive)."));
 
-    return int64_t(value);
+    return static_cast<int64_t>(value);
   }
 
   static constexpr const char* getName(bool*) {
@@ -543,7 +554,7 @@ class OptionalWrapper {
  public:
   template <typename U>
   static constexpr decltype(auto) getName(Optional<U>*) {
-    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+    return TypeWrapper::getName(static_cast<kj::Decay<U>*>(nullptr));
   }
 
   template <typename U>
@@ -568,7 +579,7 @@ class OptionalWrapper {
       return Optional<U>(kj::none);
     } else {
       return static_cast<TypeWrapper*>(this)
-          ->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject)
+          ->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject)
           .map([](auto&& value) -> Optional<U> { return kj::fwd<decltype(value)>(value); });
     }
   }
@@ -580,7 +591,7 @@ class LenientOptionalWrapper {
  public:
   template <typename U>
   static constexpr decltype(auto) getName(LenientOptional<U>*) {
-    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+    return TypeWrapper::getName(static_cast<kj::Decay<U>*>(nullptr));
   }
 
   template <typename U>
@@ -628,7 +639,7 @@ class MaybeWrapper {
 
   template <typename U>
   static constexpr decltype(auto) getName(kj::Maybe<U>*) {
-    return TypeWrapper::getName((kj::Decay<U>*)nullptr);
+    return TypeWrapper::getName(static_cast<kj::Decay<U>*>(nullptr));
   }
 
   template <typename U>
@@ -656,11 +667,11 @@ class MaybeWrapper {
       // the following tryUnwrap returning a nullptr because of an incorrect type. The
       // noSubstituteNull compatibility flag is needed to fix that.
       return static_cast<TypeWrapper*>(this)
-          ->tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr, parentObject)
+          ->tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject)
           .map([](auto&& value) -> kj::Maybe<U> { return kj::fwd<decltype(value)>(value); });
     } else {
       return static_cast<TypeWrapper*>(this)->tryUnwrap(
-          js, context, handle, (kj::Decay<U>*)nullptr, parentObject);
+          js, context, handle, static_cast<kj::Decay<U>*>(nullptr), parentObject);
     }
   }
 
@@ -691,7 +702,7 @@ class OneOfWrapper {
       }
     };
 
-    return kj::strArray(kj::arr(getNameStr((U*)nullptr)...), " or ");
+    return kj::strArray(kj::arr(getNameStr(static_cast<U*>(nullptr))...), " or ");
   }
 
   template <typename U, typename... V>
@@ -1083,7 +1094,7 @@ class ArrayBufferWrapper {
       v8::Local<v8::Value> handle,
       kj::Array<const byte>*,
       kj::Maybe<v8::Local<v8::Object>> parentObject) {
-    return tryUnwrap(js, context, handle, (kj::Array<byte>*)nullptr, parentObject);
+    return tryUnwrap(js, context, handle, static_cast<kj::Array<byte>*>(nullptr), parentObject);
   }
 };
 
@@ -1161,17 +1172,18 @@ class DictWrapper {
         // Here we have to be a bit more careful than for the kj::String case. The unwrap<K>() call
         // may throw, but we need the name in UTF-8 for the very exception that it needs to throw.
         // Thus, we do the unwrapping manually and UTF-8-convert the name only if it's needed.
-        auto unwrappedName = wrapper.tryUnwrap(js, context, name, (K*)nullptr, object);
+        auto unwrappedName = wrapper.tryUnwrap(js, context, name, static_cast<K*>(nullptr), object);
         if (unwrappedName == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictKey(strName.cStr()),
-              TypeWrapper::getName((K*)nullptr));
+              TypeWrapper::getName(static_cast<K*>(nullptr)));
         }
-        auto unwrappedValue = wrapper.tryUnwrap(js, context, value, (V*)nullptr, object);
+        auto unwrappedValue =
+            wrapper.tryUnwrap(js, context, value, static_cast<V*>(nullptr), object);
         if (unwrappedValue == kj::none) {
           auto strName = convertToUtf8(name);
           throwTypeError(js.v8Isolate, TypeErrorContext::dictField(strName.cStr()),
-              TypeWrapper::getName((V*)nullptr));
+              TypeWrapper::getName(static_cast<V*>(nullptr)));
         }
         builder.add(typename Dict<V, K>::Field{
           KJ_ASSERT_NONNULL(kj::mv(unwrappedName)), KJ_ASSERT_NONNULL(kj::mv(unwrappedValue))});
@@ -1228,11 +1240,11 @@ class DateWrapper {
     // V8 Date type directly.
     constexpr double millisToNanos = kj::MILLISECONDS / kj::NANOSECONDS;
     double nanos = millis * millisToNanos;
-    JSG_REQUIRE(
-        nanos < int64_t(kj::maxValue), TypeError, "This API doesn't support dates after 2189.");
-    JSG_REQUIRE(
-        nanos > int64_t(kj::minValue), TypeError, "This API doesn't support dates before 1687.");
-    return kj::UNIX_EPOCH + int64_t(millis) * kj::MILLISECONDS;
+    JSG_REQUIRE(nanos < static_cast<int64_t>(kj::maxValue), TypeError,
+        "This API doesn't support dates after 2189.");
+    JSG_REQUIRE(nanos > static_cast<int64_t>(kj::minValue), TypeError,
+        "This API doesn't support dates before 1687.");
+    return kj::UNIX_EPOCH + static_cast<int64_t>(millis) * kj::MILLISECONDS;
   };
 };
 
@@ -1244,7 +1256,7 @@ class NonCoercibleWrapper {
  public:
   template <CoercibleType T>
   static auto getName(NonCoercible<T>*) {
-    return TypeWrapper::getName((T*)nullptr);
+    return TypeWrapper::getName(static_cast<T*>(nullptr));
   }
 
   template <CoercibleType T>
@@ -1263,7 +1275,8 @@ class NonCoercibleWrapper {
     if constexpr (kj::isSameType<kj::String, T>() || kj::isSameType<jsg::USVString, T>() ||
         kj::isSameType<jsg::DOMString, T>()) {
       if (!handle->IsString()) return kj::none;
-      KJ_IF_SOME(value, wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)) {
+      KJ_IF_SOME(value,
+          wrapper.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)) {
         return NonCoercible<T>{
           .value = kj::mv(value),
         };
@@ -1271,14 +1284,16 @@ class NonCoercibleWrapper {
       return kj::none;
     } else if constexpr (kj::isSameType<bool, T>()) {
       if (!handle->IsBoolean()) return kj::none;
-      return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject).map([](auto& value) {
+      return wrapper.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)
+          .map([](auto& value) {
         return NonCoercible<T>{
           .value = value,
         };
       });
     } else if constexpr (kj::isSameType<double, T>()) {
       if (!handle->IsNumber()) return kj::none;
-      return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject).map([](auto& value) {
+      return wrapper.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)
+          .map([](auto& value) {
         return NonCoercible<T>{
           .value = value,
         };
@@ -1311,7 +1326,7 @@ class MemoizedIdentityWrapper {
  public:
   template <typename T>
   static auto getName(MemoizedIdentity<T>*) {
-    return TypeWrapper::getName((T*)nullptr);
+    return TypeWrapper::getName(static_cast<T*>(nullptr));
   }
 
   template <typename T>
@@ -1349,7 +1364,7 @@ class IdentifiedWrapper {
  public:
   template <typename T>
   static auto getName(Identified<T>*) {
-    return TypeWrapper::getName((T*)nullptr);
+    return TypeWrapper::getName(static_cast<T*>(nullptr));
   }
 
   template <typename T>
@@ -1369,7 +1384,7 @@ class IdentifiedWrapper {
     }
 
     auto& wrapper = static_cast<TypeWrapper&>(*this);
-    return wrapper.tryUnwrap(js, context, handle, (T*)nullptr, parentObject)
+    return wrapper.tryUnwrap(js, context, handle, static_cast<T*>(nullptr), parentObject)
         .map([&](T&& value) -> Identified<T> {
       auto isolate = js.v8Isolate;
       auto obj = handle.As<v8::Object>();

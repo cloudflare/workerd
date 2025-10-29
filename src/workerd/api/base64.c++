@@ -8,7 +8,8 @@ namespace workerd::api {
 
 jsg::BufferSource Base64Module::decodeArray(jsg::Lock& js, jsg::BufferSource input) {
   auto ptr = input.asArrayPtr();
-  auto size = simdutf::maximal_binary_length_from_base64((const char*)ptr.begin(), ptr.size());
+  auto size = simdutf::maximal_binary_length_from_base64(
+      reinterpret_cast<const char*>(ptr.begin()), ptr.size());
   auto buf = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, size);
   auto result = simdutf::base64_to_binary(ptr.asChars().begin(), input.size(),
       buf.asArrayPtr().asChars().begin(), simdutf::base64_default);

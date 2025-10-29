@@ -3565,7 +3565,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::SERVICE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getService(), kj::mv(errorContext)});
       return makeGlobal(
           Global::Fetcher{.channel = channel, .requiresHost = true, .isInHouse = false});
@@ -3599,7 +3600,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
         });
       }
 
-      uint channel = (uint)actorChannels.size();
+      uint channel = static_cast<uint>(actorChannels.size());
       actorChannels.add(FutureActorChannel{actorBinding, kj::mv(errorContext)});
 
       KJ_SWITCH_ONEOF(*actorConfig) {
@@ -3616,7 +3617,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::KV_NAMESPACE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getKvNamespace(), kj::mv(errorContext)});
 
@@ -3625,7 +3627,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::R2_BUCKET: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Bucket(), kj::mv(errorContext)});
       return makeGlobal(Global::R2Bucket{.subrequestChannel = channel,
         .bucket = kj::str(binding.getR2Bucket().getName()),
@@ -3633,13 +3636,15 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
     }
 
     case config::Worker::Binding::R2_ADMIN: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getR2Admin(), kj::mv(errorContext)});
       return makeGlobal(Global::R2Admin{.subrequestChannel = channel});
     }
 
     case config::Worker::Binding::QUEUE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(FutureSubrequestChannel{binding.getQueue(), kj::mv(errorContext)});
 
       return makeGlobal(Global::QueueBinding{.subrequestChannel = channel});
@@ -3684,7 +3689,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
             "You must run workerd with `--experimental` to use this feature."));
       }
 
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getAnalyticsEngine(), kj::mv(errorContext)});
 
@@ -3695,7 +3701,8 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
       });
     }
     case config::Worker::Binding::HYPERDRIVE: {
-      uint channel = (uint)subrequestChannels.size() + IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
+      uint channel = static_cast<uint>(subrequestChannels.size()) +
+          IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT;
       subrequestChannels.add(
           FutureSubrequestChannel{binding.getHyperdrive().getDesignator(), kj::mv(errorContext)});
       return makeGlobal(Global::Hyperdrive{

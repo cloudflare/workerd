@@ -481,7 +481,7 @@ jsg::Promise<jsg::BufferSource> SubtleCrypto::deriveBits(jsg::Lock& js,
   KJ_IF_SOME(maybeLength, lengthParam) {
     KJ_IF_SOME(l, maybeLength) {
       JSG_REQUIRE(l >= 0, TypeError, "deriveBits length must be an unsigned long integer.");
-      length = uint32_t(l);
+      length = static_cast<uint32_t>(l);
     }
   }
 

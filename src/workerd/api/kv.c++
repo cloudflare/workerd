@@ -63,7 +63,8 @@ static void parseListMetadata(TraceContext& traceContext,
 
     KJ_IF_SOME(expiration, obj.get(js, EXPIRATION).tryCast<jsg::JsNumber>()) {
       KJ_IF_SOME(value, expiration.value(js)) {
-        traceContext.userSpan.setTag("cloudflare.kv.response.expiration"_kjc, int64_t(value));
+        traceContext.userSpan.setTag(
+            "cloudflare.kv.response.expiration"_kjc, static_cast<int64_t>(value));
       }
     }
 
@@ -139,7 +140,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
     url.path.add(kj::str("get"));
 
     kj::String body = formBulkBodyString(js, name, withMetadata, options);
-    kj::Maybe<uint64_t> expectedBodySize = uint64_t(body.size());
+    kj::Maybe<uint64_t> expectedBodySize = static_cast<uint64_t>(body.size());
     auto headers = kj::HttpHeaders(context.getHeaderTable());
     headers.set(kj::HttpHeaderId::CONTENT_TYPE, MimeType::JSON.toString());
 
@@ -164,7 +165,8 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
             traceContext.userSpan.setTag("cloudflare.kv.query.type"_kjc, kj::mv(type));
           }
           KJ_IF_SOME(cacheTtl, o.cacheTtl) {
-            traceContext.userSpan.setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
+            traceContext.userSpan.setTag(
+                "cloudflare.kv.query.cache_ttl"_kjc, static_cast<int64_t>(cacheTtl));
           }
         }
       }
@@ -351,7 +353,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
         }
         KJ_IF_SOME(cacheTtl, options.cacheTtl) {
           url.query.add(kj::Url::QueryParam{kj::str("cache_ttl"), kj::str(cacheTtl)});
-          traceContext.userSpan.setTag("cloudflare.kv.query.cache_ttl"_kjc, (int64_t)cacheTtl);
+          traceContext.userSpan.setTag(
+              "cloudflare.kv.query.cache_ttl"_kjc, static_cast<int64_t>(cacheTtl));
         }
       }
     }
@@ -568,12 +571,13 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     // the URL's query parameters.
     KJ_IF_SOME(o, options) {
       KJ_IF_SOME(expiration, o.expiration) {
-        traceContext.userSpan.setTag("cloudflare.kv.query.expiration"_kjc, int64_t(expiration));
+        traceContext.userSpan.setTag(
+            "cloudflare.kv.query.expiration"_kjc, static_cast<int64_t>(expiration));
         url.query.add(kj::Url::QueryParam{kj::str("expiration"), kj::str(expiration)});
       }
       KJ_IF_SOME(expirationTtl, o.expirationTtl) {
         traceContext.userSpan.setTag(
-            "cloudflare.kv.query.expiration_ttl"_kjc, int64_t(expirationTtl));
+            "cloudflare.kv.query.expiration_ttl"_kjc, static_cast<int64_t>(expirationTtl));
         url.query.add(kj::Url::QueryParam{kj::str("expiration_ttl"), kj::str(expirationTtl)});
       }
       KJ_IF_SOME(maybeMetadata, o.metadata) {
@@ -607,11 +611,11 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     KJ_SWITCH_ONEOF(supportedBody) {
       KJ_CASE_ONEOF(text, kj::String) {
         headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, MimeType::PLAINTEXT_STRING);
-        expectedBodySize = uint64_t(text.size());
+        expectedBodySize = static_cast<uint64_t>(text.size());
         traceContext.userSpan.setTag("cloudflare.kv.query.value_type"_kjc, kj::str("text"));
       }
       KJ_CASE_ONEOF(data, kj::Array<byte>) {
-        expectedBodySize = uint64_t(data.size());
+        expectedBodySize = static_cast<uint64_t>(data.size());
         traceContext.userSpan.setTag("cloudflare.kv.query.value_type"_kjc, kj::str("ArrayBuffer"));
       }
       KJ_CASE_ONEOF(stream, jsg::Ref<ReadableStream>) {
@@ -622,7 +626,8 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     }
 
     KJ_IF_SOME(bodySize, expectedBodySize) {
-      traceContext.userSpan.setTag("cloudflare.kv.query.payload.size"_kjc, int64_t(bodySize));
+      traceContext.userSpan.setTag(
+          "cloudflare.kv.query.payload.size"_kjc, static_cast<int64_t>(bodySize));
     }
 
     auto urlStr = url.toString(kj::Url::Context::HTTP_PROXY_REQUEST);
@@ -699,7 +704,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
 
     auto promise = context.waitForOutputLocks().then(
         [headers = kj::mv(headers), client = kj::mv(client), urlStr = kj::mv(urlStr)]() mutable {
-      return client->request(kj::HttpMethod::DELETE, urlStr, headers, uint64_t(0))
+      return client->request(kj::HttpMethod::DELETE, urlStr, headers, static_cast<uint64_t>(0))
           .response
           .then([](kj::HttpClient::Response&& response) mutable {
         checkForErrorStatus("DELETE", response);
