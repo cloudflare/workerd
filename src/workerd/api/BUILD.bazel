@@ -519,6 +519,7 @@ wd_test(
     data = [
         "sync-kv-instrumentation-test.js",
         "sync-kv-test.js",
+        "tests/instrumentation-tail-worker.js",
     ],
 )
 
