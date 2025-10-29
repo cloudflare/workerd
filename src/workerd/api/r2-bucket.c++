@@ -26,13 +26,13 @@ namespace workerd::api::public_beta {
 kj::Own<kj::HttpClient> r2GetClient(
     IoContext& context, uint subrequestChannel, R2UserTracing user) {
   kj::Vector<Span::Tag> tags;
-  tags.add("rpc.service"_kjc, kj::str("r2"_kjc));
-  tags.add(user.method.key, kj::str(user.method.value));
+  tags.add("rpc.service"_kjc, kj::ConstString("r2"_kjc));
+  tags.add(user.method.key, kj::ConstString(kj::str(user.method.value)));
   KJ_IF_SOME(b, user.bucket) {
-    tags.add("cloudflare.r2.bucket"_kjc, kj::str(b));
+    tags.add("cloudflare.r2.bucket"_kjc, kj::ConstString(kj::str(b)));
   }
   KJ_IF_SOME(tag, user.extraTag) {
-    tags.add(tag.key, kj::str(tag.value));
+    tags.add(tag.key, kj::ConstString(kj::str(tag.value)));
   }
 
   return context.getHttpClientWithSpans(subrequestChannel, true, kj::none, user.op, kj::mv(tags));
