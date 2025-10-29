@@ -1,5 +1,6 @@
 #include "readable-source-adapter.h"
 #include "standard.h"
+#include "writable-sink.h"
 
 #include <workerd/api/system-streams.h>
 #include <workerd/jsg/jsg-test.h>
@@ -12,73 +13,53 @@ namespace workerd::api::streams {
 
 namespace {
 
-struct RecordingSource final: public ReadableStreamSource {
+struct RecordingSource final: public kj::AsyncInputStream {
   size_t readCalled = 0;
-  kj::Maybe<kj::Exception> canceledCalled;
 
   kj::Promise<size_t> tryRead(void*, size_t minBytes, size_t maxBytes) override {
     readCalled++;
     co_return 0;
   }
 
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding) override {
+  kj::Maybe<uint64_t> tryGetLength() override {
     static const uint64_t length = 42;
     return length;
   }
-
-  void cancel(kj::Exception ex) override {
-    canceledCalled = kj::mv(ex);
-  }
 };
 
-struct NeverDoneSource final: public ReadableStreamSource {
+struct NeverDoneSource final: public kj::AsyncInputStream {
   size_t readCalled = 0;
-  kj::Maybe<kj::Exception> canceledCalled;
 
   kj::Promise<size_t> tryRead(void* ptr, size_t minBytes, size_t maxBytes) override {
-    KJ_IF_SOME(exc, canceledCalled) {
-      return kj::cp(exc);
-    }
+    readCalled++;
     kj::ArrayPtr<kj::byte> buffer(static_cast<kj::byte*>(ptr), maxBytes);
     buffer.fill('a');
     return maxBytes;
   }
 
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding) override {
+  kj::Maybe<uint64_t> tryGetLength() override {
     return kj::none;
-  }
-
-  void cancel(kj::Exception ex) override {
-    canceledCalled = kj::mv(ex);
   }
 };
 
-struct MinimalReadSource final: public ReadableStreamSource {
+struct MinimalReadSource final: public kj::AsyncInputStream {
   size_t readCalled = 0;
-  kj::Maybe<kj::Exception> canceledCalled;
 
   kj::Promise<size_t> tryRead(void* ptr, size_t minBytes, size_t maxBytes) override {
-    KJ_IF_SOME(exc, canceledCalled) {
-      return kj::cp(exc);
-    }
+    readCalled++;
     kj::ArrayPtr<kj::byte> buffer(static_cast<kj::byte*>(ptr), minBytes);
     buffer.fill('a');
     return minBytes;
   }
 
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding) override {
+  kj::Maybe<uint64_t> tryGetLength() override {
     return kj::none;
-  }
-
-  void cancel(kj::Exception ex) override {
-    canceledCalled = kj::mv(ex);
   }
 };
 
-struct FiniteReadSource final: public ReadableStreamSource {
+struct FiniteReadSource final: public kj::AsyncInputStream {
   size_t readCalled = 0;
   size_t maxReads;
-  kj::Maybe<kj::Exception> canceledCalled;
 
   FiniteReadSource(size_t maxReads): maxReads(maxReads) {}
 
@@ -92,12 +73,8 @@ struct FiniteReadSource final: public ReadableStreamSource {
     co_return minBytes;
   }
 
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding) override {
+  kj::Maybe<uint64_t> tryGetLength() override {
     return kj::none;
-  }
-
-  void cancel(kj::Exception ex) override {
-    canceledCalled = kj::mv(ex);
   }
 };
 
@@ -108,8 +85,9 @@ KJ_TEST("Test successful construction with valid ReadableStreamSource") {
   RecordingSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -117,10 +95,6 @@ KJ_TEST("Test successful construction with valid ReadableStreamSource") {
 
     return kj::READY_NOW;
   });
-
-  // In the default case, when the adapter drops the source without any
-  // errors/cancelations, the source shoult not be canceled, only dropped.
-  KJ_ASSERT(source.canceledCalled == kj::none);
 }
 
 KJ_TEST("Adapter shutdown with no reads") {
@@ -128,8 +102,9 @@ KJ_TEST("Adapter shutdown with no reads") {
   RecordingSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -152,8 +127,6 @@ KJ_TEST("Adapter shutdown with no reads") {
 
     return kj::READY_NOW;
   });
-
-  KJ_ASSERT(source.canceledCalled == kj::none);
 }
 
 KJ_TEST("Adapter cancel with no reads") {
@@ -161,8 +134,9 @@ KJ_TEST("Adapter cancel with no reads") {
   RecordingSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -187,10 +161,6 @@ KJ_TEST("Adapter cancel with no reads") {
 
     return kj::READY_NOW;
   });
-
-  auto& ex = KJ_ASSERT_NONNULL(source.canceledCalled);
-  KJ_ASSERT(
-      ex.getDescription().contains("boom"), "Source should be canceled with provided exception");
 }
 
 KJ_TEST("Adapter cancel (kj::Exception) with no reads") {
@@ -198,8 +168,9 @@ KJ_TEST("Adapter cancel (kj::Exception) with no reads") {
   RecordingSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -214,10 +185,6 @@ KJ_TEST("Adapter cancel (kj::Exception) with no reads") {
 
     return kj::READY_NOW;
   });
-
-  auto& ex = KJ_ASSERT_NONNULL(source.canceledCalled);
-  KJ_ASSERT(
-      ex.getDescription().contains("boom"), "Source should be canceled with provided exception");
 }
 
 KJ_TEST("Adapter with single read (ArrayBuffer)") {
@@ -225,8 +192,9 @@ KJ_TEST("Adapter with single read (ArrayBuffer)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -260,8 +228,9 @@ KJ_TEST("Adapter with single read (Uint8Array)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -295,8 +264,9 @@ KJ_TEST("Adapter with single read (Int32Array)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -330,8 +300,9 @@ KJ_TEST("Adapter with single large read (ArrayBuffer)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -364,8 +335,9 @@ KJ_TEST("Adapter with single small read (ArrayBuffer)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -398,8 +370,9 @@ KJ_TEST("Adapter with minimal reads (Uint8Array)") {
   MinimalReadSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -433,8 +406,9 @@ KJ_TEST("Adapter with minimal reads (Uint32Array)") {
   MinimalReadSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -468,8 +442,9 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
   MinimalReadSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -502,8 +477,7 @@ KJ_TEST("Adapter with over large min reads (Uint32Array)") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto nullSource = newNullInputStream();
-    auto source = newSystemStream(kj::mv(nullSource), StreamEncoding::IDENTITY, env.context);
+    auto source = newReadableSource(newNullInputStream());
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
@@ -534,8 +508,9 @@ KJ_TEST("Adapter with multiple reads (Uint8Array)") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -588,8 +563,9 @@ KJ_TEST("Adapter with multiple reads shutdown") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -641,8 +617,6 @@ KJ_TEST("Adapter with multiple reads shutdown") {
       return js.resolvedPromise();
     })).attach(kj::mv(adapter));
   });
-
-  KJ_ASSERT(source.canceledCalled == kj::none, "Source should not be canceled after shutdown");
 }
 
 KJ_TEST("Adapter with multiple reads cancel") {
@@ -650,8 +624,9 @@ KJ_TEST("Adapter with multiple reads cancel") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     KJ_ASSERT(!adapter->isClosed(), "Adapter should not be closed upon construction");
     KJ_ASSERT(
@@ -713,10 +688,6 @@ KJ_TEST("Adapter with multiple reads cancel") {
       return js.resolvedPromise();
     })).attach(kj::mv(adapter));
   });
-
-  auto& ex = KJ_ASSERT_NONNULL(source.canceledCalled);
-  KJ_ASSERT(
-      ex.getDescription().contains("boom"), "Source should be canceled with provided exception");
 }
 
 KJ_TEST("Adapter close after read") {
@@ -724,8 +695,9 @@ KJ_TEST("Adapter close after read") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     auto read = adapter->read(env.js,
         ReadableStreamSourceJsAdapter::ReadOptions{
@@ -746,8 +718,6 @@ KJ_TEST("Adapter close after read") {
           "Read should have completed successfully before close()");
     })).attach(kj::mv(adapter));
   });
-
-  KJ_ASSERT(source.canceledCalled == kj::none, "Source should not be canceled after close");
 }
 
 KJ_TEST("Adapter close") {
@@ -755,8 +725,9 @@ KJ_TEST("Adapter close") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
     auto closePromise = adapter->close(env.js);
 
     // reads after close should be resoved immediately.
@@ -774,8 +745,6 @@ KJ_TEST("Adapter close") {
       KJ_ASSERT(adapter.isCanceled() == kj::none, "Adapter should not be canceled after close()");
     })).attach(kj::mv(adapter));
   });
-
-  KJ_ASSERT(source.canceledCalled == kj::none, "Source should not be canceled after close");
 }
 
 KJ_TEST("Adapter close superseded by cancel") {
@@ -783,8 +752,9 @@ KJ_TEST("Adapter close superseded by cancel") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     auto closePromise = adapter->close(env.js);
 
@@ -807,8 +777,9 @@ KJ_TEST("After read BackingStore maintains identity") {
   NeverDoneSource source;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     std::unique_ptr<v8::BackingStore> backing =
         v8::ArrayBuffer::NewBackingStore(env.js.v8Isolate, 10);
@@ -837,18 +808,20 @@ KJ_TEST("After read BackingStore maintains identity") {
 
 KJ_TEST("Read all text") {
   TestFixture fixture;
-  FiniteReadSource source(2);
+  FiniteReadSource source(4);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
             adapter->readAllText(env.js).then(
                 env.js, [&adapter = *adapter](jsg::Lock& js, jsg::JsRef<jsg::JsString> result) {
       auto str = result.getHandle(js).toString(js);
-      KJ_ASSERT(str.size() == 8192);
+      // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
+      KJ_ASSERT(str.size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });
@@ -856,17 +829,19 @@ KJ_TEST("Read all text") {
 
 KJ_TEST("Read all bytes") {
   TestFixture fixture;
-  FiniteReadSource source(2);
+  FiniteReadSource source(4);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
             adapter->readAllBytes(env.js).then(
                 env.js, [&adapter = *adapter](jsg::Lock& js, jsg::BufferSource result) {
-      KJ_ASSERT(result.size() == 8192);
+      // With exponential growth strategy: 1024 + 2048 + 4096 + 8192 = 15360
+      KJ_ASSERT(result.size() == 15360);
       KJ_ASSERT(adapter.isClosed(), "Adapter should be closed after readAllText()");
     })).attach(kj::mv(adapter));
   });
@@ -877,8 +852,9 @@ KJ_TEST("Read all text (limit)") {
   FiniteReadSource source(2);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -897,8 +873,9 @@ KJ_TEST("Read all bytes (limit)") {
   FiniteReadSource source(2);
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    kj::Own<ReadableStreamSource> fake(&source, kj::NullDisposer::instance);
-    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(fake));
+    kj::Own<kj::AsyncInputStream> fake(&source, kj::NullDisposer::instance);
+    auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(
+        env.js, env.context, newReadableSource(kj::mv(fake)));
 
     return env.context
         .awaitJs(env.js,
@@ -915,8 +892,7 @@ KJ_TEST("tryGetLength") {
   TestFixture fixture;
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto nullSource = newNullInputStream();
-    auto source = newSystemStream(kj::mv(nullSource), StreamEncoding::IDENTITY, env.context);
+    auto source = newReadableSource(newNullInputStream());
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
     auto length = KJ_ASSERT_NONNULL(adapter->tryGetLength(StreamEncoding::IDENTITY));
     KJ_ASSERT(length == 0, "Length of empty stream should be 0");
@@ -935,7 +911,7 @@ KJ_TEST("tee successful") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto dataSource = newMemoryInputStream("hello world"_kjb);
-    auto source = newSystemStream(kj::mv(dataSource), StreamEncoding::IDENTITY, env.context);
+    auto source = newReadableSource(kj::mv(dataSource));
     auto adapter = kj::heap<ReadableStreamSourceJsAdapter>(env.js, env.context, kj::mv(source));
 
     auto [branch1, branch2] = KJ_ASSERT_NONNULL(adapter->tryTee(env.js));
@@ -1063,48 +1039,37 @@ jsg::Ref<ReadableStream> createClosedStream(jsg::Lock& js) {
       kj::none);
 }
 
-struct RecordingSink final: public WritableStreamSink {
+struct RecordingSink final: public kj::AsyncOutputStream {
   kj::Vector<kj::byte> data;
-  bool ended = false;
-  kj::Maybe<kj::Exception> aborted;
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
     data.addAll(buffer.begin(), buffer.end());
-    return kj::READY_NOW;
+    co_return;
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
     for (auto piece: pieces) {
       data.addAll(piece.begin(), piece.end());
     }
-    return kj::READY_NOW;
+    co_return;
   }
 
-  kj::Promise<void> end() override {
-    ended = true;
-    return kj::READY_NOW;
-  }
-
-  void abort(kj::Exception reason) override {
-    aborted = kj::mv(reason);
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
   }
 };
 
-struct ErrorSink final: public WritableStreamSink {
-  kj::Maybe<kj::Exception> aborted;
-
+struct ErrorSink final: public kj::AsyncOutputStream {
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
-    return KJ_EXCEPTION(FAILED, "worker_do_not_log; Write failed");
+    KJ_FAIL_REQUIRE("worker_do_not_log; Write failed");
+    co_return;
   }
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
-    return KJ_EXCEPTION(FAILED, "worker_do_not_log; Write failed");
+    KJ_FAIL_REQUIRE("worker_do_not_log; Write failed");
+    co_return;
   }
 
-  kj::Promise<void> end() override {
-    return KJ_EXCEPTION(FAILED, "worker_do_not_log; End failed");
-  }
-
-  void abort(kj::Exception reason) override {
-    aborted = kj::mv(reason);
+  kj::Promise<void> whenWriteDisconnected() override {
+    return kj::NEVER_DONE;
   }
 };
 }  // namespace
@@ -1126,11 +1091,16 @@ KJ_TEST("KjAdapter constructor with valid normal ReadableStream") {
     // The size is known because we provided expectedLength in the source.
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->tryGetLength(StreamEncoding::IDENTITY)), 16 * 1024);
 
-    // The preferred encoding is always IDENTITY
-    KJ_ASSERT(adapter->getPreferredEncoding() == StreamEncoding::IDENTITY);
+    // The encoding is always IDENTITY
+    KJ_ASSERT(adapter->getEncoding() == StreamEncoding::IDENTITY);
 
-    // Teeing is unsupported so always returns kj::none
-    KJ_ASSERT(adapter->tryTee(0) == kj::none);
+    // Teeing is unsupported so always throws
+    try {
+      adapter->tee(1);
+    } catch (...) {
+      auto ex = kj::getCaughtExceptionAsKj();
+      KJ_ASSERT(ex.getDescription().contains("not supported"));
+    }
 
     return kj::READY_NOW;
   });
@@ -1153,11 +1123,8 @@ KJ_TEST("KjAdapter constructor with valid byob ReadableStream") {
     // The size is known because we provided expectedLength in the source.
     KJ_ASSERT(KJ_ASSERT_NONNULL(adapter->tryGetLength(StreamEncoding::IDENTITY)), 16 * 1024);
 
-    // The preferred encoding is always IDENTITY
-    KJ_ASSERT(adapter->getPreferredEncoding() == StreamEncoding::IDENTITY);
-
-    // Teeing is unsupported so always returns kj::none
-    KJ_ASSERT(adapter->tryTee(0) == kj::none);
+    // The encoding is always IDENTITY
+    KJ_ASSERT(adapter->getEncoding() == StreamEncoding::IDENTITY);
 
     return kj::READY_NOW;
   });
@@ -1229,7 +1196,7 @@ KJ_TEST("KjAdapter constructor with locked/disturbed stream fails") {
   });
 }
 
-KJ_TEST("KjAdapter tryRead with valid buffer and byte ranges") {
+KJ_TEST("KjAdapter read with valid buffer and byte ranges") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
@@ -1246,7 +1213,7 @@ KJ_TEST("KjAdapter tryRead with valid buffer and byte ranges") {
 
     auto buffer = kj::heapArray<kj::byte>(2049);
 
-    return adapter->tryRead(buffer.begin(), 512, buffer.size())
+    return adapter->read(buffer, 512)
         .then([buffer = kj::mv(buffer), &adapter = *adapter](size_t bytesRead) mutable {
       KJ_ASSERT(bytesRead >= 512 && bytesRead <= buffer.size());
       KJ_ASSERT(bytesRead == 2048);
@@ -1257,8 +1224,7 @@ KJ_TEST("KjAdapter tryRead with valid buffer and byte ranges") {
       KJ_ASSERT(buffer.asPtr().first(bytesRead) == expected.asPtr());
 
       // Perform another read...
-      return adapter.tryRead(buffer.begin(), 1, buffer.size())
-          .then([buffer = kj::mv(buffer)](size_t bytesRead) {
+      return adapter.read(buffer, 1).then([buffer = kj::mv(buffer)](size_t bytesRead) {
         KJ_ASSERT(bytesRead >= 1 && bytesRead <= buffer.size());
         KJ_ASSERT(bytesRead == 2048);
 
@@ -1273,7 +1239,7 @@ KJ_TEST("KjAdapter tryRead with valid buffer and byte ranges") {
   });
 }
 
-KJ_TEST("KjAdapter tryRead with left over (source provides more than requested)") {
+KJ_TEST("KjAdapter read with left over (source provides more than requested)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
@@ -1290,7 +1256,7 @@ KJ_TEST("KjAdapter tryRead with left over (source provides more than requested)"
 
     auto buffer = kj::heapArray<kj::byte>(1000);
 
-    return adapter->tryRead(buffer.begin(), 1000, buffer.size())
+    return adapter->read(buffer, 1000)
         .then([buffer = kj::mv(buffer), &adapter = *adapter](size_t bytesRead) mutable {
       KJ_ASSERT(bytesRead >= 512 && bytesRead <= buffer.size());
       KJ_ASSERT(bytesRead == 1000);
@@ -1300,8 +1266,7 @@ KJ_TEST("KjAdapter tryRead with left over (source provides more than requested)"
       KJ_ASSERT(buffer.asPtr().first(bytesRead) == expected.asPtr());
 
       // Perform another read...
-      return adapter.tryRead(buffer.begin(), 1, buffer.size())
-          .then([buffer = kj::mv(buffer)](size_t bytesRead) {
+      return adapter.read(buffer, 1).then([buffer = kj::mv(buffer)](size_t bytesRead) {
         // The next read should be only for the 24 remaining bytes leftover from the first chunk.
         KJ_ASSERT(bytesRead >= 1 && bytesRead <= buffer.size());
         KJ_ASSERT(bytesRead == 24);
@@ -1316,7 +1281,7 @@ KJ_TEST("KjAdapter tryRead with left over (source provides more than requested)"
   });
 }
 
-KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes=0)") {
+KJ_TEST("KjAdapter read with clamped minBytes (minBytes=0)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
@@ -1333,7 +1298,7 @@ KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes=0)") {
 
     auto buffer = kj::heapArray<kj::byte>(3);
 
-    return adapter->tryRead(buffer.begin(), 0, buffer.size())
+    return adapter->read(buffer, 0)
         .then([buffer = kj::mv(buffer), &adapter = *adapter](size_t bytesRead) mutable {
       // Should return exactly 1 byte, since minBytes is clamped to 1.
       KJ_ASSERT(bytesRead >= 1);
@@ -1341,7 +1306,7 @@ KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes=0)") {
   });
 }
 
-KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes > maxBytes)") {
+KJ_TEST("KjAdapter read with clamped minBytes (minBytes > maxBytes)") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
@@ -1358,7 +1323,7 @@ KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes > maxBytes)") {
 
     auto buffer = kj::heapArray<kj::byte>(3);
 
-    return adapter->tryRead(buffer.begin(), 4, buffer.size())
+    return adapter->read(buffer, 4)
         .then([buffer = kj::mv(buffer), &adapter = *adapter](size_t bytesRead) mutable {
       // Should return exactly 3 byte, since minBytes is clamped to 3.
       KJ_ASSERT(bytesRead == 3);
@@ -1366,7 +1331,7 @@ KJ_TEST("KjAdapter tryRead with clamped minBytes (minBytes > maxBytes)") {
   });
 }
 
-KJ_TEST("KjAdapter tryRead with zero length buffer") {
+KJ_TEST("KjAdapter read with zero length buffer") {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setStreamsJavaScriptControllers(true);
@@ -1383,7 +1348,7 @@ KJ_TEST("KjAdapter tryRead with zero length buffer") {
 
     auto buffer = kj::heapArray<kj::byte>(0);
 
-    return adapter->tryRead(buffer.begin(), 1, buffer.size())
+    return adapter->read(buffer, 1)
         .then([buffer = kj::mv(buffer), &adapter = *adapter](size_t bytesRead) mutable {
       // Should return exactly 0 byte
       KJ_ASSERT(bytesRead == 0);
@@ -1407,10 +1372,10 @@ KJ_TEST("KjAdapter forbid concurrent reads") {
     auto buffer = kj::heapArray<kj::byte>(2);
 
     // Concurrent reads are not allowed.
-    auto read1 = adapter->tryRead(buffer.begin(), 1, buffer.size());
+    auto read1 = adapter->read(buffer, 1);
 
     try {
-      auto read2 KJ_UNUSED = adapter->tryRead(buffer.begin(), 1, buffer.size());
+      auto read2 KJ_UNUSED = adapter->read(buffer, 1);
     } catch (...) {
       auto ex = kj::getCaughtExceptionAsKj();
       KJ_ASSERT(ex.getDescription().contains("Cannot have multiple concurrent reads"));
@@ -1434,7 +1399,7 @@ KJ_TEST("KjAdapter cancel in-flight reads") {
     auto buffer = kj::heapArray<kj::byte>(2);
 
     // Concurrent reads are not allowed.
-    auto read1 = adapter->tryRead(buffer.begin(), 1, buffer.size());
+    auto read1 = adapter->read(buffer, 1);
 
     adapter->cancel(KJ_EXCEPTION(FAILED, "worker_do_not_log; Manual cancel"));
 
@@ -1459,7 +1424,7 @@ KJ_TEST("KjAdapter read errored stream") {
     auto buffer = kj::heapArray<kj::byte>(2);
 
     // Concurrent reads are not allowed.
-    auto read1 = adapter->tryRead(buffer.begin(), 1, buffer.size());
+    auto read1 = adapter->read(buffer, 1);
 
     return read1
         .then([](size_t) { KJ_FAIL_ASSERT("Should not have completed read after cancel"); },
@@ -1469,7 +1434,7 @@ KJ_TEST("KjAdapter read errored stream") {
         .then([&adapter = *adapter]() {
       // The adapter should be in the errored state now.
       kj::FixedArray<kj::byte, 1> buf;
-      return adapter.tryRead(buf.begin(), 1, 1).then([](auto) {
+      return adapter.read(buf, 1).then([](auto) {
         KJ_FAIL_ASSERT("Should not have completed read on errored adapter");
       }, [](kj::Exception exception) { KJ_ASSERT(exception.getDescription().contains("boom")); });
     }).attach(kj::mv(adapter));
@@ -1488,7 +1453,7 @@ KJ_TEST("KjAdapter read closed stream") {
 
     auto buffer = kj::heapArray<kj::byte>(2);
 
-    auto read1 = adapter->tryRead(buffer.begin(), 1, buffer.size());
+    auto read1 = adapter->read(buffer, 1);
 
     return read1.then([](size_t size) { KJ_ASSERT(size == 0); }).attach(kj::mv(adapter));
   });
@@ -1500,12 +1465,14 @@ KJ_TEST("KjAdapter pumpTo") {
   flags.setStreamsJavaScriptControllers(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
+  kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return adapter->pumpTo(sink, true).attach(kj::mv(adapter));
+    return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
   });
 
   kj::FixedArray<kj::byte, 10 * 1024> expected;
@@ -1522,8 +1489,6 @@ KJ_TEST("KjAdapter pumpTo") {
 
   KJ_ASSERT(sink.data.size() == 10 * 1024);
   KJ_ASSERT(sink.data.asPtr() == expected.asPtr());
-  KJ_ASSERT(sink.ended);
-  KJ_ASSERT(sink.aborted == kj::none);
 }
 
 KJ_TEST("KjAdapter pumpTo (no end)") {
@@ -1532,12 +1497,14 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
   flags.setStreamsJavaScriptControllers(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
+  kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return adapter->pumpTo(sink, false).attach(kj::mv(adapter));
+    return adapter->pumpTo(*writableSink, EndAfterPump::NO).attach(kj::mv(adapter));
   });
 
   kj::FixedArray<kj::byte, 10 * 1024> expected;
@@ -1554,8 +1521,6 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
 
   KJ_ASSERT(sink.data.size() == 10 * 1024);
   KJ_ASSERT(sink.data.asPtr() == expected.asPtr());
-  KJ_ASSERT(!sink.ended);
-  KJ_ASSERT(sink.aborted == kj::none);
 }
 
 KJ_TEST("KjAdapter pumpTo (errored)") {
@@ -1564,12 +1529,14 @@ KJ_TEST("KjAdapter pumpTo (errored)") {
   flags.setStreamsJavaScriptControllers(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
   RecordingSink sink;
+  kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createErroredStream(env.js);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return env.context.waitForDeferredProxy(adapter->pumpTo(sink, false))
+    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
       KJ_FAIL_ASSERT("Should not have completed pumpTo on errored stream");
     }, [](kj::Exception exception) {
@@ -1583,12 +1550,14 @@ KJ_TEST("KjAdapter pumpTo (error sink)") {
   flags.setStreamsJavaScriptControllers(true);
   TestFixture fixture({.featureFlags = flags.asReader()});
   ErrorSink sink;
+  kj::Own<kj::AsyncOutputStream> fakeOwn(&sink, kj::NullDisposer::instance);
+  auto writableSink = newWritableSink(kj::mv(fakeOwn));
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1000);
     auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
 
-    return env.context.waitForDeferredProxy(adapter->pumpTo(sink, false))
+    return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
       KJ_FAIL_ASSERT("Should not have completed pumpTo on errored stream");
     }, [](kj::Exception exception) {
@@ -1635,7 +1604,7 @@ KJ_TEST("KjAdapter MinReadPolicy IMMEDIATE behavior") {
 
     auto buffer = kj::heapArray<kj::byte>(2048);
 
-    return adapter->tryRead(buffer.begin(), 512, buffer.size())
+    return adapter->read(buffer, 512)
         .then([buffer = kj::mv(buffer)](size_t bytesRead) {
       // With IMMEDIATE policy, should return as soon as minBytes (512) is satisfied
       KJ_ASSERT(bytesRead == 512, "Should have read exactly minBytes");
@@ -1691,7 +1660,7 @@ KJ_TEST("KjAdapter MinReadPolicy OPPORTUNISTIC behavior") {
 
     auto buffer = kj::heapArray<kj::byte>(2048);
 
-    return adapter->tryRead(buffer.begin(), 512, buffer.size())
+    return adapter->read(buffer, 512)
         .then([buffer = kj::mv(buffer)](size_t bytesRead) {
       // With OPPORTUNISTIC policy, should try to fill buffer more completely
       // when data is readily available
@@ -1706,6 +1675,99 @@ KJ_TEST("KjAdapter MinReadPolicy OPPORTUNISTIC behavior") {
 
       return kj::READY_NOW;
     }).attach(kj::mv(adapter));
+  });
+}
+
+KJ_TEST("KjAdapter readAllBytes") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto stream = createFiniteBytesReadableStream(env.js, 1024);
+    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto bytes = co_await adapter->readAllBytes(kj::maxValue).attach(kj::mv(adapter));
+    kj::FixedArray<kj::byte, 10 * 1024> expected;
+    expected.asPtr().first(1024).fill(97);          // 'a'
+    expected.asPtr().slice(1024, 2048).fill(98);    // 'b'
+    expected.asPtr().slice(2048, 3072).fill(99);    // 'c'
+    expected.asPtr().slice(3072, 4096).fill(100);   // 'd'
+    expected.asPtr().slice(4096, 5120).fill(101);   // 'e'
+    expected.asPtr().slice(5120, 6144).fill(102);   // 'f'
+    expected.asPtr().slice(6144, 7168).fill(103);   // 'g'
+    expected.asPtr().slice(7168, 8192).fill(104);   // 'h'
+    expected.asPtr().slice(8192, 9216).fill(105);   // 'i'
+    expected.asPtr().slice(9216, 10240).fill(106);  // 'j'
+
+    KJ_ASSERT(bytes.size() == 10 * 1024);
+    KJ_ASSERT(bytes == expected);
+  });
+}
+
+KJ_TEST("KjAdapter readAllBytes (limit exceeded)") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto stream = createFiniteBytesReadableStream(env.js, 1024);
+    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    try {
+      co_await adapter->readAllBytes(100).attach(kj::mv(adapter));
+      KJ_FAIL_ASSERT("should have failed");
+    } catch (...) {
+      auto ex = kj::getCaughtExceptionAsKj();
+      KJ_ASSERT(ex.getDescription().contains("would be exceeded"));
+    }
+  });
+}
+
+KJ_TEST("KjAdapter readAllText") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto stream = createFiniteBytesReadableStream(env.js, 2048);
+    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+
+    auto text = co_await adapter->readAllText(kj::maxValue).attach(kj::mv(adapter));
+    kj::FixedArray<char, 10 * 2048> expected;
+    expected.asPtr().first(2048).fill(97);           // 'a'
+    expected.asPtr().slice(2048, 4096).fill(98);     // 'b'
+    expected.asPtr().slice(4096, 6144).fill(99);     // 'c'
+    expected.asPtr().slice(6144, 8192).fill(100);    // 'd'
+    expected.asPtr().slice(8192, 10240).fill(101);   // 'e'
+    expected.asPtr().slice(10240, 12288).fill(102);  // 'f'
+    expected.asPtr().slice(12288, 14336).fill(103);  // 'g'
+    expected.asPtr().slice(14336, 16384).fill(104);  // 'h'
+    expected.asPtr().slice(16384, 18432).fill(105);  // 'i'
+    expected.asPtr().slice(18432, 20480).fill(106);  // 'j'
+
+    KJ_ASSERT(text.size() == 10 * 2048);
+    KJ_ASSERT(text == expected.asPtr());
+  });
+}
+
+KJ_TEST("KjAdapter readAllText (limit exceeded)") {
+  capnp::MallocMessageBuilder message;
+  auto flags = message.initRoot<CompatibilityFlags>();
+  flags.setStreamsJavaScriptControllers(true);
+  TestFixture fixture({.featureFlags = flags.asReader()});
+
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto stream = createFiniteBytesReadableStream(env.js, 1024);
+    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    try {
+      co_await adapter->readAllText(100).attach(kj::mv(adapter));
+      KJ_FAIL_ASSERT("should have failed");
+    } catch (...) {
+      auto ex = kj::getCaughtExceptionAsKj();
+      KJ_ASSERT(ex.getDescription().contains("would be exceeded"));
+    }
   });
 }
 

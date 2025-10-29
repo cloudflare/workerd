@@ -33,6 +33,16 @@ class NeuterableIoStream: public kj::AsyncIoStream {
   virtual void neuter(kj::Exception ex) = 0;
 };
 
+// Until kj::AsyncOutputStream has an end() method of its own... We
+// provide this subclass that adds it.
+class EndableAsyncOutputStream: public kj::AsyncOutputStream {
+ public:
+  // By default, end() is a no-op. Subclasses may override.
+  virtual kj::Promise<void> end() {
+    co_return;
+  }
+};
+
 kj::Own<NeuterableInputStream> newNeuterableInputStream(kj::AsyncInputStream&);
 kj::Own<NeuterableIoStream> newNeuterableIoStream(kj::AsyncIoStream&);
 

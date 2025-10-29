@@ -373,6 +373,24 @@ kj_test(
 )
 
 kj_test(
+    src = "streams/writable-sink-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "streams/writable-sink-adapter-test.c++",
     deps = [
         "//src/workerd/io",

@@ -1,4 +1,5 @@
 #include "common.h"
+#include "readable-source.h"
 #include "readable.h"
 
 namespace workerd::api::streams {
@@ -113,7 +114,7 @@ namespace workerd::api::streams {
 class ReadableStreamSourceJsAdapter final {
  public:
   ReadableStreamSourceJsAdapter(
-      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableStreamSource> source);
+      jsg::Lock& js, IoContext& ioContext, kj::Own<ReadableSource> source);
   KJ_DISALLOW_COPY_AND_MOVE(ReadableStreamSourceJsAdapter);
   ~ReadableStreamSourceJsAdapter() noexcept(false);
 
@@ -274,7 +275,7 @@ class ReadableStreamSourceJsAdapter final {
 // TODO(safety): This can be made safer by having tryRead take a kj::Array
 // as input instead of a raw pointer and size, then having the read return
 // the filled in Array after the read completes, but that's a larger refactor.
-class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
+class ReadableStreamSourceKjAdapter final: public ReadableSource {
  public:
   enum class MinReadPolicy {
     // The read will complete as soon as at least minBytes have been read,
@@ -318,7 +319,13 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // is in progress.
   //
   // The returned promise will never resolve with more than maxBytes.
-  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override;
+  kj::Promise<size_t> read(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override;
+
+  // Reads all remaining bytes from the stream and returns them.
+  kj::Promise<kj::Array<const kj::byte>> readAllBytes(size_t limit) override;
+
+  // Reads all remaining bytes from the stream and returns them as a string.
+  kj::Promise<kj::String> readAllText(size_t limit) override;
 
   // Fully consume the stream and write it to the provided WritableStreamSink.
   // If "end" is true, the output stream will be ended once the input
@@ -326,28 +333,23 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   // Per the contract of pumpTo, it is the caller's responsibility to ensure
   // that both the WritableStreamSink and this adapter remain alive until
   // the returned promise resolves!
-  kj::Promise<DeferredProxy<void>> pumpTo(WritableStreamSink& output, bool end) override;
+  kj::Promise<DeferredProxy<void>> pumpTo(WritableSink& output, EndAfterPump end) override;
 
   // If the stream is still active, tries to get the total length,
   // if known. If the length is not known, the encoding does not
   // match the encoding of the underlying stream, or the stream is closed
   // or errored, returns kj::none.
-  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+  kj::Maybe<size_t> tryGetLength(StreamEncoding encoding) override;
 
   // Cancels the underlying source if it is still active.
   void cancel(kj::Exception reason) override;
 
-  StreamEncoding getPreferredEncoding() override {
-    // Our underlying ReadableStream produces non-encoded bytes.
+  StreamEncoding getEncoding() override {
+    // Our underlying ReadableStream produces non-encoded bytes (for now)
     return StreamEncoding::IDENTITY;
   };
 
-  kj::Maybe<Tee> tryTee(uint64_t limit) override {
-    // While ReadableStream in general supports teeing, we aren't going
-    // to support it here because of the complexity involved (and we
-    // just don't need it).
-    return kj::none;
-  }
+  Tee tee(size_t limit) override;
 
   struct ReadContext;
   KJ_DECLARE_NON_POLYMORPHIC(ReadContext);
@@ -360,10 +362,17 @@ class ReadableStreamSourceKjAdapter final: public ReadableStreamSource {
   const Options options;
   kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
 
-  kj::Promise<size_t> tryReadImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
-  kj::Promise<void> pumpToImpl(WritableStreamSink& output, bool end);
+  kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
+  kj::Promise<void> pumpToImpl(WritableSink& output, EndAfterPump end);
   static jsg::Promise<kj::Own<ReadContext>> readInternal(
       jsg::Lock& js, kj::Own<ReadContext> context, MinReadPolicy minReadPolicy);
+
+  template <typename T>
+  kj::Promise<kj::Array<T>> readAllImpl(size_t limit);
+
+  template <typename T>
+  static jsg::Promise<kj::Array<T>> readAllReadImpl(
+      jsg::Lock& js, kj::Own<ReadContext> context, kj::Vector<T> accumulated, size_t limit);
 };
 
 }  // namespace workerd::api::streams
