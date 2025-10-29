@@ -1085,7 +1085,7 @@ KJ_TEST("KjAdapter constructor with valid normal ReadableStream") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 16 * 1024);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     // The size is known because we provided expectedLength in the source.
@@ -1117,7 +1117,7 @@ KJ_TEST("KjAdapter constructor with valid byob ReadableStream") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteByobReadableStream(env.js, 16 * 1024);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     // The size is known because we provided expectedLength in the source.
@@ -1141,7 +1141,7 @@ KJ_TEST("KjAdapter constructor with valid ReadableStream manual cancel") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 16 * 1024);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     adapter->cancel(KJ_EXCEPTION(FAILED, "Manual cancel"));
@@ -1167,7 +1167,7 @@ KJ_TEST("KjAdapter constructor with locked/disturbed stream fails") {
     auto stream = createFiniteBytesReadableStream(env.js, 16 * 1024);
     auto reader = stream->getReader(env.js, kj::none);
     try {
-      kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+      kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
       KJ_FAIL_ASSERT("Should not be able to get adapter");
     } catch (...) {
       // Expected.
@@ -1184,7 +1184,7 @@ KJ_TEST("KjAdapter constructor with locked/disturbed stream fails") {
     KJ_ASSERT(stream->isDisturbed());
 
     try {
-      kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+      kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
       KJ_FAIL_ASSERT("Should not be able to get adapter");
     } catch (...) {
       // Expected.
@@ -1208,7 +1208,7 @@ KJ_TEST("KjAdapter read with valid buffer and byte ranges") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024, &counter);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     auto buffer = kj::heapArray<kj::byte>(2049);
@@ -1251,7 +1251,7 @@ KJ_TEST("KjAdapter read with left over (source provides more than requested)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1024, &counter);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     auto buffer = kj::heapArray<kj::byte>(1000);
@@ -1293,7 +1293,7 @@ KJ_TEST("KjAdapter read with clamped minBytes (minBytes=0)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 5, &counter);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     auto buffer = kj::heapArray<kj::byte>(3);
@@ -1318,7 +1318,7 @@ KJ_TEST("KjAdapter read with clamped minBytes (minBytes > maxBytes)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 5, &counter);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     auto buffer = kj::heapArray<kj::byte>(3);
@@ -1343,7 +1343,7 @@ KJ_TEST("KjAdapter read with zero length buffer") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 5, &counter);
     KJ_ASSERT(!stream->isLocked(), "Stream should not be locked before adapter construction");
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     KJ_ASSERT(stream->isLocked(), "Stream should be locked after adapter construction");
 
     auto buffer = kj::heapArray<kj::byte>(0);
@@ -1367,7 +1367,7 @@ KJ_TEST("KjAdapter forbid concurrent reads") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 5, &counter);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     auto buffer = kj::heapArray<kj::byte>(2);
 
@@ -1394,7 +1394,7 @@ KJ_TEST("KjAdapter cancel in-flight reads") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 5, &counter);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     auto buffer = kj::heapArray<kj::byte>(2);
 
@@ -1419,7 +1419,7 @@ KJ_TEST("KjAdapter read errored stream") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createErroredStream(env.js);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     auto buffer = kj::heapArray<kj::byte>(2);
 
@@ -1449,7 +1449,7 @@ KJ_TEST("KjAdapter read closed stream") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createClosedStream(env.js);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     auto buffer = kj::heapArray<kj::byte>(2);
 
@@ -1473,7 +1473,7 @@ KJ_TEST("KjAdapter pumpTo") {
     // which means the stream size must be <= bufferSize / 2. With bufferSize = 1024
     // (for streams < 4096 bytes), we need total size <= 512 bytes.
     auto stream = createFiniteBytesReadableStream(env.js, 50);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return adapter->pumpTo(*writableSink, EndAfterPump::YES).attach(kj::mv(adapter));
   });
@@ -1506,7 +1506,7 @@ KJ_TEST("KjAdapter pumpTo (no end)") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     // Use the same size constraint as the previous test.
     auto stream = createFiniteBytesReadableStream(env.js, 50);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return adapter->pumpTo(*writableSink, EndAfterPump::NO).attach(kj::mv(adapter));
   });
@@ -1538,7 +1538,7 @@ KJ_TEST("KjAdapter pumpTo (errored)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createErroredStream(env.js);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
@@ -1559,7 +1559,7 @@ KJ_TEST("KjAdapter pumpTo (error sink)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto stream = createFiniteBytesReadableStream(env.js, 1000);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     return env.context.waitForDeferredProxy(adapter->pumpTo(*writableSink, EndAfterPump::NO))
         .then([]() -> kj::Promise<void> {
@@ -1602,9 +1602,9 @@ KJ_TEST("KjAdapter MinReadPolicy IMMEDIATE behavior") {
         StreamQueuingStrategy{.highWaterMark = 0});
 
     // Test IMMEDIATE policy - should return as soon as minBytes is satisfied
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef(),
-        ReadableStreamSourceKjAdapter::Options{
-          .minReadPolicy = ReadableStreamSourceKjAdapter::MinReadPolicy::IMMEDIATE});
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef(),
+        ReadableSourceKjAdapter::Options{
+          .minReadPolicy = ReadableSourceKjAdapter::MinReadPolicy::IMMEDIATE});
 
     auto buffer = kj::heapArray<kj::byte>(2048);
 
@@ -1658,9 +1658,9 @@ KJ_TEST("KjAdapter MinReadPolicy OPPORTUNISTIC behavior") {
         StreamQueuingStrategy{.highWaterMark = 0});
 
     // Test OPPORTUNISTIC policy - should try to fill buffer more completely
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef(),
-        ReadableStreamSourceKjAdapter::Options{
-          .minReadPolicy = ReadableStreamSourceKjAdapter::MinReadPolicy::OPPORTUNISTIC});
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef(),
+        ReadableSourceKjAdapter::Options{
+          .minReadPolicy = ReadableSourceKjAdapter::MinReadPolicy::OPPORTUNISTIC});
 
     auto buffer = kj::heapArray<kj::byte>(2048);
 
@@ -1690,7 +1690,7 @@ KJ_TEST("KjAdapter readAllBytes") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     auto bytes = co_await adapter->readAllBytes(kj::maxValue).attach(kj::mv(adapter));
     kj::FixedArray<kj::byte, 10 * 1024> expected;
     expected.asPtr().first(1024).fill(97);          // 'a'
@@ -1717,7 +1717,7 @@ KJ_TEST("KjAdapter readAllBytes (limit exceeded)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     try {
       co_await adapter->readAllBytes(100).attach(kj::mv(adapter));
       KJ_FAIL_ASSERT("should have failed");
@@ -1736,7 +1736,7 @@ KJ_TEST("KjAdapter readAllText") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto stream = createFiniteBytesReadableStream(env.js, 2048);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
 
     auto text = co_await adapter->readAllText(kj::maxValue).attach(kj::mv(adapter));
     kj::FixedArray<char, 10 * 2048> expected;
@@ -1764,7 +1764,7 @@ KJ_TEST("KjAdapter readAllText (limit exceeded)") {
 
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto stream = createFiniteBytesReadableStream(env.js, 1024);
-    auto adapter = kj::heap<ReadableStreamSourceKjAdapter>(env.js, env.context, stream.addRef());
+    auto adapter = kj::heap<ReadableSourceKjAdapter>(env.js, env.context, stream.addRef());
     try {
       co_await adapter->readAllText(100).attach(kj::mv(adapter));
       KJ_FAIL_ASSERT("should have failed");
