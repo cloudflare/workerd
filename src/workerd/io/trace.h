@@ -606,7 +606,6 @@ struct Attribute final {
 };
 using CustomInfo = kj::Array<Attribute>;
 kj::String KJ_STRINGIFY(const CustomInfo& customInfo);
-}  // namespace tracing
 
 struct CompleteSpan {
   // Represents a completed span within user tracing.
@@ -638,7 +637,6 @@ struct CompleteSpan {
   kj::String toString() const;
 };
 
-namespace tracing {
 // A Return mark is used to mark the point at which a span operation returned
 // a value. For instance, when a fetch subrequest response is received, or when
 // the fetch handler returns a Response. Importantly, it does not signal that the

@@ -103,7 +103,7 @@ class BaseTracer: public kj::Refcounted {
       LogLevel logLevel,
       kj::String message) = 0;
   // Add a span.
-  virtual void addSpan(CompleteSpan&& span) = 0;
+  virtual void addSpan(tracing::CompleteSpan&& span) = 0;
 
   virtual void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
@@ -152,7 +152,7 @@ class BaseTracer: public kj::Refcounted {
   kj::Date getTime();
 
   // helper method for addSpan() implementations
-  void adjustSpanTime(CompleteSpan& span);
+  void adjustSpanTime(tracing::CompleteSpan& span);
 
   // The root span for the new tracing format.
   SpanParent userRequestSpan = SpanParent(nullptr);
@@ -181,7 +181,7 @@ class WorkerTracer final: public BaseTracer {
       kj::Date timestamp,
       LogLevel logLevel,
       kj::String message) override;
-  void addSpan(CompleteSpan&& span) override;
+  void addSpan(tracing::CompleteSpan&& span) override;
   void addException(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       kj::String name,
