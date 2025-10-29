@@ -5,7 +5,7 @@
 namespace workerd::api::streams {
 
 // We provide two utility adapters here: ReadableStreamSourceJsAdapter and
-// ReadableStreamSourceKjAdapter.
+// ReadableSourceKjAdapter.
 //
 // ReadableStreamSourceJsAdapter adapts a ReadableStreamSource to a JavaScript-friendly
 // interface. It provides methods that return JavaScript promises and use
@@ -59,7 +59,7 @@ namespace workerd::api::streams {
 //     │  • cancel()                               │
 //     └───────────────────────────────────────────┘
 //
-// The ReadableStreamSourceKjAdapter adapts a ReadableStream to a KJ-friendly
+// The ReadableSourceKjAdapter adapts a ReadableStream to a KJ-friendly
 // ReadableStreamSource. It holds a strong reference to the ReadableStream and
 // locks it with a ReadableStreamDefaultReader. It is intended to be used by
 // KJ code that wants to read from a JavaScript-backed stream. It ensures that
@@ -67,7 +67,7 @@ namespace workerd::api::streams {
 // after itself if the adapter is dropped.
 //
 //     ┌───────────────────────────────────────────┐
-//     │   ReadableStreamSourceKjAdapter           │
+//     │         ReadableSourceKjAdapter           │
 //     │                                           │
 //     │  ┌─────────────────────────────────────┐  │
 //     │  │         KJ Native API               │  │
@@ -275,7 +275,7 @@ class ReadableStreamSourceJsAdapter final {
 // TODO(safety): This can be made safer by having read take a kj::Array
 // as input instead of a raw pointer and size, then having the read return
 // the filled in Array after the read completes, but that's a larger refactor.
-class ReadableStreamSourceKjAdapter final: public ReadableSource {
+class ReadableSourceKjAdapter final: public ReadableSource {
  public:
   enum class MinReadPolicy {
     // The read will complete as soon as at least minBytes have been read,
@@ -293,11 +293,11 @@ class ReadableStreamSourceKjAdapter final: public ReadableSource {
     MinReadPolicy minReadPolicy;
   };
 
-  ReadableStreamSourceKjAdapter(jsg::Lock& js,
+  ReadableSourceKjAdapter(jsg::Lock& js,
       IoContext& ioContext,
       jsg::Ref<ReadableStream> stream,
       Options options = {.minReadPolicy = MinReadPolicy::OPPORTUNISTIC});
-  ~ReadableStreamSourceKjAdapter() noexcept(false);
+  ~ReadableSourceKjAdapter() noexcept(false);
 
   // Attempts to read at least minBytes and up to maxBytes into the provided
   // buffer. The returned promise resolves with the actual number of bytes read,
@@ -360,7 +360,7 @@ class ReadableStreamSourceKjAdapter final: public ReadableSource {
   struct Closed {};
   kj::OneOf<kj::Own<Active>, Closed, kj::Exception> state;
   const Options options;
-  kj::Rc<WeakRef<ReadableStreamSourceKjAdapter>> selfRef;
+  kj::Rc<WeakRef<ReadableSourceKjAdapter>> selfRef;
 
   kj::Promise<size_t> readImpl(Active& active, kj::ArrayPtr<kj::byte> buffer, size_t minBytes);
 

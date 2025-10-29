@@ -471,6 +471,12 @@ class ReadableSourceImpl: public ReadableSource {
   static kj::Promise<void> pumpImpl(
       kj::Own<kj::AsyncInputStream> stream, WritableSink& output, EndAfterPump end) {
     // These are fairly arbitrary but reasonable buffer size choices.
+
+    // Note: this intentionally contains code that is similar to the
+    // ReadableSourceKjAdapter::pumpToImpl impl in readable-source-adapter.c++.
+    // The optimizations are generally the same but the targets are a bit different
+    // (ReadableStream vs. kj::AsyncInputStream).
+
     static constexpr size_t DEFAULT_BUFFER_SIZE = 16384;
     static constexpr size_t MIN_BUFFER_SIZE = 1024;
     static constexpr size_t MED_BUFFER_SIZE = MIN_BUFFER_SIZE << 6;
