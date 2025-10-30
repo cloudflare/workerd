@@ -903,11 +903,11 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server {
 };
 }  // namespace
 
-kj::Maybe<EventInfo> TailStreamCustomEventImpl::getEventInfo() const {
+kj::Maybe<EventInfo> TailStreamCustomEvent::getEventInfo() const {
   return EventInfo(TraceEventInfo(kj::Array<TraceEventInfo::TraceItem>(nullptr)));
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
@@ -947,7 +947,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::run
   co_return WorkerInterface::CustomEvent::Result{.outcome = eventOutcome};
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
@@ -1168,7 +1168,7 @@ kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
 
         // Transitions into the active state by grabbing the pending client capability.
         state.inner = KJ_MAP(wi, pending) {
-          auto customEvent = kj::heap<TailStreamCustomEventImpl>();
+          auto customEvent = kj::heap<TailStreamCustomEvent>();
           auto result = customEvent->getCap();
           auto active = kj::refcounted<TailStreamWriterState::Active>(kj::mv(result));
 
