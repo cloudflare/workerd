@@ -27,6 +27,12 @@ static bool willFireEarlier(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alar
   return alarm1.orDefault(kj::maxValue) < alarm2.orDefault(kj::maxValue);
 }
 
+// Returns true if either (set or unset) alarm will fire earlier than another. Returns false if the
+// alarms are both unset, or are both set to the same time.
+static bool alarmsDiffer(kj::Maybe<kj::Date> alarm1, kj::Maybe<kj::Date> alarm2) {
+  return willFireEarlier(alarm1, alarm2) || willFireEarlier(alarm2, alarm1);
+}
+
 // Set options.allowUnconfirmed to false and log a reason why.
 void disableAllowUnconfirmed(ActorCacheOps::WriteOptions& options, kj::StringPtr reason) {
   if (options.allowUnconfirmed) {
@@ -53,11 +59,41 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
 
-  // Because we preserve an invariant that scheduled alarms are always at or earlier than
-  // persisted db alarm state, it should be OK to populate our idea of the latest scheduled alarm
-  // using the current db alarm state.  At worst, it may perform one unnecessary scheduling
-  // request in cases where a previous alarm-state-altering transaction failed.
-  alarmScheduledNoLaterThan = metadata.getAlarm();
+  // We need to reconcile our source of truth with whatever was made durable in SRS. It is possible
+  // that SRS persisted the last setAlarm, but `scheduleRun()` failed. In that case, we should trust
+  // the value in SRS and send a new `scheduleRun()` on start up.
+  tryReconcileAlarm();
+}
+
+void ActorSqlite::tryReconcileAlarm() {
+  if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+    // Because we preserve an invariant that scheduled alarms are always at or earlier than
+    // persisted db alarm state, it should be OK to populate our idea of the latest scheduled
+    // alarm using the current db alarm state.  At worst, it may perform one unnecessary
+    // scheduling request in cases where a previous alarm-state-altering transaction failed.
+    alarmScheduledNoLaterThan = metadata.getAlarm();
+  } else {
+    // Only do reconciliation if we're using custom hooks that actually support alarms.
+    // The default hooks throw an error for SQLite-backed DOs that don't support alarms yet.
+    //
+    // We also only reconcile if SRS has an alarm time set. If there is no alarm time set and we
+    // diverged from the alarm manager, then when the alarm manager fires the alarm, we'll see
+    // that SRS has no alarm time set, and will cancel the run.
+    if (&hooks != &Hooks::DEFAULT && lastConfirmedAlarmDbState != kj::none) {
+      auto alarmPromise = requestScheduledAlarm(lastConfirmedAlarmDbState);
+      commitTasks.add(alarmPromise.catch_([this](kj::Exception&& e) -> void {
+        // If the setAlarm fails, we need to break the output gate. We can set `broken`
+        // so subsequent storage operations fail with an exception.
+        //
+        // TODO(now): I want this to log for us internally, but print as an internal error to the
+        // application, because we might fail at something as simple as scheduleRun(none) (no
+        // alarm) and the application might NEVER even use alarms. In that case, it would be weird
+        // for the application to get an exception saying "hey your setAlarm failed", since the
+        // client would never even call setAlarm!
+        broken = KJ_EXCEPTION(FAILED, "Failed to reconcile alarm in background.", e);
+      }));
+    }
+  }
 }
 
 ActorSqlite::ImplicitTxn::ImplicitTxn(ActorSqlite& parent): parent(parent) {
@@ -314,28 +350,46 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(kj::Maybe<kj::Date> request
   // Not using coroutines here, because it's important for correctness in workerd that a
   // synchronously thrown exception in scheduleRun() can escape synchronously to the caller.
 
-  bool movingAlarmLater = willFireEarlier(alarmScheduledNoLaterThan, requestedTime);
-  if (movingAlarmLater) {
-    // Since we are setting the alarm to be later, we can update alarmScheduledNoLaterThan
-    // immediately and still preserve the invariant that the scheduled alarm time is equal to or
-    // earlier than the persisted db alarm value.  Doing the immediate update ensures that
-    // subsequent invocations of commitImpl() will compare against the correct value in their
-    // precommit alarm checks, even if other later-setting requests are still in-flight, without
-    // needing to wait for them to complete.
-    alarmScheduledNoLaterThan = requestedTime;
-  }
-
-  return hooks.scheduleRun(requestedTime).then([this, movingAlarmLater, requestedTime]() {
-    if (!movingAlarmLater) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+    bool movingAlarmLater = willFireEarlier(alarmScheduledNoLaterThan, requestedTime);
+    if (movingAlarmLater) {
+      // Since we are setting the alarm to be later, we can update alarmScheduledNoLaterThan
+      // immediately and still preserve the invariant that the scheduled alarm time is equal to or
+      // earlier than the persisted db alarm value.  Doing the immediate update ensures that
+      // subsequent invocations of commitImpl() will compare against the correct value in their
+      // precommit alarm checks, even if other later-setting requests are still in-flight, without
+      // needing to wait for them to complete.
       alarmScheduledNoLaterThan = requestedTime;
     }
-  });
+
+    return hooks.scheduleRun(requestedTime).then([this, movingAlarmLater, requestedTime]() {
+      if (!movingAlarmLater) {
+        alarmScheduledNoLaterThan = requestedTime;
+      }
+    });
+  } else {
+    return hooks.scheduleRun(requestedTime).then([this, requestedTime]() {
+      KJ_LOG(INFO, "scheduleRun set alarm time to ", requestedTime);
+      currentGuaranteedAlarmTime = requestedTime;
+    });
+  }
+
+  KJ_UNREACHABLE;
 }
 
 ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
-  if (pendingCommit == kj::none &&
-      willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+  bool precommitCondition = false;
+
+  if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+    precommitCondition = pendingCommit == kj::none &&
+        willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan);
+  } else {
+    precommitCondition =
+        pendingCommit == kj::none && alarmsDiffer(metadata.getAlarm(), currentGuaranteedAlarmTime);
+  }
+
+  if (precommitCondition) {
     // Basically, this is the first scheduling request that commitImpl() would make prior to
     // commitCallback().  We start the request separately, ahead of calling sqlite functions that
     // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
@@ -351,9 +405,28 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
 
   KJ_IF_SOME(pending, pendingCommit) {
     // If an earlier commitImpl() invocation is already in the process of updating precommit
-    // alarms but has not yet made the commitCallback() call, it should be OK to wait on it to
-    // perform the precommit alarm update and db commit for this invocation, too.
+    // alarms but has not yet made the commitCallback() call, wait on it to complete the db commit.
     co_await pending.addBranch();
+
+    if (util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+      KJ_ASSERT(precommitAlarmState.schedulingPromise == kj::none,
+          "cannot have schedulingPromise when merging commits!");
+      // After the pending commit completes, check if the committed alarm state differs from what's
+      // scheduled. We need to fix this mismatch, but only one merged commit should do it.
+      if (alarmsDiffer(lastConfirmedAlarmDbState, currentGuaranteedAlarmTime)) {
+        // Check if another merged commit is already fixing the mismatch
+        KJ_IF_SOME(fixup, alarmFixupInProgress) {
+          // Wait for the existing fixup to complete
+          co_await fixup.addBranch();
+        } else {
+          // We're the first to notice the mismatch, start the fixup
+          alarmFixupInProgress = requestScheduledAlarm(lastConfirmedAlarmDbState).fork();
+          co_await KJ_REQUIRE_NONNULL(alarmFixupInProgress);
+          alarmFixupInProgress = kj::none;
+        }
+      }
+    }
+
     co_return;
   }
 
@@ -366,19 +439,21 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   pendingCommit = promise.fork();
 
   // Wait for the first precommit alarm scheduling request to complete, if any.  This was set up
-  // in startPrecommitAlarmScheduling() and is essentially the first iteration of the below
-  // while() loop, but needed to be initiated synchronously before the local database commit to
-  // ensure correctness in workerd.
+  // in startPrecommitAlarmScheduling(), which needed to be initiated synchronously before the local
+  // database commit to ensure correctness in workerd. If we don't have a precommit alarm, then
+  // we do not have an alarm to set during this commit.
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
     co_await p;
   }
 
-  // While the local db state requires an earlier alarm than is known might be scheduled, issue an
-  // alarm update request for the earlier time and wait for it to complete.  This helps ensure
-  // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
-  // the successfully persisted db.
-  while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
-    co_await requestScheduledAlarm(metadata.getAlarm());
+  if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+    // While the local db state requires an earlier alarm than is known might be scheduled, issue an
+    // alarm update request for the earlier time and wait for it to complete.  This helps ensure
+    // that the successfully scheduled alarm time is always earlier or equal to the alarm state in
+    // the successfully persisted db.
+    while (willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
+      co_await requestScheduledAlarm(metadata.getAlarm());
+    }
   }
 
   // Issue the commitCallback() request to persist the db state, then synchronously clear the
@@ -395,14 +470,17 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // Notify any merged commitImpl() requests that the db persistence completed.
   fulfiller->fulfill();
 
-  // If the db state is now later than the in-flight scheduled alarms, issue a request to update
-  // it to match the db state.  We don't need to hold open the output gate, so we add the
-  // scheduling request to commitTasks.
-  if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
-    alarmLaterTasks.add(requestScheduledAlarm(alarmStateForCommit));
+  if (!util::Autogate::isEnabled(util::AutogateKey::SERIALIZE_SRS_ALARMS)) {
+    // If the db state is now later than the in-flight scheduled alarms, issue a request to update
+    // it to match the db state.  We don't need to hold open the output gate, so we add the
+    // scheduling request to commitTasks.
+    if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
+      alarmLaterTasks.add(requestScheduledAlarm(alarmStateForCommit));
+    }
   }
 }
 
+// TODO(cleanup): When we delete the SERIALIZE_SRS_ALARMS autogate, delete this code.
 void ActorSqlite::AlarmLaterErrorHandler::taskFailed(kj::Exception&& exception) {
   // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
   // eventually fire at the earlier time, and the rescheduling will be retried.
