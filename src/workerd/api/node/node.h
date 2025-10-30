@@ -17,6 +17,7 @@
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
 #include <workerd/rust/api/lib.rs.h>
+#include <workerd/rust/jsg/jsg.h>
 
 #include <node/node.capnp.h>
 

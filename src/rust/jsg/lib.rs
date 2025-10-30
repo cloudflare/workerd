@@ -2,11 +2,103 @@
 #![warn(must_not_suspend)]
 
 use std::cell::Cell;
+use std::marker::PhantomData;
 use std::num::ParseIntError;
 use std::rc::Rc;
 
+use kj_rs::KjMaybe;
+
 pub mod modules;
 pub mod v8;
+
+pub use crate::v8::LocalValue;
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[cxx::bridge(namespace = "workerd::rust::jsg")]
+pub mod ffi {
+
+    pub struct ConstructorDescriptor {
+        // todo: remove this
+        name: String,
+    }
+
+    pub struct MethodDescriptor {
+        name: String,
+        callback: usize,
+    }
+
+    pub struct StaticMethodDescriptor {
+        name: String,
+        callback: usize,
+    }
+
+    pub struct ResourceDescriptor {
+        pub name: String,
+        pub constructor: KjMaybe<ConstructorDescriptor>,
+        pub methods: Vec<MethodDescriptor>,
+        pub static_methods: Vec<StaticMethodDescriptor>,
+    }
+
+    unsafe extern "C++" {
+        include!("workerd/rust/jsg/ffi.h");
+
+        type Isolate;
+        type FunctionCallbackInfo;
+
+        unsafe fn instantiate_resource(
+            isolate: *mut Isolate,
+            descriptor: &ResourceDescriptor,
+        ) -> u64;
+    }
+}
+
+fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
+    let mut descriptor = ffi::ResourceDescriptor {
+        name: R::class_name().to_owned(),
+        constructor: KjMaybe::None,
+        methods: Vec::new(),
+        static_methods: Vec::new(),
+    };
+
+    for m in R::members() {
+        match m {
+            Member::Constructor(_) => {
+                descriptor.constructor = KjMaybe::Some(ffi::ConstructorDescriptor {
+                    name: String::new(),
+                });
+            }
+            Member::Method { name, callback } => {
+                descriptor.methods.push(ffi::MethodDescriptor {
+                    name: name.to_string(),
+                    callback: callback as usize,
+                });
+            }
+            Member::Property {
+                name,
+                getter_callback,
+                setter_callback,
+            } => todo!(),
+            Member::StaticMethod { name, callback } => {
+                descriptor.static_methods.push(ffi::StaticMethodDescriptor {
+                    name: name.to_string(),
+                    callback: callback as usize,
+                });
+            }
+        }
+    }
+
+    descriptor
+}
+
+pub fn instantiate_resource<R: Resource>(isolate: *mut ffi::Isolate) -> LocalValue {
+    unsafe {
+        LocalValue::new(ffi::instantiate_resource(
+            isolate,
+            &get_resource_descriptor::<R>(),
+        ))
+    }
+}
 
 pub struct Error {
     pub name: String,
@@ -34,38 +126,6 @@ impl From<ParseIntError> for Error {
             "TypeError".to_owned(),
             format!("Failed to parse integer: {err}"),
         )
-    }
-}
-
-pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-pub mod ffi {
-
-    pub struct Lock {}
-
-    pub struct Value {}
-
-    pub fn value_from_string(_lock: &Lock, _value: &str) -> Value {
-        todo!()
-    }
-
-    pub fn value_from_jsg_struct<T>(_lock: &Lock, _value: &T) -> Value
-    where
-        T: crate::Struct,
-    {
-        todo!()
-    }
-
-    pub struct Args {}
-
-    impl Args {
-        pub fn get_arg(&self, _index: usize) -> Value {
-            todo!()
-        }
-    }
-
-    pub fn string_from_value(_lock: &mut Lock, _v: Value) -> &str {
-        todo!()
     }
 }
 
@@ -150,30 +210,25 @@ pub trait Type {
     }
 }
 
-pub type MethodCallbackImpl<S, R> =
-    dyn FnMut(*mut S, *mut ffi::Lock, *mut ffi::Args) -> Result<R> + 'static;
-
-pub type StaticMethodCallbackImpl<R> =
-    dyn FnMut(*mut ffi::Lock, *mut ffi::Args) -> Result<R> + 'static;
-
 pub enum Member<S: Sized> {
-    Constructor,
+    Constructor(PhantomData<S>),
     Method {
         name: &'static str,
-        callback: Box<MethodCallbackImpl<S, ffi::Value>>,
+        callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
     Property {
         name: &'static str,
-        getter: Box<MethodCallbackImpl<S, ffi::Value>>,
-        setter: Option<Box<MethodCallbackImpl<S, ()>>>,
+        getter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
+        setter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
     StaticMethod {
         name: &'static str,
-        callback: Box<StaticMethodCallbackImpl<ffi::Value>>,
+        callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
 }
 
 pub trait Resource: Type {
+    fn class_name() -> &'static str;
     fn members() -> Vec<Member<Self>>
     where
         Self: Sized;

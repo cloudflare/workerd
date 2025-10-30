@@ -1,8 +1,38 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "jsg",
     cxx_bridge_deps = ["//src/workerd/jsg"],
-    cxx_bridge_srcs = ["modules.rs"],
+    cxx_bridge_srcs = [
+        "lib.rs",
+        "modules.rs",
+        "v8.rs",
+    ],
     visibility = ["//visibility:public"],
+    deps = [":ffi"],
+)
+
+wd_cc_library(
+    name = "bridge",
+    srcs = [],
+    hdrs = ["jsg.h"],
+    visibility = ["//visibility:public"],
+    deps = [":jsg"],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    implementation_deps = [
+        ":lib.rs@cxx",
+        ":v8.rs@cxx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg",
+        "@workerd-cxx//kj-rs",
+        "@workerd-v8//:v8",
+    ],
 )

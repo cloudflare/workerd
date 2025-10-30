@@ -1,10 +1,19 @@
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
-    extern "C++" {
+    unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
-        type LocalValue;
         type Isolate;
+        type FunctionCallbackInfo;
+
+        pub unsafe fn get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
+        pub unsafe fn get_this(args: *mut FunctionCallbackInfo) -> usize /* LocalObject */;
+        pub unsafe fn get_length(args: *mut FunctionCallbackInfo) -> usize;
+        pub unsafe fn get_arg(args: *mut FunctionCallbackInfo, index: usize) -> usize /* LocalValue */;
+        pub unsafe fn unwrap_string(
+            isolate: *mut Isolate,
+            value: usize, /* LocalValue */
+        ) -> String;
     }
 }
 
@@ -21,10 +30,20 @@ pub struct Isolate {
     members: Vec<Box<dyn IsolateMember>>,
 }
 
-/// This method is called whenever a new isolate is created.
-pub fn isolate_created(isolate: *mut ffi::Isolate) -> Box<Isolate> {
-    Box::new(Isolate {
-        ptr: isolate,
-        members: Vec::new(),
-    })
+pub struct Local<T> {
+    ptr: *mut T,
 }
+
+pub struct LocalValue(u64);
+
+impl LocalValue {
+    pub(crate) unsafe fn new(value: u64) -> Self {
+        LocalValue(value)
+    }
+
+    pub unsafe fn into_raw(self) -> u64 {
+        self.0
+    }
+}
+
+pub struct Lock {}
