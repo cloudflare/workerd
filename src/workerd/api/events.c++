@@ -130,4 +130,29 @@ void ErrorEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(init.error);
 }
 
+// ======================================================================================
+namespace {
+constexpr kj::StringPtr kUnhandledRejectionEventName = "unhandledrejection"_kj;
+constexpr kj::StringPtr kRejectionHandledEventName = "rejectionhandled"_kj;
+
+constexpr kj::StringPtr getPromiseRejectionEventName(v8::PromiseRejectEvent type) {
+  switch (type) {
+    case v8::PromiseRejectEvent::kPromiseRejectWithNoHandler:
+      return kUnhandledRejectionEventName;
+    case v8::PromiseRejectEvent::kPromiseHandlerAddedAfterReject:
+      return kRejectionHandledEventName;
+    default:
+      // Events are not emitted for the other reject types.
+      KJ_UNREACHABLE;
+  }
+}
+
+}  // namespace
+
+PromiseRejectionEvent::PromiseRejectionEvent(
+    v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason)
+    : Event(getPromiseRejectionEventName(type)),
+      promise(kj::mv(promise)),
+      reason(kj::mv(reason)) {}
+
 }  // namespace workerd::api
