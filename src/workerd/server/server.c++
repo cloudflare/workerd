@@ -5135,10 +5135,10 @@ kj::Promise<void> Server::run(
     auto logging = config.getLogging();
     loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
     if (logging.hasStdoutPrefix()) {
-      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
     }
     if (logging.hasStderrPrefix()) {
-      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
     }
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
@@ -5539,10 +5539,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     auto logging = config.getLogging();
     loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
     if (logging.hasStdoutPrefix()) {
-      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
     }
     if (logging.hasStderrPrefix()) {
-      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
     }
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
