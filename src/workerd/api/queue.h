@@ -334,10 +334,9 @@ struct QueueExportedHandler {
   JSG_STRUCT(queue);
 };
 
-class QueueCustomEventImpl final: public WorkerInterface::CustomEvent, public kj::Refcounted {
+class QueueCustomEvent final: public WorkerInterface::CustomEvent, public kj::Refcounted {
  public:
-  QueueCustomEventImpl(
-      kj::OneOf<QueueEvent::Params, rpc::EventDispatcher::QueueParams::Reader> params)
+  QueueCustomEvent(kj::OneOf<QueueEvent::Params, rpc::EventDispatcher::QueueParams::Reader> params)
       : params(kj::mv(params)) {}
 
   kj::Promise<Result> run(kj::Own<IoContext_IncomingRequest> incomingRequest,

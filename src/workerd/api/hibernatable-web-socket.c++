@@ -57,7 +57,7 @@ jsg::Ref<WebSocket> HibernatableWebSocketEvent::claimWebSocket(
   return kj::mv(websocket);
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
@@ -112,7 +112,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   } catch (kj::Exception& e) {
     if (auto desc = e.getDescription();
         !jsg::isTunneledException(desc) && !jsg::isDoNotLogException(desc)) {
-      LOG_EXCEPTION("HibernatableWebSocketCustomEventImpl"_kj, e);
+      LOG_EXCEPTION("HibernatableWebSocketCustomEvent"_kj, e);
     }
     outcome = EventOutcome::EXCEPTION;
   }
@@ -122,7 +122,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
   };
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
@@ -173,19 +173,19 @@ HibernatableWebSocketEvent::ItemsForRelease::ItemsForRelease(
       ownedWebSocket(kj::mv(owned)),
       tags(kj::mv(tags)) {}
 
-HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(uint16_t typeId,
+HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(uint16_t typeId,
     kj::Own<HibernationReader> params,
     kj::Maybe<Worker::Actor::HibernationManager&> manager)
     : typeId(typeId),
       params(kj::mv(params)) {}
-HibernatableWebSocketCustomEventImpl::HibernatableWebSocketCustomEventImpl(
+HibernatableWebSocketCustomEvent::HibernatableWebSocketCustomEvent(
     uint16_t typeId, HibernatableSocketParams params, Worker::Actor::HibernationManager& manager)
     : typeId(typeId),
       params(kj::mv(params)),
       manager(manager) {}
 
 // TODO(cleanup): Try to reduce duplication with consumeParams()
-kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEventImpl::getEventInfo() const {
+kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEvent::getEventInfo() const {
   // Try to extract event type from params if available
   KJ_SWITCH_ONEOF(params) {
     KJ_CASE_ONEOF(socketParams, HibernatableSocketParams) {
@@ -232,7 +232,7 @@ kj::Maybe<tracing::EventInfo> HibernatableWebSocketCustomEventImpl::getEventInfo
   KJ_UNREACHABLE;
 }
 
-HibernatableSocketParams HibernatableWebSocketCustomEventImpl::consumeParams() {
+HibernatableSocketParams HibernatableWebSocketCustomEvent::consumeParams() {
   KJ_IF_SOME(p, params.tryGet<kj::Own<HibernationReader>>()) {
     kj::Maybe<HibernatableSocketParams> eventParameters;
     auto websocketId = kj::str(p->getMessage().getWebsocketId());

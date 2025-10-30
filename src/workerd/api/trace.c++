@@ -649,11 +649,11 @@ kj::Promise<void> sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest
 }
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> TraceCustomEventImpl::getEventInfo() const {
+kj::Maybe<tracing::EventInfo> TraceCustomEvent::getEventInfo() const {
   return tracing::EventInfo(tracing::TraceEventInfo(traces));
 }
 
-auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
+auto TraceCustomEvent::run(kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointNamePtr,
     Frankenvalue props,
     kj::TaskSet& waitUntilTasks) -> kj::Promise<Result> {
@@ -668,7 +668,7 @@ auto TraceCustomEventImpl::run(kj::Own<IoContext::IncomingRequest> incomingReque
   };
 }
 
-auto TraceCustomEventImpl::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+auto TraceCustomEvent::sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     workerd::rpc::EventDispatcher::Client dispatcher) -> kj::Promise<Result> {
   auto req = dispatcher.sendTracesRequest();

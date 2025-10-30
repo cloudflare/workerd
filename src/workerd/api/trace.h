@@ -613,9 +613,9 @@ class UnsafeTraceMetrics final: public jsg::Object {
   }
 };
 
-class TraceCustomEventImpl final: public WorkerInterface::CustomEvent {
+class TraceCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TraceCustomEventImpl(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
+  TraceCustomEvent(uint16_t typeId, kj::Array<kj::Own<Trace>> traces)
       : typeId(typeId),
         traces(kj::mv(traces)) {}
 
