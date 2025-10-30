@@ -4649,7 +4649,7 @@ KJ_TEST("Server: Catch websocket server errors") {
   };
 
   KJ_EXPECT_LOG(ERROR,
-      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 2097152 > 1048576");
+      "jsg.Error: WebSocket protocol error; protocolError.statusCode = 1009; protocolError.description = Message is too large: 34603008 > 33554432");
   test.start();
   auto& waitScope = test.getWaitScope();
 
@@ -4669,7 +4669,7 @@ KJ_TEST("Server: Catch websocket server errors") {
     ws->send(smallMessage).wait(waitScope);
     auto smallResponse = ws->receive().wait(waitScope);
     KJ_EXPECT(smallResponse.get<kj::String>() == smallMessage);
-    const auto bigMessage = kj::heapArray<kj::byte>(2 * 1024 * 1024);
+    const auto bigMessage = kj::heapArray<kj::byte>(33 * 1024 * 1024);
     auto sendProm =
         kj::evalNow([&]() { return ws->send(bigMessage); }).then([]() {}, [](kj::Exception ex) {});
     // Message is too big; we should close the connection.

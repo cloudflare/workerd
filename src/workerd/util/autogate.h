@@ -20,8 +20,6 @@ enum class AutogateKey {
   STREAMING_TAIL_WORKER,
   // Enable refactor used to consolidate the different tail worker stream implementations.
   TAIL_STREAM_REFACTOR,
-  // Increase max WebSocket message size to 32MiB.
-  WEBSOCKET_MAX_MESSAGE_SIZE_32M,
   NumOfKeys  // Reserved for iteration.
 };
 
