@@ -3,9 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/io/trace.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
-
-#include <openssl/rand.h>
 
 #include <capnp/message.h>
 #include <capnp/schema.h>
@@ -136,7 +135,7 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
     KJ_IF_SOME(entropy, entropySource) {
       entropy.generate(kj::asBytes(ret));
     } else {
-      KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&ret), sizeof(ret)) == 1);
+      getEntropy(kj::asBytes(ret));
     }
     // On the extreme off chance that we ended with with zeroes
     // let's try again, but only up to three times.

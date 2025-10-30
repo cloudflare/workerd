@@ -4,8 +4,6 @@
 
 #include "url.h"
 
-#include <openssl/rand.h>
-
 #include <kj/table.h>
 #include <kj/test.h>
 

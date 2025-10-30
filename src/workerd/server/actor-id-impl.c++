@@ -1,9 +1,9 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/server/actor-id-impl.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <openssl/hmac.h>
-#include <openssl/rand.h>
 
 #include <kj/encoding.h>
 #include <kj/memory.h>
@@ -60,7 +60,7 @@ kj::Own<ActorIdFactory::ActorId> ActorIdFactoryImpl::newUniqueId(
     kj::arrayPtr(id).slice(counter).fill(0);
     ++counter;
   } else {
-    KJ_ASSERT(RAND_bytes(id, BASE_LENGTH) == 1);
+    getEntropy(kj::arrayPtr(id, BASE_LENGTH));
   }
 
   computeMac(id);
