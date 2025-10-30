@@ -144,6 +144,36 @@ uint64_t getRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
 
   return ret;
 }
+
+// Helper to generate multiple random 64-bit values in a single batch call to the entropy source.
+// This significantly reduces overhead compared to multiple separate calls, especially for
+// RAND_bytes on macOS where each call has substantial overhead.
+template <size_t N>
+kj::Array<uint64_t> getBatchedRandom64Bit(const kj::Maybe<kj::EntropySource&>& entropySource) {
+  auto result = kj::heapArray<uint64_t>(N);
+
+  KJ_IF_SOME(entropy, entropySource) {
+    entropy.generate(result.asBytes());
+  } else {
+    KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(result.begin()),
+                  result.size() * sizeof(uint64_t)) == 1);
+  }
+
+  // Check for zero values and retry if needed (extremely unlikely)
+  for (auto& val: result) {
+    uint8_t tries = 0;
+    while (val == 0 && tries < 3) {
+      tries++;
+      KJ_IF_SOME(entropy, entropySource) {
+        entropy.generate(kj::asBytes(val));
+      } else {
+        KJ_ASSERT(RAND_bytes(reinterpret_cast<uint8_t*>(&val), sizeof(val)) == 1);
+      }
+    }
+  }
+
+  return result;
+}
 }  // namespace
 
 TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
@@ -151,7 +181,8 @@ TraceId TraceId::fromEntropy(kj::Maybe<kj::EntropySource&> entropySource) {
     return TraceId(staticSpanId, staticSpanId);
   }
 
-  return TraceId(getRandom64Bit(entropySource), getRandom64Bit(entropySource));
+  auto result = getBatchedRandom64Bit<2>(entropySource);
+  return TraceId(result[0] /* low */, result[1] /* high */);
 }
 
 kj::String SpanId::toGoString() const {
@@ -199,13 +230,35 @@ InvocationSpanContext InvocationSpanContext::newForInvocation(
     kj::Maybe<const InvocationSpanContext&> triggerContext,
     kj::Maybe<kj::EntropySource&> entropySource) {
   kj::Maybe<const InvocationSpanContext&> parent;
-  auto traceId = triggerContext
-                     .map([&](auto& ctx) mutable {
+
+  if (isPredictableModeForTest()) {
+    auto traceId = triggerContext
+                       .map([&](auto& ctx) mutable {
+      parent = ctx;
+      return ctx.traceId;
+    }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
+    return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource, kj::mv(traceId),
+        TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent));
+  }
+
+  // Optimization: Generate all random data in a single batch call to reduce overhead.
+  // This is especially important on macOS where RAND_bytes calls are expensive.
+  KJ_IF_SOME(ctx, triggerContext) {
     parent = ctx;
-    return ctx.traceId;
-  }).orDefault([&] { return TraceId::fromEntropy(entropySource); });
-  return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource, kj::mv(traceId),
-      TraceId::fromEntropy(entropySource), SpanId::fromEntropy(entropySource), kj::mv(parent));
+    auto randomValues = getBatchedRandom64Bit<3>(entropySource);
+    return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource,
+        ctx.traceId,                                // Reuse traceId from trigger
+        TraceId(randomValues[0], randomValues[1]),  // invocationId
+        SpanId(randomValues[2]),                    // spanId
+        kj::mv(parent));
+  } else {
+    auto randomValues = getBatchedRandom64Bit<5>(entropySource);
+    return InvocationSpanContext(kj::Badge<InvocationSpanContext>(), entropySource,
+        TraceId(randomValues[0], randomValues[1]),  // traceId
+        TraceId(randomValues[2], randomValues[3]),  // invocationId
+        SpanId(randomValues[4]),                    // spanId
+        kj::none);
+  }
 }
 
 TraceId TraceId::fromCapnp(rpc::TraceId::Reader reader) {
