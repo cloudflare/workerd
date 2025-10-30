@@ -8,8 +8,7 @@
 #include "setup.h"
 
 #include <workerd/jsg/exception-metadata.capnp.h>
-
-#include <openssl/rand.h>
+#include <workerd/util/entropy.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -114,7 +113,7 @@ InternalErrorId makeInternalErrorId() {
       id[i] = i;
     }
   } else {
-    KJ_ASSERT(RAND_bytes(id.asPtr().asBytes().begin(), id.size()) == 1);
+    getEntropy(kj::asBytes(id));
   }
   for (auto i: kj::indices(id)) {
     id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];

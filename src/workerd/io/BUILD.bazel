@@ -201,6 +201,7 @@ wd_cc_library(
     srcs = ["trace.c++"],
     hdrs = ["trace.h"],
     implementation_deps = [
+        "//src/workerd/util:entropy",
         "//src/workerd/util:thread-scopes",
     ],
     visibility = ["//visibility:public"],
