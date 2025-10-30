@@ -39,7 +39,7 @@ class UUID {
 
   // Create a UUID from 8-4-4-4-12 hex format. If the provided string is not valid, or the UUID
   // would be null, return kj::none.
-  static kj::Maybe<UUID> fromString(kj::StringPtr str);
+  static kj::Maybe<UUID> fromString(kj::ArrayPtr<const char> str);
 
   uint64_t getUpper() const {
     return upper;
