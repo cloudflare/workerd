@@ -883,12 +883,11 @@ void ServiceWorkerGlobalScope::reportError(jsg::Lock& js, jsg::JsValue error) {
   // If that event is not prevented, we will log the error to the console. Note
   // that we do not throw the error at all.
   auto message = v8::Exception::CreateMessage(js.v8Isolate, error);
-  auto event = js.alloc<ErrorEvent>(kj::str("error"),
-      ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
-        .filename = kj::str(message->GetScriptResourceName()),
-        .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
-        .colno = jsg::check(message->GetStartColumn(js.v8Context())),
-        .error = jsg::JsRef(js, error)});
+  auto event = js.alloc<ErrorEvent>(ErrorEvent::ErrorEventInit{.message = kj::str(message->Get()),
+    .filename = kj::str(message->GetScriptResourceName()),
+    .lineno = jsg::check(message->GetLineNumber(js.v8Context())),
+    .colno = jsg::check(message->GetStartColumn(js.v8Context())),
+    .error = jsg::JsRef(js, error)});
   if (dispatchEventImpl(js, kj::mv(event))) {
     // If the value is an object that has a stack property, log that so we get
     // the stack trace if it is an exception.

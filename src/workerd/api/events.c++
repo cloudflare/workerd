@@ -87,6 +87,13 @@ void MessageEvent::visitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(maybeSource);
 }
 
+// ======================================================================================
+namespace {
+const kj::StringPtr kDefaultErrorEventName = "error"_kj;
+}  // namespace
+
+ErrorEvent::ErrorEvent(ErrorEventInit init): Event(kDefaultErrorEventName), init(kj::mv(init)) {}
+
 ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
     : Event(kj::mv(type)),
       init(kj::mv(init)) {}

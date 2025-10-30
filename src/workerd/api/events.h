@@ -94,6 +94,7 @@ class ErrorEvent: public Event {
     JSG_STRUCT(message, filename, lineno, colno, error);
   };
 
+  ErrorEvent(ErrorEventInit init);
   ErrorEvent(kj::String type, ErrorEventInit init);
 
   static jsg::Ref<ErrorEvent> constructor(
