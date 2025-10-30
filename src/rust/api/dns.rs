@@ -231,32 +231,37 @@ impl DnsUtil {
 
 // Generated code.
 impl DnsUtil {
-    fn parse_caa_record_callback(
-        lock: *mut jsg::ffi::Lock,
-        args: *mut jsg::ffi::Args,
-    ) -> jsg::Result<jsg::ffi::Value, jsg::Error> {
-        let lock = unsafe { &mut *lock };
-        let args = unsafe { &mut *args };
-        let arg0 = args.get_arg(0);
-        let arg0 = jsg::ffi::string_from_value(lock, arg0);
-        match Self::parse_caa_record(arg0) {
-            Ok(record) => Ok(jsg::ffi::value_from_jsg_struct(lock, &record)),
-            Err(err) => Err(err.into()),
-        }
+    extern "C" fn parse_caa_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
+        // TODO: Get self from v8
+        let isolate = unsafe { jsg::v8::ffi::get_isolate(args) };
+        let this = unsafe { jsg::v8::ffi::get_this(args) };
+        let len = unsafe { jsg::v8::ffi::get_length(args) };
+        let arg0 = unsafe { jsg::v8::ffi::get_arg(args, 0) };
+
+        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(isolate, arg0) };
+        dbg!(arg0);
+
+        // let lock = unsafe { &mut *lock };
+        // let args = unsafe { &mut *args };
+        // let arg0 = args.get_arg(0);
+        // let arg0 = jsg::v8::string_from_value(lock, arg0);
+        // match Self::parse_caa_record(arg0) {
+        //     Ok(record) => Ok(jsg::v8::value_from_jsg_struct(lock, &record)),
+        //     Err(err) => Err(err.into()),
+        // }
+        todo!();
     }
 
-    fn parse_naptr_record_callback(
-        lock: *mut jsg::ffi::Lock,
-        args: *mut jsg::ffi::Args,
-    ) -> jsg::Result<jsg::ffi::Value, jsg::Error> {
-        let lock = unsafe { &mut *lock };
-        let args = unsafe { &mut *args };
-        let arg0 = args.get_arg(0);
-        let arg0 = jsg::ffi::string_from_value(lock, arg0);
-        match Self::parse_naptr_record(arg0) {
-            Ok(record) => Ok(jsg::ffi::value_from_jsg_struct(lock, &record)),
-            Err(err) => Err(err.into()),
-        }
+    extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
+        // let lock = unsafe { &mut *lock };
+        // let args = unsafe { &mut *args };
+        // let arg0 = args.get_arg(0);
+        // let arg0 = jsg::v8::string_from_value(lock, arg0);
+        // match Self::parse_naptr_record(arg0) {
+        //     Ok(record) => Ok(jsg::v8::value_from_jsg_struct(lock, &record)),
+        //     Err(err) => Err(err.into()),
+        // }
+        todo!();
     }
 }
 
@@ -267,15 +272,19 @@ impl jsg::Resource for DnsUtil {
         Self: Sized,
     {
         vec![
-            jsg::Member::StaticMethod {
+            jsg::Member::Method {
                 name: "parseCaaRecord",
-                callback: Box::new(Self::parse_caa_record_callback),
+                callback: Self::parse_caa_record_callback,
             },
-            jsg::Member::StaticMethod {
+            jsg::Member::Method {
                 name: "parseNaptrRecord",
-                callback: Box::new(Self::parse_naptr_record_callback),
+                callback: Self::parse_naptr_record_callback,
             },
         ]
+    }
+
+    fn class_name() -> &'static str {
+        "DnsUtil"
     }
 }
 
