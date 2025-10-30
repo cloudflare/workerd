@@ -83,6 +83,15 @@ class MessageEvent final: public Event {
   void visitForGc(jsg::GcVisitor& visitor);
 };
 
+class OpenEvent final: public Event {
+ public:
+  OpenEvent(): Event("open"_kjc) {}
+  static jsg::Ref<OpenEvent> constructor() = delete;
+  JSG_RESOURCE_TYPE(OpenEvent) {
+    JSG_INHERIT(Event);
+  }
+};
+
 class ErrorEvent: public Event {
  public:
   struct ErrorEventInit {
@@ -96,6 +105,7 @@ class ErrorEvent: public Event {
 
   ErrorEvent(ErrorEventInit init);
   ErrorEvent(kj::String type, ErrorEventInit init);
+  ErrorEvent(jsg::Lock& js, jsg::JsValue error);
 
   static jsg::Ref<ErrorEvent> constructor(
       jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init);
@@ -163,6 +173,6 @@ class PromiseRejectionEvent: public Event {
 
 #define EW_EVENTS_ISOLATE_TYPES                                                                    \
   api::ErrorEvent, api::ErrorEvent::ErrorEventInit, api::MessageEvent,                             \
-      api::MessageEvent::Initializer, api::PromiseRejectionEvent
+      api::MessageEvent::Initializer, api::PromiseRejectionEvent, api::OpenEvent
 
 }  // namespace workerd::api

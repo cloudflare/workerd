@@ -98,6 +98,9 @@ ErrorEvent::ErrorEvent(kj::String type, ErrorEventInit init)
     : Event(kj::mv(type)),
       init(kj::mv(init)) {}
 
+ErrorEvent::ErrorEvent(jsg::Lock& js, jsg::JsValue error)
+    : ErrorEvent(ErrorEventInit{.error = jsg::JsRef(js, error)}) {}
+
 jsg::Ref<ErrorEvent> ErrorEvent::constructor(
     jsg::Lock& js, kj::String type, jsg::Optional<ErrorEventInit> init) {
   return js.alloc<ErrorEvent>(kj::mv(type), kj::mv(init).orDefault({}));
