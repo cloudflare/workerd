@@ -9,6 +9,7 @@ wd_rust_crate(
     cxx_bridge_srcs = [
         "http.rs",
         "io.rs",
+        "random.rs",
     ],
     proc_macro_deps = [
         "@crates_vendor//:async-trait",
@@ -16,6 +17,7 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         ":ffi",
+        "@crates_vendor//:fastrand",
         "@crates_vendor//:futures",
         "@crates_vendor//:static_assertions",
     ],
@@ -36,6 +38,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":http.rs@cxx",
+        ":random.rs@cxx",
         "//src/rust/cxx-integration",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj/compat:kj-http",

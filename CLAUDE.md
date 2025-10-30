@@ -97,6 +97,20 @@ capnproto RPC library. Consult it for all questions about `kj/` and `capnproto/`
 ### Rust Development
 - `just update-rust <package>` - Update Rust dependencies (equivalent to `cargo update`)
 - `just clippy <package>` - Run clippy linting on Rust code
+- After adding new Rust dependencies to `deps/rust/cargo.bzl`, run `bazel run //deps/rust:crates_vendor -- --repin` to update the lock file
+
+### Rust/C++ Interop (via CXX)
+- **`src/rust/kj/`** contains Rust bindings to KJ library functions
+- Rust code can be called from C++ using the `cxx` crate bridge
+- Example: `src/rust/kj/random.rs` provides non-cryptographic random number generation
+  - Rust function exposed via `#[cxx::bridge]` with `extern "Rust"`
+  - C++ includes generated header: `#include <workerd/rust/kj/random.rs.h>`
+  - Call from C++ using namespace: `kj::rust::fill_random_bytes(...)`
+  - Convert KJ types to Rust using `kj_rs` conversion utilities
+- Build integration:
+  - Add `.rs` files to `cxx_bridge_srcs` in `BUILD.bazel`
+  - Add `:<filename>.rs@cxx` to C++ library deps for generated headers
+  - Update `compile_flags.txt` with `-isystembazel-bin/src/rust/kj/_virtual_includes/<filename>.rs@cxx`
 
 ## NPM Package Management
 

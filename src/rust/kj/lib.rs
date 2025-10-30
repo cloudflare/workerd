@@ -5,6 +5,7 @@
 
 pub mod http;
 pub mod io;
+pub mod random;
 
 mod own;
 pub use own::*;

@@ -7,7 +7,9 @@
 #include "ser.h"
 #include "setup.h"
 
-#include <openssl/rand.h>
+#include <workerd/rust/kj/random.rs.h>
+
+#include <kj-rs/convert.h>
 
 #include <kj/debug.h>
 
@@ -110,7 +112,9 @@ InternalErrorId makeInternalErrorId() {
       id[i] = i;
     }
   } else {
-    KJ_ASSERT(RAND_bytes(id.asPtr().asBytes().begin(), id.size()) == 1);
+    auto bytes = id.asPtr().asBytes();
+    kj::rust::fill_random_bytes(
+        rust::Slice<uint8_t>(reinterpret_cast<uint8_t*>(bytes.begin()), bytes.size()));
   }
   for (auto i: kj::indices(id)) {
     id[i] = BASE32_DIGITS[static_cast<unsigned char>(id[i]) % 32];

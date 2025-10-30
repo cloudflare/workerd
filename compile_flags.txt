@@ -59,6 +59,7 @@
 -isystembazel-bin/src/rust/dns/_virtual_includes/dns@cxx
 -isystembazel-bin/src/rust/kj/_virtual_includes/http.rs@cxx
 -isystembazel-bin/src/rust/kj/_virtual_includes/io.rs@cxx
+-isystembazel-bin/src/rust/kj/_virtual_includes/random.rs@cxx
 -isystembazel-bin/src/rust/kj/tests/_virtual_includes/lib.rs@cxx
 -isystembazel-bin/src/rust/python-parser/_virtual_includes/python-parser@cxx
 -isystembazel-bin/src/rust/net/_virtual_includes/net@cxx

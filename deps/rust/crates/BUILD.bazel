@@ -152,6 +152,18 @@ alias(
 )
 
 alias(
+    name = "fastrand-2.3.0",
+    actual = "@crates_vendor__fastrand-2.3.0//:fastrand",
+    tags = ["manual"],
+)
+
+alias(
+    name = "fastrand",
+    actual = "@crates_vendor__fastrand-2.3.0//:fastrand",
+    tags = ["manual"],
+)
+
+alias(
     name = "flate2-1.1.5",
     actual = "@crates_vendor__flate2-1.1.5//:flate2",
     tags = ["manual"],

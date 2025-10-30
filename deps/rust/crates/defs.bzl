@@ -305,6 +305,7 @@ _NORMAL_DEPENDENCIES = {
             "clang-ast": Label("@crates_vendor//:clang-ast-0.1.35"),
             "clap": Label("@crates_vendor//:clap-4.5.50"),
             "codespan-reporting": Label("@crates_vendor//:codespan-reporting-0.12.0"),
+            "fastrand": Label("@crates_vendor//:fastrand-2.3.0"),
             "flate2": Label("@crates_vendor//:flate2-1.1.5"),
             "foldhash": Label("@crates_vendor//:foldhash-0.2.0"),
             "futures": Label("@crates_vendor//:futures-0.3.31"),
@@ -1077,6 +1078,16 @@ def crate_repositories():
         urls = ["https://static.crates.io/crates/equivalent/1.0.2/download"],
         strip_prefix = "equivalent-1.0.2",
         build_file = Label("//deps/rust/crates:BUILD.equivalent-1.0.2.bazel"),
+    )
+
+    maybe(
+        http_archive,
+        name = "crates_vendor__fastrand-2.3.0",
+        sha256 = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be",
+        type = "tar.gz",
+        urls = ["https://static.crates.io/crates/fastrand/2.3.0/download"],
+        strip_prefix = "fastrand-2.3.0",
+        build_file = Label("//deps/rust/crates:BUILD.fastrand-2.3.0.bazel"),
     )
 
     maybe(
@@ -3179,6 +3190,7 @@ def crate_repositories():
         struct(repo = "crates_vendor__clang-ast-0.1.35", is_dev_dep = False),
         struct(repo = "crates_vendor__clap-4.5.50", is_dev_dep = False),
         struct(repo = "crates_vendor__codespan-reporting-0.12.0", is_dev_dep = False),
+        struct(repo = "crates_vendor__fastrand-2.3.0", is_dev_dep = False),
         struct(repo = "crates_vendor__flate2-1.1.5", is_dev_dep = False),
         struct(repo = "crates_vendor__foldhash-0.2.0", is_dev_dep = False),
         struct(repo = "crates_vendor__futures-0.3.31", is_dev_dep = False),
