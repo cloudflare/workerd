@@ -57,12 +57,13 @@ jsg::BufferSource concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
     size += partSize;
   }
 
-  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, size);
+  auto backing = jsg::BackingStore::alloc<v8::ArrayBuffer>(js, size, jsg::Lock::AllocOption::UNINITIALIZED);
   auto result = jsg::BufferSource(js, kj::mv(backing));
 
   if (size == 0) return kj::mv(result);
 
   auto view = result.asArrayPtr();
+  [[maybe_unused]] const size_t originalSize = view.size();
 
   for (auto& part: bits) {
     KJ_SWITCH_ONEOF(part) {
@@ -89,7 +90,9 @@ jsg::BufferSource concat(jsg::Lock& js, jsg::Optional<Blob::Bits> maybeBits) {
     }
   }
 
-  KJ_ASSERT(view == nullptr);
+  // Verify that we wrote to every byte - this ensures UNINITIALIZED allocation is safe.
+  KJ_ASSERT(view == nullptr, "Blob concat did not write to all allocated bytes",
+      view.size(), originalSize);
 
   return kj::mv(result);
 }
