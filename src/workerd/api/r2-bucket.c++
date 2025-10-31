@@ -551,7 +551,6 @@ R2Bucket::get(jsg::Lock& js,
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
         result = KJ_ASSERT_NONNULL(parseObjectMetadata<HeadResult>(js, "get", r2Result, errorType));
-        traceContext.userSpan.setTag("error.type"_kjc, kj::str("precondition-failed"_kjc));
       } else {
         jsg::Ref<ReadableStream> body = nullptr;
 
@@ -862,7 +861,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
             jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
-        traceContext.userSpan.setTag("error.type"_kjc, kj::str("precondition-failed"_kjc));
         return kj::none;
       } else {
         auto result = parseObjectMetadata<HeadResult>(js, "put", r2Result, errorType);
