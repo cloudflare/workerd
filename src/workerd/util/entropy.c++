@@ -4,7 +4,8 @@
 
 #include "entropy.h"
 
-#include <openssl/err.h>
+#include <ncrypto.h>
+#include <openssl/crypto.h>
 #include <openssl/rand.h>
 
 #include <kj/debug.h>
@@ -23,9 +24,8 @@ void getEntropy(kj::ArrayPtr<kj::byte> output) {
 
   while (output != nullptr) {
     if (state.data == nullptr) {
+      ncrypto::ClearErrorOnReturn clearErrorOnReturn;
       if (RAND_bytes(state.store.begin(), BUFFER_SIZE) != 1) {
-        ERR_clear_error();
-        ERR_clear_system_error();
         KJ_FAIL_REQUIRE("RAND_bytes failed to generate random data");
       }
       state.data = state.store.asPtr();
@@ -33,6 +33,8 @@ void getEntropy(kj::ArrayPtr<kj::byte> output) {
 
     size_t toCopy = kj::min(state.data.size(), output.size());
     output.first(toCopy).copyFrom(state.data.first(toCopy));
+    // Zero out the source buffer after copying to prevent sensitive data from remaining in memory
+    OPENSSL_cleanse(state.data.first(toCopy).begin(), toCopy);
     state.data = state.data.slice(toCopy);
     output = output.slice(toCopy);
   }

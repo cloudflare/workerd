@@ -252,7 +252,10 @@ wd_cc_library(
     name = "entropy",
     srcs = ["entropy.c++"],
     hdrs = ["entropy.h"],
-    implementation_deps = ["@ssl"],
+    implementation_deps = [
+        "@ncrypto",
+        "@ssl",
+    ],
     visibility = ["//visibility:public"],
     deps = ["@capnp-cpp//src/kj"],
 )
