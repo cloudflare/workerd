@@ -434,6 +434,180 @@ bool JsString::containsOnlyOneByte() const {
   return inner->ContainsOnlyOneByte();
 }
 
+bool JsString::isOneByte() const {
+  return inner->IsOneByte();
+}
+
+JsUint8Array JsUint8Array::alloc(Lock& js, size_t length) {
+  auto buffer = v8::ArrayBuffer::New(js.v8Isolate, length);
+  return JsUint8Array(v8::Uint8Array::New(buffer, 0, length));
+}
+
+JsUint8Array JsUint8Array::slice(size_t start, size_t end) const {
+  v8::Local<v8::Uint8Array> inner = *this;
+  KJ_ASSERT(start <= end && end <= size());
+  v8::Local<v8::Uint8Array> sliced =
+      v8::Uint8Array::New(inner->Buffer(), inner->ByteOffset() + start, end - start);
+  return JsUint8Array(sliced);
+}
+
+kj::Maybe<JsUint8Array> JsString::writeIntoUint8Array(
+    Lock& js, SkipBailOutForTesting skipBailout) const {
+  // We have to avoid flattening the string. We stick only to APIs that we know
+  // will not trigger flattening. The key goal is to eliminate the additional
+  // memory allocation and copying that happens when flattening occurs. This is
+  // especially important for large strings when we are close to the isolate heap
+  // limit as flattening can cause additional GC activity and memory pressure that
+  // can thrash the GC. The APIs we use here are known not to trigger flattening.
+  // We cannot avoid the allocation of the destination buffer for the UTF-8 bytes
+  // but we can avoid the intermediate allocation of a contiguous UTF-16 buffer.
+
+  // Threshold above which we always try incremental encoding to avoid flattening costs.
+  // This is set fairly low (4KB) because:
+  // * Rope strings are common even for medium-sized strings in SSR workloads
+  // * Flattening cost exists even for smaller strings
+  // * The incremental path has bail-out logic to avoid wasted allocations
+  // Below this threshold, the overhead of incremental encoding outweighs the benefit.
+  static constexpr size_t INCREMENTAL_THRESHOLD = 4 * 1024;
+  size_t length = inner->Length();
+
+  // The IsOneByte() check can quickly tell us if the string is one-byte but is prone to false
+  // negatives. If it returns true, then awesome, we know the string is one-byte. However if it
+  // returns false, we follow up with a linear scan using ContainsOnlyOneByte() to be sure.
+  // Note that even if the string contains only one-byte characters, the UTF-8 worst-case length
+  // can still be up to 2x the length because characters in the range 0x80-0xFF will be encoded as
+  // two-byte UTF-8 sequences.
+  size_t multiplier = inner->IsOneByte() || inner->ContainsOnlyOneByte() ? 2 : 3;
+  // Estimate the actual UTF-8 length we'd likely need based on the multiplier.
+  // For one-byte strings (multiplier=2): average between all-ASCII (1x) and extended-ASCII (2x).
+  // For multi-byte strings (multiplier=3): assume mixed content averaging ~2x, since pure ASCII
+  // would be 1x and worst-case multi-byte would be 3x. Most real-world strings with multi-byte
+  // characters are a mix.
+  size_t estimatedUtf8Length = multiplier == 2 ? (length * 3 / 2) : (length * 2);
+
+  // Calculate the peak memory cost of the flattening path:
+  // * UTF-16 temporary buffer: length * 2
+  // * UTF-8 output buffer: estimatedUtf8Length
+  // Both need to exist in heap memory simultaneously during encoding.
+  size_t flattenPeakCost = (length * 2) + estimatedUtf8Length;
+
+  // The worst-case UTF-8 buffer size needed for incremental encoding.
+  size_t maxUtf8Length = length * multiplier;
+
+  // If the string is already flat, the heap pressure is low, or the string is small,
+  // we skip incremental encoding and let V8 handle its own way. Specifically, we
+  // only need to take this path when the string is a rope and the heap pressure is
+  // high
+  if (!skipBailout) [[likely]] {
+    if (inner->IsFlat() || js.getHeapPressure() < jsg::Lock::HeapPressure::APPROACHING ||
+        length <= INCREMENTAL_THRESHOLD || maxUtf8Length >= flattenPeakCost) {
+      return kj::none;
+    }
+  }
+
+  // We will use an intermediate buffer to read chunks of the string into before encoding them
+  // into UTF-8. This avoids flattening the string and allocating the full UTF-16 length in
+  // memory but does require some additional processing that has its own overhead. We choose
+  // the size of the intermediate buffer based on the size of the input string to balance
+  // some of these trade-offs.
+  //
+  // Note that these thresholds are somewhat arbitrary and could likely be tuned further based
+  // on real world workload.
+  static constexpr size_t kLargeChunkThreshold = 2 * 1024 * 1024;  // 2 MB
+  static constexpr size_t kMediumIntermediate = 4 * 4096;
+  static constexpr size_t kLargeIntermediate = 2 * kMediumIntermediate;
+
+  size_t chunkSize = length > kLargeChunkThreshold ? kLargeIntermediate : kMediumIntermediate;
+
+  // If the string is <= kLargeChunkThreshold, then our intermediate buffer is stack
+  // allocated. For larger strings, we allocate the intermediate buffer on the heap
+  // and use a larger chunk size to reduce the number of iterations (at the cost of
+  // wasting the fixed stack allocation).
+  kj::SmallArray<char16_t, kMediumIntermediate> intermediate(chunkSize);
+  kj::ArrayPtr<uint16_t> intermediateView(
+      reinterpret_cast<uint16_t*>(intermediate.begin()), intermediate.size());
+
+  // Use a growing destination vector to avoid worst-case allocation. This is the intermediate
+  // vector that actually holds the UTF-8 output data. Start with our estimated size and grow
+  // as needed. This is our key memory trade-off. We sacrifice c++ heap allocation to avoid
+  // isolate heap allocation and the associated GC pressure it brings. In either case we have
+  // to allocate the UTF-8 data somewhere.
+  kj::Vector<kj::byte> output(estimatedUtf8Length);
+
+  // The number of code units we have remaining to read from the string.
+  size_t remaining = length;
+  kj::Maybe<uint16_t> carryOverLeadSurrogate;
+
+  while (remaining) {
+    // If we have a carry-over lead surrogate from the previous iteration, we need to write it
+    // into the intermediate buffer first.
+    bool hadCarryOver = false;
+    KJ_IF_SOME(lead, carryOverLeadSurrogate) {
+      intermediateView[0] = lead;
+      intermediateView = intermediateView.slice(1);
+      hadCarryOver = true;
+    }
+
+    size_t toRead = kj::min(remaining, intermediateView.size());
+    KJ_ASSERT(toRead > 0, "toRead must be greater than 0");
+
+    size_t offset = length - remaining;
+
+    // WriteV2 does not flatten the string. Yay!
+    // TODO(later): This could probably be optimized further by using the one-byte variant
+    // for one-byte strings but given that we should only get here rarely, that optimization
+    // is not urgent.
+    inner->WriteV2(
+        js.v8Isolate, offset, toRead, intermediateView.begin(), v8::String::WriteFlags::kNone);
+
+    // Let's check if the last code unit we read is a lead surrogate. If it is, we need to carry
+    // it over to the next iteration so that we can properly encode the surrogate pair into UTF-8.
+    uint16_t lastCodeUnit = intermediateView[toRead - 1];
+    if (lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF) {
+      carryOverLeadSurrogate = lastCodeUnit;
+      toRead--;
+      remaining--;
+    } else {
+      carryOverLeadSurrogate = kj::none;
+    }
+
+    size_t actualRead = toRead + (hadCarryOver ? 1 : 0);
+
+    // Calculate the exact UTF-8 length needed for this chunk.
+    size_t chunkUtf8Length = simdutf::utf8_length_from_utf16(intermediate.begin(), actualRead);
+
+    // Ensure we have space in the output vector (will grow if needed).
+    size_t currentSize = output.size();
+    output.resize(currentSize + chunkUtf8Length);
+
+    // Encode the chunk directly into the output vector.
+    size_t written = simdutf::convert_utf16_to_utf8_safe(intermediate.begin(), actualRead,
+        reinterpret_cast<char*>(output.begin() + currentSize), chunkUtf8Length);
+
+    KJ_ASSERT(written == chunkUtf8Length, "UTF-8 conversion wrote unexpected number of bytes");
+
+    // Reset the intermediate view for the next iteration.
+    intermediateView =
+        kj::arrayPtr(reinterpret_cast<uint16_t*>(intermediate.begin()), intermediate.size());
+
+    remaining -= toRead;
+  }
+
+  // Reading is done. Nothing should have caused the string to be flattened or we defeated
+  // the purpose of taking this path.
+  KJ_ASSERT(!inner->IsFlat() || skipBailout == SkipBailOutForTesting::YES);
+
+  // Allocate the final Uint8Array in the heap with the exact size needed and copy the data.
+  // This final copy is unavoidable since we are specifically trying to limit the memory usage
+  // in the isolate heap by avoiding over-allocation. If we didn't copy here, we'd have to
+  // allocate the full worst-case size up front which would defeat the purpose of this whole
+  // exercise. We also have to copy because we're using the v8 sandbox, which requires backing
+  // stores to be allocated in the heap.
+  auto result = JsUint8Array::alloc(js, output.size());
+  result.asArrayPtr().copyFrom(output);
+  return result;
+}
+
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
   if (result->IsNullOrUndefined()) return kj::none;

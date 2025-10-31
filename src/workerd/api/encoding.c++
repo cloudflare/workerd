@@ -464,25 +464,38 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-namespace {
-TextEncoder::EncodeIntoResult encodeIntoImpl(
-    jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-  return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
-  };
-}
-}  // namespace
-
-jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
+jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
-  auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
-      "Cannot allocate space for TextEncoder.encode");
-  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
+
+  // The fallback path below calls str.utf8Length(js) which forces V8 to flatten the string
+  // into a contiguous UTF-16 buffer. For rope strings (the result of string concatenation),
+  // this flattening has significant CPU and memory costs:
+  //   * CPU: Walk the rope tree and copy all segments into a new buffer
+  //   * Memory: Allocate length * 2 bytes for the contiguous UTF-16 buffer
+  //   * GC Pressure: The flattening allocation can trigger GC, and the rope segments become garbage
+  //
+  // This is particularly problematic for React/NextJS SSR workloads which generate HTML by
+  // concatenating many strings, creating deep rope structures. Every encode() call would
+  // flatten the rope and trigger GC, causing severe performance degradation.
+  //
+  // To avoid this, we use an incremental encoding approach that reads the string in chunks
+  // without forcing V8 to flatten it. This approach allocates a worst-case UTF-8 buffer
+  // (up to 2x for one-byte strings, 4x for multi-byte strings), but has internal bail-out
+  // logic to fall back to flattening when the worst-case allocation would be wasteful.
+  //
+  // Note: Before this check, it is important to avoid using any V8 APIs that will
+  // cause the string to be flattened. For example, calling str.utf8Length(js) will
+  // flatten the string, defeating the purpose of this check.
+  KJ_IF_SOME(view, str.writeIntoUint8Array(js)) {
+    return view;
+  }
+
+  // In this path, we allow V8 to flatten the string and handle the encoding for us.
+  auto view = jsg::JsUint8Array::alloc(js, str.utf8Length(js));
+  auto result KJ_UNUSED =
+      str.writeInto(js, view.asArrayPtr<char>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
   KJ_DASSERT(result.written == view.size());
-  return kj::mv(view);
+  return view;
 }
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(

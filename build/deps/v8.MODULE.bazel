@@ -51,6 +51,7 @@ PATCHES = [
     "0026-Implement-additional-Exception-construction-methods.patch",
     "0027-Export-icudata-file-to-facilitate-embedding-it.patch",
     "0028-bind-icu-to-googlesource.patch",
+    "0029-Add-v8-String-IsFlat-method.patch",
 ]
 
 http_archive(

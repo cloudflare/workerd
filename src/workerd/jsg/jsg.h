@@ -2706,6 +2706,14 @@ class Lock {
   template <typename T>
   JsObject getPrototypeFor();
 
+  enum class HeapPressure {
+    NONE,         // Heap is well under heap limits.
+    APPROACHING,  // Heap is approaching heap limits.
+    CRITICAL,     // Heap is at or over heap limits.
+  };
+  // Returns the current heap pressure estimation.
+  HeapPressure getHeapPressure();
+
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
   JsValue undefined() KJ_WARN_UNUSED_RESULT;
@@ -2997,6 +3005,18 @@ inline v8::Local<v8::Context> JsContext<T>::getHandle(Lock& js) const {
 
 inline Value SelfRef::asValue(Lock& js) const {
   return Value(js.v8Isolate, getHandle(js).As<v8::Value>());
+}
+
+inline static bool operator<(const Lock::HeapPressure a, const Lock::HeapPressure b) {
+  return static_cast<int>(a) < static_cast<int>(b);
+}
+
+inline static bool operator>(const Lock::HeapPressure a, const Lock::HeapPressure b) {
+  return static_cast<int>(a) > static_cast<int>(b);
+}
+
+inline static bool operator==(const Lock::HeapPressure a, const Lock::HeapPressure b) {
+  return static_cast<int>(a) == static_cast<int>(b);
 }
 
 }  // namespace workerd::jsg

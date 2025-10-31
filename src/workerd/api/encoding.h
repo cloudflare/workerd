@@ -216,7 +216,7 @@ class TextEncoder final: public jsg::Object {
 
   static jsg::Ref<TextEncoder> constructor(jsg::Lock& js);
 
-  jsg::BufferSource encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
+  jsg::JsUint8Array encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input);
 
   EncodeIntoResult encodeInto(jsg::Lock& js, jsg::JsString input, jsg::JsUint8Array buffer);
 

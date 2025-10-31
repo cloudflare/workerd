@@ -8,6 +8,8 @@
 
 namespace workerd::jsg {
 
+WD_STRONG_BOOL(SkipBailOutForTesting);
+
 inline void requireOnStack(void* self) {
 #ifdef KJ_DEBUG
   kj::requireOnStack(self, "JsValue types must be allocated on stack");
@@ -241,6 +243,17 @@ class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
     return kj::ArrayPtr(data, length);
   }
 
+  inline size_t size() const {
+    return inner->ByteLength();
+  }
+
+  JsUint8Array slice(size_t start, size_t end) const KJ_WARN_UNUSED_RESULT;
+  inline JsUint8Array first(size_t size) const KJ_WARN_UNUSED_RESULT {
+    return slice(0, size);
+  }
+
+  static JsUint8Array alloc(Lock& js, size_t length) KJ_WARN_UNUSED_RESULT;
+
   using JsBase<v8::Uint8Array, JsUint8Array>::JsBase;
 };
 
@@ -255,7 +268,13 @@ class JsString final: public JsBase<v8::String, JsString> {
 
   int hashCode() const;
 
+  // Uses v8::String's ContainsOnlyOneByte() API, which potentially scans
+  // the entire string, so use with care.
   bool containsOnlyOneByte() const;
+
+  // Uses v8::String's IsOneByte() API, which is a fast check but prone to
+  // false negatives.
+  bool isOneByte() const;
 
   bool operator==(const JsString& other) const;
 
@@ -288,6 +307,16 @@ class JsString final: public JsBase<v8::String, JsString> {
       Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
+
+  // A variation of writeInto that uses an alternative method of writing the UTF8 bytes
+  // of the string into a Uint8Array. This variation uses WriteV2 to write incrementally
+  // into a small buffer, which is then converted to UTF8 using simdutf in small chunks.
+  // This is more efficient for large strings, since it avoids the need to risk flattening
+  // the string into a contiguous buffer in memory before writing it out. This is especially
+  // important for very large strings where flatten can incur a significant performance penalty
+  // and trigger increased GC activity.
+  kj::Maybe<JsUint8Array> writeIntoUint8Array(
+      Lock& js, SkipBailOutForTesting skipBailout = SkipBailOutForTesting::NO) const;
 
   using JsBase<v8::String, JsString>::JsBase;
 };

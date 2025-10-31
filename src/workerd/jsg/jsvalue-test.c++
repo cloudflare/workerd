@@ -152,5 +152,64 @@ KJ_TEST("simple") {
       "boolean", "true");
 }
 
+KJ_TEST("writeIntoUint8Array") {
+  Evaluator<JsValueContext, JsValueIsolate> e(v8System);
+  e.run([](Lock& js) {
+    auto str = js.str("Hello, world! 👋"_kj);
+    auto uint8Array = str.writeIntoUint8Array(js, SkipBailOutForTesting::YES);
+    auto ptr = KJ_ASSERT_NONNULL(uint8Array).asArrayPtr();
+
+    kj::byte check[] = {
+      'H', 'e', 'l', 'l', 'o', ',', ' ', 'w', 'o', 'r', 'l', 'd', '!', ' ', 0xf0, 0x9f, 0x91, 0x8b};
+
+    KJ_EXPECT(ptr.size() == sizeof(check));
+
+    KJ_EXPECT(ptr == kj::arrayPtr(check));
+  });
+
+  // Let's do a much larger string now.
+  e.run([](Lock& js) {
+    // Repeat the euro sign 1000 times.
+
+    auto largeStr = kj::strArray(kj::repeat("€", 1000), "");
+    auto str = js.str(largeStr);
+    auto uint8Array = str.writeIntoUint8Array(js, SkipBailOutForTesting::YES);
+    auto ptr = KJ_ASSERT_NONNULL(uint8Array).asArrayPtr();
+    KJ_EXPECT(ptr.size() == 1000 * 3);  // Each euro sign is 3 bytes in UTF-8.
+
+    kj::byte check[] = {0xe2, 0x82, 0xac};
+
+    for (size_t i = 0; i < 1000; i++) {
+      auto offset = i * 3;
+      KJ_EXPECT(ptr.slice(offset, offset + 3) == kj::arrayPtr(check));
+    }
+  });
+
+  e.run([](Lock& js) {
+    // Create a string with 4095 ASCII chars + emoji (2 char16_t) + more content.
+    // This ensures the lead surrogate is at position 4095 (last slot of first buffer chunk)
+    // and trail surrogate is at position 4096 (would be in next chunk).
+    kj::Vector<kj::String> parts;
+    parts.add(kj::str(kj::repeat('A', 4095)));  // 4095 ASCII characters
+    parts.add(kj::str("🎉"));                   // Emoji (U+1F389), which is a surrogate pair
+    parts.add(kj::str("test"));                 // Some content after to continue processing
+
+    auto testStr = kj::strArray(parts.asPtr(), "");
+    auto str = js.str(testStr);
+    auto uint8Array = str.writeIntoUint8Array(js, SkipBailOutForTesting::YES);
+    auto ptr = KJ_ASSERT_NONNULL(uint8Array).asArrayPtr();
+
+    // Expected: 4095 bytes (ASCII) + 4 bytes (emoji UTF-8) + 4 bytes ("test")
+    KJ_EXPECT(ptr.size() == 4095 + 4 + 4);
+
+    // Check the emoji is encoded correctly (U+1F389 -> F0 9F 8E 89 in UTF-8)
+    kj::byte emojiCheck[] = {0xf0, 0x9f, 0x8e, 0x89};
+    KJ_EXPECT(ptr.slice(4095, 4095 + 4) == kj::arrayPtr(emojiCheck));
+
+    // Check the content after
+    kj::byte testCheck[] = {'t', 'e', 's', 't'};
+    KJ_EXPECT(ptr.slice(4099, 4099 + 4) == kj::arrayPtr(testCheck));
+  });
+}
 }  // namespace
 }  // namespace workerd::jsg::test

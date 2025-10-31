@@ -547,6 +547,23 @@ std::unique_ptr<v8::BackingStore> Lock::allocBackingStore(size_t size, AllocOpti
   return kj::mv(store);
 }
 
+Lock::HeapPressure Lock::getHeapPressure() {
+  static constexpr double CRITICAL_THRESHOLD = 0.9;
+  static constexpr double APPROACHING_THRESHOLD = 0.7;
+  v8::HeapStatistics stats;
+  v8Isolate->GetHeapStatistics(&stats);
+  size_t used = stats.used_heap_size();
+  size_t total = stats.total_heap_size();
+  double usage = static_cast<double>(used) / static_cast<double>(total);
+  if (usage < APPROACHING_THRESHOLD) {
+    return HeapPressure::NONE;
+  } else if (usage < CRITICAL_THRESHOLD) {
+    return HeapPressure::APPROACHING;
+  } else {
+    return HeapPressure::CRITICAL;
+  }
+}
+
 const capnp::SchemaLoader& ContextGlobal::getSchemaLoader() {
   return KJ_ASSERT_NONNULL(schemaLoader);
 }
