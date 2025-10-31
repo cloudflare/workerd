@@ -492,52 +492,73 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
 }
 
 jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
-  auto str = input.orDefault(js.str());
+  jsg::JsString str = input.orDefault(js.str());
 
-  // Do the conversion while ValueView is alive, but to a C++ heap buffer (not V8 heap)
-  kj::Array<kj::byte> output_data;
+  if (str.length(js) == 0) {
+    return jsg::BufferSource(js, jsg::BackingStore::alloc<v8::Uint8Array>(js, 0));
+  }
 
-  {
+  // Allocate the output buffer and perform the conversion while ValueView is alive, but defer
+  // creating the V8 BufferSource until after ValueView is destroyed. This approach uses
+  // BackingStore::wrap with a custom disposer to avoid the copy overhead that would occur with
+  // BackingStore::from in the v8 sandbox, since from() copies data when it's not already in the
+  // sandbox. By using new/delete with wrap(), we maintain ownership semantics compatible with V8's
+  // C-style BackingStore API while avoiding the extra allocation and copy.
+  jsg::BackingStore backing = [&]() {
     v8::String::ValueView value_view(js.v8Isolate, str);
     size_t length = static_cast<size_t>(value_view.length());
 
     if (value_view.is_one_byte()) {
+      // Fast path for Latin-1 encoded strings. V8 uses Latin-1 (ISO-8859-1) encoding internally
+      // for strings that contain only code points <= U+00FF. We need to convert to UTF-8.
       auto data = reinterpret_cast<const char*>(value_view.data8());
       size_t utf8_length = simdutf::utf8_length_from_latin1(data, length);
-      output_data = kj::heapArray<kj::byte>(utf8_length);
+      auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
       [[maybe_unused]] auto written =
-          simdutf::convert_latin1_to_utf8(data, length, output_data.asChars().begin());
-      KJ_DASSERT(written == output_data.size());
-    } else {
-      auto data = reinterpret_cast<const char16_t*>(value_view.data16());
-
-      // Check if UTF-16LE is valid
-      auto validation_result = simdutf::validate_utf16le(data, length);
-
-      if (validation_result) {
-        // Valid UTF-16LE, convert directly
-        size_t utf8_length = simdutf::utf8_length_from_utf16le(data, length);
-        output_data = kj::heapArray<kj::byte>(utf8_length);
-        [[maybe_unused]] auto written =
-            simdutf::convert_utf16le_to_utf8(data, length, output_data.asChars().begin());
-        KJ_DASSERT(written == output_data.size());
-      } else {
-        // Invalid UTF-16LE (unpaired surrogates), fix it first
-        auto well_formed = kj::heapArray<char16_t>(length);
-        simdutf::to_well_formed_utf16le(data, length, well_formed.begin());
-
-        // Now convert the well-formed UTF-16LE to UTF-8
-        size_t utf8_length = simdutf::utf8_length_from_utf16le(well_formed.begin(), length);
-        output_data = kj::heapArray<kj::byte>(utf8_length);
-        [[maybe_unused]] auto written = simdutf::convert_utf16le_to_utf8(
-            well_formed.begin(), length, output_data.asChars().begin());
-        KJ_DASSERT(written == output_data.size());
-      }
+          simdutf::convert_latin1_to_utf8(data, length, output->asChars().begin());
+      KJ_DASSERT(written == output->size());
+      return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
+          [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
+          output);
     }
-  }  // ValueView destroyed here, releasing the heap lock
 
-  // Now create BufferSource from the output data (this allocates V8 objects, which is now safe)
-  return jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(output_data)));
+    // Two-byte string path. V8 uses UTF-16LE encoding internally for strings with code points
+    // > U+00FF. Check if the UTF-16 is valid (no unpaired surrogates) to determine the path.
+    auto data = reinterpret_cast<const char16_t*>(value_view.data16());
+    auto valid_utf16 = simdutf::validate_utf16le(data, length);
+
+    if (valid_utf16) {
+      // Common case: valid UTF-16LE, convert directly to UTF-8
+      size_t utf8_length = simdutf::utf8_length_from_utf16le(data, length);
+      auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
+      [[maybe_unused]] auto written =
+          simdutf::convert_utf16le_to_utf8(data, length, output->asChars().begin());
+      KJ_DASSERT(written == output->size());
+      return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
+          [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
+          output);
+    }
+
+    // Rare case: Invalid UTF-16LE with unpaired surrogates. Per the Encoding Standard, we must
+    // replace unpaired surrogates with U+FFFD replacement characters. We do this in two passes:
+    // first fix the UTF-16, then convert to UTF-8. This extra buffer allocation only happens
+    // for malformed strings, which should be uncommon in practice.
+    auto well_formed = kj::heapArray<char16_t>(length);
+    simdutf::to_well_formed_utf16le(data, length, well_formed.begin());
+
+    size_t utf8_length = simdutf::utf8_length_from_utf16le(well_formed.begin(), length);
+    auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
+    [[maybe_unused]] auto written =
+        simdutf::convert_utf16le_to_utf8(well_formed.begin(), length, output->asChars().begin());
+    KJ_DASSERT(written == output->size());
+    return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
+        [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
+        output);
+  }();  // ValueView destroyed here, releasing the heap lock
+
+  // Now that ValueView is destroyed and the heap lock is released, it's safe to create V8 objects.
+  // Construct the BufferSource which will create the actual Uint8Array that gets returned to JS.
+  return jsg::BufferSource(js, kj::mv(backing));
 }
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
