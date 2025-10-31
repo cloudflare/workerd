@@ -8,6 +8,7 @@
 
 namespace workerd {
 
+// Fills `output` with cryptographically-random bytes.
 void getEntropy(kj::ArrayPtr<kj::byte> output);
 
 }  // namespace workerd
