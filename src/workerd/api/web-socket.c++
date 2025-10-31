@@ -482,18 +482,12 @@ WebSocket::Accepted::~Accepted() noexcept(false) {
 //
 // JS-RPC messages are size-limited to 32MiB, and it seems to be working well, so we're setting the
 // WebSocket default max message size to match that.
-//
-// TODO(soon): This is currently autogated, so that we can enable the change in production before
-//   enabling it by default in local development. This is so that people do not inadvertently deploy
-//   something that works locally but breaks when deployed.
 static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
 
 void WebSocket::startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
-  size_t maxMessageSize = kj::WebSocket::SUGGESTED_MAX_MESSAGE_SIZE;
+  size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
-  } else if (util::Autogate::isEnabled(util::AutogateKey::WEBSOCKET_MAX_MESSAGE_SIZE_32M)) {
-    maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   }
 
   // If the kj::WebSocket happens to be an AbortableWebSocket (see util/abortable.h), then

@@ -334,19 +334,59 @@ class JsProxy final: public JsBase<v8::Proxy, JsProxy> {
   using JsBase<v8::Proxy, JsProxy>::JsBase;
 };
 
-#define V(Name)                                                                                    \
-  class Js##Name final: public JsBase<v8::Name, Js##Name> {                                        \
-   public:                                                                                         \
-    using JsBase<v8::Name, Js##Name>::JsBase;                                                      \
-  };
+class JsSymbol final: public JsBase<v8::Symbol, JsSymbol> {
+ public:
+  kj::String description(Lock& js) const KJ_WARN_UNUSED_RESULT;
 
-V(Symbol)
-V(BigInt)
-V(Int32)
-V(Uint32)
-V(Set)
+  using JsBase<v8::Symbol, JsSymbol>::JsBase;
+};
 
-#undef V
+class JsSet final: public JsBase<v8::Set, JsSet> {
+ public:
+  void add(Lock& js, const JsValue& value);
+  bool has(Lock& js, const JsValue& value) const;
+  bool delete_(Lock& js, const JsValue& value);
+  void clear();
+  size_t size() const;
+
+  template <IsJsValue... Args>
+  void addAll(Lock& js, Args... args) {
+    (check(inner->Add(js.v8Context(), args.inner)), ...);
+  }
+
+  void addAll(Lock& js, kj::ArrayPtr<const JsValue> values);
+
+  operator JsArray() const;
+
+  using JsBase<v8::Set, JsSet>::JsBase;
+};
+
+class JsBigInt final: public JsBase<v8::BigInt, JsBigInt> {
+ public:
+  // If the BigInt value does not fit in int64_t, returns kj::none
+  // and schedules an exception on the isolate.
+  kj::Maybe<int64_t> toInt64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  // If the BigInt value does not fit in int64_t, returns kj::none
+  // and schedules an exception on the isolate.
+  kj::Maybe<uint64_t> toUint64(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::BigInt, JsBigInt>::JsBase;
+};
+
+class JsInt32 final: public JsBase<v8::Int32, JsInt32> {
+ public:
+  kj::Maybe<int32_t> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Int32, JsInt32>::JsBase;
+};
+
+class JsUint32 final: public JsBase<v8::Uint32, JsUint32> {
+ public:
+  kj::Maybe<uint32_t> value(Lock& js) const KJ_WARN_UNUSED_RESULT;
+
+  using JsBase<v8::Uint32, JsUint32>::JsBase;
+};
 
 class JsNumber final: public JsBase<v8::Number, JsNumber> {
  public:
@@ -716,7 +756,7 @@ struct JsValueWrapper {
 class JsMessage final {
  public:
   static JsMessage create(Lock& js, const JsValue& exception);
-  explicit inline JsMessage(): inner(v8::Local<v8::Message>()) {
+  explicit inline JsMessage() {
     requireOnStack(this);
   }
   explicit inline JsMessage(v8::Local<v8::Message> inner): inner(inner) {

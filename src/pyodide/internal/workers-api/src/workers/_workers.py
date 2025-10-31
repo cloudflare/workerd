@@ -970,6 +970,52 @@ class _DurableObjectNamespaceWrapper:
         return _FetcherWrapper(self._binding.get(*args, **kwargs))
 
 
+class _WorkflowInstanceWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def send_event(self, *args, **kwargs):
+        return self._binding.sendEvent(*args, **kwargs)
+
+    async def pause(self, *args, **kwargs):
+        return self._binding.pause(*args, **kwargs)
+
+    async def resume(self, *args, **kwargs):
+        return self._binding.resume(*args, **kwargs)
+
+    async def terminate(self, *args, **kwargs):
+        return self._binding.terminate(*args, **kwargs)
+
+    async def restart(self, *args, **kwargs):
+        return self._binding.restart(*args, **kwargs)
+
+    async def status(self, *args, **kwargs):
+        return self._binding.status(*args, **kwargs)
+
+
+class _WorkflowBindingWrapper:
+    def __init__(self, binding):
+        self._binding = binding
+
+    def __getattr__(self, name):
+        return getattr(self._binding, name)
+
+    async def get(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.get(*args, **kwargs))
+
+    async def create(self, *args, **kwargs):
+        return _WorkflowInstanceWrapper(await self._binding.create(*args, **kwargs))
+
+    async def create_batch(self, *args, **kwargs):
+        return [
+            _WorkflowInstanceWrapper(w)
+            for w in await self._binding.createBatch(*args, **kwargs)
+        ]
+
+
 class _EnvWrapper:
     def __init__(self, env: Any):
         self._env = env
@@ -981,6 +1027,9 @@ class _EnvWrapper:
 
         if _is_js_instance(binding, "DurableObjectNamespace"):
             return _DurableObjectNamespaceWrapper(binding)
+
+        if _is_js_instance(binding, "WorkflowImpl"):
+            return _WorkflowBindingWrapper(binding)
 
         # TODO: Implement APIs for bindings.
         return binding

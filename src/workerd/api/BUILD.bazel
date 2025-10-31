@@ -114,6 +114,8 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":pyodide",
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
         "//src/workerd/jsg:rtti",
     ],
     visibility = ["//visibility:public"],
@@ -168,7 +170,10 @@ wd_cc_library(
         "//src/pyodide:generated/pyodide_extra.capnp.h",
         "//src/pyodide:pyodide_static.capnp.h",
     ],
-    implementation_deps = ["//src/workerd/io"],
+    implementation_deps = [
+        "//src/workerd/io",
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/pyodide:pyodide_extra_capnp",
@@ -191,12 +196,14 @@ wd_cc_library(
     name = "util",
     srcs = ["util.c++"],
     hdrs = ["util.h"],
-    implementation_deps = ["@simdutf"],
+    implementation_deps = [
+        "//src/workerd/util:mimetype",
+        "//src/workerd/util:strings",
+        "@simdutf",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg",
-        "//src/workerd/util",
-        "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -205,12 +212,14 @@ wd_cc_library(
     name = "encoding",
     srcs = ["encoding.c++"],
     hdrs = ["encoding.h"],
+    implementation_deps = [
+        "//src/workerd/util:strings",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":util",
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -221,11 +230,11 @@ wd_cc_library(
     hdrs = ["data-url.h"],
     implementation_deps = [
         ":encoding",
+        "//src/workerd/util:strings",
     ],
     visibility = ["//visibility:public"],
     deps = [
         "//src/workerd/jsg:url",
-        "//src/workerd/util",
         "//src/workerd/util:mimetype",
         "@capnp-cpp//src/kj",
     ],
@@ -338,6 +347,8 @@ kj_test(
     deps = [
         ":encoding",
         ":html-rewriter",
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
         "//src/workerd/io",
         "//src/workerd/jsg:rtti",
     ],
@@ -359,6 +370,24 @@ kj_test(
 kj_test(
     src = "cf-property-test.c++",
     deps = ["//src/workerd/tests:test-fixture"],
+)
+
+kj_test(
+    src = "streams/writable-sink-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "streams/readable-source-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/jsg",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 kj_test(
@@ -487,7 +516,11 @@ wd_test(
 wd_test(
     src = "sync-kv-test.wd-test",
     args = ["--experimental"],
-    data = ["sync-kv-test.js"],
+    data = [
+        "sync-kv-instrumentation-test.js",
+        "sync-kv-test.js",
+        "tests/instrumentation-tail-worker.js",
+    ],
 )
 
 wd_test(

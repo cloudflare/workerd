@@ -100,6 +100,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":strings",
         "//src/workerd/jsg:memory-tracker",
         "@capnp-cpp//src/kj",
         "@capnp-cpp//src/kj:kj-async",

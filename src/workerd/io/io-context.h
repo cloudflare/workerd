@@ -119,7 +119,7 @@ class IoContext_IncomingRequest final {
       kj::Own<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
-      tracing::InvocationSpanContext invocationSpanContext);
+      kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -176,9 +176,7 @@ class IoContext_IncomingRequest final {
 
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
-  tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return invocationSpanContext;
-  }
+  tracing::InvocationSpanContext& getInvocationSpanContext();
 
  private:
   kj::Own<IoContext> context;
@@ -189,7 +187,8 @@ class IoContext_IncomingRequest final {
   // The invocation span context identifies the trace id, invocation id, and root
   // span for the current request. Every invocation of a worker function always
   // has a root span, even if it is not explicitly traced.
-  tracing::InvocationSpanContext invocationSpanContext;
+  kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan;
+  kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
 
@@ -922,7 +921,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentUserTraceSpan();
 
   tracing::InvocationSpanContext& getInvocationSpanContext() {
-    return getCurrentIncomingRequest().invocationSpanContext;
+    return getCurrentIncomingRequest().getInvocationSpanContext();
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).

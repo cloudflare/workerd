@@ -334,6 +334,9 @@ void doLockTest(bool walMode) {
   KJ_EXPECT(db.run(GET_COUNT).getInt(0) == 1);
 
   // Concurrent write allowed, as long as we're not writing at the same time.
+  // Deliberately not assigning this to a variable: We want to create a thread and join it
+  // immediately.
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   kj::Thread([&vfs = vfs]() noexcept {
     SqliteDatabase db2(vfs, kj::Path({"foo"}), kj::WriteMode::MODIFY);
     KJ_EXPECT(db2.run(GET_COUNT).getInt(0) == 1);
@@ -493,8 +496,7 @@ RowCounts countRowsTouched(SqliteDatabase& db,
 
 template <typename... Params>
 RowCounts countRowsTouched(SqliteDatabase& db, kj::StringPtr sqlCode, Params... bindParams) {
-  return countRowsTouched(
-      db, SqliteDatabase::TRUSTED, sqlCode, std::forward<Params>(bindParams)...);
+  return countRowsTouched(db, SqliteDatabase::TRUSTED, sqlCode, kj::fwd<Params>(bindParams)...);
 }
 
 KJ_TEST("SQLite read row counters (basic)") {

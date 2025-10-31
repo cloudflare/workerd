@@ -32,7 +32,7 @@ class Queue final {
 
   template <typename... Args>
   T& emplace(Args&&... args) KJ_LIFETIMEBOUND {
-    return inner.emplace_back(std::forward<Args>(args)...);
+    return inner.emplace_back(kj::fwd<Args>(args)...);
   }
 
   // Pops the front element from the queue, moving it out.
@@ -161,11 +161,11 @@ class Queue final {
     inner.swap(other.inner);
   }
 
- private:
-  std::list<T> inner;
-
   // Delete the new and delete operators to prevent heap allocation.
   void* operator new(size_t) = delete;
   void operator delete(void*) = delete;
+
+ private:
+  std::list<T> inner;
 };
 }  // namespace workerd::util

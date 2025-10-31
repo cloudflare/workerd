@@ -1,6 +1,6 @@
 [
   {
-    "directory": "src/workerd",
+    "directory": "src",
     "globs": ["*.c++", "*.h"],
     "formatter": "clang-format"
   },

@@ -139,6 +139,10 @@ wd_cc_library(
     hdrs = [
         "workerd-api.h",
     ],
+    implementation_deps = [
+        "//src/workerd/api:urlpattern",
+        "//src/workerd/api:urlpattern-standard",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",

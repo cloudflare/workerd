@@ -706,21 +706,15 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     }
     KJ_CASE_ONEOF(formData, jsg::Ref<FormData>) {
       auto boundary = makeRandomBoundaryCharacters();
-      auto type = MimeType::FORM_DATA.clone();
-      type.addParam("boundary"_kj, boundary);
-      contentType = type.toString();
+      contentType = MimeType::formDataWithBoundary(boundary);
       buffer = formData->serialize(boundary);
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
-      auto type = MimeType::FORM_URLENCODED.clone();
-      type.addParam("charset"_kj, "UTF-8"_kj);
-      contentType = type.toString();
+      contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
       buffer = searchParams->toString();
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<url::URLSearchParams>) {
-      auto type = MimeType::FORM_URLENCODED.clone();
-      type.addParam("charset"_kj, "UTF-8"_kj);
-      contentType = type.toString();
+      contentType = MimeType::formUrlEncodedWithCharset("UTF-8"_kj);
       buffer = searchParams->toString();
     }
   }
