@@ -10186,6 +10186,11 @@ declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
     tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(
+      event: TailStream.TailEvent<TailStream.Onset>,
+    ):
+      | TailStream.TailEventHandlerType
+      | Promise<TailStream.TailEventHandlerType>;
     trace?(traces: TraceItem[]): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;
