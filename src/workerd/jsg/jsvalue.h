@@ -280,6 +280,7 @@ class JsString final: public JsBase<v8::String, JsString> {
   int hashCode() const;
 
   bool isFlat() const;
+  bool isOneByte(Lock& js) const KJ_WARN_UNUSED_RESULT;
   bool containsOnlyOneByte() const;
 
   bool operator==(const JsString& other) const;
@@ -313,6 +314,8 @@ class JsString final: public JsBase<v8::String, JsString> {
       Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags options = WriteFlags::NONE) const;
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
+
+  void writeOneByte(Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags flags = WriteFlags::NONE);
 
   using JsBase<v8::String, JsString>::JsBase;
 };
@@ -986,6 +989,10 @@ inline void JsObject::delete_(Lock& js, kj::StringPtr name) {
 
 inline int JsString::length(jsg::Lock& js) const {
   return inner->Length();
+}
+
+inline bool JsString::isOneByte(jsg::Lock& js) const {
+  return inner->IsOneByte();
 }
 
 inline size_t JsString::utf8Length(jsg::Lock& js) const {
