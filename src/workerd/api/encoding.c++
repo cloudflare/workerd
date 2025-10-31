@@ -491,74 +491,110 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
+jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   jsg::JsString str = input.orDefault(js.str());
 
-  if (str.length(js) == 0) {
-    return jsg::BufferSource(js, jsg::BackingStore::alloc<v8::Uint8Array>(js, 0));
+  if (str.isOneByte(js)) {
+    auto length = str.length(js);
+    // Fast path for one-byte strings (Latin-1). writeOneByte() copies the raw bytes without
+    // flattening the string, which is more efficient than using ValueView. Note that we
+    // allocate `length * 2` bytes because Latin-1 characters 0x80-0xFF need 2 bytes in UTF-8.
+    auto backing =
+        jsg::BackingStore::alloc<v8::Uint8Array>(js, length, jsg::Lock::AllocOption::UNINITIALIZED);
+    str.writeOneByte(
+        js, backing.asArrayPtr<kj::byte>(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
+    auto backingData = reinterpret_cast<const char*>(backing.asArrayPtr<kj::byte>().begin());
+
+    size_t utf8_length = simdutf::utf8_length_from_latin1(backingData, length);
+
+    if (utf8_length == length) {
+      return jsg::JsUint8Array(backing.createHandle(js).As<v8::Uint8Array>());
+    }
+
+    auto backing2 = jsg::BackingStore::alloc<v8::Uint8Array>(
+        js, utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+    auto written = simdutf::convert_latin1_to_utf8(
+        backingData, length, reinterpret_cast<char*>(backing2.asArrayPtr<kj::byte>().begin()));
+    KJ_DASSERT(backing2.size() == written);
+    return jsg::JsUint8Array(backing2.createHandle(js).As<v8::Uint8Array>());
   }
 
-  // Allocate the output buffer and perform the conversion while ValueView is alive, but defer
-  // creating the V8 BufferSource until after ValueView is destroyed. This approach uses
-  // BackingStore::wrap with a custom disposer to avoid the copy overhead that would occur with
-  // BackingStore::from in the v8 sandbox, since from() copies data when it's not already in the
-  // sandbox. By using new/delete with wrap(), we maintain ownership semantics compatible with V8's
-  // C-style BackingStore API while avoiding the extra allocation and copy.
-  jsg::BackingStore backing = [&]() {
-    v8::String::ValueView value_view(js.v8Isolate, str);
-    size_t length = static_cast<size_t>(value_view.length());
+  // First pass: Calculate the required UTF-8 output buffer size.
+  // We need to do this in a separate ValueView because:
+  // 1. ValueView holds the V8 heap lock, which prevents us from allocating new V8 objects
+  // 2. We must determine the exact output size before allocating the BackingStore
+  // 3. Once we know the size, we'll create a second ValueView to do the actual conversion
+  size_t utf8_length = 0;
+  bool isValidUtf16 = true;
+  // For invalid UTF-16 strings (with unpaired surrogates), we need to fix them to well-formed
+  // UTF-16 before calculating the UTF-8 length. We store the fixed version here so it can be
+  // reused in the second pass, avoiding the need to fix it twice.
+  kj::Array<char16_t> wellFormed;
 
-    if (value_view.is_one_byte()) {
-      // Fast path for Latin-1 encoded strings. V8 uses Latin-1 (ISO-8859-1) encoding internally
-      // for strings that contain only code points <= U+00FF. We need to convert to UTF-8.
-      auto data = reinterpret_cast<const char*>(value_view.data8());
-      size_t utf8_length = simdutf::utf8_length_from_latin1(data, length);
-      auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
-      [[maybe_unused]] auto written =
-          simdutf::convert_latin1_to_utf8(data, length, output->asChars().begin());
-      KJ_DASSERT(written == output->size());
-      return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
-          [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
-          output);
-    }
+  {
+    v8::String::ValueView view(js.v8Isolate, str);
+    // One-byte strings are handled by the fast path above
+    KJ_DASSERT(!view.is_one_byte());
 
+    auto data = reinterpret_cast<const char16_t*>(view.data16());
     // Two-byte string path. V8 uses UTF-16LE encoding internally for strings with code points
     // > U+00FF. Check if the UTF-16 is valid (no unpaired surrogates) to determine the path.
-    auto data = reinterpret_cast<const char16_t*>(value_view.data16());
-    auto valid_utf16 = simdutf::validate_utf16le(data, length);
+    isValidUtf16 = simdutf::validate_utf16le(data, view.length());
 
-    if (valid_utf16) {
+    if (isValidUtf16) {
+      // Common case: valid UTF-16, calculate UTF-8 length directly
+      utf8_length = simdutf::utf8_length_from_utf16le(data, view.length());
+    } else {
+      // Rare case: Invalid UTF-16 with unpaired surrogates. Per the Encoding Standard,
+      // unpaired surrogates must be replaced with U+FFFD (replacement character).
+      // U+FFFD is 3 bytes in UTF-8, which means the UTF-8 length will differ from what
+      // we'd calculate from the invalid UTF-16. We must fix the UTF-16 first, then
+      // calculate the UTF-8 length from the well-formed version to get the correct size.
+      wellFormed = kj::heapArray<char16_t>(view.length());
+      simdutf::to_well_formed_utf16le(data, view.length(), wellFormed.begin());
+      utf8_length = simdutf::utf8_length_from_utf16le(wellFormed.begin(), view.length());
+    }
+  }  // ValueView destroyed here, releasing the heap lock
+
+  // Pre-allocate the jsg::BackingStore to avoid the copy overhead that would occur with
+  // BackingStore::from() in the v8 sandbox, since from() copies data when it's not already in the
+  // sandbox. By pre-allocating with alloc(), the memory is already in the sandbox and we can
+  // perform the conversion directly into it.
+  auto backing = jsg::BackingStore::alloc<v8::Uint8Array>(
+      js, utf8_length, jsg::Lock::AllocOption::UNINITIALIZED);
+
+  // Second pass: Perform the actual UTF-8 conversion.
+  // We create a new ValueView here to access the string data again, now that we have a
+  // pre-allocated output buffer. The closure ensures the ValueView is destroyed before we
+  // return the result, which is important for proper V8 heap management.
+  [&]() {
+    v8::String::ValueView view(js.v8Isolate, str);
+    // One-byte strings are handled by the fast path above
+    KJ_DASSERT(!view.is_one_byte());
+
+    size_t length = static_cast<size_t>(view.length());
+    auto* output = backing.asArrayPtr<char>().begin();
+    auto data = reinterpret_cast<const char16_t*>(view.data16());
+
+    if (isValidUtf16) {
       // Common case: valid UTF-16LE, convert directly to UTF-8
-      size_t utf8_length = simdutf::utf8_length_from_utf16le(data, length);
-      auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
-      [[maybe_unused]] auto written =
-          simdutf::convert_utf16le_to_utf8(data, length, output->asChars().begin());
-      KJ_DASSERT(written == output->size());
-      return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
-          [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
-          output);
+      [[maybe_unused]] auto written = simdutf::convert_utf16le_to_utf8(data, length, output);
+      KJ_DASSERT(written == backing.size());
+      return;
     }
 
-    // Rare case: Invalid UTF-16LE with unpaired surrogates. Per the Encoding Standard, we must
-    // replace unpaired surrogates with U+FFFD replacement characters. We do this in two passes:
-    // first fix the UTF-16, then convert to UTF-8. This extra buffer allocation only happens
-    // for malformed strings, which should be uncommon in practice.
-    auto well_formed = kj::heapArray<char16_t>(length);
-    simdutf::to_well_formed_utf16le(data, length, well_formed.begin());
-
-    size_t utf8_length = simdutf::utf8_length_from_utf16le(well_formed.begin(), length);
-    auto* output = new kj::Array<kj::byte>(kj::heapArray<kj::byte>(utf8_length));
+    // Rare case: Invalid UTF-16LE with unpaired surrogates. We already fixed the UTF-16 to
+    // well-formed in the first pass (stored in wellFormed array), so now we just convert that
+    // fixed version to UTF-8. This reuses the wellFormed array created earlier, avoiding the
+    // need to fix the UTF-16 a second time.
     [[maybe_unused]] auto written =
-        simdutf::convert_utf16le_to_utf8(well_formed.begin(), length, output->asChars().begin());
-    KJ_DASSERT(written == output->size());
-    return jsg::BackingStore::wrap<v8::Uint8Array>(output->begin(), output->size(),
-        [](void*, size_t, void* ptr) { delete reinterpret_cast<kj::Array<kj::byte>*>(ptr); },
-        output);
+        simdutf::convert_utf16le_to_utf8(wellFormed.begin(), wellFormed.size(), output);
+    KJ_DASSERT(written == backing.size());
   }();  // ValueView destroyed here, releasing the heap lock
 
   // Now that ValueView is destroyed and the heap lock is released, it's safe to create V8 objects.
-  // Construct the BufferSource which will create the actual Uint8Array that gets returned to JS.
-  return jsg::BufferSource(js, kj::mv(backing));
+  // Create the Uint8Array from the BackingStore and return it to JS.
+  return jsg::JsUint8Array(backing.createHandle(js).As<v8::Uint8Array>());
 }
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
