@@ -1063,7 +1063,7 @@ void WebSocket::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err) {
     error = err.addRef(js);
 
     dispatchEventImpl(js,
-        js.alloc<ErrorEvent>(kj::str("error"),
+        js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}));
 
     // After an error we don't allow further send()s. If the receive loop has also ended then we

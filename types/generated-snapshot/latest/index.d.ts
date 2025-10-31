@@ -531,25 +531,6 @@ interface ExportedHandler<
 interface StructuredSerializeOptions {
   transfer?: any[];
 }
-/**
- * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
- */
-declare abstract class PromiseRejectionEvent extends Event {
-  /**
-   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
-   */
-  readonly promise: Promise<any>;
-  /**
-   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
-   */
-  readonly reason: any;
-}
 declare abstract class Navigator {
   sendBeacon(
     url: string,
@@ -1641,6 +1622,25 @@ declare class MessageEvent extends Event {
 }
 interface MessageEventInit {
   data: ArrayBuffer | string;
+}
+/**
+ * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
+ */
+declare abstract class PromiseRejectionEvent extends Event {
+  /**
+   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
+   */
+  readonly promise: Promise<any>;
+  /**
+   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
+   */
+  readonly reason: any;
 }
 /**
  * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the Window/fetch, XMLHttpRequest.send() or navigator.sendBeacon() methods.
