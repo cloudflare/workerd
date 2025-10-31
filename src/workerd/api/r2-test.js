@@ -371,7 +371,6 @@ export default {
             }
           }
           case 'multipleChecksums': {
-            // Convert buffers to hex strings as expected by Cap'n Proto JSON codec
             const toHex = (buffer) =>
               Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join(
                 ''
@@ -575,8 +574,6 @@ export default {
             });
           }
           case 'multipleChecksums': {
-            // Return HEAD response with multiple checksums
-            // Convert buffers to hex strings as expected by Cap'n Proto JSON codec
             const toHex = (buffer) =>
               Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join(
                 ''
