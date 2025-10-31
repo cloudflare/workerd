@@ -25,7 +25,7 @@
 /// maximum size of scripts that can be executed. Currently, this is 16MB.
 /// Executing a 16MB script file is very likely to take longer than the typical
 /// timeout, so the limit on script size shouldn't be a problem in practice.
-#define REPRL_MAX_DATA_SIZE (16 << 20)
+const uint64_t REPRL_MAX_DATA_SIZE = 16 << 20;
 
 /// Opaque struct representing a REPRL execution context.
 struct reprl_context;
