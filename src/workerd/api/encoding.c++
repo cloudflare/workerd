@@ -4,6 +4,7 @@
 
 #include "encoding.h"
 
+#include "simdutf.h"
 #include "util.h"
 
 #include <workerd/jsg/jsg.h>
@@ -464,25 +465,53 @@ jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
 
-namespace {
-TextEncoder::EncodeIntoResult encodeIntoImpl(
-    jsg::Lock& js, jsg::JsString input, jsg::BufferSource& buffer) {
-  auto result = input.writeInto(
-      js, buffer.asArrayPtr().asChars(), jsg::JsString::WriteFlags::REPLACE_INVALID_UTF8);
-  return TextEncoder::EncodeIntoResult{
-    .read = static_cast<int>(result.read),
-    .written = static_cast<int>(result.written),
-  };
-}
-}  // namespace
-
 jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
-  auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
-      "Cannot allocate space for TextEncoder.encode");
-  [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
-  KJ_DASSERT(result.written == view.size());
-  return kj::mv(view);
+
+  // Do the conversion while ValueView is alive, but to a C++ heap buffer (not V8 heap)
+  kj::Array<kj::byte> output_data;
+
+  {
+    v8::String::ValueView value_view(js.v8Isolate, str);
+    size_t length = static_cast<size_t>(value_view.length());
+
+    if (value_view.is_one_byte()) {
+      auto data = reinterpret_cast<const char*>(value_view.data8());
+      size_t utf8_length = simdutf::utf8_length_from_latin1(data, length);
+      output_data = kj::heapArray<kj::byte>(utf8_length);
+      [[maybe_unused]] auto written =
+          simdutf::convert_latin1_to_utf8(data, length, output_data.asChars().begin());
+      KJ_DASSERT(written == output_data.size());
+    } else {
+      auto data = reinterpret_cast<const char16_t*>(value_view.data16());
+
+      // Check if UTF-16LE is valid
+      auto validation_result = simdutf::validate_utf16le(data, length);
+
+      if (validation_result) {
+        // Valid UTF-16LE, convert directly
+        size_t utf8_length = simdutf::utf8_length_from_utf16le(data, length);
+        output_data = kj::heapArray<kj::byte>(utf8_length);
+        [[maybe_unused]] auto written =
+            simdutf::convert_utf16le_to_utf8(data, length, output_data.asChars().begin());
+        KJ_DASSERT(written == output_data.size());
+      } else {
+        // Invalid UTF-16LE (unpaired surrogates), fix it first
+        auto well_formed = kj::heapArray<char16_t>(length);
+        simdutf::to_well_formed_utf16le(data, length, well_formed.begin());
+
+        // Now convert the well-formed UTF-16LE to UTF-8
+        size_t utf8_length = simdutf::utf8_length_from_utf16le(well_formed.begin(), length);
+        output_data = kj::heapArray<kj::byte>(utf8_length);
+        [[maybe_unused]] auto written = simdutf::convert_utf16le_to_utf8(
+            well_formed.begin(), length, output_data.asChars().begin());
+        KJ_DASSERT(written == output_data.size());
+      }
+    }
+  }  // ValueView destroyed here, releasing the heap lock
+
+  // Now create BufferSource from the output data (this allocates V8 objects, which is now safe)
+  return jsg::BufferSource(js, jsg::BackingStore::from(js, kj::mv(output_data)));
 }
 
 TextEncoder::EncodeIntoResult TextEncoder::encodeInto(
