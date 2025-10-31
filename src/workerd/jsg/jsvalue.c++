@@ -434,6 +434,95 @@ bool JsString::containsOnlyOneByte() const {
   return inner->ContainsOnlyOneByte();
 }
 
+JsUint8Array JsString::writeIntoUint8Array(Lock& js) const {
+  // We have to avoid flattening the string. We stick only to APIs that we know
+  // will not trigger flattening. They key goal is to eliminate the additional
+  // memory allocation and copying that happens when flattening occurs. This is
+  // especially important for large strings when we are close to the isolate heap
+  // limit as flattening can cause additional GC activity and memory pressure that
+  // can thrash the GC. The APIs we use here are known not to trigger flattening.
+  // We cannot avoid the allocation of the destination buffer for the UTF-8 bytes
+  // but wen can avoid the intermediate allocation of a contiguous UTF-16 buffer.
+
+  // The size of our destination buffer is the UTF-8 length of the string, which is an upper bound on the number of bytes we will need to write. We calculate this ourselves rather than using inner->Utf8LengthV2() because that method definitely triggers flattening.
+  auto length = inner->Length();
+
+  // The worst case is every code unit is a 4-byte UTF-8 sequence.
+  auto maxUtf8Length = length * 4;
+
+  auto backing = v8::ArrayBuffer::NewBackingStore(js.v8Isolate, maxUtf8Length);
+  kj::ArrayPtr<char> destination(static_cast<char*>(backing->Data()), backing->ByteLength());
+  kj::FixedArray<char16_t, 4096> intermediate;
+  kj::ArrayPtr<uint16_t> intermediateView(
+      reinterpret_cast<uint16_t*>(intermediate.begin()), intermediate.size());
+
+  // The number of code units we have remaining to write from the string.
+  size_t remaining = length;
+  // The actual calculated UTF-8 length of the string.
+  size_t utf8Length = 0;
+  bool hadCarryOver = false;
+
+  kj::Maybe<uint16_t> carryOverLeadSurrogate;
+
+  while (remaining) {
+    // If we have a carry-over lead surrogate from the previous iteration, we need to write it
+    // into the intermediate buffer first.
+    KJ_IF_SOME(lead, carryOverLeadSurrogate) {
+      intermediateView[0] = lead;
+      intermediateView = intermediateView.slice(1);
+      hadCarryOver = true;
+    } else {
+      hadCarryOver = false;
+    }
+
+    size_t toRead = kj::min(remaining, intermediateView.size());
+    KJ_ASSERT(toRead > 0, "toRead must be greater than 0");
+
+    size_t offset = length - remaining;
+
+    inner->WriteV2(
+        js.v8Isolate, offset, toRead, intermediateView.begin(), v8::String::WriteFlags::kNone);
+
+    // Let's check if the last code unit we read is a lead surrogate. If it is, we need to carry it over to the next iteration so that we can properly encode the surrogate pair into UTF-8.
+    uint16_t lastCodeUnit = intermediateView[toRead - 1];
+    if (lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF) {
+      carryOverLeadSurrogate = lastCodeUnit;
+      toRead--;
+      remaining--;  // Account for the carried-over char16_t so we don't re-read it
+    } else {
+      carryOverLeadSurrogate = kj::none;
+    }
+
+    size_t actualRead = toRead + (hadCarryOver ? 1 : 0);
+
+    // Let's get the expected UTF-8 length of the code units we just read.
+    size_t expectedUtf8Length = simdutf::utf8_length_from_utf16(intermediate.begin(), actualRead);
+
+    // This should never exceed the maximum remaining destination length.
+    KJ_ASSERT(expectedUtf8Length <= destination.size());
+
+    // Now, let's encode the code units we do have in the intermediate buffer into UTF-8
+    // using simdutf.
+    size_t written = simdutf::convert_utf16_to_utf8_safe(
+        intermediate.begin(), actualRead, destination.begin(), destination.size());
+
+    // The written should match the expected UTF-8 length.
+    KJ_ASSERT(written <= expectedUtf8Length);
+    utf8Length += written;
+
+    destination = destination.slice(written);
+    intermediateView =
+        kj::arrayPtr(reinterpret_cast<uint16_t*>(intermediate.begin()), intermediate.size());
+
+    remaining -= toRead;
+  }
+
+  KJ_ASSERT(utf8Length <= maxUtf8Length, "Calculated UTF-8 length exceeds maximum expected length");
+
+  auto buffer = v8::ArrayBuffer::New(js.v8Isolate, kj::mv(backing));
+  return JsUint8Array(v8::Uint8Array::New(buffer, 0, utf8Length));
+}
+
 kj::Maybe<JsArray> JsRegExp::operator()(Lock& js, const JsString& input) const {
   auto result = check(inner->Exec(js.v8Context(), input));
   if (result->IsNullOrUndefined()) return kj::none;

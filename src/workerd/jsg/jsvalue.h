@@ -289,6 +289,15 @@ class JsString final: public JsBase<v8::String, JsString> {
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
 
+  // A variation of writeInto that uses an alternative method of writing the UTF8 bytes
+  // of the string into a Uint8Array. This variation uses WriteV2 to write incrementally
+  // into a small buffer, which is then converted to UTF8 using simdutf in small chunks.
+  // This is more efficient for large strings, since it avoids the need to risk flattening
+  // the string into a contiguous buffer in memory before writing it out. This is especially
+  // important for very large strings where flatten can incur a significant performance penalty
+  // and trigger increased GC activity.
+  JsUint8Array writeIntoUint8Array(Lock& js) const;
+
   using JsBase<v8::String, JsString>::JsBase;
 };
 
