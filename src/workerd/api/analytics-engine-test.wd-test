@@ -26,12 +26,26 @@ const mainWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "analytics-engine-test.js"),
   ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "streaming_tail_worker", "tail_worker_user_spans"],
   compatibilityDate = "2023-02-28",
 
-  bindings = [ ( name = "aebinding", analyticsEngine = "analytics") ]
+  bindings = [ ( name = "aebinding", analyticsEngine = "analytics") ],
+  streamingTails = ["tail"],
 );
 
 const unitTests :Workerd.Config = (
-    services = [ (name = "main", worker = .mainWorker), (name = "analytics", worker = .analyticsWorker) ],
+    services = [
+      (name = "main", worker = .mainWorker),
+      (name = "analytics", worker = .analyticsWorker),
+      (name = "tail", worker = .tailWorker),
+    ],
+);
+
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "analytics-engine-test-tail.js")
+  ],
+  compatibilityDate = "2024-10-14",
+  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
