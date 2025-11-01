@@ -275,7 +275,7 @@ class Module {
   };
 
   KJ_DISALLOW_COPY_AND_MOVE(Module);
-  virtual ~Module() = default;
+  virtual ~Module() noexcept(false) = default;
 
   // The fully resolved absolute import specifier URL for the module.
   inline const Url& id() const KJ_LIFETIMEBOUND {
