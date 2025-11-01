@@ -328,27 +328,22 @@ void addHeadResultSpanTags(
       kj::str(toISOString(js, headResult.getUploaded()).asPtr()));
   auto checksums = headResult.getChecksums();
   KJ_IF_SOME(md5, checksums.get()->md5) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(md5));
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("md5"));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.md5"_kjc, kj::encodeHex(md5));
   }
   KJ_IF_SOME(sha1, checksums.get()->sha1) {
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha1));
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha1"));
+    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.sha1"_kjc, kj::encodeHex(sha1));
   }
   KJ_IF_SOME(sha256, checksums.get()->sha256) {
     traceContext.userSpan.setTag(
-        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha256));
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha256"));
+        "cloudflare.r2.response.checksum.sha256"_kjc, kj::encodeHex(sha256));
   }
   KJ_IF_SOME(sha384, checksums.get()->sha384) {
     traceContext.userSpan.setTag(
-        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha384));
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha384"));
+        "cloudflare.r2.response.checksum.sha384"_kjc, kj::encodeHex(sha384));
   }
   KJ_IF_SOME(sha512, checksums.get()->sha512) {
     traceContext.userSpan.setTag(
-        "cloudflare.r2.response.checksum.value"_kjc, kj::encodeHex(sha512));
-    traceContext.userSpan.setTag("cloudflare.r2.response.checksum.type"_kjc, kj::str("sha512"));
+        "cloudflare.r2.response.checksum.sha512"_kjc, kj::encodeHex(sha512));
   }
 
   traceContext.userSpan.setTag(
