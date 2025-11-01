@@ -16,9 +16,9 @@
 #include <workerd/server/workerd-capnp-schema.embed.h>
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
 
 #include <fcntl.h>
-#include <openssl/rand.h>
 #include <sys/stat.h>
 
 #include <capnp/dynamic.h>
@@ -99,7 +99,7 @@ __lsan_default_suppressions() {
 class EntropySourceImpl: public kj::EntropySource {
  public:
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
-    KJ_ASSERT(RAND_bytes(buffer.begin(), buffer.size()) == 1);
+    getEntropy(buffer);
   }
 };
 
