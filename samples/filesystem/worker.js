@@ -8,7 +8,6 @@ const root = await navigator.storage.getDirectory();
 const tmp = await root.getDirectoryHandle('tmp');
 export default {
   async fetch(req, env) {
-
     // Any files that are created in the tmp file directory will be
     // automatically cleaned up by the runtime after each request.
     // The tmp dir is specific to each request, so concurrent requests
@@ -16,7 +15,7 @@ export default {
     // between requests.
 
     // Web File System APIs...
-    const file = await tmp.getFileHandle("foo", { create: true });
+    const file = await tmp.getFileHandle('foo', { create: true });
     const writable = await file.createWritable();
     await writable.write('Hello World\n');
     await writable.close();
@@ -26,5 +25,5 @@ export default {
     const data = readFileSync('/tmp/foo', 'utf8');
 
     return new Response(data);
-  }
+  },
 };

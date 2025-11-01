@@ -11,7 +11,6 @@ import { promisify } from 'node:util';
 
 export default {
   async fetch() {
-
     // Random bytes, numbers, and UUIDs
     const buf = new Uint8Array(10);
     randomFillSync(buf);
@@ -37,6 +36,6 @@ export default {
     };
     console.log(scryptSync(password, salt, keylen, options));
 
-    return new Response("ok");
-  }
+    return new Response('ok');
+  },
 };

@@ -187,27 +187,26 @@ declare namespace Cloudflare {
 
   // Evaluates to the type of a property in GlobalProps, defaulting to `Default` if it is not
   // present.
-  type GlobalProp<K extends string, Default> =
-      K extends keyof GlobalProps ? GlobalProps[K] : Default;
+  type GlobalProp<K extends string, Default> = K extends keyof GlobalProps
+    ? GlobalProps[K]
+    : Default;
 
   // The type of the program's main module exports, if known. Requires `GlobalProps` to declare the
   // `mainModule` property.
-  type MainModule = GlobalProp<"mainModule", {}>;
+  type MainModule = GlobalProp<'mainModule', {}>;
 
   // The type of ctx.exports, which contains loopback bindings for all top-level exports.
   type Exports = {
-    [K in keyof MainModule]:
-        & LoopbackForExport<MainModule[K]>
-
-        // If the export is listed in `durableNamespaces`, then it is also a
-        // DurableObjectNamespace.
-        & (K extends GlobalProp<"durableNamespaces", never>
-            ?  MainModule[K] extends new (...args: any[]) => infer DoInstance
-                ? DoInstance extends Rpc.DurableObjectBranded
-                    ? DurableObjectNamespace<DoInstance>
-                    : DurableObjectNamespace<undefined>
-                : DurableObjectNamespace<undefined>
-            : {});
+    [K in keyof MainModule]: LoopbackForExport<MainModule[K]> &
+      // If the export is listed in `durableNamespaces`, then it is also a
+      // DurableObjectNamespace.
+      (K extends GlobalProp<'durableNamespaces', never>
+        ? MainModule[K] extends new (...args: any[]) => infer DoInstance
+          ? DoInstance extends Rpc.DurableObjectBranded
+            ? DurableObjectNamespace<DoInstance>
+            : DurableObjectNamespace<undefined>
+          : DurableObjectNamespace<undefined>
+        : {});
   };
 }
 
@@ -223,10 +222,8 @@ declare namespace CloudflareWorkersModule {
 
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
 
-  export abstract class WorkerEntrypoint<
-    Env = Cloudflare.Env,
-    Props = {},
-  > implements Rpc.WorkerEntrypointBranded
+  export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.WorkerEntrypointBranded
   {
     [Rpc.__WORKER_ENTRYPOINT_BRAND]: never;
 
@@ -243,10 +240,8 @@ declare namespace CloudflareWorkersModule {
     test?(controller: TestController): void | Promise<void>;
   }
 
-  export abstract class DurableObject<
-    Env = Cloudflare.Env,
-    Props = {},
-  > implements Rpc.DurableObjectBranded
+  export abstract class DurableObject<Env = Cloudflare.Env, Props = {}>
+    implements Rpc.DurableObjectBranded
   {
     [Rpc.__DURABLE_OBJECT_BRAND]: never;
 

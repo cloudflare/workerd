@@ -2,14 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from "node:assert";
-import ts from "typescript";
-import { isUnsatisfiable } from "../../generator/type";
-import { printNode } from "../../print";
-import { ensureStatementModifiers, hasModifier } from "../helpers";
-import { maybeGetDefines, maybeGetOverride } from "./compiler";
+import assert from 'node:assert';
+import ts from 'typescript';
+import { isUnsatisfiable } from '../../generator/type';
+import { printNode } from '../../print';
+import { ensureStatementModifiers, hasModifier } from '../helpers';
+import { maybeGetDefines, maybeGetOverride } from './compiler';
 
-export { compileOverridesDefines } from "./compiler";
+export { compileOverridesDefines } from './compiler';
 
 // Applies handwritten partial TypeScript overrides to generate types to improve
 // output fidelity. Also applies type renames and inserts additional handwritten
@@ -85,7 +85,7 @@ interface OverrideTransformContext {
 
 // Gets an identifying label for this member, shared between method overloads
 function getMemberKey(member: ts.ClassElement | ts.TypeElement): string {
-  if (ts.isConstructorDeclaration(member)) return "constructor$";
+  if (ts.isConstructorDeclaration(member)) return 'constructor$';
 
   const name = member.name;
   assert(
@@ -99,7 +99,7 @@ function getMemberKey(member: ts.ClassElement | ts.TypeElement): string {
   const isStatic =
     ts.canHaveModifiers(member) &&
     hasModifier(ts.getModifiers(member), ts.SyntaxKind.StaticKeyword);
-  const keyNamespace = isStatic ? "static$" : "instance$";
+  const keyNamespace = isStatic ? 'static$' : 'instance$';
 
   if (
     ts.isIdentifier(name) ||

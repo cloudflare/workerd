@@ -1,14 +1,14 @@
-var Stream = require('stream').Stream
+var Stream = require('stream').Stream;
 
-module.exports = legacy
+module.exports = legacy;
 
-function legacy (fs) {
+function legacy(fs) {
   return {
     ReadStream: ReadStream,
-    WriteStream: WriteStream
-  }
+    WriteStream: WriteStream,
+  };
 
-  function ReadStream (path, options) {
+  function ReadStream(path, options) {
     if (!(this instanceof ReadStream)) return new ReadStream(path, options);
 
     Stream.call(this);
@@ -53,7 +53,7 @@ function legacy (fs) {
     }
 
     if (this.fd !== null) {
-      process.nextTick(function() {
+      process.nextTick(function () {
         self._read();
       });
       return;
@@ -69,10 +69,10 @@ function legacy (fs) {
       self.fd = fd;
       self.emit('open', fd);
       self._read();
-    })
+    });
   }
 
-  function WriteStream (path, options) {
+  function WriteStream(path, options) {
     if (!(this instanceof WriteStream)) return new WriteStream(path, options);
 
     Stream.call(this);
@@ -111,7 +111,13 @@ function legacy (fs) {
 
     if (this.fd === null) {
       this._open = fs.open;
-      this._queue.push([this._open, this.path, this.flags, this.mode, undefined]);
+      this._queue.push([
+        this._open,
+        this.path,
+        this.flags,
+        this.mode,
+        undefined,
+      ]);
       this.flush();
     }
   }
