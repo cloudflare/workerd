@@ -128,7 +128,7 @@ class StringCache final {
 // Serialize attribute value
 jsg::JsValue ToJs(jsg::Lock& js, const Attribute::Value& value) {
   KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(str, kj::String) {
+    KJ_CASE_ONEOF(str, kj::ConstString) {
       return js.str(str);
     }
     KJ_CASE_ONEOF(b, bool) {

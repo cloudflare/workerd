@@ -7,7 +7,8 @@
       "owner": "capnproto",
       "repo": "capnproto",
       "branch": "v2",
-      "extra_strip_prefix": "/c++"
+      "extra_strip_prefix": "/c++",
+      "freeze_commit": "b7e4829680f93a149f50f579efe78d94a6e22c2a"
     }
   ]
 }

@@ -125,8 +125,8 @@ class Worker: public kj::AtomicRefcounted {
     ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY;
     StructuredLogging structuredLogging = StructuredLogging::NO;
     ProcessStdioPrefixed processStdioPrefixed = ProcessStdioPrefixed::YES;
-    kj::String stdoutPrefix = kj::str("stdout:"_kj);
-    kj::String stderrPrefix = kj::str("stderr:"_kj);
+    kj::ConstString stdoutPrefix = "stdout:"_kjc;
+    kj::ConstString stderrPrefix = "stderr:"_kjc;
 
     LoggingOptions() = default;
     LoggingOptions(LoggingOptions&&) = default;
@@ -138,15 +138,15 @@ class Worker: public kj::AtomicRefcounted {
         : consoleMode(other.consoleMode),
           structuredLogging(other.structuredLogging),
           processStdioPrefixed(other.processStdioPrefixed),
-          stdoutPrefix(kj::str(other.stdoutPrefix)),
-          stderrPrefix(kj::str(other.stderrPrefix)) {}
+          stdoutPrefix(other.stdoutPrefix.clone()),
+          stderrPrefix(other.stderrPrefix.clone()) {}
 
     LoggingOptions& operator=(const LoggingOptions& other) {
       consoleMode = other.consoleMode;
       structuredLogging = other.structuredLogging;
       processStdioPrefixed = other.processStdioPrefixed;
-      stdoutPrefix = kj::str(other.stdoutPrefix);
-      stderrPrefix = kj::str(other.stderrPrefix);
+      stdoutPrefix = other.stdoutPrefix.clone();
+      stderrPrefix = other.stderrPrefix.clone();
       return *this;
     }
   };
