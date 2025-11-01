@@ -478,6 +478,14 @@ TextEncoder::EncodeIntoResult encodeIntoImpl(
 
 jsg::BufferSource TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString> input) {
   auto str = input.orDefault(js.str());
+
+  // If the input string to large (>= 100k code units) we want to avoid the overhead of flattening
+  // by using the alternative writeIntoUint8Array method...
+  if (str.length(js) >= 100 * 1024) {
+    auto view = str.writeIntoUint8Array(js);
+    return jsg::BufferSource(js, view);
+  }
+
   auto view = JSG_REQUIRE_NONNULL(jsg::BufferSource::tryAlloc(js, str.utf8Length(js)), RangeError,
       "Cannot allocate space for TextEncoder.encode");
   [[maybe_unused]] auto result = encodeIntoImpl(js, str, view);
