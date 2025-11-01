@@ -46,10 +46,12 @@ def _fmt_python_snapshot_release(
         backport,
         baseline_snapshot_hash,
         flag,
+        real_pyodide_version,
         **_kwds):
     content = ", ".join(
         [
             'pyodide = "%s"' % pyodide_version,
+            'realPyodideVersion = "%s"' % real_pyodide_version,
             'pyodideRevision = "%s"' % pyodide_date,
             'packages = "%s"' % packages,
             "backport = %s" % backport,

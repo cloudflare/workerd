@@ -97,8 +97,8 @@ def _make_bundle_version_info(versions):
 
     dev = result["development"]
 
-    # Uncomment to test with development = 0.28.2
-    # dev["real_pyodide_version"] = "0.28.2"
+    # Uncomment to test with development = 0.26.0a2
+    # dev["real_pyodide_version"] = "0.26.0a2"
     result["development"] = result[dev["real_pyodide_version"]] | dev
     _check_pyodide_versions(result)
     return result
@@ -194,7 +194,7 @@ BUNDLE_VERSION_INFO = _make_bundle_version_info([
         ],
     },
     {
-        "real_pyodide_version": "0.26.0a2",
+        "real_pyodide_version": "0.28.2",
         "name": "development",
         "pyodide_version": "dev",
         "pyodide_date": "dev",
