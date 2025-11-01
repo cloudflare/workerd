@@ -1835,6 +1835,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               impl->permanentException);
         }
       });
+
+      // Reset this back to its default after startup execution
+      // Leaving it on comes at the expense of collecting stack traces for all thrown exceptions
+      if (script->isolate->impl->inspector == kj::none) {
+        lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(false);
+      }
     });
   });
 }
