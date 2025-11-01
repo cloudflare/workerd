@@ -131,38 +131,6 @@ class Cloudflare: public jsg::Object {
   }
 };
 
-class PromiseRejectionEvent: public Event {
- public:
-  PromiseRejectionEvent(
-      v8::PromiseRejectEvent type, jsg::V8Ref<v8::Promise> promise, jsg::Value reason);
-
-  static jsg::Ref<PromiseRejectionEvent> constructor(kj::String type) = delete;
-
-  jsg::V8Ref<v8::Promise> getPromise(jsg::Lock& js) {
-    return promise.addRef(js);
-  }
-  jsg::Value getReason(jsg::Lock& js) {
-    return reason.addRef(js);
-  }
-
-  JSG_RESOURCE_TYPE(PromiseRejectionEvent) {
-    JSG_INHERIT(Event);
-    JSG_READONLY_INSTANCE_PROPERTY(promise, getPromise);
-    JSG_READONLY_INSTANCE_PROPERTY(reason, getReason);
-  }
-
-  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
-    tracker.trackField("promise", promise);
-    tracker.trackField("reason", reason);
-  }
-
- private:
-  jsg::V8Ref<v8::Promise> promise;
-  jsg::Value reason;
-
-  void visitForGc(jsg::GcVisitor& visitor);
-};
-
 class WorkerGlobalScope: public EventTarget, public jsg::ContextGlobal {
  public:
   jsg::Unimplemented importScripts(kj::String s) {
@@ -446,12 +414,10 @@ class Immediate final: public jsg::Object {
   }
 
  private:
-  // On the off chance user code holds onto to the Ref<Immediate> longer than
-  // the IoContext remains alive, let's maintain just a weak reference to the
-  // IoContext here to avoid problems. This reference is used only for handling
-  // the dispose operation, so it should be perfectly fine for it to be weak
-  // and a non-op after the IoContext is gone.
-  kj::Own<IoContext::WeakRef> contextRef;
+  // Note: We cannot use IoContext::WeakRef here because it's not thread-safe (it's only intended
+  // to be held from KJ I/O objects, but this is a JSG object which can be accessed by V8's GC
+  // on different threads). Instead, we use IoPtr<IoContext> which is safe to hold from JSG objects.
+  IoPtr<IoContext> ioContext;
   TimeoutId timeoutId;
 };
 
@@ -939,7 +905,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
       api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::PromiseRejectionEvent,           \
-      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
+      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
+      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

@@ -550,25 +550,6 @@ export interface ExportedHandler<
 export interface StructuredSerializeOptions {
   transfer?: any[];
 }
-/**
- * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
- *
- * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
- */
-export declare abstract class PromiseRejectionEvent extends Event {
-  /**
-   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
-   */
-  readonly promise: Promise<any>;
-  /**
-   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
-   *
-   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
-   */
-  readonly reason: any;
-}
 export declare abstract class Navigator {
   sendBeacon(
     url: string,
@@ -1691,6 +1672,25 @@ export declare class MessageEvent extends Event {
 }
 export interface MessageEventInit {
   data: ArrayBuffer | string;
+}
+/**
+ * The **`PromiseRejectionEvent`** interface represents events which are sent to the global script context when JavaScript Promises are rejected.
+ *
+ * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent)
+ */
+export declare abstract class PromiseRejectionEvent extends Event {
+  /**
+   * The PromiseRejectionEvent interface's **`promise`** read-only property indicates the JavaScript rejected.
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/promise)
+   */
+  readonly promise: Promise<any>;
+  /**
+   * The PromiseRejectionEvent **`reason`** read-only property is any JavaScript value or Object which provides the reason passed into Promise.reject().
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/PromiseRejectionEvent/reason)
+   */
+  readonly reason: any;
 }
 /**
  * The **`FormData`** interface provides a way to construct a set of key/value pairs representing form fields and their values, which can be sent using the Window/fetch, XMLHttpRequest.send() or navigator.sendBeacon() methods.
@@ -10163,6 +10163,11 @@ export declare namespace CloudflareWorkersModule {
     constructor(ctx: ExecutionContext, env: Env);
     fetch?(request: Request): Response | Promise<Response>;
     tail?(events: TraceItem[]): void | Promise<void>;
+    tailStream?(
+      event: TailStream.TailEvent<TailStream.Onset>,
+    ):
+      | TailStream.TailEventHandlerType
+      | Promise<TailStream.TailEventHandlerType>;
     trace?(traces: TraceItem[]): void | Promise<void>;
     scheduled?(controller: ScheduledController): void | Promise<void>;
     queue?(batch: MessageBatch<unknown>): void | Promise<void>;

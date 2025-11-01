@@ -4,6 +4,7 @@
 
 #pragma once
 #include "basics.h"
+#include "events.h"
 #include "http.h"
 
 #include <workerd/jsg/jsg.h>
@@ -20,35 +21,6 @@ class Response;
 // https://developer.mozilla.org/en-US/docs/Web/API/EventSource
 class EventSource: public EventTarget {
  public:
-  class ErrorEvent final: public Event {
-   public:
-    ErrorEvent(jsg::Lock& js, const jsg::JsValue& error)
-        : Event(kj::str("error")),
-          error(js, error) {}
-
-    static jsg::Ref<ErrorEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(ErrorEvent) {
-      JSG_INHERIT(Event);
-      JSG_LAZY_READONLY_INSTANCE_PROPERTY(error, getError);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> error;
-
-    jsg::JsValue getError(jsg::Lock& js) {
-      return error.getHandle(js);
-    }
-  };
-
-  class OpenEvent final: public Event {
-   public:
-    OpenEvent(): Event(kj::str("open")) {}
-    static jsg::Ref<OpenEvent> constructor() = delete;
-    JSG_RESOURCE_TYPE(OpenEvent) {
-      JSG_INHERIT(Event);
-    }
-  };
-
   struct EventSourceInit {
     // We don't actually make use of the standard withCredentials option. If this is set to
     // any truthy value, we'll throw.
@@ -230,6 +202,4 @@ class EventSource: public EventTarget {
 
 }  // namespace workerd::api
 
-#define EW_EVENTSOURCE_ISOLATE_TYPES                                                               \
-  api::EventSource, api::EventSource::ErrorEvent, api::EventSource::OpenEvent,                     \
-      api::EventSource::EventSourceInit
+#define EW_EVENTSOURCE_ISOLATE_TYPES api::EventSource, api::EventSource::EventSourceInit

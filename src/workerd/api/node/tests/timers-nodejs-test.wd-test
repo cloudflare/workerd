@@ -7,8 +7,11 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "timers-nodejs-test.js")
         ],
-        compatibilityDate = "2025-01-09",
-        compatibilityFlags = ["nodejs_compat", "no_nodejs_compat_v2"],
+        compatibilityDate = "2025-10-04",
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [
+          ( name = "SUBREQUEST", service = "nodejs-timers-test" ),
+        ],
       )
     ),
   ],
