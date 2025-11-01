@@ -393,7 +393,6 @@ class ReadableStreamController {
       BranchPtr(BranchPtr&& other) = default;
       BranchPtr& operator=(BranchPtr&&) = default;
       BranchPtr(BranchPtr& other) = default;
-      BranchPtr& operator=(BranchPtr&) = default;
 
       inline void doClose(jsg::Lock& js) {
         inner->doClose(js);
