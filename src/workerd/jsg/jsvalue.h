@@ -42,8 +42,6 @@ inline void requireOnStack(void* self) {
   V(NumberObject)                                                                                  \
   V(StringObject)                                                                                  \
   V(SymbolObject)                                                                                  \
-  V(ArrayBuffer)                                                                                   \
-  V(ArrayBufferView)                                                                               \
   V(TypedArray)                                                                                    \
   V(Uint8ClampedArray)                                                                             \
   V(Int8Array)                                                                                     \
@@ -228,6 +226,32 @@ class JsArray final: public JsBase<v8::Array, JsArray> {
   void add(Lock& js, const JsValue& value);
 
   using JsBase<v8::Array, JsArray>::JsBase;
+};
+
+class JsArrayBuffer final: public JsBase<v8::ArrayBuffer, JsArrayBuffer> {
+ public:
+  kj::ArrayPtr<kj::byte> asArrayPtr() {
+    v8::Local<v8::ArrayBuffer> inner = *this;
+    void* data = inner->GetBackingStore()->Data();
+    size_t length = inner->ByteLength();
+    return kj::ArrayPtr(static_cast<kj::byte*>(data), length);
+  }
+
+  using JsBase<v8::ArrayBuffer, JsArrayBuffer>::JsBase;
+};
+
+class JsArrayBufferView final: public JsBase<v8::ArrayBufferView, JsArrayBufferView> {
+ public:
+  template <typename T = kj::byte>
+  kj::ArrayPtr<T> asArrayPtr() {
+    v8::Local<v8::ArrayBufferView> inner = *this;
+    auto buf = inner->Buffer();
+    T* data = static_cast<T*>(buf->Data()) + inner->ByteOffset();
+    size_t length = inner->ByteLength();
+    return kj::ArrayPtr(data, length);
+  }
+
+  using JsBase<v8::ArrayBufferView, JsArrayBufferView>::JsBase;
 };
 
 class JsUint8Array final: public JsBase<v8::Uint8Array, JsUint8Array> {
