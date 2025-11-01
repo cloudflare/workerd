@@ -123,6 +123,7 @@ wd_cc_library(
         "//src/workerd/jsg:script",
         "//src/workerd/util:checked-queue",
         "//src/workerd/util:exception",
+        "//src/workerd/util:perfetto",
         "//src/workerd/util:ring-buffer",
         "//src/workerd/util:small-set",
         "//src/workerd/util:sqlite",

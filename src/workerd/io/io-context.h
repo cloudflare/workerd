@@ -19,6 +19,7 @@
 #include <workerd/jsg/jsg.h>
 #include <workerd/util/exception.h>
 #include <workerd/util/uncaught-exception-source.h>
+#include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/weak-refs.h>
 
 #include <capnp/dynamic.h>
@@ -1193,9 +1194,13 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
   } else {
     asyncLockPromise = worker->takeAsyncLock(getMetrics());
   }
-
+  TRACE_EVENT_BEGIN("workerd", "IoContext::run() waiting on lock",
+      PERFETTO_TRACK_FROM_POINTER(this), PERFETTO_FLOW_FROM_POINTER(this));
   return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
                                    Worker::AsyncLock lock) mutable {
+    TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(this));
+    TRACE_EVENT(
+        "workerd", "IoContext::run() acquired lock and running", PERFETTO_FLOW_FROM_POINTER(this));
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
     if constexpr (kj::isSameType<Result, void>()) {
@@ -1204,6 +1209,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 
         RunnableImpl(Func&& func): func(kj::fwd<Func>(func)) {}
         void run(Worker::Lock& lock) override {
+          TRACE_EVENT("workerd", "IoContext::run() running void func");
           func(lock);
         }
       };
@@ -1217,6 +1223,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::run(
 
         RunnableImpl(Func&& func): func(kj::fwd<Func>(func)) {}
         void run(Worker::Lock& lock) override {
+          TRACE_EVENT("workerd", "IoContext::run() running non-void func");
           result = func(lock);
         }
       };
