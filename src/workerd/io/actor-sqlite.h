@@ -230,12 +230,9 @@ class ActorSqlite final: public ActorCacheInterface, private kj::TaskSet::ErrorH
 
   kj::TaskSet commitTasks;
 
-  class AlarmLaterErrorHandler: public kj::TaskSet::ErrorHandler {
-   public:
-    void taskFailed(kj::Exception&& exception) override;
-  };
-  AlarmLaterErrorHandler alarmLaterErrorHandler;
-  kj::TaskSet alarmLaterTasks;
+  // Promise chain for serializing "move alarm later" operations to prevent races
+  // at the alarm manager. Each update waits for the previous one to complete.
+  kj::Maybe<kj::ForkedPromise<void>> alarmLaterChain;
 
   void startImplicitTxn();
 

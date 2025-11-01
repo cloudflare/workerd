@@ -1062,17 +1062,21 @@ KJ_TEST("setting later alarm times does scheduling after db commit") {
 
   // Fulfill 3ms db commit.  Expect 3ms alarm to be scheduled and 3ms gate to be unblocked.
   KJ_ASSERT(!gateWait3Ms.poll(test.ws));
+
   commit3MsFulfiller->fulfill();
   KJ_ASSERT(gateWait3Ms.poll(test.ws));
+
+  // The 3ms scheduleRun waits for the 2ms scheduleRun to complete first, since we chain
+  // "move later" operations to ensure they execute in order at the alarm manager.
+  fulfiller2Ms->fulfill();
+
   auto fulfiller3Ms = kj::mv(test.pollAndExpectCalls({"scheduleRun(3ms)"})[0]);
   test.pollAndExpectCalls({});
 
-  // Outstanding alarm scheduling can complete asynchronously.
-  fulfiller2Ms->fulfill();
   fulfiller3Ms->fulfill();
 }
 
-KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
+KJ_TEST("move-earlier operations wait for pending move-later operations") {
   ActorSqliteTest test;
 
   // Initialize alarm state to 1ms.
@@ -1089,13 +1093,15 @@ KJ_TEST("in-flight later alarm times don't affect subsequent commits") {
 
   // While 5ms scheduling is still in-flight, set alarm to 2ms.  Even though the last-confirmed
   // alarm value was 1ms, we expect that setting the alarm to 2ms will be interpreted as setting
-  // the alarm earlier, so it will issue the schedule request before the commit request.
+  // the alarm earlier. However, to prevent races, it will wait for the 5ms operation to complete
+  // before issuing the schedule request.
   test.setAlarm(twoMs);
-  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
-  auto commit2MsFulfiller = kj::mv(test.pollAndExpectCalls({"commit"})[0]);
+  test.pollAndExpectCalls({});  // No scheduleRun(2ms) yet - it's waiting for 5ms to complete
 
+  // Complete the 5ms scheduling, which should unblock the 2ms scheduling
   fulfiller5Ms->fulfill();
-  commit2MsFulfiller->fulfill();
+  test.pollAndExpectCalls({"scheduleRun(2ms)"})[0]->fulfill();
+  test.pollAndExpectCalls({"commit"})[0]->fulfill();
 }
 
 KJ_TEST("rejected move-earlier alarm scheduling request breaks gate") {

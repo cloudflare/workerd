@@ -47,8 +47,7 @@ ActorSqlite::ActorSqlite(kj::Own<SqliteDatabase> dbParam,
       hooks(hooks),
       kv(*db),
       metadata(*db),
-      commitTasks(*this),
-      alarmLaterTasks(alarmLaterErrorHandler) {
+      commitTasks(*this) {
   db->onWrite(KJ_BIND_METHOD(*this, onWrite));
   db->onCriticalError(KJ_BIND_METHOD(*this, onCriticalError));
   lastConfirmedAlarmDbState = metadata.getAlarm();
@@ -336,11 +335,16 @@ ActorSqlite::PrecommitAlarmState ActorSqlite::startPrecommitAlarmScheduling() {
   PrecommitAlarmState state;
   if (pendingCommit == kj::none &&
       willFireEarlier(metadata.getAlarm(), alarmScheduledNoLaterThan)) {
-    // Basically, this is the first scheduling request that commitImpl() would make prior to
-    // commitCallback().  We start the request separately, ahead of calling sqlite functions that
-    // commit to local disk, for correctness in workerd, where alarm scheduling and db commits are
-    // both synchronous.
-    state.schedulingPromise = requestScheduledAlarm(metadata.getAlarm());
+    // When moving the alarm earlier, we must wait for any pending "move later" operations
+    // to complete first. This prevents a race where a pending delete could overwrite our
+    // new earlier alarm at the alarm manager.
+    KJ_IF_SOME(chain, alarmLaterChain) {
+      state.schedulingPromise =
+          chain.addBranch().then([this]() { return requestScheduledAlarm(metadata.getAlarm()); });
+    } else {
+      // No pending operations, schedule directly
+      state.schedulingPromise = requestScheduledAlarm(metadata.getAlarm());
+    }
   }
   return kj::mv(state);
 }
@@ -371,6 +375,9 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   // ensure correctness in workerd.
   KJ_IF_SOME(p, precommitAlarmState.schedulingPromise) {
     co_await p;
+    // Clear the alarm chain after successful precommit since any pending "move later" operations
+    // are no longer a race risk once we've updated the alarm manager with our earlier time.
+    alarmLaterChain = kj::none;
   }
 
   // While the local db state requires an earlier alarm than is known might be scheduled, issue an
@@ -396,20 +403,26 @@ kj::Promise<void> ActorSqlite::commitImpl(ActorSqlite::PrecommitAlarmState preco
   fulfiller->fulfill();
 
   // If the db state is now later than the in-flight scheduled alarms, issue a request to update
-  // it to match the db state.  We don't need to hold open the output gate, so we add the
-  // scheduling request to commitTasks.
+  // it to match the db state. We chain these requests to ensure they execute in order and
+  // prevent races at the alarm manager.
   if (willFireEarlier(alarmScheduledNoLaterThan, alarmStateForCommit)) {
-    alarmLaterTasks.add(requestScheduledAlarm(alarmStateForCommit));
-  }
-}
+    auto updatePromise = [this, alarmStateForCommit]() {
+      return requestScheduledAlarm(alarmStateForCommit).catch_([](kj::Exception&& e) {
+        // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
+        // eventually fire at the earlier time, and the rescheduling will be retried.
+        // We catch here to prevent the chain from breaking on errors.
+        LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", e);
+      });
+    };
 
-void ActorSqlite::AlarmLaterErrorHandler::taskFailed(kj::Exception&& exception) {
-  // If an exception occurs when scheduling the alarm later, it's OK -- the alarm will
-  // eventually fire at the earlier time, and the rescheduling will be retried.
-  //
-  // TODO(cleanup): Logging is here for short-term debugging, but could be removed; occasional
-  // alarm scheduling failures are expected during shutdowns or extreme load.
-  LOG_WARNING_PERIODICALLY("NOSENTRY SQLite reschedule later alarm failed", exception);
+    KJ_IF_SOME(chain, alarmLaterChain) {
+      // Chain with existing operations
+      alarmLaterChain = chain.addBranch().then(kj::mv(updatePromise)).fork();
+    } else {
+      // Start new chain
+      alarmLaterChain = updatePromise().fork();
+    }
+  }
 }
 
 void ActorSqlite::taskFailed(kj::Exception&& exception) {
@@ -580,7 +593,6 @@ kj::OneOf<uint, kj::Promise<uint>> ActorSqlite::delete_(kj::Array<Key> keys, Wri
 kj::Maybe<kj::Promise<void>> ActorSqlite::setAlarm(
     kj::Maybe<kj::Date> newAlarmTime, WriteOptions options) {
   requireNotBroken();
-
   // TODO(someday): When deleting alarm data in an otherwise empty database, clear the database to
   // free up resources?
 
