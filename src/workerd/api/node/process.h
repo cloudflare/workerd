@@ -23,9 +23,9 @@ class ProcessModule final: public jsg::Object {
 // which is ONLY used in testing environments, and requires 'experimental'.
 #ifdef _WIN32
   static constexpr kj::StringPtr platform = "win32"_kj;
-#elif defined(__linux__)
+#elifdef __linux__
   static constexpr kj::StringPtr platform = "linux"_kj;
-#elif defined(__APPLE__)
+#elifdef __APPLE__
   static constexpr kj::StringPtr platform = "darwin"_kj;
 #else
   static constexpr kj::StringPtr platform = "unsupported-platform"_kj;
