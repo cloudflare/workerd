@@ -530,7 +530,7 @@ StartQueueEventResponse startQueueEvent(EventTarget& globalEventTarget,
 
 }  // namespace
 
-kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
+kj::Maybe<tracing::EventInfo> QueueCustomEvent::getEventInfo() const {
   kj::String queueName;
   uint32_t batchSize;
   KJ_SWITCH_ONEOF(params) {
@@ -547,7 +547,7 @@ kj::Maybe<tracing::EventInfo> QueueCustomEventImpl::getEventInfo() const {
   return tracing::EventInfo(tracing::QueueEventInfo(kj::mv(queueName), batchSize));
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
     kj::Own<IoContext_IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
@@ -707,7 +707,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::run(
   }
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
@@ -759,7 +759,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEventImpl::sendRpc(
   });
 }
 
-kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
+kj::Array<QueueRetryMessage> QueueCustomEvent::getRetryMessages() const {
   auto retryMsgs = kj::heapArrayBuilder<QueueRetryMessage>(result.retries.size());
   for (const auto& entry: result.retries) {
     retryMsgs.add(QueueRetryMessage{
@@ -768,7 +768,7 @@ kj::Array<QueueRetryMessage> QueueCustomEventImpl::getRetryMessages() const {
   return retryMsgs.finish();
 }
 
-kj::Array<kj::String> QueueCustomEventImpl::getExplicitAcks() const {
+kj::Array<kj::String> QueueCustomEvent::getExplicitAcks() const {
   auto ackArray = kj::heapArrayBuilder<kj::String>(result.explicitAcks.size());
   for (const auto& msgId: result.explicitAcks) {
     ackArray.add(kj::heapString(msgId));

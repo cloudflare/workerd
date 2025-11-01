@@ -10,9 +10,9 @@ namespace workerd::tracing {
 
 // A WorkerInterface::CustomEvent implementation used to deliver streaming tail
 // events to a tail worker.
-class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
+class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TailStreamCustomEventImpl(uint16_t typeId = TYPE,
+  TailStreamCustomEvent(uint16_t typeId = TYPE,
       kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
           kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
@@ -38,7 +38,7 @@ class TailStreamCustomEventImpl final: public WorkerInterface::CustomEvent {
 
   kj::Maybe<tracing::EventInfo> getEventInfo() const override;
 
-  // Specify same type as with TraceCustomEventImpl here by default.
+  // Specify same type as with TraceCustomEvent here by default.
   static constexpr uint16_t TYPE = 2;
 
   rpc::TailStreamTarget::Client getCap() {

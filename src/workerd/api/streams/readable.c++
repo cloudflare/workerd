@@ -604,7 +604,7 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
 
 // Wrapper around ReadableStreamSource that prevents deferred proxying. We need this for RPC
 // streams because although they are "system streams", they become disconnected when the IoContext
-// is destroyed, due to the JsRpcCustomEventImpl being canceled.
+// is destroyed, due to the JsRpcCustomEvent being canceled.
 //
 // TODO(someday): Devise a better way for RPC streams to extend the lifetime of the RPC session
 //   beyond the destruction of the IoContext, if it is being used for deferred proxying.

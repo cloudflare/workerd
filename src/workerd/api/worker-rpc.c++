@@ -1881,8 +1881,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
 // completes, since it is actually returned as the result of the top-level RPC call, but that
 // call doesn't return until the `CompletionMembrane` says all capabilities were dropped, so this
 // would create a cycle.
-class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::MembranePolicy,
-                                                                 public kj::Refcounted {
+class JsRpcSessionCustomEvent::ServerTopLevelMembrane final: public capnp::MembranePolicy,
+                                                             public kj::Refcounted {
  public:
   explicit ServerTopLevelMembrane(kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -1914,7 +1914,7 @@ class JsRpcSessionCustomEventImpl::ServerTopLevelMembrane final: public capnp::M
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> doneFulfiller;
 };
 
-kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::run(
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     kj::Own<IoContext::IncomingRequest> incomingRequest,
     kj::Maybe<kj::StringPtr> entrypointName,
     Frankenvalue props,
@@ -1955,7 +1955,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::r
   }
 }
 
-kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEventImpl::sendRpc(
+kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendRpc(
     capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
     capnp::ByteStreamFactory& byteStreamFactory,
     rpc::EventDispatcher::Client dispatcher) {
