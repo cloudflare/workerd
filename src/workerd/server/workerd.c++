@@ -800,7 +800,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "<addr> instead of the address specified in the config file.")
         .addOptionWithArg({'i', "inspector-addr"}, CLI_METHOD(enableInspector), "<addr>",
             "Enable the inspector protocol to connect to the address <addr>.")
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
         // TODO(later): In the future, we might want to enable providing a perfetto
         // TraceConfig structure here rather than just the categories.
         .addOptionWithArg({"p", "perfetto-trace"}, CLI_METHOD(enablePerfetto),
@@ -1070,7 +1070,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
     server->overrideExternal(kj::mv(name), kj::str(value));
   }
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   void enablePerfetto(kj::StringPtr param) {
     auto [name, value] = parseOverride(param);
     perfettoTraceDestination = kj::str(name);
@@ -1534,7 +1534,7 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
   kj::Maybe<kj::String> testServicePattern;
   kj::Maybe<kj::String> testEntrypointPattern;
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
   kj::Maybe<kj::String> perfettoTraceDestination;
   kj::Maybe<kj::String> perfettoTraceCategories;
 #endif
