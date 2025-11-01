@@ -6,7 +6,7 @@ bazel_dep(name = "rules_nodejs", version = "6.5.2")
 # TODO(soon): Remove after next rules_ts release
 git_override(
     module_name = "aspect_rules_ts",
-    commit = "e7a6c5a30dde6448d735182de25a4ec8f6a35fcc",
+    commit = "6e4a8a3f06d13ff901afe0d230406dfd9b12ee5e",
     remote = "https://github.com/aspect-build/rules_ts.git",
 )
 
