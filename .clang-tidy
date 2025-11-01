@@ -2,6 +2,9 @@
 # TODO: We currently disable default checks with -*. While many checks provide little value or
 # produce false positives, try to incrementally enable most of them.
 # TODO: these checks are in progress of cleaning up
+# Note: cppcoreguidelines-noexcept-destructor is designed to detect destructors that are missing
+# noexcept. We always use noexcept(false) as per KJ-style, but this check works for our purposes
+# too.
 Checks: >
   -*,
   bugprone-argument-comment,
@@ -21,6 +24,7 @@ Checks: >
   misc-redundant-expression,
   misc-throw-by-value-catch-by-reference,
   misc-unused-alias-decls,
+  modernize-avoid-variadic-functions,
   modernize-macro-to-enum,
   modernize-redundant-void-arg,
   modernize-type-traits,
@@ -40,12 +44,14 @@ Checks: >
   performance-for-range-copy,
   performance-move-constructor-init,
   readability-container-contains,
+  readability-delete-null-pointer,
   readability-duplicate-include,
-  readability-redundant-access-specifiers,
-  readability-redundant-casting,
-  readability-redundant-declaration,
-  readability-redundant-member-init,
-  readability-static-accessed-through-instance
+  readability-redundant-*,
+  -readability-redundant-inline-specifier,
+  -readability-redundant-smartptr-get,
+  readability-reference-to-constructed-temporary,
+  readability-static-accessed-through-instance,
+  readability-use-concise-preprocessor-directives
 
 # TODO: Fix and enable
 # bugprone-parent-virtual-call
@@ -54,7 +60,10 @@ Checks: >
 # modernize-use-override
 # modernize-use-ranges
 # readability-avoid-const-params-in-decls
+# readability-avoid-return-with-void-value
+# readability-container-size-empty
 # readability-redundant-smartptr-get
+# readability-use-anyofallof
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*src/workerd/.*'

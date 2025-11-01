@@ -1,6 +1,6 @@
 #pragma once
 
-#if defined(WORKERD_USE_PERFETTO)
+#ifdef WORKERD_USE_PERFETTO
 #include <kj/memory.h>
 #define PERFETTO_ENABLE_LEGACY_TRACE_EVENTS 1
 // Only include a smaller header here to keep include size under control. This approach is

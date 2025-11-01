@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#if !defined(_WIN32)
+#ifndef _WIN32
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE

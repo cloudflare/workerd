@@ -17,22 +17,22 @@
 #define TRAP_SEQUENCE1_() asm volatile("int3")
 #define TRAP_SEQUENCE2_() asm volatile("ud2")
 
-#elif defined(__arm__)
+#elifdef __arm__
 
 #define TRAP_SEQUENCE1_() asm volatile("bkpt #0")
 #define TRAP_SEQUENCE2_() asm volatile("udf #0")
 
-#elif defined(__aarch64__)
+#elifdef __aarch64__
 
 #define TRAP_SEQUENCE1_() asm volatile("brk #0")
 #define TRAP_SEQUENCE2_() asm volatile("hlt #0")
 
-#elif defined(__powerpc64__)
+#elifdef __powerpc64__
 
 #define TRAP_SEQUENCE1_() asm volatile(".4byte 0x7D821008")
 #define TRAP_SEQUENCE2_() asm volatile("")
 
-#elif defined(__s390x__)
+#elifdef __s390x__
 
 #define TRAP_SEQUENCE1_() asm volatile(".2byte 0x0001")
 #define TRAP_SEQUENCE2_() asm volatile("")
@@ -44,14 +44,14 @@
 
 #endif  // Architecture check
 
-#elif defined(_MSC_VER)
+#elifdef _MSC_VER
 
 #if defined(_M_X64) || defined(_M_IX86)
 
 #define TRAP_SEQUENCE1_() __debugbreak()
 #define TRAP_SEQUENCE2_()
 
-#elif defined(_M_ARM64)
+#elifdef _M_ARM64
 
 #define TRAP_SEQUENCE1_() __debugbreak()
 #define TRAP_SEQUENCE2_()
