@@ -8,10 +8,6 @@ load("@//build/deps:gen/shared_deps.bzl", shared_deps_gen = "deps_gen")
 
 shared_deps_gen()
 
-load("@//build/deps:gen/deps.bzl", "deps_gen")
-
-deps_gen()
-
 # ========================================================================================
 # Rust bootstrap
 
