@@ -177,7 +177,8 @@ void Container::listenHttp(jsg::Lock& js, kj::String addr, jsg::Function<jsg::Pr
     auto req = rpcClient->listenTcpRequest();
     auto& ioctx = IoContext::current();
     req.setHandler(kj::heap<TcpPortConnectHandler>(js, ioctx.getByteStreamFactory(), kj::mv(cb)));
-    IoContext::current().addTask(req.sendIgnoringResult());
+    auto cap = req.send();
+    capabilities.add(cap.getHandle());
 }
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
