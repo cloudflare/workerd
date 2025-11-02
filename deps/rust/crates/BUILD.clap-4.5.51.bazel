@@ -6,13 +6,16 @@
 #     bazel run @@//deps/rust:crates_vendor
 ###############################################################################
 
-load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load(
+    "@rules_rust//rust:defs.bzl",
+    "rust_binary",
+    "rust_library",
+)
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "proc_macro2",
+    name = "clap",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -30,31 +33,33 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
+        "derive",
+        "help",
+        "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__clap_derive-4.5.49//:clap_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=clap",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.103",
+    version = "4.5.51",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.103//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
+        "@crates_vendor__clap_builder-4.5.51//:clap_builder",
     ],
 )
 
-cargo_build_script(
-    name = "_bs",
+rust_binary(
+    name = "stdio-fixture__bin",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -64,7 +69,6 @@ cargo_build_script(
         allow_empty = True,
         exclude = [
             "**/* *",
-            "**/*.rs",
             ".tmp_git_root/**/*",
             "BUILD",
             "BUILD.bazel",
@@ -73,42 +77,28 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
+        "derive",
+        "help",
+        "std",
     ],
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
+    crate_root = "src/bin/stdio-fixture.rs",
     edition = "2021",
-    pkg_name = "proc-macro2",
+    proc_macro_deps = [
+        "@crates_vendor__clap_derive-4.5.49//:clap_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=clap",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.103",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
+    version = "4.5.51",
+    deps = [
+        ":clap",
+        "@crates_vendor__clap_builder-4.5.51//:clap_builder",
+    ],
 )

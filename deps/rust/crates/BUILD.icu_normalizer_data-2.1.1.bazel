@@ -12,7 +12,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "proc_macro2",
+    name = "icu_normalizer_data",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,11 +29,6 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
-    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -41,15 +36,14 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=icu_normalizer_data",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.103",
+    version = "2.1.1",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.103//:build_script_build",
-        "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
+        "@crates_vendor__icu_normalizer_data-2.1.1//:build_script_build",
     ],
 )
 
@@ -72,11 +66,6 @@ cargo_build_script(
             "WORKSPACE.bazel",
         ],
     ),
-    crate_features = [
-        "default",
-        "proc-macro",
-        "span-locations",
-    ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
     data = glob(
@@ -92,18 +81,18 @@ cargo_build_script(
         ],
     ),
     edition = "2021",
-    pkg_name = "proc-macro2",
+    pkg_name = "icu_normalizer_data",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=proc-macro2",
+        "crate-name=icu_normalizer_data",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.103",
+    version = "2.1.1",
     visibility = ["//visibility:private"],
 )
 

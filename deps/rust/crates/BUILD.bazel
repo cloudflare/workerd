@@ -68,50 +68,50 @@ alias(
 )
 
 alias(
-    name = "capnp-0.21.7",
-    actual = "@crates_vendor__capnp-0.21.7//:capnp",
+    name = "capnp-0.23.0",
+    actual = "@crates_vendor__capnp-0.23.0//:capnp",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp",
-    actual = "@crates_vendor__capnp-0.21.7//:capnp",
+    actual = "@crates_vendor__capnp-0.23.0//:capnp",
     tags = ["manual"],
 )
 
 alias(
-    name = "capnp-rpc-0.21.0",
-    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
+    name = "capnp-rpc-0.23.0",
+    actual = "@crates_vendor__capnp-rpc-0.23.0//:capnp_rpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnp-rpc",
-    actual = "@crates_vendor__capnp-rpc-0.21.0//:capnp_rpc",
+    actual = "@crates_vendor__capnp-rpc-0.23.0//:capnp_rpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "capnpc-0.21.4",
-    actual = "@crates_vendor__capnpc-0.21.4//:capnpc",
+    name = "capnpc-0.23.2",
+    actual = "@crates_vendor__capnpc-0.23.2//:capnpc",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc",
-    actual = "@crates_vendor__capnpc-0.21.4//:capnpc",
+    actual = "@crates_vendor__capnpc-0.23.2//:capnpc",
     tags = ["manual"],
 )
 
 alias(
-    name = "cc-1.2.43",
-    actual = "@crates_vendor__cc-1.2.43//:cc",
+    name = "cc-1.2.44",
+    actual = "@crates_vendor__cc-1.2.44//:cc",
     tags = ["manual"],
 )
 
 alias(
     name = "cc",
-    actual = "@crates_vendor__cc-1.2.43//:cc",
+    actual = "@crates_vendor__cc-1.2.44//:cc",
     tags = ["manual"],
 )
 
@@ -128,14 +128,14 @@ alias(
 )
 
 alias(
-    name = "clap-4.5.50",
-    actual = "@crates_vendor__clap-4.5.50//:clap",
+    name = "clap-4.5.51",
+    actual = "@crates_vendor__clap-4.5.51//:clap",
     tags = ["manual"],
 )
 
 alias(
     name = "clap",
-    actual = "@crates_vendor__clap-4.5.50//:clap",
+    actual = "@crates_vendor__clap-4.5.51//:clap",
     tags = ["manual"],
 )
 
@@ -406,19 +406,19 @@ alias(
 # Binaries
 alias(
     name = "capnpc__capnpc-rust",
-    actual = "@crates_vendor__capnpc-0.21.4//:capnpc-rust__bin",
+    actual = "@crates_vendor__capnpc-0.23.2//:capnpc-rust__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "capnpc__capnpc-rust-bootstrap",
-    actual = "@crates_vendor__capnpc-0.21.4//:capnpc-rust-bootstrap__bin",
+    actual = "@crates_vendor__capnpc-0.23.2//:capnpc-rust-bootstrap__bin",
     tags = ["manual"],
 )
 
 alias(
     name = "clap__stdio-fixture",
-    actual = "@crates_vendor__clap-4.5.50//:stdio-fixture__bin",
+    actual = "@crates_vendor__clap-4.5.51//:stdio-fixture__bin",
     tags = ["manual"],
 )
 

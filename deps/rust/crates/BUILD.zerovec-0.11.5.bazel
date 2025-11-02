@@ -11,7 +11,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "syn",
+    name = "zerovec",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,34 +29,27 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
-        "default",
         "derive",
-        "extra-traits",
-        "fold",
-        "full",
-        "parsing",
-        "printing",
-        "proc-macro",
-        "visit",
-        "visit-mut",
+        "yoke",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    proc_macro_deps = [
+        "@crates_vendor__zerovec-derive-0.11.2//:zerovec_derive",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=zerovec",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "2.0.108",
+    version = "0.11.5",
     deps = [
-        "@crates_vendor__proc-macro2-1.0.103//:proc_macro2",
-        "@crates_vendor__quote-1.0.41//:quote",
-        "@crates_vendor__unicode-ident-1.0.22//:unicode_ident",
+        "@crates_vendor__yoke-0.8.1//:yoke",
+        "@crates_vendor__zerofrom-0.1.6//:zerofrom",
     ],
 )
