@@ -11,10 +11,44 @@ namespace workerd::api {
 
 // =======================================================================================
 // Basic lifecycle methods
+//
+
+class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler::Server {
+  public:
+    TcpPortConnectHandler(capnp::ByteStreamFactory& byteStreamFactory,
+    IoOwn<jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)>> handle)
+    : byteStreamFactory(byteStreamFactory), handle(kj::mv(handle)) {}
+
+  protected:
+    kj::Promise<void> connect(ConnectContext ctx) override {
+        co_return;
+    }
+
+    // implement this, by sending to jsg callback.
+    // Should init a httpServer in the constructor by using *this.
+    // see fake-container-service for more details.
+    kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {}
+
+  private:
+    capnp::ByteStreamFactory& byteStreamFactory;
+    IoOwn<jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)>> handle;
+};
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
+
+void Container::listenHttp(jsg::Lock& js, kj::String addr, jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)> cb) {
+    auto req = rpcClient->listenTcpRequest();
+    auto& ioctx = IoContext::current();
+    auto object = ioctx.addObject(kj::heap(kj::mv(cb)));
+    req.setHandler(kj::heap<TcpPortConnectHandler>(ioctx.getByteStreamFactory(), kj::mv(object)));
+    IoContext::current().addTask(req.sendIgnoringResult());
+}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
