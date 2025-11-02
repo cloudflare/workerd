@@ -1,0 +1,245 @@
+#pragma once
+
+#include <workerd/jsg/jsg.h>
+#include <workerd/jsg/memory.h>
+#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/worker-interface.capnp.h>
+#include <kj/compat/http.h>
+
+namespace workerd::api {
+
+class Headers final: public jsg::Object {
+private:
+  template <typename T>
+  struct IteratorState {
+    kj::Array<T> copy;
+    decltype(copy.begin()) cursor = copy.begin();
+  };
+
+public:
+  enum class Guard {
+    // WARNING: This type is serialized, do not change the numeric values.
+    IMMUTABLE = 0,
+    REQUEST = 1,
+    // REQUEST_NO_CORS,  // CORS not relevant on server side
+    RESPONSE = 2,
+    NONE = 3
+  };
+
+  struct DisplayedHeader {
+    kj::String key;   // lower-cased name
+    kj::String value; // comma-concatenation of all values seen
+  };
+
+  Headers(): guard(Guard::NONE) {}
+  explicit Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict);
+  explicit Headers(jsg::Lock& js, const Headers& other);
+  explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);
+  KJ_DISALLOW_COPY_AND_MOVE(Headers);
+
+  // Make a copy of this Headers object, and preserve the guard.
+  jsg::Ref<Headers> clone(jsg::Lock& js) const;
+
+  // Fill in the given HttpHeaders with these headers. Note that strings are inserted by
+  // reference, so the output must be consumed immediately.
+  void shallowCopyTo(kj::HttpHeaders& out);
+
+  // Like has(), but only call this with an already-lower-case `name`. Useful to avoid an
+  // unnecessary string allocation. Not part of the JS interface.
+  bool hasLowerCase(kj::StringPtr name);
+
+  // Returns headers with lower-case name and comma-concatenated duplicates.
+  kj::Array<DisplayedHeader> getDisplayedHeaders(jsg::Lock& js);
+
+  using StringPair = jsg::Sequence<kj::String>;
+  using StringPairs = jsg::Sequence<StringPair>;
+
+  // Per the fetch specification, it is possible to initialize a Headers object
+  // from any other object that has a Symbol.iterator implementation. Those are
+  // handled in this Initializer definition using the StringPairs definition
+  // that aliases jsg::Sequence<jsg::Sequence<kj::String>>. Technically,
+  // the Headers object itself falls under that definition as well. However, treating
+  // a Headers object as a jsg::Sequence<jsg::Sequence<T>> is nowhere near as
+  // performant and has the side effect of forcing all header names to be lower-cased
+  // rather than case-preserved. Instead of following the spec exactly here, we
+  // choose to special case creating a Header object from another Header object.
+  // This is an intentional departure from the spec.
+  using Initializer = kj::OneOf<jsg::Ref<Headers>,
+                                StringPairs,
+                                jsg::Dict<kj::String, kj::String>>;
+
+  static jsg::Ref<Headers> constructor(jsg::Lock& js, jsg::Optional<Initializer> init);
+  kj::Maybe<kj::String> get(jsg::Lock& js, kj::String name);
+
+  // getAll is a legacy non-standard extension API that we introduced before
+  // getSetCookie() was defined. We continue to support it for backwards
+  // compatibility but users really ought to be using getSetCookie() now.
+  kj::Array<kj::StringPtr> getAll(kj::String name);
+
+  // The Set-Cookie header is special in that it is the only HTTP header that
+  // is not permitted to be combined into a single instance.
+  kj::Array<kj::StringPtr> getSetCookie();
+
+  bool has(kj::String name);
+
+  void set(jsg::Lock& js, kj::String name, kj::String value);
+  void append(jsg::Lock& js, kj::String name, kj::String value);
+  void delete_(kj::String name);
+
+  kj::Maybe<kj::String> getUnguarded(jsg::Lock& js, kj::StringPtr name);
+  void setUnguarded(jsg::Lock& js, kj::String name, kj::String value);
+  void appendUnguarded(jsg::Lock& js, kj::String name, kj::String value);
+
+  kj::Maybe<kj::String> getCommon(jsg::Lock& js, capnp::CommonHeaderName idx);
+  bool hasCommon(capnp::CommonHeaderName idx);
+  void setCommon(capnp::CommonHeaderName idx, kj::String value);
+  void deleteCommon(capnp::CommonHeaderName idx);
+
+  void forEach(jsg::Lock& js,
+               jsg::Function<void(kj::StringPtr, kj::StringPtr, jsg::Ref<Headers>)>,
+               jsg::Optional<jsg::Value>);
+
+  bool inspectImmutable();
+
+  JSG_ITERATOR(EntryIterator, entries,
+               kj::Array<kj::String>,
+               IteratorState<DisplayedHeader>,
+               entryIteratorNext)
+  JSG_ITERATOR(KeyIterator, keys,
+               kj::String,
+               IteratorState<kj::String>,
+               keyOrValueIteratorNext)
+  JSG_ITERATOR(ValueIterator, values,
+               kj::String,
+               IteratorState<kj::String>,
+               keyOrValueIteratorNext)
+
+  // JavaScript API.
+
+  JSG_RESOURCE_TYPE(Headers, CompatibilityFlags::Reader flags) {
+    JSG_METHOD(get);
+    JSG_METHOD(getAll);
+    if (flags.getHttpHeadersGetSetCookie()) {
+      JSG_METHOD(getSetCookie);
+    }
+    JSG_METHOD(has);
+    JSG_METHOD(set);
+    JSG_METHOD(append);
+    JSG_METHOD_NAMED(delete, delete_);
+    JSG_METHOD(forEach);
+    JSG_METHOD(entries);
+    JSG_METHOD(keys);
+    JSG_METHOD(values);
+
+    JSG_INSPECT_PROPERTY(immutable, inspectImmutable);
+
+    JSG_ITERABLE(entries);
+
+    JSG_TS_DEFINE(type HeadersInit = Headers | Iterable<Iterable<string>> | Record<string, string>);
+    // All type aliases get inlined when exporting RTTI, but this type alias is included by
+    // the official TypeScript types, so users might be depending on it.
+
+    JSG_TS_OVERRIDE({
+      constructor(init?: HeadersInit);
+
+      entries(): IterableIterator<[key: string, value: string]>;
+      [Symbol.iterator](): IterableIterator<[key: string, value: string]>;
+
+      forEach<This = unknown>(callback: (this: This, value: string, key: string, parent: Headers) => void, thisArg?: This): void;
+    });
+  }
+
+  void serialize(jsg::Lock& js, jsg::Serializer& serializer);
+  static jsg::Ref<Headers> deserialize(
+      jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
+
+  JSG_SERIALIZABLE(rpc::SerializationTag::HEADERS);
+
+  void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
+
+  // A header is identified by either a common header ID or an uncommon header name.
+  // The header key name is always identifed in lower-case form, while the original
+  // casing is preserved in the actual Header struct to support case-preserving display.
+  // TODO(perf): We can likely optimize this further by interning uncommon header names
+  // so that we avoid repeated allocations of the same uncommon header name. Unless
+  // it proves to be a performance problem, however, we can leave that for future work.
+  using HeaderKey = kj::OneOf<uint, kj::String>;
+
+private:
+  struct Header final {
+    // The header key, either a common header ID or an uncommon header name.
+    HeaderKey key;
+    // If the casing of the header name does not match the lower-cased version, we
+    // store the original casing here for display purposes. If the casing matches, this
+    // remains unset to avoid redundant allocation.
+    kj::Maybe<kj::String> name;
+
+    // We intentionally do not comma-concatenate header values of the same name, as we need to be
+    // able to re-serialize them separately. This is particularly important for the Set-Cookie
+    // header, which uses a date format that requires a comma. This would normally suggest using a
+    // std::multimap, but we also need to be able to display the values in comma-concatenated form
+    // via Headers.entries()[1] in order to be Fetch-conformant. Storing a vector of strings in a
+    // std::map makes this easier, and also makes it easy to honor the "first header name casing is
+    // used for all duplicate header names" rule[2] that the Fetch spec mandates.
+    //
+    // See: 1: https://fetch.spec.whatwg.org/#concept-header-list-sort-and-combine
+    //      2: https://fetch.spec.whatwg.org/#concept-header-list-append
+    kj::Vector<kj::String> values;
+
+    // Returns the lower-cased key name of the header.
+    kj::StringPtr getKeyName() const;
+
+    // If the casing of the header name matches the lower-cased version, this
+    // returns the key name, otherwise it returns the preserved-casing name.
+    kj::StringPtr getHeaderName() const;
+
+    explicit Header(HeaderKey key, kj::Maybe<kj::String> name = kj::none,
+                    kj::Vector<kj::String> values = kj::Vector<kj::String>(1));
+
+    Header clone() const;
+
+    JSG_MEMORY_INFO(Header) {
+      tracker.trackField("key", key.tryGet<kj::String>());
+      tracker.trackField("name", name);
+      for (const auto& value : values) {
+        tracker.trackField(nullptr, value);
+      }
+    }
+  };
+
+  struct HeaderCallbacks final {
+    inline static const HeaderKey& keyForRow(const Header& header) { return header.key; }
+    inline static HeaderKey& keyForRow(Header& header) { return header.key; }
+    static bool matches(Header& header, const HeaderKey& other);
+    static bool matches(Header& header, kj::StringPtr otherName);
+    static bool matches(Header& header, capnp::CommonHeaderName commondId);
+    static kj::uint hashCode(const HeaderKey& key);
+    static kj::uint hashCode(capnp::CommonHeaderName commondId);
+  };
+
+  kj::Table<Header, kj::HashIndex<HeaderCallbacks>> headers;
+
+  Guard guard;
+
+  void checkGuard() {
+    JSG_REQUIRE(guard == Guard::NONE, TypeError, "Can't modify immutable headers.");
+  }
+
+  static kj::Maybe<kj::Array<kj::String>> entryIteratorNext(jsg::Lock& js, auto& state) {
+    if (state.cursor == state.copy.end()) {
+      return kj::none;
+    }
+    auto& ret = *state.cursor++;
+    return kj::arr(kj::mv(ret.key), kj::mv(ret.value));
+  }
+
+  static kj::Maybe<kj::String> keyOrValueIteratorNext(jsg::Lock& js, auto& state) {
+    if (state.cursor == state.copy.end()) {
+      return kj::none;
+    }
+    auto& ret = *state.cursor++;
+    return kj::mv(ret);
+  }
+};
+
+}  // namespace workerd::api
