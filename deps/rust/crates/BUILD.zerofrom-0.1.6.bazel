@@ -29,7 +29,6 @@ rust_library(
         ],
     ),
     crate_features = [
-        "alloc",
         "derive",
     ],
     crate_root = "src/lib.rs",
