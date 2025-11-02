@@ -491,6 +491,7 @@ export interface TestController {}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  onunload: () => void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   abort(reason?: any): void;
@@ -654,6 +655,7 @@ export interface DurableObjectClass<
 > {}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  onunload: () => void;
   readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;

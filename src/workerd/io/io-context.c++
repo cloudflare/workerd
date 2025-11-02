@@ -4,6 +4,8 @@
 
 #include "io-context.h"
 
+#include <workerd/api/events.h>
+#include <workerd/api/global-scope.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -567,6 +569,11 @@ class IoContext::PendingEvent: public kj::Refcounted {
 };
 
 IoContext::~IoContext() noexcept(false) {
+  // Dispatch unload events if any were attached
+  KJ_IF_SOME(onUnload, onUnload) {
+    worker->runInUnloadScope(kj::mv(onUnload));
+  }
+
   if (!canceler.isEmpty()) {
     KJ_IF_SOME(e, abortException) {
       // Assume the abort exception is why we are canceling.

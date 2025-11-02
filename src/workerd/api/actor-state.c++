@@ -16,6 +16,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/features.h>
 #include <workerd/io/hibernation-manager.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
@@ -1058,6 +1059,27 @@ DurableObjectState::DurableObjectState(jsg::Lock& js,
 
 void DurableObjectState::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
+}
+
+jsg::Optional<jsg::Function<void()>> DurableObjectState::getOnUnload(jsg::Lock& js) {
+  auto& context = IoContext::current();
+  KJ_IF_SOME(actor, context.getActor()) {
+    return actor.onUnload.map([&](jsg::Function<void()>& func) { return func.addRef(js); });
+  } else {
+    return kj::none;
+  }
+}
+
+void DurableObjectState::setOnUnload(jsg::Function<void()> handler) {
+  // For DurableObjectState, store unload listeners on the Actor itself since the actor
+  // lifetime is what we care about, not individual request lifetimes
+  auto& context = IoContext::current();
+  KJ_IF_SOME(actor, context.getActor()) {
+    actor.onUnload.emplace(kj::mv(handler));
+  } else {
+    // This shouldn't happen in practice since DurableObjectState is only available in actors
+    KJ_FAIL_REQUIRE("DurableObjectState onunload set outside of actor context");
+  }
 }
 
 kj::OneOf<jsg::Ref<DurableObjectId>, kj::StringPtr> DurableObjectState::getId(jsg::Lock& js) {
