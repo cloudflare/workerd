@@ -5,16 +5,299 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/stream-utils.h>
+
+#include <capnp/membrane.h>
 
 namespace workerd::api {
 
+enum class NeuterReason { SENT_RESPONSE, THREW_EXCEPTION, CLIENT_DISCONNECTED };
+
+kj::Exception makeNeuterException(NeuterReason reason) {
+  switch (reason) {
+    case NeuterReason::SENT_RESPONSE:
+      return JSG_KJ_EXCEPTION(
+          FAILED, TypeError, "Can't read from request stream after response has been sent.");
+    case NeuterReason::THREW_EXCEPTION:
+      return JSG_KJ_EXCEPTION(
+          FAILED, TypeError, "Can't read from request stream after responding with an exception.");
+    case NeuterReason::CLIENT_DISCONNECTED:
+      return JSG_KJ_EXCEPTION(
+          DISCONNECTED, TypeError, "Can't read from request stream because client disconnected.");
+  }
+  KJ_UNREACHABLE;
+}
+
 // =======================================================================================
 // Basic lifecycle methods
+//
+
+// TcpPortHttpHandler handles all HTTP requests from a container to a durable object.
+class Container::TcpPortHttpHandler final: public rpc::Container::TcpHandler::Server,
+                                           public kj::HttpService {
+ public:
+  TcpPortHttpHandler(IoContext& ctx,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(
+          jsg::Ref<workerd::api::Request>)>&& handle)
+      : byteStreamFactory(byteStreamFactory),
+        handle(kj::mv(handle)),
+        timer(kj::origin<
+            kj::TimePoint>()),  // TODO: There should be something more meaningful here to put
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this, &ctx](jsg::Lock& lock, ConnectContext context) {
+              return connectImpl(lock, ctx, context);
+            })),
+        enterIsolateAndRequest(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this, &ctx](jsg::Lock& lock,
+                kj::HttpMethod method,
+                kj::StringPtr url,
+                kj::Own<kj::HttpHeaders> headers,
+                kj::Own<NeuterableInputStream> requestBody,
+                Response* response) {
+              return requestImpl(
+                  lock, ctx, method, url, kj::mv(headers), kj::mv(requestBody), response);
+            })) {}
+
+ protected:
+  class OutputStreamBreakout final: public capnp::ExplicitEndOutputStream {
+    // Class which wraps one side of an AsyncIoStream as an AsyncOutputStream.
+    // TODO(cleanup): This really ought to be in KJ or something.
+   public:
+    OutputStreamBreakout(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+    ~OutputStreamBreakout() noexcept(false) {
+      KJ_IF_SOME(i, inner) {
+        i->shutdownWrite();
+      }
+    }
+
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      return getInner().write(buffer);
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      return getInner().write(pieces);
+    }
+
+    kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+        kj::AsyncInputStream& input, uint64_t amount) override {
+      return getInner().tryPumpFrom(input, amount);
+    }
+
+    kj::Promise<void> whenWriteDisconnected() override {
+      return getInner().whenWriteDisconnected();
+    }
+
+    kj::Promise<void> end() override {
+      getInner().shutdownWrite();
+      inner = kj::none;
+      return kj::READY_NOW;
+    }
+
+   private:
+    kj::Maybe<kj::Own<kj::AsyncIoStream>> inner;
+
+    kj::AsyncIoStream& getInner() {
+      return *KJ_ASSERT_NONNULL(inner, "already called end()");
+    }
+  };
+
+  kj::Promise<void> connect(ConnectContext context) override {
+    return enterIsolateAndCall(context);
+  }
+
+  kj::Promise<void> connectImpl(jsg::Lock& js, IoContext& ctx, ConnectContext context) {
+    auto pipe = kj::newTwoWayPipe();
+    auto httpServer = kj::heap<kj::HttpServer>(timer, ctx.getHeaderTable(), *this);
+
+    auto promise = httpServer->listenHttp(kj::mv(pipe.ends[1])).attach(kj::mv(httpServer));
+
+    auto stream = kj::refcountedWrapper(kj::mv(pipe.ends[0]));
+
+    auto up = byteStreamFactory.kjToCapnp(kj::heap<OutputStreamBreakout>(stream->addWrappedRef()));
+
+    auto down = byteStreamFactory.capnpToKj(context.getParams().getDown());
+
+    auto downPump =
+        stream->getWrapped().pumpTo(*down).attach(kj::mv(down), kj::mv(stream)).ignoreResult();
+
+    capnp::PipelineBuilder<ConnectResults> pipeline;
+    pipeline.setUp(up);
+    context.setPipeline(pipeline.build());
+    context.getResults().setUp(kj::mv(up));
+
+    return kj::joinPromisesFailFast(kj::arr(kj::mv(promise), kj::mv(downPump)));
+  }
+
+  kj::Promise<void> request(kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response) override {
+    // We need to own the headers
+    auto headersCloned = kj::heap(headers.cloneShallow());
+
+    // We need to own the stream
+    auto ownRequestBody = newNeuterableInputStream(requestBody);
+
+    // HACK: response is passed as Response*, we need to revisit makeReentryCallback to see
+    // if it can accept a &Response
+    co_await enterIsolateAndRequest(
+        method, url, kj::mv(headersCloned), kj::mv(ownRequestBody), &response);
+  }
+
+  kj::Promise<workerd::api::DeferredProxy<void>> requestImpl(jsg::Lock& js,
+      IoContext& ctx,
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      kj::Own<kj::HttpHeaders> headers,
+      kj::Own<NeuterableInputStream> ownRequestBody,
+      Response* response) {
+    // Code mostly ported over from global-scope.c++
+
+    const kj::HttpHeaders& constHeaders = *headers;
+    auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
+      // Make sure to cancel the request body stream since the native stream is no longer valid once
+      // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
+      // haven't consumed the entire request body.
+      ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    });
+
+    KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+
+    auto& ioContext = IoContext::current();
+
+    auto jsHeaders = js.alloc<Headers>(js, constHeaders, Headers::Guard::REQUEST);
+    auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+    auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
+
+    kj::Maybe<Body::ExtractedBody> body;
+
+    if (headers->get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
+        headers->get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
+        ownRequestBody->tryGetLength().orDefault(1) > 0) {
+      body = Body::ExtractedBody(jsStream.addRef());
+    }
+
+    if (body != kj::none && headers->get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+        headers->get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
+      KJ_IF_SOME(l, ownRequestBody->tryGetLength()) {
+        jsHeaders->setUnguarded(
+            js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+      } else {
+        jsHeaders->setUnguarded(
+            js, jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+      }
+    }
+
+    // TODO: add container metadata here.
+    // For now, empty cf object.
+    auto cf = CfProperty("{}"_kj);
+
+    // Create a reference to the response object
+    auto& resRef = *response;
+
+    auto jsRequest =
+        js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+            /* fetcher */ kj::none, /* signal */ kj::none, kj::mv(cf), kj::mv(body),
+            /* thisSignal */ kj::none, Request::CacheMode::NONE);
+    auto body2 = kj::addRef(*ownRequestBody);
+
+    // HACK: If the client disconnects, the `response` reference is no longer valid. But our
+    //   promise resolves in JavaScript space, so won't be canceled. So we need to track
+    //   cancellation separately. We use a weird refcounted boolean.
+    // TODO(cleanup): Is there something less ugly we can do here?
+    struct RefcountedBool: public kj::Refcounted {
+      bool value;
+      RefcountedBool(bool value): value(value) {}
+    };
+    auto canceled = kj::refcounted<RefcountedBool>(false);
+
+    return ioContext
+        .awaitJs(js,
+            handle(js, kj::mv(jsRequest))
+                .then(js,
+                    // the functor makes sure the then callback runs in the correct ioContext
+                    ioContext.addFunctor(
+
+                        [&resRef, &headers, canceled = kj::addRef(*canceled)](
+                            jsg::Lock& js, jsg::Ref<workerd::api::Response> res) mutable
+                        -> IoOwn<kj::Promise<DeferredProxy<void>>> {
+      JSG_REQUIRE(res->getType() != "error"_kj, TypeError,
+          "Return value from serve handler must not be an error response (like Response.error())");
+
+      auto& context = IoContext::current();
+      if (canceled->value) {
+        // Oops, the client disconnected before the response was ready to send. `response` is
+        // a dangling reference, let's not use it.
+        return context.addObject(kj::heap(addNoopDeferredProxy(kj::READY_NOW)));
+      }
+
+      // Send the JS response back to the original HttpService::Response
+      return context.addObject(kj::heap(res->send(js, resRef, {}, *headers)));
+    })))
+        .attach(kj::defer([canceled = kj::mv(canceled)]() mutable { canceled->value = true; }))
+        .then(
+            [ownRequestBody = kj::mv(ownRequestBody), deferredNeuter = kj::mv(deferredNeuter)](
+                DeferredProxy<void> deferredProxy) mutable {
+      // In the case of bidirectional streaming, the request body stream needs to remain valid
+      // while proxying the response. So, arrange for neutering to happen only after the proxy
+      // task finishes.
+      deferredProxy.proxyTask = deferredProxy.proxyTask
+                                    .then([body = kj::addRef(*ownRequestBody)]() mutable {
+        body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
+      }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
+        body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+        kj::throwFatalException(kj::mv(e));
+      }).attach(kj::mv(deferredNeuter));
+      return deferredProxy;
+    },
+            [body = kj::mv(body2)](kj::Exception&& e) mutable -> DeferredProxy<void> {
+      // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
+      //   so `deferredNeuter` hasn't been destroyed yet.
+      body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
+      kj::throwFatalException(kj::mv(e));
+    });
+  }
+
+  using kj::HttpService::connect;
+
+ private:
+  capnp::ByteStreamFactory& byteStreamFactory;
+  jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(jsg::Ref<workerd::api::Request>)>
+      handle;
+  kj::TimerImpl timer;
+
+  // enter isolate calls that we use to run code in the Worker isolate thread
+  kj::Function<kj::Promise<void>(ConnectContext connectContext)> enterIsolateAndCall;
+
+  kj::Function<kj::Promise<DeferredProxy<void>>(kj::HttpMethod method,
+      kj::StringPtr url,
+      kj::Own<kj::HttpHeaders> headers,
+      kj::Own<NeuterableInputStream> requestBody,
+      Response*
+          response  // FIXME: Should be Response&, but seems like makeReentryCallback does not like it
+      )>
+      enterIsolateAndRequest;
+};
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
     : rpcClient(IoContext::current().addObject(kj::heap(kj::mv(rpcClient)))),
       running(running) {}
+
+void Container::listenHttp(jsg::Lock& js,
+    kj::String addr,
+    jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request> request)> handler) {
+  auto req = rpcClient->listenTcpRequest();
+  auto& ioctx = IoContext::current();
+  req.setHandler(kj::heap<TcpPortHttpHandler>(ioctx, ioctx.getByteStreamFactory(), kj::mv(handler)));
+  auto cap = req.send();
+
+  // TODO: we need a way to remove these capabilities from JS, in a way the user might want to
+  // temporarily open a port.
+  capabilities.add(cap.getHandle());
+}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");

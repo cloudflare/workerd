@@ -15,6 +15,8 @@
 namespace workerd::api {
 
 class Fetcher;
+class Response;
+class Request;
 
 // Implements the `ctx.container` API for durable-object-attached containers. This API allows
 // the DO to supervise the attached container (lightweight virtual machine), including starting,
@@ -45,6 +47,9 @@ class Container: public jsg::Object {
   void signal(jsg::Lock& js, int signo);
   jsg::Ref<Fetcher> getTcpPort(jsg::Lock& js, int port);
   jsg::Promise<void> setInactivityTimeout(jsg::Lock& js, int64_t durationMs);
+  void listenHttp(jsg::Lock& js,
+      kj::String addr,
+      jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request> request)> handler);
 
   // TODO(containers): listenTcp()
 
@@ -57,6 +62,7 @@ class Container: public jsg::Object {
     JSG_METHOD(getTcpPort);
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(setInactivityTimeout);
+      JSG_METHOD(listenHttp);
     }
   }
 
@@ -69,12 +75,14 @@ class Container: public jsg::Object {
   bool running;
 
   kj::Maybe<jsg::Value> destroyReason;
+  kj::Vector<capnp::Capability::Client> capabilities;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);
   }
 
   class TcpPortWorkerInterface;
+  class TcpPortHttpHandler;
   class TcpPortOutgoingFactory;
 };
 
