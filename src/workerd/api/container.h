@@ -74,6 +74,7 @@ class Container: public jsg::Object {
   bool running;
 
   kj::Maybe<jsg::Value> destroyReason;
+  kj::Vector<capnp::Capability::Client> capabilities;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(destroyReason);
