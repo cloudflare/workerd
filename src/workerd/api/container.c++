@@ -5,7 +5,10 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/stream-utils.h>
+
 
 namespace workerd::api {
 
@@ -13,15 +16,92 @@ namespace workerd::api {
 // Basic lifecycle methods
 //
 
-class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler::Server {
+enum class NeuterReason { SENT_RESPONSE, THREW_EXCEPTION, CLIENT_DISCONNECTED };
+
+kj::Exception makeNeuterException(NeuterReason reason) {
+  switch (reason) {
+    case NeuterReason::SENT_RESPONSE:
+      return JSG_KJ_EXCEPTION(
+          FAILED, TypeError, "Can't read from request stream after response has been sent.");
+    case NeuterReason::THREW_EXCEPTION:
+      return JSG_KJ_EXCEPTION(
+          FAILED, TypeError, "Can't read from request stream after responding with an exception.");
+    case NeuterReason::CLIENT_DISCONNECTED:
+      return JSG_KJ_EXCEPTION(
+          DISCONNECTED, TypeError, "Can't read from request stream because client disconnected.");
+  }
+  KJ_UNREACHABLE;
+}
+
+class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler::Server,
+                                              private kj::HttpService {
   public:
-    TcpPortConnectHandler(capnp::ByteStreamFactory& byteStreamFactory,
-    IoOwn<jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)>> handle)
-    : byteStreamFactory(byteStreamFactory), handle(kj::mv(handle)) {}
+    TcpPortConnectHandler(
+        jsg::Lock& lock, capnp::ByteStreamFactory& byteStreamFactory,
+    jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(jsg::Ref<workerd::api::Request>)>&& handle)
+    : js(lock), byteStreamFactory(byteStreamFactory),
+        handle(kj::mv(handle)),
+        timer(kj::origin<kj::TimePoint>()),
+        httpServer(timer, kj::HttpHeaderTable(), *this) {}
 
   protected:
-    kj::Promise<void> connect(ConnectContext ctx) override {
-        co_return;
+     class OutputStreamBreakout final: public capnp::ExplicitEndOutputStream {
+          // Dumb class which wraps one side of an AsyncIoStream as an AsyncOutputStream.
+          // TODO(cleanup): This really ought to be in KJ or something.
+         public:
+          OutputStreamBreakout(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+          ~OutputStreamBreakout() noexcept(false) {
+            KJ_IF_SOME(i, inner) {
+              i->shutdownWrite();
+            }
+          }
+
+          kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+            return getInner().write(buffer);
+          }
+          kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+            return getInner().write(pieces);
+          }
+
+          kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+              kj::AsyncInputStream& input, uint64_t amount) override {
+            return getInner().tryPumpFrom(input, amount);
+          }
+
+          kj::Promise<void> whenWriteDisconnected() override {
+            return getInner().whenWriteDisconnected();
+          }
+
+          kj::Promise<void> end() override {
+            getInner().shutdownWrite();
+            inner = kj::none;
+            return kj::READY_NOW;
+          }
+
+         private:
+          kj::Maybe<kj::Own<kj::AsyncIoStream>> inner;
+
+          kj::AsyncIoStream& getInner() { return *KJ_ASSERT_NONNULL(inner, "already called end()"); }
+        };
+
+    kj::Promise<void> connect(ConnectContext context) override {
+         auto pipe = kj::newTwoWayPipe();
+         auto promise = httpServer.listenHttp(kj::mv(pipe.ends[1]));
+
+         auto stream = kj::refcountedWrapper(kj::mv(pipe.ends[0]));
+
+         auto up = byteStreamFactory.kjToCapnp(kj::heap<OutputStreamBreakout>(stream->addWrappedRef()));
+
+         auto down = byteStreamFactory.capnpToKj(context.getParams().getDown());
+         auto downPump =
+             stream->getWrapped().pumpTo(*down).attach(kj::mv(down), kj::mv(stream)).ignoreResult();
+
+         capnp::PipelineBuilder<ConnectResults> pipeline;
+         pipeline.setUp(up);
+         context.setPipeline(pipeline.build());
+         context.getResults().setUp(kj::mv(up));
+
+         return kj::joinPromisesFailFast(kj::arr(kj::mv(promise), kj::mv(downPump)));
     }
 
     // implement this, by sending to jsg callback.
@@ -31,11 +111,62 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
       kj::StringPtr url,
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
-      Response& response) override {}
+      Response& response) override {
+
+      auto ownRequestBody = newNeuterableInputStream(requestBody);
+      auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
+        // Make sure to cancel the request body stream since the native stream is no longer valid once
+        // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
+        // haven't consumed the entire request body.
+        ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+      });
+      KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+
+      auto& ioContext = IoContext::current();
+      auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
+      auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
+      auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
+          kj::Maybe<Body::ExtractedBody> body;
+      if (headers.get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
+          headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
+          requestBody.tryGetLength().orDefault(1) > 0) {
+        body = Body::ExtractedBody(jsStream.addRef());
+      }
+
+      if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+          headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
+        // We can't use headers.set() here as headers is marked const. Instead, we call set() on the
+        // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
+        KJ_IF_SOME(l, requestBody.tryGetLength()) {
+          jsHeaders->setUnguarded(
+              js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
+        } else {
+          jsHeaders->setUnguarded(
+              js, jsg::ByteString(kj::str("Transfer-Encoding")), jsg::ByteString(kj::str("chunked")));
+        }
+      }
+
+      CfProperty cf = CfProperty("{}"_kj);
+      auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
+       js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
+       /* signal */ kj::none, kj::mv(cf), kj::mv(body),
+       /* thisSignal */ kj::none, Request::CacheMode::NONE);
+      co_await ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
+        [&response, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) {
+          KJ_LOG(ERROR, "Interesting?", res->getType());
+          auto& context = IoContext::current();
+          return context.addObject(kj::heap(res->send(js, response, {}, headers)));
+        }));
+    }
+
+    using kj::HttpService::connect;
 
   private:
+    jsg::Lock& js;
     capnp::ByteStreamFactory& byteStreamFactory;
-    IoOwn<jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)>> handle;
+    jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(jsg::Ref<workerd::api::Request>)> handle;
+    kj::TimerImpl timer;
+    kj::HttpServer httpServer;
 };
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
@@ -45,8 +176,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
 void Container::listenHttp(jsg::Lock& js, kj::String addr, jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)> cb) {
     auto req = rpcClient->listenTcpRequest();
     auto& ioctx = IoContext::current();
-    auto object = ioctx.addObject(kj::heap(kj::mv(cb)));
-    req.setHandler(kj::heap<TcpPortConnectHandler>(ioctx.getByteStreamFactory(), kj::mv(object)));
+    req.setHandler(kj::heap<TcpPortConnectHandler>(js, ioctx.getByteStreamFactory(), kj::mv(cb)));
     IoContext::current().addTask(req.sendIgnoringResult());
 }
 
