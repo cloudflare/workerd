@@ -3835,6 +3835,10 @@ interface Container {
   signal(signo: number): void;
   getTcpPort(port: number): Fetcher;
   setInactivityTimeout(durationMs: number | bigint): Promise<void>;
+  listenHttp(
+    addr: string,
+    handler: (param0: Request) => Response | Promise<Response>,
+  ): void;
 }
 interface ContainerStartupOptions {
   entrypoint?: string[];
