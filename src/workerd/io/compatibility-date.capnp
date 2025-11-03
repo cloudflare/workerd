@@ -1185,7 +1185,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # flag with nodejs_compat (or nodejs_compat_v2).
 
   enableCtxExports @139 :Bool
-    $compatEnableFlag("enable_ctx_exports");
+    $compatEnableFlag("enable_ctx_exports")
+    $compatDisableFlag("disable_ctx_exports")
+    $compatEnableDate("2025-11-17");
   # Enable the ctx.exports API.
 
   pythonExternalSDK @140 :Bool
