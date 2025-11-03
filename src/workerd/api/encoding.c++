@@ -461,6 +461,129 @@ kj::Maybe<jsg::JsString> TextDecoder::decodePtr(
 // =======================================================================================
 // TextEncoder implementation
 
+namespace {
+
+constexpr inline bool isLeadSurrogate(char16_t c) {
+  return 0xD800 <= c && c < 0xDC00;
+}
+
+constexpr inline bool isTrailSurrogate(char16_t c) {
+  return 0xDC00 <= c && c <= 0xDFFF;
+}
+
+// Calculate the number of UTF-8 bytes needed for a single UTF-16 code unit
+constexpr inline size_t utf8BytesForCodeUnit(char16_t c) {
+  if (c < 0x80) return 1;
+  if (c < 0x800) return 2;
+  return 3;
+}
+
+// Calculate UTF-8 length from UTF-16 with potentially invalid surrogates.
+// Invalid surrogates are counted as U+FFFD (3 bytes in UTF-8).
+size_t utf8LengthFromInvalidUtf16(const char16_t* input, size_t length) {
+  size_t utf8Length = 0;
+  bool pendingSurrogate = false;
+
+  for (size_t i = 0; i < length; i++) {
+    char16_t c = input[i];
+
+    if (pendingSurrogate) {
+      if (isTrailSurrogate(c)) {
+        // Valid surrogate pair = 4 bytes in UTF-8
+        utf8Length += 4;
+        pendingSurrogate = false;
+      } else {
+        // Unpaired lead surrogate = U+FFFD (3 bytes)
+        utf8Length += 3;
+        if (!isLeadSurrogate(c)) {
+          utf8Length += utf8BytesForCodeUnit(c);
+          pendingSurrogate = false;
+        }
+      }
+    } else if (isLeadSurrogate(c)) {
+      pendingSurrogate = true;
+    } else {
+      if (isTrailSurrogate(c)) {
+        // Unpaired trail surrogate = U+FFFD (3 bytes)
+        utf8Length += 3;
+      } else {
+        utf8Length += utf8BytesForCodeUnit(c);
+      }
+    }
+  }
+
+  if (pendingSurrogate) {
+    utf8Length += 3;  // Trailing unpaired lead surrogate
+  }
+
+  return utf8Length;
+}
+
+// Encode a single UTF-16 code unit to UTF-8
+inline size_t encodeUtf8CodeUnit(char16_t c, char* out) {
+  if (c < 0x80) {
+    *out = static_cast<char>(c);
+    return 1;
+  } else if (c < 0x800) {
+    out[0] = static_cast<char>(0xC0 | (c >> 6));
+    out[1] = static_cast<char>(0x80 | (c & 0x3F));
+    return 2;
+  } else {
+    out[0] = static_cast<char>(0xE0 | (c >> 12));
+    out[1] = static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+    out[2] = static_cast<char>(0x80 | (c & 0x3F));
+    return 3;
+  }
+}
+
+// Encode a valid surrogate pair to UTF-8
+inline void encodeSurrogatePair(char16_t lead, char16_t trail, char* out) {
+  uint32_t codepoint = 0x10000 + (((lead & 0x3FF) << 10) | (trail & 0x3FF));
+  out[0] = static_cast<char>(0xF0 | (codepoint >> 18));
+  out[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+  out[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+  out[3] = static_cast<char>(0x80 | (codepoint & 0x3F));
+}
+
+// Convert UTF-16 with potentially invalid surrogates to UTF-8.
+// Invalid surrogates are replaced with U+FFFD.
+void convertInvalidUtf16ToUtf8(const char16_t* input, size_t length, char* out) {
+  size_t position = 0;
+  bool pendingSurrogate = false;
+
+  for (size_t i = 0; i < length; i++) {
+    char16_t c = input[i];
+
+    if (pendingSurrogate) {
+      if (isTrailSurrogate(c)) {
+        encodeSurrogatePair(input[i - 1], c, out + position);
+        position += 4;
+        pendingSurrogate = false;
+      } else {
+        position += encodeUtf8CodeUnit(0xFFFD, out + position);
+        if (!isLeadSurrogate(c)) {
+          position += encodeUtf8CodeUnit(c, out + position);
+          pendingSurrogate = false;
+        }
+      }
+    } else if (isLeadSurrogate(c)) {
+      pendingSurrogate = true;
+    } else {
+      if (isTrailSurrogate(c)) {
+        position += encodeUtf8CodeUnit(0xFFFD, out + position);
+      } else {
+        position += encodeUtf8CodeUnit(c, out + position);
+      }
+    }
+  }
+
+  if (pendingSurrogate) {
+    encodeUtf8CodeUnit(0xFFFD, out + position);
+  }
+}
+
+}  // namespace
+
 jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();
 }
@@ -522,17 +645,12 @@ jsg::JsUint8Array TextEncoder::encode(jsg::Lock& js, jsg::Optional<jsg::JsString
     } else {
       // Rare case: Invalid UTF-16 with unpaired surrogates. Per the Encoding Standard,
       // unpaired surrogates must be replaced with U+FFFD (replacement character).
-      // U+FFFD is 3 bytes in UTF-8, which means the UTF-8 length will differ from what
-      // we'd calculate from the invalid UTF-16. We must fix the UTF-16 first, then
-      // calculate the UTF-8 length from the well-formed version to get the correct size.
-      auto wellFormed = kj::heapArray<char16_t>(view.length());
-      simdutf::to_well_formed_utf16le(data, view.length(), wellFormed.begin());
-      utf8_length = simdutf::utf8_length_from_utf16le(wellFormed.begin(), view.length());
+      // Use custom conversion that handles invalid surrogates without creating an
+      // intermediate well-formed UTF-16 buffer.
+      utf8_length = utf8LengthFromInvalidUtf16(data, view.length());
       backingStore = v8::ArrayBuffer::NewBackingStore(
           js.v8Isolate, utf8_length, v8::BackingStoreInitializationMode::kUninitialized);
-      [[maybe_unused]] auto written = simdutf::convert_utf16le_to_utf8(
-          wellFormed.begin(), wellFormed.size(), reinterpret_cast<char*>(backingStore->Data()));
-      KJ_DASSERT(written == utf8_length);
+      convertInvalidUtf16ToUtf8(data, view.length(), reinterpret_cast<char*>(backingStore->Data()));
     }
   }  // ValueView destroyed here, releasing the heap lock
 
