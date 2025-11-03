@@ -432,6 +432,7 @@ wd_cc_library(
     hdrs = ["encoding.h"],
     implementation_deps = [
         "//src/workerd/util:strings",
+        "@simdutf",
     ],
     visibility = ["//visibility:public"],
     deps = [
