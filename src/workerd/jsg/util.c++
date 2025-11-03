@@ -206,13 +206,12 @@ DecodedException decodeTunneledException(
   result.isDoNotLogException = tunneledInfo.isDoNotLogException;
 
   auto errorType = tunneledInfo.message;
-  auto appMessage = [&](kj::StringPtr errorString) -> kj::ConstString {
+  auto appMessage = [&](kj::StringPtr errorString) -> kj::String {
     if (tunneledInfo.isInternal) {
       result.internalErrorId = makeInternalErrorId();
-      return kj::ConstString(renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId)));
+      return renderInternalError(KJ_ASSERT_NONNULL(result.internalErrorId));
     } else {
-      // .attach() to convert StringPtr to ConstString:
-      return trimErrorMessage(errorString).attach();
+      return kj::str(trimErrorMessage(errorString));
     }
   };
   result.isInternal = tunneledInfo.isInternal;
@@ -254,7 +253,7 @@ DecodedException decodeTunneledException(
         auto& js = Lock::from(isolate);
         auto errorName = kj::str(errorType.first(closeParen));
         auto message = appMessage(errorType.slice(1 + closeParen));
-        auto exception = js.domException(kj::mv(errorName), kj::str(message));
+        auto exception = js.domException(kj::mv(errorName), kj::mv(message));
         result.handle = KJ_ASSERT_NONNULL(exception.tryGetHandle(js));
         addAdditionalInfo();
         return result;

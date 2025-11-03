@@ -1705,11 +1705,11 @@ class SpanSubmitter final: public kj::Refcounted {
   void submitSpan(tracing::SpanId spanId, tracing::SpanId parentSpanId, const Span& span) {
     // We largely recreate the span here which feels inefficient, but is hard to avoid given the
     // mismatch between the Span type and the full span information required for OTel.
-    tracing::CompleteSpan span2(spanId, parentSpanId, kj::ConstString(kj::str(span.operationName)),
-        span.startTime, span.endTime);
+    tracing::CompleteSpan span2(
+        spanId, parentSpanId, span.operationName.clone(), span.startTime, span.endTime);
     span2.tags.reserve(span.tags.size());
     for (auto& tag: span.tags) {
-      span2.tags.insert(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      span2.tags.insert(tag.key.clone(), spanTagClone(tag.value));
     }
     if (isPredictableModeForTest()) {
       span2.startTime = span2.endTime = kj::UNIX_EPOCH;
@@ -5135,10 +5135,10 @@ kj::Promise<void> Server::run(
     auto logging = config.getLogging();
     loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
     if (logging.hasStdoutPrefix()) {
-      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
     }
     if (logging.hasStderrPrefix()) {
-      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
     }
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
@@ -5539,10 +5539,10 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     auto logging = config.getLogging();
     loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
     if (logging.hasStdoutPrefix()) {
-      loggingOptions.stdoutPrefix = kj::str(logging.getStdoutPrefix());
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
     }
     if (logging.hasStderrPrefix()) {
-      loggingOptions.stderrPrefix = kj::str(logging.getStderrPrefix());
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
     }
   } else {
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());

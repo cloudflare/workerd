@@ -999,7 +999,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
     // Retrieve the method name and report onset event info if tracing is enabled.
     switch (params.which()) {
       case rpc::JsRpcTarget::CallParams::METHOD_NAME: {
-        methodNameForTrace = params.getMethodName().attach();
+        methodNameForTrace = kj::ConstString(kj::str(params.getMethodName()));
         break;
       }
       case rpc::JsRpcTarget::CallParams::METHOD_PATH: {

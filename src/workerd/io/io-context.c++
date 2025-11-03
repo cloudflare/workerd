@@ -881,10 +881,8 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   SpanBuilder userSpan = nullptr;
 
   KJ_IF_SOME(n, options.operationName) {
-    // TODO(cleanup): Using kj::Maybe<kj::LiteralStringConst> for operationName instead would remove
-    // a memory allocation here, but there might be use cases for dynamically allocated strings.
-    span = makeTraceSpan(kj::ConstString(kj::str(n)));
-    userSpan = makeUserTraceSpan(kj::ConstString(kj::mv(n)));
+    span = makeTraceSpan(n.clone());
+    userSpan = makeUserTraceSpan(n.clone());
   }
 
   TraceContext tracing(kj::mv(span), kj::mv(userSpan));

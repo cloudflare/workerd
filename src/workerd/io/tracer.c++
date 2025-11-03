@@ -207,7 +207,7 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
   for (const Span::TagMap::Entry& tag: span.tags) {
     messageSize += tag.key.size();
     KJ_SWITCH_ONEOF(tag.value) {
-      KJ_CASE_ONEOF(str, kj::String) {
+      KJ_CASE_ONEOF(str, kj::ConstString) {
         messageSize += str.size();
       }
       KJ_CASE_ONEOF(val, bool) {
@@ -237,11 +237,11 @@ void WorkerTracer::addSpan(tracing::CompleteSpan&& span) {
       topLevelContext.getTraceId(), topLevelContext.getInvocationId(), span.spanId);
 
   tailStreamWriter->report(
-      spanOpenContext, tracing::SpanOpen(span.spanId, kj::str(span.operationName)), span.startTime);
+      spanOpenContext, tracing::SpanOpen(span.spanId, span.operationName.clone()), span.startTime);
   // If a span manages to exceed the size limit, truncate it by not providing span attributes.
   if (span.tags.size() && messageSize <= MAX_TRACE_BYTES) {
     tracing::CustomInfo attr = KJ_MAP(tag, span.tags) {
-      return tracing::Attribute(kj::ConstString(kj::str(tag.key)), spanTagClone(tag.value));
+      return tracing::Attribute(tag.key.clone(), kj::mv(tag.value));
     };
     tailStreamWriter->report(spanComponentContext, kj::mv(attr), span.startTime);
   }
@@ -567,9 +567,9 @@ void WorkerTracer::setJsRpcInfo(const tracing::InvocationSpanContext& context,
   }
 
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    auto attr = kj::heapArrayBuilder<tracing::Attribute>(1);
-    attr.add(tracing::Attribute("jsrpc.method"_kjc, kj::str(methodName)));
-    writer->report(context, attr.finish(), timestamp);
+    auto tag = tracing::Attribute("jsrpc.method"_kjc, methodName.clone());
+    kj::Array<tracing::Attribute> attrs(&tag, 1, kj::NullArrayDisposer::instance);
+    writer->report(context, kj::mv(attrs), timestamp);
   }
 }
 
