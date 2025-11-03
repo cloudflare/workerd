@@ -49,6 +49,11 @@ class InputGate {
     virtual void inputGateWaiterAdded() {}
     virtual void inputGateWaiterRemoved() {}
 
+    // Optionally create a tracing span for the time spent holding the input gate lock.
+    // The span should be ended when the lock is released.
+    // Returns a span builder that will be automatically ended when the lock is released.
+    virtual kj::Maybe<kj::Own<void>> makeInputGateHoldSpan() { return kj::none; }
+
     static const Hooks DEFAULT;
   };
 
@@ -120,6 +125,10 @@ class InputGate {
   // CriticalSection inherits InputGate for implementation convenience (since much implementation
   // is shared).
   bool isCriticalSection = false;
+
+  // Tracing span for the time the input gate is held. Created when lockCount goes from 0 to 1,
+  // destroyed when lockCount goes from 1 to 0.
+  kj::Maybe<kj::Own<void>> traceSpan;
 
   struct Waiter {
     Waiter(kj::PromiseFulfiller<Lock>& fulfiller, InputGate& gate, bool isChildWaiter);
@@ -244,6 +253,11 @@ class OutputGate {
     virtual void outputGateWaiterAdded() {}
     virtual void outputGateWaiterRemoved() {}
 
+    // Optionally create a tracing span for the time spent holding the output gate lock.
+    // The span should be ended when the lock is released.
+    // Returns a span builder that will be automatically ended when the lock is released.
+    virtual kj::Maybe<kj::Own<void>> makeOutputGateHoldSpan() { return kj::none; }
+
     static const Hooks DEFAULT;
   };
 
@@ -297,8 +311,12 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise) {
   }
 
   hooks.outputGateLocked();
-  auto rejectIfCanceled = kj::defer([this, &fulfiller]() {
+  // Start tracing span for output gate hold
+  auto traceSpan = hooks.makeOutputGateHoldSpan();
+  auto rejectIfCanceled = kj::defer([this, &fulfiller, traceSpan = kj::mv(traceSpan)]() mutable {
     hooks.outputGateReleased();
+    // End tracing span for output gate hold (by destroying it)
+    traceSpan = kj::none;
     if (fulfiller->isWaiting()) {
       auto e = makeUnfulfilledException();
       setBroken(e);

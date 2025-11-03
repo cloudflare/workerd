@@ -3432,6 +3432,28 @@ struct Worker::Actor::Impl {
     void inputGateWaiterRemoved() override {
       metrics.inputGateWaiterRemoved();
     }
+
+    kj::Maybe<kj::Own<void>> makeInputGateHoldSpan() override {
+      // Create a trace span for the input gate hold duration.
+      // We use IoContext::current() which is only available when an IoContext is active.
+      // If no IoContext is current (e.g., during early initialization), we skip tracing.
+      kj::Maybe<IoContext&> maybeCtx;
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+        maybeCtx = IoContext::current();
+      })) {
+        // Exception occurred, no IoContext available
+        (void)exception;
+        return kj::none;
+      }
+      KJ_IF_SOME(ctx, maybeCtx) {
+        auto span = ctx.makeTraceSpan("actor_input_gate_hold"_kjc);
+        if (span.isObserved()) {
+          // Box the SpanBuilder into a kj::Own<void> so it can be stored and will end when destroyed
+          return kj::heap<SpanBuilder>(kj::mv(span)).attach(kj::defer([]() {}));
+        }
+      }
+      return kj::none;
+    }
     // Implements InputGate::Hooks.
 
     kj::Promise<void> makeTimeoutPromise() override {
@@ -3459,6 +3481,28 @@ struct Worker::Actor::Impl {
     }
     void outputGateWaiterRemoved() override {
       metrics.outputGateWaiterRemoved();
+    }
+
+    kj::Maybe<kj::Own<void>> makeOutputGateHoldSpan() override {
+      // Create a trace span for the output gate hold duration.
+      // We use IoContext::current() which is only available when an IoContext is active.
+      // If no IoContext is current (e.g., during early initialization), we skip tracing.
+      kj::Maybe<IoContext&> maybeCtx;
+      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+        maybeCtx = IoContext::current();
+      })) {
+        // Exception occurred, no IoContext available
+        (void)exception;
+        return kj::none;
+      }
+      KJ_IF_SOME(ctx, maybeCtx) {
+        auto span = ctx.makeTraceSpan("actor_output_gate_hold"_kjc);
+        if (span.isObserved()) {
+          // Box the SpanBuilder into a kj::Own<void> so it can be stored and will end when destroyed
+          return kj::heap<SpanBuilder>(kj::mv(span)).attach(kj::defer([]() {}));
+        }
+      }
+      return kj::none;
     }
 
     // Implements ActorCache::Hooks

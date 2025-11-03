@@ -79,6 +79,8 @@ InputGate::Lock::Lock(InputGate& gate)
 
   if (++gateToLock->lockCount == 1) {
     gateToLock->hooks.inputGateLocked();
+    // Start tracing span for input gate hold
+    gateToLock->traceSpan = gateToLock->hooks.makeInputGateHoldSpan();
   }
 }
 
@@ -104,6 +106,8 @@ void InputGate::releaseLock() {
   // Check if any waiters can be released.
   if (lockCount == 0) {
     hooks.inputGateReleased();
+    // End tracing span for input gate hold
+    traceSpan = kj::none;
     if (!waitingChildren.empty()) {
       auto& waiter = waitingChildren.front();
       waitingChildren.remove(waiter);
