@@ -27,7 +27,9 @@ struct RustModuleRegistry: public ::workerd::rust::jsg::ModuleRegistry {
       auto localValue = callback(js.v8Isolate);
 
       // Convert uint64_t LocalValue back to v8::Local<v8::Value>
-      auto value = from_repr(localValue);
+      auto value = local_from_ffi<v8::Value>(localValue);
+
+      KJ_DASSERT(value->IsObject());
 
       // Convert to v8::Object
       auto wrap = value.As<v8::Object>();

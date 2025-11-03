@@ -14,6 +14,10 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: usize, /* LocalValue */
         ) -> String;
+        pub unsafe fn global_function_template_as_local(
+            isolate: *mut Isolate,
+            value: usize, /* GlobalFunctionTemplate */
+        ) -> usize /* LocalFunctionTemplate */;
     }
 }
 
@@ -27,23 +31,61 @@ trait IsolateMember: Drop {
 /// It needs to have the same lifetime as the v8 Isolate.
 pub struct Isolate {
     ptr: *mut ffi::Isolate,
-    members: Vec<Box<dyn IsolateMember>>,
+}
+
+impl Isolate {
+    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate) -> Self {
+        Isolate { ptr: isolate }
+    }
+
+    pub unsafe fn to_ffi(&mut self) -> *mut ffi::Isolate {
+        self.ptr
+    }
 }
 
 pub struct Local<T> {
     ptr: *mut T,
 }
 
-pub struct LocalValue(u64);
+pub struct LocalValue(usize);
 
 impl LocalValue {
-    pub(crate) unsafe fn new(value: u64) -> Self {
+    pub unsafe fn from_ffi(value: usize) -> Self {
         LocalValue(value)
     }
 
-    pub unsafe fn into_raw(self) -> u64 {
+    pub unsafe fn to_ffi(self) -> usize {
         self.0
     }
 }
 
 pub struct Lock {}
+
+pub struct GlobalFunctionTemplate(usize);
+
+impl GlobalFunctionTemplate {
+    pub fn as_local(&self, isolate: &mut Isolate) -> LocalFunctionTemplate {
+        unsafe {
+            LocalFunctionTemplate::from_ffi(ffi::global_function_template_as_local(
+                isolate.to_ffi(),
+                self.0,
+            ))
+        }
+    }
+
+    pub unsafe fn from_ffi(value: usize) -> Self {
+        GlobalFunctionTemplate(value)
+    }
+}
+
+pub struct LocalFunctionTemplate(usize);
+
+impl LocalFunctionTemplate {
+    pub unsafe fn from_ffi(value: usize) -> Self {
+        LocalFunctionTemplate(value)
+    }
+
+    pub unsafe fn to_ffi(self) -> usize {
+        self.0
+    }
+}

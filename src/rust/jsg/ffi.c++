@@ -10,8 +10,7 @@ using namespace kj_rs;
 
 namespace workerd::rust::jsg {
 
-v8::Local<v8::FunctionTemplate> get_template(
-    v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
+size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   // v8::EscapableHandleScope scope(isolate);
 
@@ -82,14 +81,15 @@ v8::Local<v8::FunctionTemplate> get_template(
 
   // auto result = scope.Escape(constructor);
   // slot.Reset(isolate, result);
-  return constructor;
+  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, constructor));
 }
 
-LocalValue instantiate_resource(v8::Isolate* isolate, const ResourceDescriptor& descriptor) {
-  auto tmpl = get_template(isolate, descriptor);
-  v8::Local<v8::Object> object =
-      workerd::jsg::check(tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
-  return to_repr(object);
+LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl) {
+  auto local_tmpl = local_from_ffi<v8::FunctionTemplate>(tmpl);
+  v8::Local<v8::Object> obj = workerd::jsg::check(
+      local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
+  // TODO: Attach to the wrapper (call attachWrapper)
+  return to_ffi(kj::mv(obj));
 }
 
 }  // namespace workerd::rust::jsg

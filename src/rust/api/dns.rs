@@ -1,3 +1,4 @@
+use jsg::v8;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -107,13 +108,13 @@ pub struct DnsUtil {}
 
 // Generated code
 pub struct DnsUtilWrapper {
-    // memoized_constructor: Option<GlobalFunctionTemplate>,
+    pub constructor: v8::GlobalFunctionTemplate,
     // context_constructor: Option<GlobalFunctionTemplate>,
 }
 
-impl DnsUtilWrapper {
-    fn register(&mut self, isolate: &mut jsg::v8::Isolate) {
-        // Create necessary constructors.
+impl jsg::ResourceWrapper for DnsUtilWrapper {
+    fn get_constructor(&self, isolate: &mut v8::Isolate) -> v8::LocalFunctionTemplate {
+        self.constructor.as_local(isolate)
     }
 }
 
@@ -249,7 +250,7 @@ impl DnsUtil {
         //     Ok(record) => Ok(jsg::v8::value_from_jsg_struct(lock, &record)),
         //     Err(err) => Err(err.into()),
         // }
-        todo!();
+        todo!("obtain self here");
     }
 
     extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {

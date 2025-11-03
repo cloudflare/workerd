@@ -3,6 +3,9 @@
 
 use std::pin::Pin;
 
+use crate::dns::DnsUtil;
+use crate::dns::DnsUtilWrapper;
+
 pub mod dns;
 
 #[cxx::bridge(namespace = "workerd::rust::api")]
@@ -18,12 +21,6 @@ mod ffi {
         include!("workerd/rust/jsg/ffi.h");
 
         type ModuleRegistry = jsg::modules::ffi::ModuleRegistry;
-
-        fn register_add_builtin_module(
-            registry: Pin<&mut ModuleRegistry>,
-            specifier: &str,
-            callback: unsafe fn(*mut Isolate) -> u64,
-        );
     }
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
@@ -31,8 +28,12 @@ mod ffi {
 }
 
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
-    ffi::register_add_builtin_module(registry, "node-internal:dns", |isolate| unsafe {
-        let isolate_ptr = isolate as *mut jsg::ffi::Isolate;
-        jsg::instantiate_resource::<dns::DnsUtil>(isolate_ptr).into_raw()
+    jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
+        let mut isolate = jsg::v8::Isolate::from_ffi(isolate);
+        let dns_util = DnsUtil {};
+        let dns_util_wrapper = DnsUtilWrapper {
+            constructor: jsg::create_resource_constructor::<DnsUtil>(&mut isolate),
+        };
+        jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).to_ffi()
     });
 }

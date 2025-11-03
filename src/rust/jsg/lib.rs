@@ -43,13 +43,19 @@ pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
 
-        type Isolate;
+        type Isolate = crate::v8::ffi::Isolate;
         type FunctionCallbackInfo;
 
-        unsafe fn instantiate_resource(
+        unsafe fn create_resource_template(
             isolate: *mut Isolate,
             descriptor: &ResourceDescriptor,
-        ) -> u64;
+        ) -> usize /* v8::GlobalFunctionTemplate */;
+
+        unsafe fn wrap_resource(
+            isolate: *mut Isolate,
+            resource: usize,    /* R* */
+            constructor: usize, /* v8::LocalFunctionTemplate */
+        ) -> usize /* v8::LocalValue */;
     }
 }
 
@@ -91,11 +97,29 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
     descriptor
 }
 
-pub fn instantiate_resource<R: Resource>(isolate: *mut ffi::Isolate) -> LocalValue {
+pub fn create_resource_constructor<R: Resource>(
+    isolate: &mut v8::Isolate,
+) -> v8::GlobalFunctionTemplate {
     unsafe {
-        LocalValue::new(ffi::instantiate_resource(
-            isolate,
+        v8::GlobalFunctionTemplate::from_ffi(ffi::create_resource_template(
+            isolate.to_ffi(),
             &get_resource_descriptor::<R>(),
+        ))
+    }
+}
+
+pub fn wrap_resource<R: Resource, W: ResourceWrapper>(
+    isolate: &mut v8::Isolate,
+    resource: R,
+    wrapper: &W,
+) -> v8::LocalValue {
+    let constructor = wrapper.get_constructor(isolate);
+    let resource = Box::new(resource);
+    unsafe {
+        v8::LocalValue::from_ffi(ffi::wrap_resource(
+            isolate.to_ffi(),
+            Box::into_raw(resource) as usize,
+            constructor.to_ffi(),
         ))
     }
 }
@@ -232,6 +256,10 @@ pub trait Resource: Type {
     fn members() -> Vec<Member<Self>>
     where
         Self: Sized;
+}
+
+pub trait ResourceWrapper {
+    fn get_constructor(&self, isolate: &mut v8::Isolate) -> v8::LocalFunctionTemplate;
 }
 
 pub trait Struct: Type {}
