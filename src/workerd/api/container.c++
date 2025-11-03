@@ -54,7 +54,7 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
                       kj::StringPtr url,
                       kj::Own<kj::HttpHeaders> headers,
                       kj::Own<NeuterableInputStream> requestBody,
-                      Response& response) {
+                      Response* response) {
                     return requestImpl(
                             lock,
                             ctx,
@@ -158,17 +158,14 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
     ) override {
         auto headersCloned = kj::heap(headers.cloneShallow());
         auto ownRequestBody = newNeuterableInputStream(requestBody);
-        return enterIsolateAndRequest(method, url, kj::mv(headersCloned), kj::mv(ownRequestBody), response);
+        co_await enterIsolateAndRequest(method, url, kj::mv(headersCloned), kj::mv(ownRequestBody), &response);
     }
 
-    // implement this, by sending to jsg callback.
-    // Should init a httpServer in the constructor by using *this.
-    // see fake-container-service for more details.
-    kj::Promise<void> requestImpl(jsg::Lock& js, IoContext& ctx, kj::HttpMethod method,
+    kj::Promise<workerd::api::DeferredProxy<void>> requestImpl(jsg::Lock& js, IoContext& ctx, kj::HttpMethod method,
       kj::StringPtr url,
       kj::Own<kj::HttpHeaders> headers,
       kj::Own<NeuterableInputStream> ownRequestBody,
-      Response& response) {
+      Response* response) {
 
       KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 1");
       auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
@@ -193,7 +190,7 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
         body = Body::ExtractedBody(jsStream.addRef());
       }
 
-      KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 3");
+      KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 3", ownRequestBody->tryGetLength());
 
       if (body != kj::none && headers->get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
           headers->get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
@@ -209,17 +206,17 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
       }
 
       CfProperty cf = CfProperty("{}"_kj);
+      Response& resRef = *response;
       auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
        kj::none,
        /* signal */ kj::none, kj::mv(cf), kj::mv(body),
        /* thisSignal */ kj::none, Request::CacheMode::NONE);
-      // co_await ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
-      //   [&response, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) mutable {
-      //     KJ_LOG(ERROR, "TEST: Interesting?", res->getType());
-      //     auto& context = IoContext::current();
-      //     return context.addObject(kj::heap(res->send(js, response, {}, headers)));
-      //   }));
-      return kj::READY_NOW;
+      return ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
+        [&resRef, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) mutable {
+          KJ_LOG(ERROR, "TEST: Interesting?", res->getType());
+          auto& context = IoContext::current();
+          return context.addObject(kj::heap(res->send(js, resRef, {}, *headers)));
+        })).attach(kj::mv(deferredNeuter));
     }
 
     using kj::HttpService::connect;
@@ -232,11 +229,11 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
     kj::HttpHeaderTable headerTable;
 
     kj::Function<kj::Promise<void>(ConnectContext connectContext)> enterIsolateAndCall;
-    kj::Function<kj::Promise<void>(kj::HttpMethod method,
+    kj::Function<kj::Promise<workerd::api::DeferredProxy<void>>(kj::HttpMethod method,
         kj::StringPtr url,
         kj::Own<kj::HttpHeaders> headers,
         kj::Own<NeuterableInputStream> requestBody,
-        Response& response)> enterIsolateAndRequest;
+        Response* response)> enterIsolateAndRequest;
     // kj::HttpServer httpServer;
 };
 
