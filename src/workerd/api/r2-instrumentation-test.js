@@ -1077,7 +1077,7 @@ export const test = {
         'cloudflare.binding.name': 'BUCKET',
         'cloudflare.r2.operation': 'PutObject',
         'cloudflare.r2.bucket': 'r2-test',
-        'cloudflare.r2.request.key': 'md5checksum',
+        'cloudflare.r2.request.key': 'multipleChecksums',
         'cloudflare.r2.request.checksum.type': 'md5',
         'cloudflare.r2.request.checksum.value':
           '9a0364b9e99bb480dd25e1f0284c8555',
@@ -1086,6 +1086,33 @@ export const test = {
         'cloudflare.r2.response.etag': 'objectEtag',
         'cloudflare.r2.response.size': 123,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
+        'cloudflare.r2.response.checksum.md5':
+          '9a0364b9e99bb480dd25e1f0284c8555',
+        'cloudflare.r2.response.checksum.sha1':
+          '2a0364b9e99bb480dd25e1f0284c855511223344',
+        'cloudflare.r2.response.checksum.sha256':
+          '3a0364b9e99bb480dd25e1f0284c8555112233445566778899aabbccddeeff00',
+        'cloudflare.r2.response.storage_class': 'Standard',
+        'cloudflare.r2.response.custom_metadata': true,
+        closed: true,
+      },
+      {
+        name: 'r2_head',
+        'cloudflare.binding.type': 'r2',
+        'cloudflare.binding.name': 'BUCKET',
+        'cloudflare.r2.operation': 'HeadObject',
+        'cloudflare.r2.bucket': 'r2-test',
+        'cloudflare.r2.request.key': 'multipleChecksums',
+        'cloudflare.r2.response.success': true,
+        'cloudflare.r2.response.etag': 'objectEtag',
+        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
+        'cloudflare.r2.response.checksum.md5':
+          '9a0364b9e99bb480dd25e1f0284c8555',
+        'cloudflare.r2.response.checksum.sha1':
+          '2a0364b9e99bb480dd25e1f0284c855511223344',
+        'cloudflare.r2.response.checksum.sha256':
+          '3a0364b9e99bb480dd25e1f0284c8555112233445566778899aabbccddeeff00',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
         closed: true,
