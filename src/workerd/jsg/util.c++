@@ -7,8 +7,12 @@
 #include "ser.h"
 #include "setup.h"
 
+#include <workerd/jsg/exception-metadata.capnp.h>
+
 #include <openssl/rand.h>
 
+#include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/debug.h>
 
 #include <cstdlib>
@@ -452,6 +456,48 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
     //    this case we cannot serialize the exception, but again we'll just move on without the
     //    annotation.
   }
+}
+
+void addJsExceptionMetadata(Lock& js, kj::Exception& exception, v8::Local<v8::Value> handle) {
+  // Extract JavaScript error type and stack trace
+  if (!handle->IsObject()) {
+    return;  // Not an error object, nothing to extract
+  }
+
+  auto errorObj = jsg::JsObject(handle.As<v8::Object>());
+
+  // Build Cap'n Proto message
+  capnp::MallocMessageBuilder message;
+  auto metadata = message.initRoot<JsExceptionMetadata>();
+
+  // Limit for user-controlled fields (4KB)
+  constexpr size_t MAX_FIELD_SIZE = 4096;
+
+  // Extract error name (e.g., "Error", "TypeError", "RangeError")
+  auto nameProp = errorObj.get(js, "name"_kj);
+  if (nameProp.isString()) {
+    auto errorType = nameProp.toString(js);
+    // Truncate to 4KB if needed
+    if (errorType.size() > MAX_FIELD_SIZE) {
+      errorType = kj::str(errorType.slice(0, MAX_FIELD_SIZE));
+    }
+    metadata.setErrorType(errorType);
+  }
+
+  // Extract stack trace string
+  auto stackProp = errorObj.get(js, "stack"_kj);
+  if (stackProp.isString()) {
+    auto stackTrace = stackProp.toString(js);
+    // Truncate to 4KB if needed
+    if (stackTrace.size() > MAX_FIELD_SIZE) {
+      stackTrace = kj::str(stackTrace.slice(0, MAX_FIELD_SIZE));
+    }
+    metadata.setStackTrace(stackTrace);
+  }
+
+  // Serialize to bytes using Cap'n Proto
+  auto words = capnp::messageToFlatArray(message);
+  exception.setDetail(JS_EXCEPTION_METADATA_DETAIL_ID, kj::heapArray(words.asBytes()));
 }
 
 static kj::String typeErrorMessage(TypeErrorContext c, const char* expectedType) {
