@@ -45,11 +45,25 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
         timer(kj::origin<kj::TimePoint>()),
         enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this, &ctx](jsg::Lock& lock, ConnectContext context) {
-                return ctx.run([this, &ctx, context](jsg::Lock& lock) mutable {
-                    return connectImpl(lock, ctx, context);
-                });
+                return connectImpl(lock, ctx, context);
             }
-        )) {}
+        )),
+        enterIsolateAndRequest(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this, &ctx](jsg::Lock& lock,
+                      kj::HttpMethod method,
+                      kj::StringPtr url,
+                      kj::Own<kj::HttpHeaders> headers,
+                      kj::Own<NeuterableInputStream> requestBody,
+                      Response& response) {
+                    return requestImpl(
+                            lock,
+                            ctx,
+                            method,
+                            url,
+                            kj::mv(headers),
+                            kj::mv(requestBody),
+                            response);
+            })) {}
 
   protected:
      class OutputStreamBreakout final: public capnp::ExplicitEndOutputStream {
@@ -142,47 +156,50 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
       kj::AsyncInputStream& requestBody,
       Response& response
     ) override {
-        // return enterIsolateAndRequest(method, url, headers, requestBody, response);
-    // }
+        auto headersCloned = kj::heap(headers.cloneShallow());
+        auto ownRequestBody = newNeuterableInputStream(requestBody);
+        return enterIsolateAndRequest(method, url, kj::mv(headersCloned), kj::mv(ownRequestBody), response);
+    }
 
     // implement this, by sending to jsg callback.
     // Should init a httpServer in the constructor by using *this.
     // see fake-container-service for more details.
-    // kj::Promise<void> requestImpl(jsg::Lock& js, IoContext& ctx, kj::HttpMethod method,
-      // kj::StringPtr url,
-      // const kj::HttpHeaders& headers,
-      // kj::AsyncInputStream& requestBody,
-      // Response& response) {
+    kj::Promise<void> requestImpl(jsg::Lock& js, IoContext& ctx, kj::HttpMethod method,
+      kj::StringPtr url,
+      kj::Own<kj::HttpHeaders> headers,
+      kj::Own<NeuterableInputStream> ownRequestBody,
+      Response& response) {
 
       KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 1");
-      auto ownRequestBody = newNeuterableInputStream(requestBody);
       auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
         // Make sure to cancel the request body stream since the native stream is no longer valid once
         // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
         // haven't consumed the entire request body.
         ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
       });
+
       KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
       KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 2");
 
       auto& ioContext = IoContext::current();
-      auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
+      const kj::HttpHeaders& constHeaders = *headers;
+      auto jsHeaders = js.alloc<Headers>(js, constHeaders, Headers::Guard::REQUEST);
       auto b = newSystemStream(kj::addRef(*ownRequestBody), StreamEncoding::IDENTITY);
       auto jsStream = js.alloc<ReadableStream>(ioContext, kj::mv(b));
           kj::Maybe<Body::ExtractedBody> body;
-      if (headers.get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
-          headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
-          requestBody.tryGetLength().orDefault(1) > 0) {
+      if (headers->get(kj::HttpHeaderId::CONTENT_LENGTH) != kj::none ||
+          headers->get(kj::HttpHeaderId::TRANSFER_ENCODING) != kj::none ||
+          ownRequestBody->tryGetLength().orDefault(1) > 0) {
         body = Body::ExtractedBody(jsStream.addRef());
       }
 
       KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 3");
 
-      if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
-          headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
+      if (body != kj::none && headers->get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
+          headers->get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
         // We can't use headers.set() here as headers is marked const. Instead, we call set() on the
         // JavaScript headers object, ignoring the REQUEST guard that usually makes them immutable.
-        KJ_IF_SOME(l, requestBody.tryGetLength()) {
+        KJ_IF_SOME(l, ownRequestBody->tryGetLength()) {
           jsHeaders->setUnguarded(
               js, jsg::ByteString(kj::str("Content-Length")), jsg::ByteString(kj::str(l)));
         } else {
@@ -196,12 +213,13 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
        kj::none,
        /* signal */ kj::none, kj::mv(cf), kj::mv(body),
        /* thisSignal */ kj::none, Request::CacheMode::NONE);
-      co_await ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
-        [&response, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) {
-          KJ_LOG(ERROR, "TEST: Interesting?", res->getType());
-          auto& context = IoContext::current();
-          return context.addObject(kj::heap(res->send(js, response, {}, headers)));
-        }));
+      // co_await ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
+      //   [&response, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) mutable {
+      //     KJ_LOG(ERROR, "TEST: Interesting?", res->getType());
+      //     auto& context = IoContext::current();
+      //     return context.addObject(kj::heap(res->send(js, response, {}, headers)));
+      //   }));
+      return kj::READY_NOW;
     }
 
     using kj::HttpService::connect;
@@ -214,11 +232,11 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
     kj::HttpHeaderTable headerTable;
 
     kj::Function<kj::Promise<void>(ConnectContext connectContext)> enterIsolateAndCall;
-    // kj::Function<kj::Promise<void>(kj::HttpMethod method,
-    //     kj::StringPtr url,
-    //     const kj::HttpHeaders& headers,
-    //     kj::AsyncInputStream& requestBody,
-    //     Response& response)> enterIsolateAndRequest;
+    kj::Function<kj::Promise<void>(kj::HttpMethod method,
+        kj::StringPtr url,
+        kj::Own<kj::HttpHeaders> headers,
+        kj::Own<NeuterableInputStream> requestBody,
+        Response& response)> enterIsolateAndRequest;
     // kj::HttpServer httpServer;
 };
 
