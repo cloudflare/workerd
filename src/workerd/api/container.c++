@@ -8,6 +8,7 @@
 #include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/stream-utils.h>
+#include <capnp/membrane.h>
 
 
 namespace workerd::api {
@@ -34,15 +35,21 @@ kj::Exception makeNeuterException(NeuterReason reason) {
 }
 
 class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler::Server,
-                                              private kj::HttpService {
+                                              public kj::HttpService {
   public:
     TcpPortConnectHandler(
-        jsg::Lock& lock, capnp::ByteStreamFactory& byteStreamFactory,
+        IoContext& ctx, jsg::Lock& lock, capnp::ByteStreamFactory& byteStreamFactory,
     jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(jsg::Ref<workerd::api::Request>)>&& handle)
     : js(lock), byteStreamFactory(byteStreamFactory),
         handle(kj::mv(handle)),
         timer(kj::origin<kj::TimePoint>()),
-        httpServer(timer, kj::HttpHeaderTable(), *this) {}
+        enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
+            [this, &ctx](jsg::Lock& lock, ConnectContext context) {
+                return ctx.run([this, &ctx, context](jsg::Lock& lock) mutable {
+                    return connectImpl(lock, ctx, context);
+                });
+            }
+        )) {}
 
   protected:
      class OutputStreamBreakout final: public capnp::ExplicitEndOutputStream {
@@ -85,34 +92,69 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
         };
 
     kj::Promise<void> connect(ConnectContext context) override {
-         auto pipe = kj::newTwoWayPipe();
-         auto promise = httpServer.listenHttp(kj::mv(pipe.ends[1]));
+        return enterIsolateAndCall(context);
+    }
 
+    kj::Promise<void> connectImpl(jsg::Lock& js, IoContext& ctx, ConnectContext context) {
+        return ctx.run([this, &ctx, context](jsg::Lock& js) mutable -> kj::Promise<void> {
+        auto ownedContext = capnp::CallContextHook::from(context).addRef();
+        auto pipe = kj::newTwoWayPipe();
+        KJ_LOG(ERROR, "TEST: Lets go first");
+        auto httpServer = kj::heap<kj::HttpServer>(timer, headerTable, *this);
+
+        auto promise = httpServer->listenHttp(kj::mv(pipe.ends[1])).catch_([](kj::Exception&& e) {
+            KJ_LOG(ERROR, "TEST: what?", e);
+        }).attach(kj::mv(httpServer));
+
+         KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) ah ");
          auto stream = kj::refcountedWrapper(kj::mv(pipe.ends[0]));
+        KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) ah 2 ");
 
          auto up = byteStreamFactory.kjToCapnp(kj::heap<OutputStreamBreakout>(stream->addWrappedRef()));
+        KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) 0");
 
          auto down = byteStreamFactory.capnpToKj(context.getParams().getDown());
+        KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) 1");
+
          auto downPump =
              stream->getWrapped().pumpTo(*down).attach(kj::mv(down), kj::mv(stream)).ignoreResult();
+         KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) 2");
 
          capnp::PipelineBuilder<ConnectResults> pipeline;
          pipeline.setUp(up);
          context.setPipeline(pipeline.build());
          context.getResults().setUp(kj::mv(up));
+         KJ_LOG(ERROR, "TEST: Lets go? (CONNECT) 3");
 
-         return kj::joinPromisesFailFast(kj::arr(kj::mv(promise), kj::mv(downPump)));
+
+         auto promiseIo = ctx.awaitIo(js,
+            kj::joinPromisesFailFast(kj::arr(kj::mv(promise), kj::mv(downPump))), [](jsg::Lock& lock) {
+         });
+         ctx.addTask(ctx.awaitJs(js, kj::mv(promiseIo)));
+         return kj::READY_NOW;
+        });
     }
+
+    kj::Promise<void> request(
+      kj::HttpMethod method,
+      kj::StringPtr url,
+      const kj::HttpHeaders& headers,
+      kj::AsyncInputStream& requestBody,
+      Response& response
+    ) override {
+        // return enterIsolateAndRequest(method, url, headers, requestBody, response);
+    // }
 
     // implement this, by sending to jsg callback.
     // Should init a httpServer in the constructor by using *this.
     // see fake-container-service for more details.
-    kj::Promise<void> request(kj::HttpMethod method,
-      kj::StringPtr url,
-      const kj::HttpHeaders& headers,
-      kj::AsyncInputStream& requestBody,
-      Response& response) override {
+    // kj::Promise<void> requestImpl(jsg::Lock& js, IoContext& ctx, kj::HttpMethod method,
+      // kj::StringPtr url,
+      // const kj::HttpHeaders& headers,
+      // kj::AsyncInputStream& requestBody,
+      // Response& response) {
 
+      KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 1");
       auto ownRequestBody = newNeuterableInputStream(requestBody);
       auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
         // Make sure to cancel the request body stream since the native stream is no longer valid once
@@ -121,6 +163,7 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
         ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
       });
       KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
+      KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 2");
 
       auto& ioContext = IoContext::current();
       auto jsHeaders = js.alloc<Headers>(js, headers, Headers::Guard::REQUEST);
@@ -132,6 +175,8 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
           requestBody.tryGetLength().orDefault(1) > 0) {
         body = Body::ExtractedBody(jsStream.addRef());
       }
+
+      KJ_LOG(ERROR, "TEST: 2 Lets go? (CONNECT) 3");
 
       if (body != kj::none && headers.get(kj::HttpHeaderId::CONTENT_LENGTH) == kj::none &&
           headers.get(kj::HttpHeaderId::TRANSFER_ENCODING) == kj::none) {
@@ -148,12 +193,12 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
 
       CfProperty cf = CfProperty("{}"_kj);
       auto jsRequest = js.alloc<Request>(js, method, url, Request::Redirect::MANUAL, kj::mv(jsHeaders),
-       js.alloc<Fetcher>(IoContext::NEXT_CLIENT_CHANNEL, Fetcher::RequiresHostAndProtocol::YES),
+       kj::none,
        /* signal */ kj::none, kj::mv(cf), kj::mv(body),
        /* thisSignal */ kj::none, Request::CacheMode::NONE);
       co_await ioContext.awaitJs(js, handle(js, kj::mv(jsRequest)).then(js,
         [&response, &headers](jsg::Lock& js, jsg::Ref<workerd::api::Response> res) {
-          KJ_LOG(ERROR, "Interesting?", res->getType());
+          KJ_LOG(ERROR, "TEST: Interesting?", res->getType());
           auto& context = IoContext::current();
           return context.addObject(kj::heap(res->send(js, response, {}, headers)));
         }));
@@ -166,7 +211,15 @@ class Container::TcpPortConnectHandler final: public rpc::Container::TcpHandler:
     capnp::ByteStreamFactory& byteStreamFactory;
     jsg::Function<jsg::Promise<jsg::Ref<workerd::api::Response>>(jsg::Ref<workerd::api::Request>)> handle;
     kj::TimerImpl timer;
-    kj::HttpServer httpServer;
+    kj::HttpHeaderTable headerTable;
+
+    kj::Function<kj::Promise<void>(ConnectContext connectContext)> enterIsolateAndCall;
+    // kj::Function<kj::Promise<void>(kj::HttpMethod method,
+    //     kj::StringPtr url,
+    //     const kj::HttpHeaders& headers,
+    //     kj::AsyncInputStream& requestBody,
+    //     Response& response)> enterIsolateAndRequest;
+    // kj::HttpServer httpServer;
 };
 
 Container::Container(rpc::Container::Client rpcClient, bool running)
@@ -176,8 +229,9 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
 void Container::listenHttp(jsg::Lock& js, kj::String addr, jsg::Function<jsg::Promise<jsg::Ref<Response>>(jsg::Ref<Request>)> cb) {
     auto req = rpcClient->listenTcpRequest();
     auto& ioctx = IoContext::current();
-    req.setHandler(kj::heap<TcpPortConnectHandler>(js, ioctx.getByteStreamFactory(), kj::mv(cb)));
+    req.setHandler(kj::heap<TcpPortConnectHandler>(ioctx, js, ioctx.getByteStreamFactory(), kj::mv(cb)));
     auto cap = req.send();
+    KJ_LOG(ERROR, "TEST: Lets go?");
     capabilities.add(cap.getHandle());
 }
 
