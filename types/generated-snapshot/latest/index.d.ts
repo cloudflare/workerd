@@ -477,6 +477,7 @@ interface TestController {}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
 }
 type ExportedHandlerFetchHandler<Env = unknown, CfHostMetadata = unknown> = (
@@ -645,6 +646,7 @@ interface DurableObjectClass<
 > {}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
+  readonly exports: Cloudflare.Exports;
   readonly props: Props;
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
