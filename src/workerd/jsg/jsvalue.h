@@ -315,8 +315,6 @@ class JsString final: public JsBase<v8::String, JsString> {
   WriteIntoStatus writeInto(
       Lock& js, kj::ArrayPtr<uint16_t> buffer, WriteFlags options = WriteFlags::NONE) const;
 
-  void writeOneByte(Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags flags = WriteFlags::NONE);
-
   using JsBase<v8::String, JsString>::JsBase;
 };
 
