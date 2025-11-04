@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'node:assert';
-import ts from 'typescript';
+import assert from "node:assert";
+import ts from "typescript";
 
 export const SourcesMap = Map<string, string>;
 export type SourcesMap = InstanceType<typeof SourcesMap>;
@@ -34,19 +34,19 @@ export function createMemoryProgram(
 
   host ??= {
     getCurrentDirectory(): string {
-      return '/';
+      return "/";
     },
     getCanonicalFileName(fileName: string): string {
       return fileName;
     },
     getDefaultLibFileName(_options: ts.CompilerOptions): string {
-      return '';
+      return "";
     },
     getDefaultLibLocation(): string {
-      return '/node_modules/typescript/lib';
+      return "/node_modules/typescript/lib";
     },
     getNewLine(): string {
-      return '\n';
+      return "\n";
     },
     useCaseSensitiveFileNames(): boolean {
       return true;
@@ -55,14 +55,14 @@ export function createMemoryProgram(
       return sourceFiles.has(fileName);
     },
     readFile(_path: string): string | undefined {
-      assert.fail('readFile() not implemented');
+      assert.fail("readFile() not implemented");
     },
     writeFile(
       _path: string,
       _data: string,
       _writeByteOrderMark?: boolean
     ): void {
-      assert.fail('writeFile() not implemented');
+      assert.fail("writeFile() not implemented");
     },
     getSourceFile(
       fileName: string,

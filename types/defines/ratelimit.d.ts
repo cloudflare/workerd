@@ -1,9 +1,9 @@
 interface RateLimitOptions {
-  key: string;
+  key: string
 }
 
 interface RateLimitOutcome {
-  success: boolean;
+  success: boolean
 }
 
 interface RateLimit {

@@ -7,6 +7,6 @@ export default {
     console.log('hello to the tail worker!');
     reportError('boom');
     reportError(new Error('test'));
-    return new Response('Hello World\n');
-  },
+    return new Response("Hello World\n");
+  }
 };

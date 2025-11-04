@@ -1,4 +1,4 @@
-import { channel } from 'node:diagnostics_channel';
+import { channel } from "node:diagnostics_channel";
 
 const theChannel = channel('test');
 

@@ -1,5 +1,5 @@
-import { DurableObject } from 'cloudflare:workers';
-import { expectTypeOf } from 'expect-type';
+import { DurableObject } from "cloudflare:workers";
+import { expectTypeOf } from "expect-type";
 
 // Aliased as SqlStorageValue, but let's assert it includes the raw types we expect
 type Value = ArrayBuffer | string | number | null;
@@ -13,12 +13,12 @@ class TestDOSql extends DurableObject {
     expectTypeOf<number>(db.databaseSize);
 
     // Verify default row type of exec
-    for (const row of db.exec('...')) {
+    for (const row of db.exec("...")) {
       expectTypeOf<Record<string, Value>>(row);
     }
 
     // Verify scoped row type of exec
-    for (const row of db.exec<{ name: string; phone: number }>('...')) {
+    for (const row of db.exec<{ name: string; phone: number }>("...")) {
       expectTypeOf<{ name: string; phone: number }>(row);
 
       // @ts-expect-error double-checking our assertions are strict
@@ -27,7 +27,7 @@ class TestDOSql extends DurableObject {
       expectTypeOf<Record<string, number>>(row);
     }
 
-    const cursor = db.exec('...', 1, 'two');
+    const cursor = db.exec("...", 1, "two")
     expectTypeOf<SqlStorageCursor<Record<string, Value>>>(cursor);
 
     expectTypeOf<number>(cursor.rowsRead);
@@ -43,7 +43,7 @@ class TestDOSql extends DurableObject {
       expectTypeOf<Record<string, Value>>(next.value);
     }
 
-    const another = cursor.next();
+    const another = cursor.next()
     // Or check .value to do the same thing
     if (another.value) {
       expectTypeOf<Record<string, Value>>(another.value);
@@ -54,8 +54,8 @@ class TestDOSql extends DurableObject {
     }
 
     // Common shorthand usage
-    const { value: thirdRow } = cursor.next();
-    if (!thirdRow) throw new Error('No value!');
+    const { value: thirdRow } = cursor.next()
+    if (!thirdRow) throw new Error('No value!')
     expectTypeOf<Record<string, Value>>(thirdRow);
   }
 }

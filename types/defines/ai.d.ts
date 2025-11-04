@@ -134,12 +134,7 @@ export declare abstract class BaseAiTextEmbeddings {
   postProcessedOutputs: AiTextEmbeddingsOutput;
 }
 export type RoleScopedChatInput = {
-  role:
-    | 'user'
-    | 'assistant'
-    | 'system'
-    | 'tool'
-    | (string & NonNullable<unknown>);
+  role: "user" | "assistant" | "system" | "tool" | (string & NonNullable<unknown>);
   content: string;
   name?: string;
 };
@@ -147,7 +142,7 @@ export type AiTextGenerationToolLegacyInput = {
   name: string;
   description: string;
   parameters?: {
-    type: 'object' | (string & NonNullable<unknown>);
+    type: "object" | (string & NonNullable<unknown>);
     properties: {
       [key: string]: {
         type: string;
@@ -158,12 +153,12 @@ export type AiTextGenerationToolLegacyInput = {
   };
 };
 export type AiTextGenerationToolInput = {
-  type: 'function' | (string & NonNullable<unknown>);
+  type: "function" | (string & NonNullable<unknown>);
   function: {
     name: string;
     description: string;
     parameters?: {
-      type: 'object' | (string & NonNullable<unknown>);
+      type: "object" | (string & NonNullable<unknown>);
       properties: {
         [key: string]: {
           type: string;
@@ -196,10 +191,7 @@ export type AiTextGenerationInput = {
   presence_penalty?: number;
   messages?: RoleScopedChatInput[];
   response_format?: AiTextGenerationResponseFormat;
-  tools?:
-    | AiTextGenerationToolInput[]
-    | AiTextGenerationToolLegacyInput[]
-    | (object & NonNullable<unknown>);
+  tools?: AiTextGenerationToolInput[] | AiTextGenerationToolLegacyInput[] | (object & NonNullable<unknown>);
   functions?: AiTextGenerationFunctionsInput[];
 };
 export type AiTextGenerationToolLegacyOutput = {
@@ -208,7 +200,7 @@ export type AiTextGenerationToolLegacyOutput = {
 };
 export type AiTextGenerationToolOutput = {
   id: string;
-  type: 'function';
+  type: "function";
   function: {
     name: string;
     arguments: string;
@@ -221,8 +213,7 @@ export type UsageTags = {
 };
 export type AiTextGenerationOutput = {
   response?: string;
-  tool_calls?: AiTextGenerationToolLegacyOutput[] &
-    AiTextGenerationToolOutput[];
+  tool_calls?: AiTextGenerationToolLegacyOutput[] & AiTextGenerationToolOutput[];
   usage?: UsageTags;
 };
 export declare abstract class BaseAiTextGeneration {
@@ -278,7 +269,7 @@ export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
       /**
        * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | {
       /**
@@ -289,7 +280,7 @@ export type Ai_Cf_Baai_Bge_Base_En_V1_5_Input =
         /**
          * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
          */
-        pooling?: 'mean' | 'cls';
+        pooling?: "mean" | "cls";
       }[];
     };
 export type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
@@ -302,7 +293,7 @@ export type Ai_Cf_Baai_Bge_Base_En_V1_5_Output =
       /**
        * The pooling method used in the embedding process.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | AsyncResponse;
 export interface AsyncResponse {
@@ -398,7 +389,7 @@ export type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
       /**
        * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | {
       /**
@@ -409,7 +400,7 @@ export type Ai_Cf_Baai_Bge_Small_En_V1_5_Input =
         /**
          * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
          */
-        pooling?: 'mean' | 'cls';
+        pooling?: "mean" | "cls";
       }[];
     };
 export type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
@@ -422,7 +413,7 @@ export type Ai_Cf_Baai_Bge_Small_En_V1_5_Output =
       /**
        * The pooling method used in the embedding process.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | AsyncResponse;
 export declare abstract class Base_Ai_Cf_Baai_Bge_Small_En_V1_5 {
@@ -435,7 +426,7 @@ export type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
       /**
        * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | {
       /**
@@ -446,7 +437,7 @@ export type Ai_Cf_Baai_Bge_Large_En_V1_5_Input =
         /**
          * The pooling method used in the embedding process. `cls` pooling will generate more accurate embeddings on larger inputs - however, embeddings created with cls pooling are not compatible with embeddings generated with mean pooling. The default pooling method is `mean` in order for this to not be a breaking change, but we highly suggest using the new `cls` pooling for better accuracy.
          */
-        pooling?: 'mean' | 'cls';
+        pooling?: "mean" | "cls";
       }[];
     };
 export type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
@@ -459,7 +450,7 @@ export type Ai_Cf_Baai_Bge_Large_En_V1_5_Output =
       /**
        * The pooling method used in the embedding process.
        */
-      pooling?: 'mean' | 'cls';
+      pooling?: "mean" | "cls";
     }
   | AsyncResponse;
 export declare abstract class Base_Ai_Cf_Baai_Bge_Large_En_V1_5 {
@@ -735,7 +726,7 @@ export interface BGEM3OutputEmbeddingForContexts {
   /**
    * The pooling method used in the embedding process.
    */
-  pooling?: 'mean' | 'cls';
+  pooling?: "mean" | "cls";
 }
 export interface BGEM3OuputEmbedding {
   shape?: number[];
@@ -746,7 +737,7 @@ export interface BGEM3OuputEmbedding {
   /**
    * The pooling method used in the embedding process.
    */
-  pooling?: 'mean' | 'cls';
+  pooling?: "mean" | "cls";
 }
 export declare abstract class Base_Ai_Cf_Baai_Bge_M3 {
   inputs: Ai_Cf_Baai_Bge_M3_Input;
@@ -1077,7 +1068,7 @@ export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Prompt {
   presence_penalty?: number;
 }
 export interface JSONMode {
-  type?: 'json_object' | 'json_schema';
+  type?: "json_object" | "json_schema";
   json_schema?: unknown;
 }
 export interface Meta_Llama_3_3_70B_Instruct_Fp8_Fast_Messages {
@@ -1326,7 +1317,7 @@ export interface Ai_Cf_Meta_Llama_Guard_3_8B_Input {
     /**
      * The role of the message sender must alternate between 'user' and 'assistant'.
      */
-    role: 'user' | 'assistant';
+    role: "user" | "assistant";
     /**
      * The content of the message as a string.
      */
@@ -1663,9 +1654,7 @@ export declare abstract class Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct {
   inputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct_Output;
 }
-export type Ai_Cf_Qwen_Qwq_32B_Input =
-  | Qwen_Qwq_32B_Prompt
-  | Qwen_Qwq_32B_Messages;
+export type Ai_Cf_Qwen_Qwq_32B_Input = Qwen_Qwq_32B_Prompt | Qwen_Qwq_32B_Messages;
 export interface Qwen_Qwq_32B_Prompt {
   /**
    * The input text prompt for the model to generate a response.
@@ -2211,9 +2200,7 @@ export declare abstract class Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruc
   inputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Input;
   postProcessedOutputs: Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct_Output;
 }
-export type Ai_Cf_Google_Gemma_3_12B_It_Input =
-  | Google_Gemma_3_12B_It_Prompt
-  | Google_Gemma_3_12B_It_Messages;
+export type Ai_Cf_Google_Gemma_3_12B_It_Input = Google_Gemma_3_12B_It_Prompt | Google_Gemma_3_12B_It_Messages;
 export interface Google_Gemma_3_12B_It_Prompt {
   /**
    * The input text prompt for the model to generate a response.
@@ -2719,10 +2706,7 @@ export interface Ai_Cf_Meta_Llama_4_Messages {
   presence_penalty?: number;
 }
 export interface Ai_Cf_Meta_Llama_4_Async_Batch {
-  requests: (
-    | Ai_Cf_Meta_Llama_4_Prompt_Inner
-    | Ai_Cf_Meta_Llama_4_Messages_Inner
-  )[];
+  requests: (Ai_Cf_Meta_Llama_4_Prompt_Inner | Ai_Cf_Meta_Llama_4_Messages_Inner)[];
 }
 export interface Ai_Cf_Meta_Llama_4_Prompt_Inner {
   /**
@@ -3018,7 +3002,7 @@ export interface Ai_Cf_Deepgram_Nova_3_Input {
   /**
    * Sets how the model will interpret strings submitted to the custom_topic param. When strict, the model will only return topics submitted using the custom_topic param. When extended, the model will return its own detected topics in addition to those submitted using the custom_topic param.
    */
-  custom_topic_mode?: 'extended' | 'strict';
+  custom_topic_mode?: "extended" | "strict";
   /**
    * Custom topics you want the model to detect within your input audio or text if present Submit up to 100
    */
@@ -3026,7 +3010,7 @@ export interface Ai_Cf_Deepgram_Nova_3_Input {
   /**
    * Sets how the model will interpret intents submitted to the custom_intent param. When strict, the model will only return intents submitted using the custom_intent param. When extended, the model will return its own detected intents in addition those submitted using the custom_intents param
    */
-  custom_intent_mode?: 'extended' | 'strict';
+  custom_intent_mode?: "extended" | "strict";
   /**
    * Custom intents you want the model to detect within your input audio if present
    */
@@ -3050,15 +3034,7 @@ export interface Ai_Cf_Deepgram_Nova_3_Input {
   /**
    * Specify the expected encoding of your submitted audio
    */
-  encoding?:
-    | 'linear16'
-    | 'flac'
-    | 'mulaw'
-    | 'amr-nb'
-    | 'amr-wb'
-    | 'opus'
-    | 'speex'
-    | 'g729';
+  encoding?: "linear16" | "flac" | "mulaw" | "amr-nb" | "amr-wb" | "opus" | "speex" | "g729";
   /**
    * Arbitrary key-value pairs that are attached to the API response for usage in downstream processing
    */
@@ -3090,7 +3066,7 @@ export interface Ai_Cf_Deepgram_Nova_3_Input {
   /**
    * Mode of operation for the model representing broad area of topic that will be talked about in the supplied audio
    */
-  mode?: 'general' | 'medical' | 'finance';
+  mode?: "general" | "medical" | "finance";
   /**
    * Transcribe each audio channel independently.
    */
@@ -3213,7 +3189,7 @@ export type Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input =
       /**
        * type of data PCM data that's sent to the inference server as raw array
        */
-      dtype?: 'uint8' | 'float32' | 'float64';
+      dtype?: "uint8" | "float32" | "float64";
     }
   | {
       /**
@@ -3223,7 +3199,7 @@ export type Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input =
       /**
        * type of data PCM data that's sent to the inference server as raw array
        */
-      dtype?: 'uint8' | 'float32' | 'float64';
+      dtype?: "uint8" | "float32" | "float64";
     };
 export interface Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output {
   /**
@@ -3239,9 +3215,7 @@ export declare abstract class Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2 {
   inputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Input;
   postProcessedOutputs: Ai_Cf_Pipecat_Ai_Smart_Turn_V2_Output;
 }
-export type Ai_Cf_Openai_Gpt_Oss_120B_Input =
-  | GPT_OSS_120B_Responses
-  | GPT_OSS_120B_Responses_Async;
+export type Ai_Cf_Openai_Gpt_Oss_120B_Input = GPT_OSS_120B_Responses | GPT_OSS_120B_Responses_Async;
 export interface GPT_OSS_120B_Responses {
   /**
    * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
@@ -3251,11 +3225,11 @@ export interface GPT_OSS_120B_Responses {
     /**
      * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
      */
-    effort?: 'low' | 'medium' | 'high';
+    effort?: "low" | "medium" | "high";
     /**
      * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
      */
-    summary?: 'auto' | 'concise' | 'detailed';
+    summary?: "auto" | "concise" | "detailed";
   };
 }
 export interface GPT_OSS_120B_Responses_Async {
@@ -3268,24 +3242,20 @@ export interface GPT_OSS_120B_Responses_Async {
       /**
        * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
        */
-      effort?: 'low' | 'medium' | 'high';
+      effort?: "low" | "medium" | "high";
       /**
        * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
        */
-      summary?: 'auto' | 'concise' | 'detailed';
+      summary?: "auto" | "concise" | "detailed";
     };
   }[];
 }
-export type Ai_Cf_Openai_Gpt_Oss_120B_Output =
-  | {}
-  | (string & NonNullable<unknown>);
+export type Ai_Cf_Openai_Gpt_Oss_120B_Output = {} | (string & NonNullable<unknown>);
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_120B {
   inputs: Ai_Cf_Openai_Gpt_Oss_120B_Input;
   postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_120B_Output;
 }
-export type Ai_Cf_Openai_Gpt_Oss_20B_Input =
-  | GPT_OSS_20B_Responses
-  | GPT_OSS_20B_Responses_Async;
+export type Ai_Cf_Openai_Gpt_Oss_20B_Input = GPT_OSS_20B_Responses | GPT_OSS_20B_Responses_Async;
 export interface GPT_OSS_20B_Responses {
   /**
    * Responses API Input messages. Refer to OpenAI Responses API docs to learn more about supported content types
@@ -3295,11 +3265,11 @@ export interface GPT_OSS_20B_Responses {
     /**
      * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
      */
-    effort?: 'low' | 'medium' | 'high';
+    effort?: "low" | "medium" | "high";
     /**
      * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
      */
-    summary?: 'auto' | 'concise' | 'detailed';
+    summary?: "auto" | "concise" | "detailed";
   };
 }
 export interface GPT_OSS_20B_Responses_Async {
@@ -3312,17 +3282,15 @@ export interface GPT_OSS_20B_Responses_Async {
       /**
        * Constrains effort on reasoning for reasoning models. Currently supported values are low, medium, and high. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response.
        */
-      effort?: 'low' | 'medium' | 'high';
+      effort?: "low" | "medium" | "high";
       /**
        * A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. One of auto, concise, or detailed.
        */
-      summary?: 'auto' | 'concise' | 'detailed';
+      summary?: "auto" | "concise" | "detailed";
     };
   }[];
 }
-export type Ai_Cf_Openai_Gpt_Oss_20B_Output =
-  | {}
-  | (string & NonNullable<unknown>);
+export type Ai_Cf_Openai_Gpt_Oss_20B_Output = {} | (string & NonNullable<unknown>);
 export declare abstract class Base_Ai_Cf_Openai_Gpt_Oss_20B {
   inputs: Ai_Cf_Openai_Gpt_Oss_20B_Input;
   postProcessedOutputs: Ai_Cf_Openai_Gpt_Oss_20B_Output;
@@ -3410,26 +3378,26 @@ export interface Ai_Cf_Deepgram_Aura_1_Input {
    * Speaker used to produce the audio.
    */
   speaker?:
-    | 'angus'
-    | 'asteria'
-    | 'arcas'
-    | 'orion'
-    | 'orpheus'
-    | 'athena'
-    | 'luna'
-    | 'zeus'
-    | 'perseus'
-    | 'helios'
-    | 'hera'
-    | 'stella';
+    | "angus"
+    | "asteria"
+    | "arcas"
+    | "orion"
+    | "orpheus"
+    | "athena"
+    | "luna"
+    | "zeus"
+    | "perseus"
+    | "helios"
+    | "hera"
+    | "stella";
   /**
    * Encoding of the output audio.
    */
-  encoding?: 'linear16' | 'flac' | 'mulaw' | 'alaw' | 'mp3' | 'opus' | 'aac';
+  encoding?: "linear16" | "flac" | "mulaw" | "alaw" | "mp3" | "opus" | "aac";
   /**
    * Container specifies the file format wrapper for the output audio. The available options depend on the encoding type..
    */
-  container?: 'none' | 'wav' | 'ogg';
+  container?: "none" | "wav" | "ogg";
   /**
    * The text content to be converted to speech
    */
@@ -3452,82 +3420,82 @@ export declare abstract class Base_Ai_Cf_Deepgram_Aura_1 {
   postProcessedOutputs: Ai_Cf_Deepgram_Aura_1_Output;
 }
 export interface AiModels {
-  '@cf/huggingface/distilbert-sst-2-int8': BaseAiTextClassification;
-  '@cf/stabilityai/stable-diffusion-xl-base-1.0': BaseAiTextToImage;
-  '@cf/runwayml/stable-diffusion-v1-5-inpainting': BaseAiTextToImage;
-  '@cf/runwayml/stable-diffusion-v1-5-img2img': BaseAiTextToImage;
-  '@cf/lykon/dreamshaper-8-lcm': BaseAiTextToImage;
-  '@cf/bytedance/stable-diffusion-xl-lightning': BaseAiTextToImage;
-  '@cf/myshell-ai/melotts': BaseAiTextToSpeech;
-  '@cf/google/embeddinggemma-300m': BaseAiTextEmbeddings;
-  '@cf/microsoft/resnet-50': BaseAiImageClassification;
-  '@cf/meta/llama-2-7b-chat-int8': BaseAiTextGeneration;
-  '@cf/mistral/mistral-7b-instruct-v0.1': BaseAiTextGeneration;
-  '@cf/meta/llama-2-7b-chat-fp16': BaseAiTextGeneration;
-  '@hf/thebloke/llama-2-13b-chat-awq': BaseAiTextGeneration;
-  '@hf/thebloke/mistral-7b-instruct-v0.1-awq': BaseAiTextGeneration;
-  '@hf/thebloke/zephyr-7b-beta-awq': BaseAiTextGeneration;
-  '@hf/thebloke/openhermes-2.5-mistral-7b-awq': BaseAiTextGeneration;
-  '@hf/thebloke/neural-chat-7b-v3-1-awq': BaseAiTextGeneration;
-  '@hf/thebloke/llamaguard-7b-awq': BaseAiTextGeneration;
-  '@hf/thebloke/deepseek-coder-6.7b-base-awq': BaseAiTextGeneration;
-  '@hf/thebloke/deepseek-coder-6.7b-instruct-awq': BaseAiTextGeneration;
-  '@cf/deepseek-ai/deepseek-math-7b-instruct': BaseAiTextGeneration;
-  '@cf/defog/sqlcoder-7b-2': BaseAiTextGeneration;
-  '@cf/openchat/openchat-3.5-0106': BaseAiTextGeneration;
-  '@cf/tiiuae/falcon-7b-instruct': BaseAiTextGeneration;
-  '@cf/thebloke/discolm-german-7b-v1-awq': BaseAiTextGeneration;
-  '@cf/qwen/qwen1.5-0.5b-chat': BaseAiTextGeneration;
-  '@cf/qwen/qwen1.5-7b-chat-awq': BaseAiTextGeneration;
-  '@cf/qwen/qwen1.5-14b-chat-awq': BaseAiTextGeneration;
-  '@cf/tinyllama/tinyllama-1.1b-chat-v1.0': BaseAiTextGeneration;
-  '@cf/microsoft/phi-2': BaseAiTextGeneration;
-  '@cf/qwen/qwen1.5-1.8b-chat': BaseAiTextGeneration;
-  '@cf/mistral/mistral-7b-instruct-v0.2-lora': BaseAiTextGeneration;
-  '@hf/nousresearch/hermes-2-pro-mistral-7b': BaseAiTextGeneration;
-  '@hf/nexusflow/starling-lm-7b-beta': BaseAiTextGeneration;
-  '@hf/google/gemma-7b-it': BaseAiTextGeneration;
-  '@cf/meta-llama/llama-2-7b-chat-hf-lora': BaseAiTextGeneration;
-  '@cf/google/gemma-2b-it-lora': BaseAiTextGeneration;
-  '@cf/google/gemma-7b-it-lora': BaseAiTextGeneration;
-  '@hf/mistral/mistral-7b-instruct-v0.2': BaseAiTextGeneration;
-  '@cf/meta/llama-3-8b-instruct': BaseAiTextGeneration;
-  '@cf/fblgit/una-cybertron-7b-v2-bf16': BaseAiTextGeneration;
-  '@cf/meta/llama-3-8b-instruct-awq': BaseAiTextGeneration;
-  '@hf/meta-llama/meta-llama-3-8b-instruct': BaseAiTextGeneration;
-  '@cf/meta/llama-3.1-8b-instruct-fp8': BaseAiTextGeneration;
-  '@cf/meta/llama-3.1-8b-instruct-awq': BaseAiTextGeneration;
-  '@cf/meta/llama-3.2-3b-instruct': BaseAiTextGeneration;
-  '@cf/meta/llama-3.2-1b-instruct': BaseAiTextGeneration;
-  '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b': BaseAiTextGeneration;
-  '@cf/facebook/bart-large-cnn': BaseAiSummarization;
-  '@cf/llava-hf/llava-1.5-7b-hf': BaseAiImageToText;
-  '@cf/baai/bge-base-en-v1.5': Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
-  '@cf/openai/whisper': Base_Ai_Cf_Openai_Whisper;
-  '@cf/meta/m2m100-1.2b': Base_Ai_Cf_Meta_M2M100_1_2B;
-  '@cf/baai/bge-small-en-v1.5': Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
-  '@cf/baai/bge-large-en-v1.5': Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
-  '@cf/unum/uform-gen2-qwen-500m': Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
-  '@cf/openai/whisper-tiny-en': Base_Ai_Cf_Openai_Whisper_Tiny_En;
-  '@cf/openai/whisper-large-v3-turbo': Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
-  '@cf/baai/bge-m3': Base_Ai_Cf_Baai_Bge_M3;
-  '@cf/black-forest-labs/flux-1-schnell': Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
-  '@cf/meta/llama-3.2-11b-vision-instruct': Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
-  '@cf/meta/llama-3.3-70b-instruct-fp8-fast': Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
-  '@cf/meta/llama-guard-3-8b': Base_Ai_Cf_Meta_Llama_Guard_3_8B;
-  '@cf/baai/bge-reranker-base': Base_Ai_Cf_Baai_Bge_Reranker_Base;
-  '@cf/qwen/qwen2.5-coder-32b-instruct': Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
-  '@cf/qwen/qwq-32b': Base_Ai_Cf_Qwen_Qwq_32B;
-  '@cf/mistralai/mistral-small-3.1-24b-instruct': Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
-  '@cf/google/gemma-3-12b-it': Base_Ai_Cf_Google_Gemma_3_12B_It;
-  '@cf/meta/llama-4-scout-17b-16e-instruct': Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
-  '@cf/deepgram/nova-3': Base_Ai_Cf_Deepgram_Nova_3;
-  '@cf/pipecat-ai/smart-turn-v2': Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2;
-  '@cf/openai/gpt-oss-120b': Base_Ai_Cf_Openai_Gpt_Oss_120B;
-  '@cf/openai/gpt-oss-20b': Base_Ai_Cf_Openai_Gpt_Oss_20B;
-  '@cf/leonardo/phoenix-1.0': Base_Ai_Cf_Leonardo_Phoenix_1_0;
-  '@cf/leonardo/lucid-origin': Base_Ai_Cf_Leonardo_Lucid_Origin;
-  '@cf/deepgram/aura-1': Base_Ai_Cf_Deepgram_Aura_1;
+  "@cf/huggingface/distilbert-sst-2-int8": BaseAiTextClassification;
+  "@cf/stabilityai/stable-diffusion-xl-base-1.0": BaseAiTextToImage;
+  "@cf/runwayml/stable-diffusion-v1-5-inpainting": BaseAiTextToImage;
+  "@cf/runwayml/stable-diffusion-v1-5-img2img": BaseAiTextToImage;
+  "@cf/lykon/dreamshaper-8-lcm": BaseAiTextToImage;
+  "@cf/bytedance/stable-diffusion-xl-lightning": BaseAiTextToImage;
+  "@cf/myshell-ai/melotts": BaseAiTextToSpeech;
+  "@cf/google/embeddinggemma-300m": BaseAiTextEmbeddings;
+  "@cf/microsoft/resnet-50": BaseAiImageClassification;
+  "@cf/meta/llama-2-7b-chat-int8": BaseAiTextGeneration;
+  "@cf/mistral/mistral-7b-instruct-v0.1": BaseAiTextGeneration;
+  "@cf/meta/llama-2-7b-chat-fp16": BaseAiTextGeneration;
+  "@hf/thebloke/llama-2-13b-chat-awq": BaseAiTextGeneration;
+  "@hf/thebloke/mistral-7b-instruct-v0.1-awq": BaseAiTextGeneration;
+  "@hf/thebloke/zephyr-7b-beta-awq": BaseAiTextGeneration;
+  "@hf/thebloke/openhermes-2.5-mistral-7b-awq": BaseAiTextGeneration;
+  "@hf/thebloke/neural-chat-7b-v3-1-awq": BaseAiTextGeneration;
+  "@hf/thebloke/llamaguard-7b-awq": BaseAiTextGeneration;
+  "@hf/thebloke/deepseek-coder-6.7b-base-awq": BaseAiTextGeneration;
+  "@hf/thebloke/deepseek-coder-6.7b-instruct-awq": BaseAiTextGeneration;
+  "@cf/deepseek-ai/deepseek-math-7b-instruct": BaseAiTextGeneration;
+  "@cf/defog/sqlcoder-7b-2": BaseAiTextGeneration;
+  "@cf/openchat/openchat-3.5-0106": BaseAiTextGeneration;
+  "@cf/tiiuae/falcon-7b-instruct": BaseAiTextGeneration;
+  "@cf/thebloke/discolm-german-7b-v1-awq": BaseAiTextGeneration;
+  "@cf/qwen/qwen1.5-0.5b-chat": BaseAiTextGeneration;
+  "@cf/qwen/qwen1.5-7b-chat-awq": BaseAiTextGeneration;
+  "@cf/qwen/qwen1.5-14b-chat-awq": BaseAiTextGeneration;
+  "@cf/tinyllama/tinyllama-1.1b-chat-v1.0": BaseAiTextGeneration;
+  "@cf/microsoft/phi-2": BaseAiTextGeneration;
+  "@cf/qwen/qwen1.5-1.8b-chat": BaseAiTextGeneration;
+  "@cf/mistral/mistral-7b-instruct-v0.2-lora": BaseAiTextGeneration;
+  "@hf/nousresearch/hermes-2-pro-mistral-7b": BaseAiTextGeneration;
+  "@hf/nexusflow/starling-lm-7b-beta": BaseAiTextGeneration;
+  "@hf/google/gemma-7b-it": BaseAiTextGeneration;
+  "@cf/meta-llama/llama-2-7b-chat-hf-lora": BaseAiTextGeneration;
+  "@cf/google/gemma-2b-it-lora": BaseAiTextGeneration;
+  "@cf/google/gemma-7b-it-lora": BaseAiTextGeneration;
+  "@hf/mistral/mistral-7b-instruct-v0.2": BaseAiTextGeneration;
+  "@cf/meta/llama-3-8b-instruct": BaseAiTextGeneration;
+  "@cf/fblgit/una-cybertron-7b-v2-bf16": BaseAiTextGeneration;
+  "@cf/meta/llama-3-8b-instruct-awq": BaseAiTextGeneration;
+  "@hf/meta-llama/meta-llama-3-8b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.1-8b-instruct-fp8": BaseAiTextGeneration;
+  "@cf/meta/llama-3.1-8b-instruct-awq": BaseAiTextGeneration;
+  "@cf/meta/llama-3.2-3b-instruct": BaseAiTextGeneration;
+  "@cf/meta/llama-3.2-1b-instruct": BaseAiTextGeneration;
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": BaseAiTextGeneration;
+  "@cf/facebook/bart-large-cnn": BaseAiSummarization;
+  "@cf/llava-hf/llava-1.5-7b-hf": BaseAiImageToText;
+  "@cf/baai/bge-base-en-v1.5": Base_Ai_Cf_Baai_Bge_Base_En_V1_5;
+  "@cf/openai/whisper": Base_Ai_Cf_Openai_Whisper;
+  "@cf/meta/m2m100-1.2b": Base_Ai_Cf_Meta_M2M100_1_2B;
+  "@cf/baai/bge-small-en-v1.5": Base_Ai_Cf_Baai_Bge_Small_En_V1_5;
+  "@cf/baai/bge-large-en-v1.5": Base_Ai_Cf_Baai_Bge_Large_En_V1_5;
+  "@cf/unum/uform-gen2-qwen-500m": Base_Ai_Cf_Unum_Uform_Gen2_Qwen_500M;
+  "@cf/openai/whisper-tiny-en": Base_Ai_Cf_Openai_Whisper_Tiny_En;
+  "@cf/openai/whisper-large-v3-turbo": Base_Ai_Cf_Openai_Whisper_Large_V3_Turbo;
+  "@cf/baai/bge-m3": Base_Ai_Cf_Baai_Bge_M3;
+  "@cf/black-forest-labs/flux-1-schnell": Base_Ai_Cf_Black_Forest_Labs_Flux_1_Schnell;
+  "@cf/meta/llama-3.2-11b-vision-instruct": Base_Ai_Cf_Meta_Llama_3_2_11B_Vision_Instruct;
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast": Base_Ai_Cf_Meta_Llama_3_3_70B_Instruct_Fp8_Fast;
+  "@cf/meta/llama-guard-3-8b": Base_Ai_Cf_Meta_Llama_Guard_3_8B;
+  "@cf/baai/bge-reranker-base": Base_Ai_Cf_Baai_Bge_Reranker_Base;
+  "@cf/qwen/qwen2.5-coder-32b-instruct": Base_Ai_Cf_Qwen_Qwen2_5_Coder_32B_Instruct;
+  "@cf/qwen/qwq-32b": Base_Ai_Cf_Qwen_Qwq_32B;
+  "@cf/mistralai/mistral-small-3.1-24b-instruct": Base_Ai_Cf_Mistralai_Mistral_Small_3_1_24B_Instruct;
+  "@cf/google/gemma-3-12b-it": Base_Ai_Cf_Google_Gemma_3_12B_It;
+  "@cf/meta/llama-4-scout-17b-16e-instruct": Base_Ai_Cf_Meta_Llama_4_Scout_17B_16E_Instruct;
+  "@cf/deepgram/nova-3": Base_Ai_Cf_Deepgram_Nova_3;
+  "@cf/pipecat-ai/smart-turn-v2": Base_Ai_Cf_Pipecat_Ai_Smart_Turn_V2;
+  "@cf/openai/gpt-oss-120b": Base_Ai_Cf_Openai_Gpt_Oss_120B;
+  "@cf/openai/gpt-oss-20b": Base_Ai_Cf_Openai_Gpt_Oss_20B;
+  "@cf/leonardo/phoenix-1.0": Base_Ai_Cf_Leonardo_Phoenix_1_0;
+  "@cf/leonardo/lucid-origin": Base_Ai_Cf_Leonardo_Lucid_Origin;
+  "@cf/deepgram/aura-1": Base_Ai_Cf_Deepgram_Aura_1;
 }
 export type AiOptions = {
   /**
@@ -3572,20 +3540,14 @@ export type AiModelsSearchObject = {
 export interface InferenceUpstreamError extends Error {}
 export interface AiInternalError extends Error {}
 export type AiModelListType = Record<string, any>;
-export declare abstract class Ai<
-  AiModelList extends AiModelListType = AiModels,
-> {
+export declare abstract class Ai<AiModelList extends AiModelListType = AiModels> {
   aiGatewayLogId: string | null;
   gateway(gatewayId: string): AiGateway;
   autorag(autoragId: string): AutoRAG;
-  run<
-    Name extends keyof AiModelList,
-    Options extends AiOptions,
-    InputOptions extends AiModelList[Name]['inputs'],
-  >(
+  run<Name extends keyof AiModelList, Options extends AiOptions, InputOptions extends AiModelList[Name]["inputs"]>(
     model: Name,
     inputs: InputOptions,
-    options?: Options
+    options?: Options,
   ): Promise<
     Options extends
       | {
@@ -3599,7 +3561,7 @@ export declare abstract class Ai<
             stream: true;
           }
         ? ReadableStream
-        : AiModelList[Name]['postProcessedOutputs']
+        : AiModelList[Name]["postProcessedOutputs"]
   >;
   models(params?: AiModelsSearchParams): Promise<AiModelsSearchObject[]>;
   toMarkdown(): ToMarkdownService;
@@ -3611,7 +3573,7 @@ export declare abstract class Ai<
     options?: {
       gateway?: GatewayOptions;
       extraHeaders?: object;
-    }
+    },
   ): Promise<ConversionResponse[]>;
   toMarkdown(
     files: {
@@ -3621,6 +3583,6 @@ export declare abstract class Ai<
     options?: {
       gateway?: GatewayOptions;
       extraHeaders?: object;
-    }
+    },
   ): Promise<ConversionResponse>;
 }

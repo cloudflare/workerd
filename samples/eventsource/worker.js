@@ -26,6 +26,6 @@ export default {
     // We'll keep the connection open and running for 20 seconds...
     await scheduler.wait(20000);
 
-    return new Response('Hello World\n');
-  },
+    return new Response("Hello World\n");
+  }
 };

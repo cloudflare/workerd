@@ -4,8 +4,9 @@
 
 // burrito-shop-impl is an internal module and can't be imported by user code
 
+
 // internal modules can import each other, but users still can't access them
-import { makeBurritoImpl } from 'burrito-shop-internal:kitchen';
+import { makeBurritoImpl } from "burrito-shop-internal:kitchen";
 
 export class BurritoShop {
   #recipes;

@@ -2,15 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'assert';
-import { test } from 'node:test';
-import path from 'path';
-import ts from 'typescript';
-import { printer } from '../../src/print';
-import { createMemoryProgram } from '../../src/program';
-import { createGlobalScopeTransformer } from '../../src/transforms';
+import assert from "assert";
+import { test } from "node:test";
+import path from "path";
+import ts from "typescript";
+import { printer } from "../../src/print";
+import { createMemoryProgram } from "../../src/program";
+import { createGlobalScopeTransformer } from "../../src/transforms";
 
-test('createGlobalScopeTransformer: extracts global scope', () => {
+test("createGlobalScopeTransformer: extracts global scope", () => {
   const source = `type WorkerGlobalScopeEventMap = {
     fetch: Event;
     scheduled: Event;
@@ -41,7 +41,7 @@ interface ServiceWorkerGlobalScope extends WorkerGlobalScope {
 }
 `;
 
-  const sourcePath = path.resolve(__dirname, 'source.ts');
+  const sourcePath = path.resolve(__dirname, "source.ts");
   const sources = new Map([[sourcePath, source]]);
   const program = createMemoryProgram(sources);
   const checker = program.getTypeChecker();
@@ -71,7 +71,7 @@ declare const console: Console;
   );
 });
 
-test('createGlobalScopeTransformer: inlining type parameters in heritage', () => {
+test("createGlobalScopeTransformer: inlining type parameters in heritage", () => {
   const source = `declare class A<T> {
     thing: T;
 }
@@ -81,7 +81,7 @@ declare class ServiceWorkerGlobalScope extends B<string> {
 }
 `;
 
-  const sourcePath = path.resolve(__dirname, 'source.ts');
+  const sourcePath = path.resolve(__dirname, "source.ts");
   const sources = new Map([[sourcePath, source]]);
   const program = createMemoryProgram(sources);
   const checker = program.getTypeChecker();

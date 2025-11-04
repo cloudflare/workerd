@@ -10,16 +10,16 @@
 
 export let testStrings = {
   async test(ctrl, env, ctx) {
-    if ('foo' + 'bar' != 'foobar') {
-      throw new Error('strings are broken!');
+    if ("foo" + "bar" != "foobar") {
+      throw new Error("strings are broken!");
     }
-  },
+  }
 };
 
 export let testMath = {
   async test(ctrl, env, ctx) {
     if (1 + 1 != 2) {
-      throw new Error('math is broken!');
+      throw new Error("math is broken!");
     }
-  },
+  }
 };

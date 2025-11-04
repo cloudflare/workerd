@@ -2,14 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'node:assert';
-import ts from 'typescript';
-import { printNode } from '../print';
+import assert from "node:assert";
+import ts from "typescript";
+import { printNode } from "../print";
 
 // Checks whether the modifiers array contains a modifier of the specified kind
 export function hasModifier(
   modifiers: ReadonlyArray<ts.Modifier> | undefined,
-  kind: ts.Modifier['kind']
+  kind: ts.Modifier["kind"]
 ): boolean {
   if (modifiers === undefined) return false;
   return modifiers.some((modifier) => modifier.kind === kind);

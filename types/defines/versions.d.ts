@@ -9,4 +9,4 @@ export type WorkerVersionMetadata = {
   tag: string;
   /** The timestamp of when the Worker Version was uploaded */
   timestamp: string;
-};
+}

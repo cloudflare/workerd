@@ -1,4 +1,4 @@
-declare module 'workerd:rtti' {
+declare module "workerd:rtti" {
   const api: {
     exportExperimentalTypes(): ArrayBuffer;
     exportTypes(compatDate: string, compatFlags: string[]): ArrayBuffer;

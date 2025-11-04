@@ -6,21 +6,21 @@
 //     Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 //     The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 //     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 declare const WORKERD_VERSION: string;
 
 export const knownPackages: Record<string, string> = {
-  'darwin arm64 LE': '@cloudflare/workerd-darwin-arm64',
-  'darwin x64 LE': '@cloudflare/workerd-darwin-64',
-  'linux arm64 LE': '@cloudflare/workerd-linux-arm64',
-  'linux x64 LE': '@cloudflare/workerd-linux-64',
-  'win32 x64 LE': '@cloudflare/workerd-windows-64',
+  "darwin arm64 LE": "@cloudflare/workerd-darwin-arm64",
+  "darwin x64 LE": "@cloudflare/workerd-darwin-64",
+  "linux arm64 LE": "@cloudflare/workerd-linux-arm64",
+  "linux x64 LE": "@cloudflare/workerd-linux-64",
+  "win32 x64 LE": "@cloudflare/workerd-windows-64",
 };
 
-const maybeExeExtension = process.platform === 'win32' ? '.exe' : '';
+const maybeExeExtension = process.platform === "win32" ? ".exe" : "";
 
 export function pkgAndSubpathForCurrentPlatform(): {
   pkg: string;
@@ -41,12 +41,12 @@ export function pkgAndSubpathForCurrentPlatform(): {
 }
 
 function pkgForSomeOtherPlatform(): string | null {
-  const libMain = require.resolve('workerd');
+  const libMain = require.resolve("workerd");
   const nodeModulesDirectory = path.dirname(
     path.dirname(path.dirname(libMain))
   );
 
-  if (path.basename(nodeModulesDirectory) === 'node_modules') {
+  if (path.basename(nodeModulesDirectory) === "node_modules") {
     for (const unixKey in knownPackages) {
       try {
         const pkg = knownPackages[unixKey];
@@ -59,11 +59,8 @@ function pkgForSomeOtherPlatform(): string | null {
 }
 
 export function downloadedBinPath(pkg: string, subpath: string): string {
-  const libDir = path.dirname(require.resolve('workerd'));
-  return path.join(
-    libDir,
-    `downloaded-${pkg.replace('/', '-')}-${path.basename(subpath)}${maybeExeExtension}`
-  );
+  const libDir = path.dirname(require.resolve("workerd"));
+  return path.join(libDir, `downloaded-${pkg.replace("/", "-")}-${path.basename(subpath)}${maybeExeExtension}`);
 }
 
 export function generateBinPath(): { binPath: string } {
@@ -156,16 +153,16 @@ by workerd to install the correct binary executable for your current platform.`)
   //
   let pnpapi: any;
   try {
-    pnpapi = require('pnpapi');
+    pnpapi = require("pnpapi");
   } catch (e) {}
   if (pnpapi) {
     const root = pnpapi.getPackageInformation(pnpapi.topLevel).packageLocation;
     const binTargetPath = path.join(
       root,
-      'node_modules',
-      '.cache',
-      'workerd',
-      `pnpapi-${pkg.replace('/', '-')}-${WORKERD_VERSION}-${path.basename(subpath)}`
+      "node_modules",
+      ".cache",
+      "workerd",
+      `pnpapi-${pkg.replace("/", "-")}-${WORKERD_VERSION}-${path.basename(subpath)}`
     );
     if (!fs.existsSync(binTargetPath)) {
       fs.mkdirSync(path.dirname(binTargetPath), { recursive: true });

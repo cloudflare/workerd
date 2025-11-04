@@ -2,9 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'node:assert';
-import ts from 'typescript';
-import { printNode } from '../print';
+import assert from "node:assert";
+import ts from "typescript";
+import { printNode } from "../print";
 
 // Replaces custom Iterator-like interfaces with built-in `Iterator` types:
 //
@@ -86,10 +86,10 @@ function createIteratorDeclarationsVisitor(
         extendsNode?.token === ts.SyntaxKind.ExtendsKeyword &&
         extendsNode.types.length === 1 &&
         ts.isIdentifier(extendsNode.types[0].expression) &&
-        (extendsNode.types[0].expression.text === 'Iterator' ||
-          extendsNode.types[0].expression.text === 'AsyncIterator')
+        (extendsNode.types[0].expression.text === "Iterator" ||
+          extendsNode.types[0].expression.text === "AsyncIterator")
       ) {
-        const isAsync = extendsNode.types[0].expression.text !== 'Iterator';
+        const isAsync = extendsNode.types[0].expression.text !== "Iterator";
         // Check `node` has one of the following shapes:
         // ```ts
         // export interface ThingIterator extends Iterator {
@@ -107,7 +107,7 @@ function createIteratorDeclarationsVisitor(
           if (
             ts.isMethodSignature(member) &&
             ts.isIdentifier(member.name) &&
-            member.name.text === 'next' &&
+            member.name.text === "next" &&
             member.type !== undefined
           ) {
             nextTypeNode = member.type;
@@ -124,7 +124,7 @@ function createIteratorDeclarationsVisitor(
           assert(
             ts.isTypeReferenceNode(nextTypeNode) &&
               ts.isIdentifier(nextTypeNode.typeName) &&
-              nextTypeNode.typeName.text === 'Promise' &&
+              nextTypeNode.typeName.text === "Promise" &&
               nextTypeNode.typeArguments?.length === 1,
             `Expected Promise, got "${printNode(nextTypeNode)}"`
           );
@@ -145,7 +145,7 @@ function createIteratorDeclarationsVisitor(
         let nextValueSymbol: ts.Symbol | undefined;
         nextTypeSymbol.members.forEach((value, key) => {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
-          if (key === 'value') nextValueSymbol = value;
+          if (key === "value") nextValueSymbol = value;
         });
         assert(nextValueSymbol !== undefined);
         const nextValueDeclarations = nextValueSymbol.getDeclarations();
@@ -164,7 +164,7 @@ function createIteratorDeclarationsVisitor(
         const nodeSymbol = nodeType.getSymbol();
         assert(nodeSymbol !== undefined);
         const iteratorType = ctx.factory.createTypeReferenceNode(
-          isAsync ? 'AsyncIterableIterator' : 'IterableIterator',
+          isAsync ? "AsyncIterableIterator" : "IterableIterator",
           [nextValueType]
         );
         iteratorCtx.types.set(nodeSymbol, iteratorType);

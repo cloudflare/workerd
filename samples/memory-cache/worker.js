@@ -4,7 +4,7 @@
 
 export default {
   async fetch(req, env) {
-    const cached = await env.CACHE.read('hello', async (key) => {
+    const cached = await env.CACHE.read("hello", async (key) => {
       return {
         value: 'World',
         expiration: Date.now() + 10000,
@@ -12,5 +12,5 @@ export default {
     });
 
     return new Response(`Hello ${cached}\n`);
-  },
+  }
 };

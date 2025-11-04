@@ -1,4 +1,8 @@
-import { PassThrough, Transform, Readable } from 'node:stream';
+import {
+  PassThrough,
+  Transform,
+  Readable,
+} from 'node:stream';
 
 import { default as split2 } from 'split2';
 
@@ -15,7 +19,7 @@ export default {
     const lb = new Transform({
       transform(chunk, encoding, callback) {
         callback(null, enc.encode(chunk + '\n'));
-      },
+      }
     });
 
     const readable = pt.pipe(split2()).pipe(lb);
@@ -23,5 +27,5 @@ export default {
     pt.end('hello\nfrom\nthe\nwonderful\nworld\nof\nnode.js\nstreams!');
 
     return new Response(Readable.toWeb(readable));
-  },
+  }
 };

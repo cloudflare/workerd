@@ -1,17 +1,14 @@
 export type ConversionResponse = {
   name: string;
   mimeType: string;
-} & (
-  | {
-      format: 'markdown';
-      tokens: number;
-      data: string;
-    }
-  | {
-      format: 'error';
-      error: string;
-    }
-);
+} & ({
+  format: "markdown";
+  tokens: number;
+  data: string;
+} | {
+  format: "error",
+  error: string,
+});
 
 export type SupportedFileFormat = {
   mimeType: string;
@@ -30,5 +27,5 @@ export declare abstract class ToMarkdownService {
     },
     options?: { gateway?: GatewayOptions; extraHeaders?: object }
   ): Promise<ConversionResponse>;
-  supported(): Promise<SupportedFileFormat[]>;
+  supported(): Promise<SupportedFileFormat[]>
 }

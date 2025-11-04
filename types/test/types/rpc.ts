@@ -74,7 +74,7 @@ class TestCounter extends RpcTarget {
 
 const symbolMethod = Symbol('symbolMethod');
 
-type Props = { myProp: number };
+type Props = {myProp: number};
 
 class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
   constructor(ctx: ExecutionContext<Props>, env: Env) {

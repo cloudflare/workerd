@@ -2,15 +2,15 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'assert';
-import { test } from 'node:test';
-import path from 'path';
-import ts from 'typescript';
-import { printer } from '../../src/print';
-import { createMemoryProgram } from '../../src/program';
-import { createClassToInterfaceTransformer } from '../../src/transforms/class-to-interface';
+import assert from "assert";
+import { test } from "node:test";
+import path from "path";
+import ts from "typescript";
+import { printer } from "../../src/print";
+import { createMemoryProgram } from "../../src/program";
+import { createClassToInterfaceTransformer } from "../../src/transforms/class-to-interface";
 
-test('createClassToInterfaceTransformer: transforms class to interface', () => {
+test("createClassToInterfaceTransformer: transforms class to interface", () => {
   const source = `
     class MyClass<T = void, U = void> {
       constructor(str: string): MyClass;
@@ -35,14 +35,14 @@ test('createClassToInterfaceTransformer: transforms class to interface', () => {
     }
   `;
 
-  const sourcePath = path.resolve(__dirname, 'source.ts');
+  const sourcePath = path.resolve(__dirname, "source.ts");
   const sources = new Map([[sourcePath, source]]);
   const program = createMemoryProgram(sources);
   const sourceFile = program.getSourceFile(sourcePath);
   assert(sourceFile !== undefined);
 
   const result = ts.transform(sourceFile, [
-    createClassToInterfaceTransformer(['MyClass']),
+    createClassToInterfaceTransformer(["MyClass"]),
   ]);
   assert.strictEqual(result.transformed.length, 1);
 
@@ -50,10 +50,10 @@ test('createClassToInterfaceTransformer: transforms class to interface', () => {
   assert.strictEqual(
     normalizeWhitespace(output.trim()),
     normalizeWhitespace(expectedOutput.trim()),
-    'The transformed output did not match the expected output'
+    "The transformed output did not match the expected output"
   );
 });
 
 function normalizeWhitespace(str: string) {
-  return str.replace(/\s+/g, ' ').trim();
+  return str.replace(/\s+/g, " ").trim();
 }

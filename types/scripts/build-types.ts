@@ -1,37 +1,37 @@
-import assert from 'node:assert';
-import childProcess from 'node:child_process';
-import events from 'node:events';
-import { readFileSync, readdirSync } from 'node:fs';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import ts from 'typescript';
-import { SourcesMap, createMemoryProgram } from '../src/program';
-import { getFilePath } from '../src/utils';
+import assert from "node:assert";
+import childProcess from "node:child_process";
+import events from "node:events";
+import { readFileSync, readdirSync } from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import ts from "typescript";
+import { SourcesMap, createMemoryProgram } from "../src/program";
+import { getFilePath } from "../src/utils";
 
-const OUTPUT_PATH = getFilePath('types/definitions');
+const OUTPUT_PATH = getFilePath("types/definitions");
 const ENTRYPOINTS = [
-  { compatDate: '2021-01-01', name: 'oldest' },
+  { compatDate: "2021-01-01", name: "oldest" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#formdata-parsing-supports-file
-  { compatDate: '2021-11-03' },
+  { compatDate: "2021-11-03" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#settersgetters-on-api-object-prototypes
-  { compatDate: '2022-01-31' },
+  { compatDate: "2022-01-31" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#global-navigator
-  { compatDate: '2022-03-21' },
+  { compatDate: "2022-03-21" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#r2-bucket-list-respects-the-include-option
-  { compatDate: '2022-08-04' },
+  { compatDate: "2022-08-04" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#new-url-parser-implementation
-  { compatDate: '2022-10-31' },
+  { compatDate: "2022-10-31" },
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#streams-constructors
   // https://developers.cloudflare.com/workers/platform/compatibility-dates/#compliant-transformstream-constructor
-  { compatDate: '2022-11-30' },
+  { compatDate: "2022-11-30" },
   // https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L275-L280 (http_headers_getsetcookie)
-  { compatDate: '2023-03-01' },
+  { compatDate: "2023-03-01" },
   // https://github.com/cloudflare/workerd/blob/fcb6f33d10c71975cb2ce68dbf1924a1eeadbd8a/src/workerd/io/compatibility-date.capnp#L307-L312 (urlsearchparams_delete_has_value_arg)
-  { compatDate: '2023-07-01' },
+  { compatDate: "2023-07-01" },
   // Latest compatibility date with experimental features
-  { compatDate: '2999-12-31', name: 'latest' },
+  { compatDate: "2999-12-31", name: "latest" },
   // Latest compatibility date with experimental features
-  { compatDate: 'experimental' },
+  { compatDate: "experimental" },
 ];
 
 /**
@@ -46,15 +46,15 @@ function loadLibFiles(): SourcesMap {
     return cachedLibFiles;
   }
 
-  const libLocation = path.dirname(require.resolve('typescript'));
+  const libLocation = path.dirname(require.resolve("typescript"));
   const libFiles = readdirSync(libLocation).filter(
-    (file) => file.startsWith('lib.') && file.endsWith('.d.ts')
+    (file) => file.startsWith("lib.") && file.endsWith(".d.ts")
   );
   const lib: SourcesMap = new Map();
   for (const file of libFiles) {
     lib.set(
       `/node_modules/typescript/lib/${file}`,
-      readFileSync(path.join(libLocation, file), 'utf-8')
+      readFileSync(path.join(libLocation, file), "utf-8")
     );
   }
 
@@ -68,7 +68,7 @@ function checkDiagnostics(sources: SourcesMap): void {
     undefined,
     {
       noEmit: true,
-      lib: ['lib.esnext.d.ts'],
+      lib: ["lib.esnext.d.ts"],
       types: [],
       noUnusedParameters: true,
     },
@@ -89,19 +89,19 @@ function checkDiagnostics(sources: SourcesMap): void {
       );
       const message = ts.flattenDiagnosticMessageText(
         diagnostic.messageText,
-        '\n'
+        "\n"
       );
       console.log(
         `${diagnostic.file.fileName}:${line + 1}:${character + 1} : ${message}`
       );
     } else {
       console.log(
-        ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
       );
     }
   });
 
-  assert(allDiagnostics.length === 0, 'TypeScript failed to compile!');
+  assert(allDiagnostics.length === 0, "TypeScript failed to compile!");
 }
 
 function spawnWorkerd(
@@ -109,21 +109,21 @@ function spawnWorkerd(
 ): Promise<{ url: URL; kill: () => Promise<void> }> {
   return new Promise((resolve) => {
     const workerdProcess = childProcess.spawn(
-      getFilePath('src/workerd/server/workerd'),
-      ['serve', '--verbose', '--experimental', '--control-fd=3', configPath],
-      { stdio: ['inherit', 'inherit', 'inherit', 'pipe'] }
+      getFilePath("src/workerd/server/workerd"),
+      ["serve", "--verbose", "--experimental", "--control-fd=3", configPath],
+      { stdio: ["inherit", "inherit", "inherit", "pipe"] }
     );
-    const exitPromise = events.once(workerdProcess, 'exit');
-    workerdProcess.stdio[3]?.on('data', (chunk: Buffer): void => {
+    const exitPromise = events.once(workerdProcess, "exit");
+    workerdProcess.stdio[3]?.on("data", (chunk: Buffer): void => {
       const message = JSON.parse(chunk.toString().trim()) as {
-        event: string;
-        port: number;
+        event: string
+        port: number
       };
-      assert.strictEqual(message.event, 'listen');
+      assert.strictEqual(message.event, "listen");
       resolve({
         url: new URL(`http://127.0.0.1:${message.port}`),
         async kill() {
-          workerdProcess.kill('SIGTERM');
+          workerdProcess.kill("SIGTERM");
           await exitPromise;
         },
       });
@@ -134,10 +134,7 @@ function spawnWorkerd(
 async function buildEntrypoint(
   entrypoint: (typeof ENTRYPOINTS)[number],
   workerUrl: URL
-): Promise<{
-  name: string;
-  files: Array<{ fileName: string; content: string }>;
-}> {
+): Promise<{ name: string; files: Array<{ fileName: string; content: string }> }> {
   const url = new URL(`/${entrypoint.compatDate}.bundle`, workerUrl);
   const response = await fetch(url);
   if (!response.ok) throw new Error(await response.text());
@@ -152,14 +149,12 @@ async function buildEntrypoint(
   const filePromises: Promise<void>[] = [];
 
   for (const [fileName, definitions] of bundle) {
-    assert(typeof definitions === 'string');
+    assert(typeof definitions === "string");
     const prettierIgnoreRegexp = /^\s*\/\/\s*prettier-ignore\s*\n/gm;
-    const typings = definitions.replaceAll(prettierIgnoreRegexp, '');
+    const typings = definitions.replaceAll(prettierIgnoreRegexp, "");
 
     files.push({ fileName, content: typings });
-    filePromises.push(
-      fs.writeFile(path.join(entrypointPath, fileName), typings)
-    );
+    filePromises.push(fs.writeFile(path.join(entrypointPath, fileName), typings));
   }
 
   // Write all files in parallel (without prettier formatting)
@@ -170,14 +165,12 @@ async function buildEntrypoint(
 
 async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
   const allEntrypoints = await Promise.all(
-    ENTRYPOINTS.map((entrypoint) => buildEntrypoint(entrypoint, workerUrl))
+    ENTRYPOINTS.map(entrypoint => buildEntrypoint(entrypoint, workerUrl))
   );
 
   // Format all TypeScript files with a single Prettier CLI call using exact same defaults as API
-  const prettierPath = require.resolve('prettier/bin/prettier.cjs');
-  childProcess.execSync(
-    `${prettierPath} "${OUTPUT_PATH}/**/*.ts" --write --parser=typescript`
-  );
+  const prettierPath = require.resolve("prettier/bin/prettier.cjs");
+  childProcess.execSync(`${prettierPath} "${OUTPUT_PATH}/**/*.ts" --write --parser=typescript`);
 
   for (const { files } of allEntrypoints) {
     const entrypointFiles = new SourcesMap();
@@ -191,7 +184,7 @@ async function buildAllEntrypoints(workerUrl: URL): Promise<void> {
   }
 }
 export async function main(): Promise<void> {
-  const worker = await spawnWorkerd(getFilePath('types/scripts/config.capnp'));
+  const worker = await spawnWorkerd(getFilePath("types/scripts/config.capnp"));
   try {
     await buildAllEntrypoints(worker.url);
   } finally {

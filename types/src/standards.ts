@@ -1,21 +1,21 @@
-import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
-import * as ts from 'typescript';
-import { createMemoryProgram } from './program';
-import { CommentsData } from './transforms';
+import assert from "node:assert";
+import { readFileSync } from "node:fs";
+import * as ts from "typescript";
+import { createMemoryProgram } from "./program";
+import { CommentsData } from "./transforms";
 
 // Collate comments from standards-based .d.ts files (e.g. lib.webworker.d.ts)
 export function collateStandardComments(
   ...standardTypes: string[]
 ): CommentsData {
-  const combinedLibPath = '/$virtual/standards.d.ts';
+  const combinedLibPath = "/$virtual/standards.d.ts";
   const combinedLibContents: string = standardTypes
     .map(
       (s) =>
         // Remove the Microsoft copyright notices from the file, to prevent them being copied in as TS comments
-        readFileSync(s, 'utf-8').split(`/////////////////////////////`)[2]
+        readFileSync(s, "utf-8").split(`/////////////////////////////`)[2]
     )
-    .join('\n');
+    .join("\n");
 
   const program = createMemoryProgram(
     new Map([[combinedLibPath, combinedLibContents]])
@@ -26,11 +26,7 @@ export function collateStandardComments(
   assert(combinedLibFile !== undefined);
 
   const result: CommentsData = {};
-  const recordComments = (
-    node: ts.Node,
-    name: string,
-    memberName?: string
-  ): void => {
+  const recordComments = (node: ts.Node, name: string, memberName?: string): void => {
     const ranges = ts.getLeadingCommentRanges(
       combinedLibContents,
       node.getFullStart()
@@ -38,8 +34,8 @@ export function collateStandardComments(
     if (ranges === undefined) return;
 
     const nodeResult = (result[name] ??= {});
-    const key = memberName ?? '$';
-    nodeResult[key] ??= '';
+    const key = memberName ?? "$";
+    nodeResult[key] ??= "";
 
     for (const range of ranges) {
       let text = combinedLibContents.slice(range.pos + 2, range.end);
@@ -48,17 +44,17 @@ export function collateStandardComments(
       // assert that only multiline comments are included.
       assert(
         range.kind === ts.SyntaxKind.MultiLineCommentTrivia,
-        'Unexpected single-line comment in a standards .d.ts file'
+        "Unexpected single-line comment in a standards .d.ts file"
       );
       text = text
         // Remove the multiline comment end
         .slice(0, text.length - 2)
         // Remove multiline comment prefix lines (e.g. `   * ` -> ` * `)
-        .replaceAll(/^\s+/gm, ' ');
+        .replaceAll(/^\s+/gm, " ");
 
       // Let's make sure comments that are actually only 1 line (usually a link to MDN) don't start
       // with two * characters (e.g. `/** [MDN Reference] ... */` -> `/* [MDN Reference] ... */`)
-      if (!text.includes('\n') && text.startsWith('*')) {
+      if (!text.includes("\n") && text.startsWith("*")) {
         text = text.slice(1);
       }
 

@@ -17,41 +17,35 @@ import { connect } from 'cloudflare:sockets';
 
 export default {
   async fetch(req, env) {
-    const gopherAddr = 'gopher.floodgap.com:70';
+    const gopherAddr = "gopher.floodgap.com:70";
 
     const url = new URL(req.url);
-    const useProxy = url.searchParams.has('use_proxy');
+    const useProxy = url.searchParams.has("use_proxy");
 
     try {
-      const socket = useProxy
-        ? env.proxy.connect(gopherAddr)
-        : connect(gopherAddr);
+      const socket = useProxy ? env.proxy.connect(gopherAddr) : connect(gopherAddr);
 
       // Write data to the socket. Specifically the "selector" followed by CR+LF.
-      const writer = socket.writable.getWriter();
+      const writer = socket.writable.getWriter()
       const encoder = new TextEncoder();
-      const encoded = encoder.encode(url.pathname + '\r\n');
+      const encoded = encoder.encode(url.pathname + "\r\n");
       await writer.write(encoded);
 
       // The Gopher server should now return a response to us and close the connection.
       // So start reading from the socket.
       const decoder = new TextDecoder();
 
-      let gopherResponse = '';
+      let gopherResponse = "";
       for await (const chunk of socket.readable) {
         gopherResponse += decoder.decode(chunk, { stream: true });
       }
       gopherResponse += decoder.decode();
 
-      console.log('Read ', gopherResponse.length, ' from Gopher server');
+      console.log("Read ", gopherResponse.length, " from Gopher server");
 
-      return new Response(gopherResponse, {
-        headers: { 'Content-Type': 'text/plain' },
-      });
+      return new Response(gopherResponse, { headers: { "Content-Type": "text/plain" } });
     } catch (error) {
-      return new Response('Socket connection failed: ' + error, {
-        status: 500,
-      });
+      return new Response("Socket connection failed: " + error, { status: 500 });
     }
-  },
+  }
 };

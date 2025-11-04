@@ -3,10 +3,10 @@ import {
   channel,
   tracingChannel,
   Channel,
-} from 'node:diagnostics_channel';
-import { doSomething } from 'library';
+} from "node:diagnostics_channel";
+import { doSomething } from "library";
 
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { AsyncLocalStorage } from "node:async_hooks";
 
 // The library will send a diagnostic message when the doSomething
 // method is called. We listen for that event here. When using
@@ -19,9 +19,7 @@ const als1 = new AsyncLocalStorage();
 const als2 = new AsyncLocalStorage();
 const c = channel('bar');
 c.bindStore(als1);
-c.bindStore(als2, (data) => {
-  return { data };
-});
+c.bindStore(als2, (data) => {return { data }});
 
 const tc = tracingChannel('foo');
 tc.start.bindStore(als1);
@@ -40,13 +38,10 @@ export default {
       return 1;
     }, {}, 1, 2, 3));
 
-    await tc.tracePromise(
-      async function () {
-        console.log('....', this);
-      },
-      { a: 1 }
-    );
+    await tc.tracePromise(async function() {
+      console.log('....', this);
+    }, {a:1});
 
-    return new Response('ok');
-  },
+    return new Response("ok");
+  }
 };

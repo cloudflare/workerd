@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import assert from 'node:assert';
-import ts from 'typescript';
+import assert from "node:assert";
+import ts from "typescript";
 
 // Copies all properties of `ServiceWorkerGlobalScope` and its superclasses into
 // the global scope:
@@ -191,7 +191,7 @@ function createGlobalScopeVisitor(
     if (
       (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) &&
       node.name !== undefined &&
-      node.name.text === 'ServiceWorkerGlobalScope'
+      node.name.text === "ServiceWorkerGlobalScope"
     ) {
       return [node, ...extractGlobalNodes(node)];
     }

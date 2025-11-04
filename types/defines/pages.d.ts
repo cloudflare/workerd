@@ -14,7 +14,7 @@ type EventContext<Env, P extends string, Data> = {
 type PagesFunction<
   Env = unknown,
   Params extends string = any,
-  Data extends Record<string, unknown> = Record<string, unknown>,
+  Data extends Record<string, unknown> = Record<string, unknown>
 > = (context: EventContext<Env, Params, Data>) => Response | Promise<Response>;
 
 type EventPluginContext<Env, P extends string, Data, PluginArgs> = {
@@ -33,11 +33,11 @@ type PagesPluginFunction<
   Env = unknown,
   Params extends string = any,
   Data extends Record<string, unknown> = Record<string, unknown>,
-  PluginArgs = unknown,
+  PluginArgs = unknown
 > = (
   context: EventPluginContext<Env, Params, Data, PluginArgs>
 ) => Response | Promise<Response>;
 
-declare module 'assets:*' {
+declare module "assets:*" {
   export const onRequest: PagesFunction;
 }

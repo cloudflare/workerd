@@ -1,4 +1,4 @@
-import ts from 'typescript';
+import ts from "typescript";
 
 export function createAddOnMessageDeclarationTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return (context) => {
@@ -9,7 +9,7 @@ export function createAddOnMessageDeclarationTransformer(): ts.TransformerFactor
         context.factory.createVariableDeclarationList(
           [
             context.factory.createVariableDeclaration(
-              'onmessage',
+              "onmessage",
               undefined,
               context.factory.createKeywordTypeNode(ts.SyntaxKind.NeverKeyword)
             ),

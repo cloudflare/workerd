@@ -1,22 +1,17 @@
-import assert from 'node:assert';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import {
-  build,
-  type PluginBuild,
-  type OnResolveArgs,
-  type OnLoadArgs,
-} from 'esbuild';
-import { CommentsData } from 'src/transforms';
-import cloudflareComments from '../src/cloudflare';
-import { collateStandardComments } from '../src/standards';
-import { getFilePath } from '../src/utils';
+import assert from "node:assert";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { build, type PluginBuild, type OnResolveArgs, type OnLoadArgs } from "esbuild";
+import { CommentsData } from "src/transforms";
+import cloudflareComments from "../src/cloudflare";
+import { collateStandardComments } from "../src/standards";
+import { getFilePath } from "../src/utils";
 
 async function readPath(rootPath: string): Promise<string> {
   try {
-    return await fs.readFile(rootPath, 'utf8');
+    return await fs.readFile(rootPath, "utf8");
   } catch (e) {
-    if (!(e && typeof e === 'object' && 'code' in e && e.code === 'EISDIR'))
+    if (!(e && typeof e === "object" && "code" in e && e.code === "EISDIR"))
       throw e;
     const fileNames = await fs.readdir(rootPath);
     const contentsPromises = fileNames.map((fileName) => {
@@ -24,23 +19,18 @@ async function readPath(rootPath: string): Promise<string> {
       return readPath(filePath);
     });
     const contents = await Promise.all(contentsPromises);
-    return contents.join('\n');
+    return contents.join("\n");
   }
 }
 
-async function readParamNames(): Promise<
-  Record<string, Record<string, string[]>>
-> {
+async function readParamNames(): Promise<Record<string, Record<string, string[]>>> {
   // Support methods defined in parent classes
   const additionalClassNames: [string, string][] = [
-    ['DurableObjectStorageOperations', 'DurableObjectStorage'],
-    ['DurableObjectStorageOperations', 'DurableObjectTransaction'],
+    ["DurableObjectStorageOperations", "DurableObjectStorage"],
+    ["DurableObjectStorageOperations", "DurableObjectTransaction"],
   ];
 
-  const data = await fs.readFile(
-    getFilePath('src/workerd/tools/param-names.json'),
-    'utf8'
-  );
+  const data = await fs.readFile(getFilePath("src/workerd/tools/param-names.json"), "utf8");
   const recordArray = JSON.parse(data) as {
     fully_qualified_parent_name: string[];
     function_like_name: string;
@@ -53,9 +43,9 @@ async function readParamNames(): Promise<
     record: (typeof recordArray)[number]
   ): void {
     let functionName: string = record.function_like_name;
-    if (functionName.endsWith('_')) functionName = functionName.slice(0, -1);
+    if (functionName.endsWith("_")) functionName = functionName.slice(0, -1);
     // `constructor` is a reserved property name
-    if (functionName === 'constructor') functionName = `$${functionName}`;
+    if (functionName === "constructor") functionName = `$${functionName}`;
 
     result[structureName] ??= {};
     const structureRecord = result[structureName];
@@ -69,7 +59,7 @@ async function readParamNames(): Promise<
   for (const record of recordArray) {
     const structureName: string = record.fully_qualified_parent_name
       .filter(Boolean)
-      .join('::');
+      .join("::");
 
     registerApi(structureName, record);
 
@@ -85,12 +75,12 @@ async function readParamNames(): Promise<
 export function readComments(): CommentsData {
   const comments = collateStandardComments(
     path.join(
-      path.dirname(require.resolve('typescript')),
-      'lib.webworker.d.ts'
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.d.ts"
     ),
     path.join(
-      path.dirname(require.resolve('typescript')),
-      'lib.webworker.iterable.d.ts'
+      path.dirname(require.resolve("typescript")),
+      "lib.webworker.iterable.d.ts"
     )
   );
 
@@ -108,65 +98,51 @@ export function readComments(): CommentsData {
 
 if (require.main === module)
   void build({
-    logLevel: 'info',
-    format: 'esm',
-    target: 'esnext',
-    external: ['node:*', 'workerd:*'],
+    logLevel: "info",
+    format: "esm",
+    target: "esnext",
+    external: ["node:*", "workerd:*"],
     bundle: true,
     minify: true,
-    outdir: getFilePath('types/dist'),
-    outExtension: { '.js': '.mjs' },
-    entryPoints: [getFilePath('types/src/worker/index.ts')],
+    outdir: getFilePath("types/dist"),
+    outExtension: { ".js": ".mjs" },
+    entryPoints: [getFilePath("types/src/worker/index.ts")],
     plugins: [
       {
-        name: 'raw',
+        name: "raw",
         setup(build: PluginBuild): void {
-          build.onResolve(
-            { filter: /^raw:/ },
-            (
-              args: OnResolveArgs
-            ): {
-              namespace: string;
-              path: string;
-            } => {
-              const resolved = path.resolve(
-                args.resolveDir,
-                args.path.slice(4)
-              );
-              return { namespace: 'raw', path: resolved };
-            }
-          );
-          build.onLoad(
-            { namespace: 'raw', filter: /.*/ },
-            async (args: OnLoadArgs) => {
-              const contents = await readPath(args.path);
-              return { contents, loader: 'text' };
-            }
-          );
+          build.onResolve({ filter: /^raw:/ }, (args: OnResolveArgs): {
+            namespace: string,
+            path: string
+          } => {
+            const resolved = path.resolve(args.resolveDir, args.path.slice(4));
+            return { namespace: "raw", path: resolved };
+          });
+          build.onLoad({ namespace: "raw", filter: /.*/ }, async (args: OnLoadArgs) => {
+            const contents = await readPath(args.path);
+            return { contents, loader: "text" };
+          });
         },
       },
       {
-        name: 'virtual',
+        name: "virtual",
         setup(build: PluginBuild): void {
           build.onResolve({ filter: /^virtual:/ }, (args: OnResolveArgs) => {
             return {
-              namespace: 'virtual',
-              path: args.path.substring('virtual:'.length),
+              namespace: "virtual",
+              path: args.path.substring("virtual:".length),
             };
           });
-          build.onLoad(
-            { namespace: 'virtual', filter: /.*/ },
-            async (args: OnLoadArgs) => {
-              if (args.path === 'param-names.json') {
-                const contents = await readParamNames();
-                return { contents: JSON.stringify(contents), loader: 'json' };
-              }
-              if (args.path === 'comments.json') {
-                const comments = readComments();
-                return { contents: JSON.stringify(comments), loader: 'json' };
-              }
+          build.onLoad({ namespace: "virtual", filter: /.*/ }, async (args: OnLoadArgs) => {
+            if (args.path === "param-names.json") {
+              const contents = await readParamNames();
+              return { contents: JSON.stringify(contents), loader: "json" };
             }
-          );
+            if (args.path === "comments.json") {
+              const comments = readComments();
+              return { contents: JSON.stringify(comments), loader: "json" };
+            }
+          });
         },
       },
     ],

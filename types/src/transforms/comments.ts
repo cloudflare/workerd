@@ -1,14 +1,14 @@
 // Copyright (c) 2022-2023 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import ts from 'typescript';
-import { hasModifier } from './helpers';
+import ts from "typescript";
+import { hasModifier } from "./helpers";
 
 // Refer to `collateStandardComments()` in `standards.ts` for construction
 export type CommentsData = Record<
   /* globalName */ string,
   // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
-  | Record</* root */ '$' | /* memberName */ string, string | undefined>
+  | Record</* root */ "$" | /* memberName */ string, string | undefined>
   | undefined
 >;
 
@@ -41,7 +41,7 @@ function createVisitor(data: CommentsData): ts.Visitor {
       ts.isIdentifier(node.name)
     ) {
       const comments = data[node.name.text];
-      maybeAddComment(node, comments?.['$']);
+      maybeAddComment(node, comments?.["$"]);
       for (const member of node.members) {
         if (member.name !== undefined && ts.isIdentifier(member.name)) {
           let key = member.name.text;
@@ -62,7 +62,7 @@ function createVisitor(data: CommentsData): ts.Visitor {
       ts.isIdentifier(node.name)
     ) {
       const comments = data[node.name.text];
-      maybeAddComment(node, comments?.['$']);
+      maybeAddComment(node, comments?.["$"]);
     }
 
     if (
@@ -73,7 +73,7 @@ function createVisitor(data: CommentsData): ts.Visitor {
       const name = declaration.name;
       if (ts.isIdentifier(name)) {
         const comments = data[name.text];
-        maybeAddComment(node, comments?.['$']);
+        maybeAddComment(node, comments?.["$"]);
       }
     }
 

@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 export default {
-  async fetch(request, env, ctx): Promise<Response> {
-    return new Response('Hello World from Typescript!');
-  },
+	async fetch(request, env, ctx): Promise<Response> {
+		return new Response('Hello World from Typescript!');
+	},
 } satisfies ExportedHandler<Env>;
