@@ -1,11 +1,5 @@
 import * as trace_events from 'node:trace_events';
-import {
-  strictEqual,
-  deepStrictEqual,
-  throws,
-  ok,
-  doesNotThrow,
-} from 'node:assert';
+import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
 
 export const traceEventsTest = {
   test() {
@@ -15,55 +9,146 @@ export const traceEventsTest = {
     strictEqual(typeof trace_events.createTracing, 'function');
     strictEqual(typeof trace_events.getEnabledCategories, 'function');
 
-    doesNotThrow(() => {
-      trace_events.createTracing({ categories: ['node'] });
-    });
+    // Test createTracing with valid categories - should throw ERR_METHOD_NOT_IMPLEMENTED after validation
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['node'] });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
-    doesNotThrow(() => {
-      trace_events.createTracing({ categories: ['node', 'v8'] });
-    });
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['node', 'v8'] });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
     throws(
       () => {
         trace_events.createTracing({ categories: [] });
       },
-      { code: 'ERR_TRACE_EVENTS_CATEGORY_REQUIRED' }
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
     );
 
     // Test createTracing options validation - options must be an object
-    for (const input of [
-      'invalid',
-      null,
-      123,
-      [],
-      { categories: 'invalid' },
-      { categories: {} },
-      { categories: 123 },
-      { categories: [123] },
-      { categories: ['valid', 123] },
-      { categories: ['valid', null] },
-      { categories: ['valid', {}] },
-    ]) {
-      throws(
-        () => {
-          trace_events.createTracing(input);
-        },
-        {
-          code: 'ERR_INVALID_ARG_TYPE',
-        }
-      );
-    }
+    throws(
+      () => {
+        trace_events.createTracing('invalid');
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
 
-    // Test getEnabledCategories - should return undefined
+    throws(
+      () => {
+        trace_events.createTracing(null);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing(123);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing([]);
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    // Test createTracing categories validation - must be array of strings if provided
+    throws(
+      () => {
+        trace_events.createTracing({ categories: 'invalid' });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: {} });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: 123 });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: [123] });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['valid', 123] });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['valid', null] });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['valid', {}] });
+      },
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+      }
+    );
+
+    // Test getEnabledCategories - should return empty array
     const enabledCategories = trace_events.getEnabledCategories();
-    strictEqual(enabledCategories, undefined);
+    ok(Array.isArray(enabledCategories));
+    deepStrictEqual(enabledCategories, []);
 
     // Test getEnabledCategories with arguments (should ignore them)
     const enabledCategories2 = trace_events.getEnabledCategories('ignored');
-    strictEqual(enabledCategories2, undefined);
+    deepStrictEqual(enabledCategories2, []);
 
     const enabledCategories3 = trace_events.getEnabledCategories(123, {});
-    strictEqual(enabledCategories3, undefined);
+    deepStrictEqual(enabledCategories3, []);
 
     // Test Tracing class through prototype (can't instantiate due to constructor throwing)
     // We need to access the Tracing class through the internal module structure
@@ -71,28 +156,48 @@ export const traceEventsTest = {
 
     // Test that createTracing validates properly before throwing
     // Test with additional unknown properties (should be accepted)
-    doesNotThrow(() => {
-      trace_events.createTracing({
-        categories: ['node'],
-        unknownProperty: 'should be ignored',
-      });
-    });
+    throws(
+      () => {
+        trace_events.createTracing({
+          categories: ['node'],
+          unknownProperty: 'should be ignored',
+        });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
     // Test edge cases with categories array
-    doesNotThrow(() => {
-      trace_events.createTracing({ categories: [''] }); // empty string should be valid
-    });
+    throws(
+      () => {
+        trace_events.createTracing({ categories: [''] }); // empty string should be valid
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
-    doesNotThrow(() => {
-      trace_events.createTracing({ categories: ['a'.repeat(1000)] }); // very long string
-    });
+    throws(
+      () => {
+        trace_events.createTracing({ categories: ['a'.repeat(1000)] }); // very long string
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
     // Test that categories with special characters are accepted
-    doesNotThrow(() => {
-      trace_events.createTracing({
-        categories: ['node.fs', 'v8.gc', 'custom-category'],
-      });
-    });
+    throws(
+      () => {
+        trace_events.createTracing({
+          categories: ['node.fs', 'v8.gc', 'custom-category'],
+        });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
     // Test with undefined categories (should pass validation)
     throws(
@@ -115,9 +220,16 @@ export const traceEventsTest = {
     // Test that getEnabledCategories is consistent across calls
     const categories1 = trace_events.getEnabledCategories();
     const categories2 = trace_events.getEnabledCategories();
-    strictEqual(categories1, undefined);
-    strictEqual(categories2, undefined);
-    strictEqual(categories1, categories2);
+    deepStrictEqual(categories1, categories2);
+    strictEqual(categories1.length, 0);
+    strictEqual(categories2.length, 0);
+
+    // Test that getEnabledCategories returns a new array each time (not the same reference)
+    const categories3 = trace_events.getEnabledCategories();
+    const categories4 = trace_events.getEnabledCategories();
+    // Arrays should be equal but not the same reference
+    deepStrictEqual(categories3, categories4);
+    // Note: We can't test reference inequality without modifying the arrays
 
     // Test various valid category names
     const validCategoryNames = [
@@ -137,21 +249,36 @@ export const traceEventsTest = {
     ];
 
     for (const category of validCategoryNames) {
-      doesNotThrow(() => {
-        trace_events.createTracing({ categories: [category] });
-      });
+      throws(
+        () => {
+          trace_events.createTracing({ categories: [category] });
+        },
+        {
+          code: 'ERR_METHOD_NOT_IMPLEMENTED',
+        }
+      );
     }
 
     // Test with multiple valid categories
-    doesNotThrow(() => {
-      trace_events.createTracing({ categories: validCategoryNames });
-    });
+    throws(
+      () => {
+        trace_events.createTracing({ categories: validCategoryNames });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
 
     // Test with duplicate categories (should be valid)
-    doesNotThrow(() => {
-      trace_events.createTracing({
-        categories: ['node', 'node', 'v8', 'v8'],
-      });
-    });
+    throws(
+      () => {
+        trace_events.createTracing({
+          categories: ['node', 'node', 'v8', 'v8'],
+        });
+      },
+      {
+        code: 'ERR_METHOD_NOT_IMPLEMENTED',
+      }
+    );
   },
 };
