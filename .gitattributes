@@ -1,0 +1,12 @@
+# Files that have not been required to be formatted prior to Nov 2025
+# See https://github.com/cloudflare/workerd/pull/5227
+npm/scripts/build-types-package.mjs  rules-lint-ignored=true
+samples/**/*.js                      rules-lint-ignored=true
+samples/helloworld-ts/worker.ts      rules-lint-ignored=true
+tools/base.eslint.config.mjs         rules-lint-ignored=true
+.devcontainer/devcontainer.json      rules-lint-ignored=true
+build/deps/deps.schema.json          rules-lint-ignored=true
+tools/windows/vsconfig.json          rules-lint-ignored=true
+types/tsconfig.json                  rules-lint-ignored=true
+types/**/*.ts                        rules-lint-ignored=true
+npm/lib/*.ts                         rules-lint-ignored=true

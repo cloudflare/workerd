@@ -56,7 +56,12 @@
                 "type": "string"
               }
             },
-            "required": ["type", "name", "owner", "repo"],
+            "required": [
+              "type",
+              "name",
+              "owner",
+              "repo"
+            ],
             "additionalProperties": false
           },
           {
@@ -79,7 +84,10 @@
               },
               "file_type": {
                 "type": "string",
-                "enum": ["archive", "executable"]
+                "enum": [
+                  "archive",
+                  "executable"
+                ]
               },
               "freeze_version": {
                 "type": "string"
@@ -112,7 +120,12 @@
                 "type": "string"
               }
             },
-            "required": ["type", "name", "owner", "repo"],
+            "required": [
+              "type",
+              "name",
+              "owner",
+              "repo"
+            ],
             "additionalProperties": false
           },
           {
@@ -152,7 +165,11 @@
                 }
               }
             },
-            "required": ["type", "name", "url"],
+            "required": [
+              "type",
+              "name",
+              "url"
+            ],
             "additionalProperties": false
           },
           {
@@ -171,12 +188,18 @@
                 "type": "string"
               }
             },
-            "required": ["type", "name", "build_file"],
+            "required": [
+              "type",
+              "name",
+              "build_file"
+            ],
             "additionalProperties": false
           }
         ]
       }
     }
   },
-  "required": ["repositories"]
+  "required": [
+    "repositories"
+  ]
 }
