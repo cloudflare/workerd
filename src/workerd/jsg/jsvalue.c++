@@ -377,10 +377,6 @@ JsString JsString::internalize(Lock& js) const {
   return JsString(inner->InternalizeString(js.v8Isolate));
 }
 
-void JsString::writeOneByte(Lock& js, kj::ArrayPtr<kj::byte> buffer, WriteFlags flags) {
-  inner->WriteOneByteV2(js.v8Isolate, 0, buffer.size(), buffer.begin(), flags);
-}
-
 JsString::WriteIntoStatus JsString::writeInto(
     Lock& js, kj::ArrayPtr<char> buffer, WriteFlags options) const {
   WriteIntoStatus result = {0, 0};
