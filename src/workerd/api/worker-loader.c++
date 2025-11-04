@@ -162,9 +162,9 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
       KJ_CASE_ONEOF(module, Module) {
         uint fieldCount = (module.js != kj::none) + (module.cjs != kj::none) +
             (module.text != kj::none) + (module.data != kj::none) + (module.json != kj::none) +
-            (module.py != kj::none);
+            (module.py != kj::none) + (module.wasm != kj::none);
         JSG_REQUIRE(fieldCount == 1, TypeError,
-            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', 'json', or 'py'. "
+            "Each module must contain exactly one of 'js', 'cjs', 'text', 'data', 'json', 'py', or 'wasm'. "
             "Module '",
             entry.name, "' contained ", fieldCount, " properties.");
 
@@ -184,6 +184,8 @@ Worker::Script::Source WorkerLoader::extractSource(jsg::Lock& js, WorkerCode& co
             return Worker::Script::JsonModule{.body = serialized};
           } else KJ_IF_SOME(py, module.py) {
             return Worker::Script::PythonModule{.body = py};
+          } else KJ_IF_SOME(wasm, module.wasm) {
+            return Worker::Script::WasmModule{.body = wasm};
           } else {
             KJ_UNREACHABLE;
           }

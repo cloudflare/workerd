@@ -4130,6 +4130,7 @@ interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
+  wasm?: ArrayBuffer;
 }
 interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
