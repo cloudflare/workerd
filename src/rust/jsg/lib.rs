@@ -56,6 +56,11 @@ pub mod ffi {
             resource: usize,    /* R* */
             constructor: usize, /* v8::LocalFunctionTemplate */
         ) -> usize /* v8::LocalValue */;
+
+        unsafe fn unwrap_resource(
+            isolate: *mut Isolate,
+            value: usize, /* v8::LocalValue */
+        ) -> usize /* R* */;
     }
 }
 
@@ -97,31 +102,41 @@ fn get_resource_descriptor<R: Resource>() -> ffi::ResourceDescriptor {
     descriptor
 }
 
-pub fn create_resource_constructor<R: Resource>(
-    isolate: &mut v8::Isolate,
-) -> v8::GlobalFunctionTemplate {
+pub fn create_resource_constructor<R: Resource>(lock: &mut v8::Lock) -> v8::GlobalFunctionTemplate {
     unsafe {
         v8::GlobalFunctionTemplate::from_ffi(ffi::create_resource_template(
-            isolate.to_ffi(),
+            lock.get_isolate(),
             &get_resource_descriptor::<R>(),
         ))
     }
 }
 
+// TODO: R needs to be a non-empty struct.
 pub fn wrap_resource<R: Resource, W: ResourceWrapper>(
-    isolate: &mut v8::Isolate,
+    lock: &mut v8::Lock,
     resource: R,
     wrapper: &W,
 ) -> v8::LocalValue {
-    let constructor = wrapper.get_constructor(isolate);
+    let constructor = wrapper.get_constructor(lock);
     let resource = Box::new(resource);
+    let resource = Box::into_raw(resource);
+    dbg!(resource);
     unsafe {
         v8::LocalValue::from_ffi(ffi::wrap_resource(
-            isolate.to_ffi(),
-            Box::into_raw(resource) as usize,
+            lock.get_isolate(),
+            resource as usize,
             constructor.to_ffi(),
         ))
     }
+}
+
+// TODO: Take a look at the lifecycle.
+pub fn unwrap_resource<'a, R: Resource>(
+    lock: &'a mut v8::Lock,
+    value: v8::LocalValue,
+) -> &'a mut R {
+    let ptr = unsafe { ffi::unwrap_resource(lock.get_isolate(), value.to_ffi()) as *mut R };
+    unsafe { &mut *ptr }
 }
 
 pub struct Error {
@@ -259,7 +274,7 @@ pub trait Resource: Type {
 }
 
 pub trait ResourceWrapper {
-    fn get_constructor(&self, isolate: &mut v8::Isolate) -> v8::LocalFunctionTemplate;
+    fn get_constructor(&self, isolate: &mut v8::Lock) -> v8::LocalFunctionTemplate;
 }
 
 pub trait Struct: Type {}

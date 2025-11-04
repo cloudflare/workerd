@@ -24,23 +24,7 @@ pub mod ffi {
 trait IsolateMember: Drop {
     /// Initialize the member with the given isolate.
     /// Nit: It will call something like "register()"
-    fn init(&mut self, isolate: &mut Isolate);
-}
-
-/// Represents a V8 isolate.
-/// It needs to have the same lifetime as the v8 Isolate.
-pub struct Isolate {
-    ptr: *mut ffi::Isolate,
-}
-
-impl Isolate {
-    pub unsafe fn from_ffi(isolate: *mut ffi::Isolate) -> Self {
-        Isolate { ptr: isolate }
-    }
-
-    pub unsafe fn to_ffi(&mut self) -> *mut ffi::Isolate {
-        self.ptr
-    }
+    fn init(&mut self, isolate: &mut Lock);
 }
 
 pub struct Local<T> {
@@ -59,15 +43,35 @@ impl LocalValue {
     }
 }
 
-pub struct Lock {}
+pub struct Lock {
+    ptr: *mut ffi::Isolate,
+}
+
+impl Lock {
+    pub unsafe fn from_args(args: *mut ffi::FunctionCallbackInfo) -> Self {
+        unsafe {
+            Lock {
+                ptr: ffi::get_isolate(args),
+            }
+        }
+    }
+
+    pub unsafe fn from_isolate(isolate: *mut ffi::Isolate) -> Self {
+        Lock { ptr: isolate }
+    }
+
+    pub unsafe fn get_isolate(&self) -> *mut ffi::Isolate {
+        self.ptr
+    }
+}
 
 pub struct GlobalFunctionTemplate(usize);
 
 impl GlobalFunctionTemplate {
-    pub fn as_local(&self, isolate: &mut Isolate) -> LocalFunctionTemplate {
+    pub fn as_local(&self, lock: &mut Lock) -> LocalFunctionTemplate {
         unsafe {
             LocalFunctionTemplate::from_ffi(ffi::global_function_template_as_local(
-                isolate.to_ffi(),
+                lock.get_isolate(),
                 self.0,
             ))
         }
@@ -87,5 +91,17 @@ impl LocalFunctionTemplate {
 
     pub unsafe fn to_ffi(self) -> usize {
         self.0
+    }
+}
+
+pub struct FunctionCallbackInfo(*mut ffi::FunctionCallbackInfo);
+
+impl FunctionCallbackInfo {
+    pub unsafe fn from_ffi(info: *mut ffi::FunctionCallbackInfo) -> Self {
+        FunctionCallbackInfo(info)
+    }
+
+    pub fn get_this(&self) -> LocalValue {
+        unsafe { LocalValue::from_ffi(ffi::get_this(self.0)) }
     }
 }

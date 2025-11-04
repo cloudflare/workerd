@@ -85,11 +85,27 @@ size_t create_resource_template(v8::Isolate* isolate, const ResourceDescriptor& 
 }
 
 LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl) {
+  auto self = reinterpret_cast<void*>(resource);
   auto local_tmpl = local_from_ffi<v8::FunctionTemplate>(tmpl);
-  v8::Local<v8::Object> obj = workerd::jsg::check(
+  v8::Local<v8::Object> object = workerd::jsg::check(
       local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
-  // TODO: Attach to the wrapper (call attachWrapper)
-  return to_ffi(kj::mv(obj));
+  auto tagAddress = const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+      tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
+      self,
+      static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
+  return to_ffi(kj::mv(object));
+}
+
+size_t unwrap_resource(Isolate* isolate, LocalValue value) {
+  auto v8_obj = local_from_ffi<v8::Object>(value);
+  KJ_ASSERT(v8_obj->GetAlignedPointerFromInternalField(
+                ::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX) ==
+      const_cast<uint16_t*>(&::workerd::jsg::Wrappable::WORKERD_RUST_WRAPPABLE_TAG));
+  return reinterpret_cast<size_t>(v8_obj->GetAlignedPointerFromInternalField(
+      ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 }
 
 }  // namespace workerd::rust::jsg

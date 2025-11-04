@@ -103,4 +103,6 @@ inline LocalFunctionTemplate global_function_template_as_local(
 
 LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplate tmpl);
 
+size_t unwrap_resource(Isolate* isolate, LocalValue value);
+
 }  // namespace workerd::rust::jsg

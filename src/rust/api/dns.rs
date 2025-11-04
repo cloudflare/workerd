@@ -1,4 +1,5 @@
-use jsg::v8;
+use jsg::v8::Lock;
+use jsg::v8::{self};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -20,6 +21,7 @@ impl Into<jsg::Error> for DnsParserError {
 }
 
 /// CAA record representation
+#[derive(Debug)]
 pub struct CaaRecord {
     pub critical: u8,
     pub field: String,
@@ -31,6 +33,7 @@ impl jsg::Type for CaaRecord {}
 impl jsg::Struct for CaaRecord {}
 
 /// NAPTR record representation
+#[derive(Debug)]
 pub struct NaptrRecord {
     pub flags: String,
     pub service: String,
@@ -104,7 +107,9 @@ pub fn parse_replacement(input: &[&str]) -> jsg::Result<String, DnsParserError> 
 }
 
 // #[jsg::resource]
-pub struct DnsUtil {}
+pub struct DnsUtil {
+    pub foo: char,
+}
 
 // Generated code
 pub struct DnsUtilWrapper {
@@ -113,7 +118,7 @@ pub struct DnsUtilWrapper {
 }
 
 impl jsg::ResourceWrapper for DnsUtilWrapper {
-    fn get_constructor(&self, isolate: &mut v8::Isolate) -> v8::LocalFunctionTemplate {
+    fn get_constructor(&self, isolate: &mut v8::Lock) -> v8::LocalFunctionTemplate {
         self.constructor.as_local(isolate)
     }
 }
@@ -143,7 +148,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
-    pub fn parse_caa_record(record: &str) -> Result<CaaRecord, DnsParserError> {
+    pub fn parse_caa_record(&self, record: &str) -> Result<CaaRecord, DnsParserError> {
         // Let's remove "\\#" and the length of data from the beginning of the record
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[2..].to_vec();
         let critical = data[0].parse::<u8>()?;
@@ -197,7 +202,7 @@ impl DnsUtil {
     /// # Errors
     /// `DnsParserError::InvalidHexString`
     /// `DnsParserError::ParseIntError`
-    pub fn parse_naptr_record(record: &str) -> jsg::Result<NaptrRecord, DnsParserError> {
+    pub fn parse_naptr_record(&self, record: &str) -> jsg::Result<NaptrRecord, DnsParserError> {
         let data = record.split_ascii_whitespace().collect::<Vec<_>>()[1..].to_vec();
 
         let order_str = data[1..3].to_vec();
@@ -233,35 +238,34 @@ impl DnsUtil {
 // Generated code.
 impl DnsUtil {
     extern "C" fn parse_caa_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-        // TODO: Get self from v8
-        let isolate = unsafe { jsg::v8::ffi::get_isolate(args) };
-        let this = unsafe { jsg::v8::ffi::get_this(args) };
+        let mut lock = unsafe { jsg::v8::Lock::from_args(args) };
         let len = unsafe { jsg::v8::ffi::get_length(args) };
         let arg0 = unsafe { jsg::v8::ffi::get_arg(args, 0) };
-
-        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(isolate, arg0) };
-        dbg!(arg0);
-
-        // let lock = unsafe { &mut *lock };
-        // let args = unsafe { &mut *args };
-        // let arg0 = args.get_arg(0);
-        // let arg0 = jsg::v8::string_from_value(lock, arg0);
+        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0) };
+        let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
+        let mut self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, args.get_this());
         // match Self::parse_caa_record(arg0) {
         //     Ok(record) => Ok(jsg::v8::value_from_jsg_struct(lock, &record)),
         //     Err(err) => Err(err.into()),
         // }
-        todo!("obtain self here");
+        let result = self_.parse_caa_record(&arg0);
+        dbg!(result);
+        todo!();
     }
 
     extern "C" fn parse_naptr_record_callback(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-        // let lock = unsafe { &mut *lock };
-        // let args = unsafe { &mut *args };
-        // let arg0 = args.get_arg(0);
-        // let arg0 = jsg::v8::string_from_value(lock, arg0);
+        let mut lock = unsafe { jsg::v8::Lock::from_args(args) };
+        let len = unsafe { jsg::v8::ffi::get_length(args) };
+        let arg0 = unsafe { jsg::v8::ffi::get_arg(args, 0) };
+        let arg0 = unsafe { jsg::v8::ffi::unwrap_string(lock.get_isolate(), arg0) };
+        let args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
+        let mut self_ = jsg::unwrap_resource::<DnsUtil>(&mut lock, args.get_this());
         // match Self::parse_naptr_record(arg0) {
         //     Ok(record) => Ok(jsg::v8::value_from_jsg_struct(lock, &record)),
         //     Err(err) => Err(err.into()),
         // }
+        let result = self_.parse_naptr_record(&arg0);
+        dbg!(result);
         todo!();
     }
 }

@@ -3,16 +3,6 @@ import * as errorCodes from 'node-internal:internal_dns_constants';
 import { DnsError } from 'node-internal:internal_errors';
 import { validateString } from 'node-internal:validators';
 
-import * as dnsKeys from 'node-internal:dns';
-
-console.log({
-  dnsUtil,
-  dnsKeys,
-  method: Object.keys(dnsUtil),
-  parseCaaRecord: typeof dnsUtil.parseCaaRecord,
-  hasParseCaaRecord: 'parseCaaRecord' in dnsUtil,
-});
-
 export type TTLResponse = {
   ttl: number;
   address: string;
