@@ -983,12 +983,3 @@ export class ERR_PERFORMANCE_INVALID_TIMESTAMP extends NodeTypeError {
     );
   }
 }
-
-export class ERR_TRACE_EVENTS_CATEGORY_REQUIRED extends NodeTypeError {
-  constructor() {
-    super(
-      'ERR_TRACE_EVENTS_CATEGORY_REQUIRED',
-      'At least one category is required'
-    );
-  }
-}

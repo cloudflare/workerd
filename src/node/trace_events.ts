@@ -22,39 +22,37 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import type * as TraceEvents from 'node:trace_events';
-import { ERR_TRACE_EVENTS_CATEGORY_REQUIRED } from 'node-internal:internal_errors';
+import { ERR_METHOD_NOT_IMPLEMENTED } from 'node-internal:internal_errors';
+
 import { validateObject, validateStringArray } from 'node-internal:validators';
+
 import { format, customInspectSymbol } from 'node-internal:internal_inspect';
+
+import type { CreateTracingOptions } from 'node:trace_events';
 
 // TODO(soon): It is conceivable that we might implement this as part of
 // the workers observability features in the future. For now it's a non
 // functional stub.
 
-class Tracing implements TraceEvents.Tracing {
-  #categories: string[];
-  #enabled = false;
-
-  constructor(categories: string[]) {
-    this.#categories = categories;
+class Tracing {
+  constructor(_: string[]) {
+    throw new ERR_METHOD_NOT_IMPLEMENTED('Tracing');
   }
 
   enable(): void {
-    this.#enabled = true;
     // non-op
   }
 
   disable(): void {
-    this.#enabled = false;
     // non-op
   }
 
   get enabled(): boolean {
-    return this.#enabled;
+    return false;
   }
 
-  get categories(): string {
-    return this.#categories.join(',');
+  get categories(): string[] {
+    return [];
   }
 
   [customInspectSymbol](depth?: number, _: object = {}): string | object {
@@ -68,22 +66,17 @@ class Tracing implements TraceEvents.Tracing {
   }
 }
 
-export function createTracing(
-  options: TraceEvents.CreateTracingOptions
-): Tracing {
+export function createTracing(options: CreateTracingOptions): Tracing {
   validateObject(options, 'options');
   validateStringArray(options.categories, 'options.categories');
-  if (options.categories.length <= 0) {
-    throw new ERR_TRACE_EVENTS_CATEGORY_REQUIRED();
-  }
-  return new Tracing(options.categories);
+  throw new ERR_METHOD_NOT_IMPLEMENTED('trace_events.createTracing');
 }
 
-export function getEnabledCategories(): string | undefined {
-  return undefined;
+export function getEnabledCategories(): string[] {
+  return [];
 }
 
 export default {
   createTracing,
   getEnabledCategories,
-} satisfies typeof TraceEvents;
+};

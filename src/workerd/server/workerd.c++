@@ -5,6 +5,7 @@
 #include "server.h"
 #include "workerd-api.h"
 
+#include <workerd/api/unsafe.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/supported-compatibility-date.embed.h>
@@ -17,9 +18,14 @@
 #include <workerd/server/workerd.capnp.h>
 #include <workerd/util/autogate.h>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
+
+#ifdef __linux__
+#include <sys/mman.h>
 #include <sys/stat.h>
+#endif
 
 #include <capnp/dynamic.h>
 #include <capnp/message.h>
@@ -69,6 +75,32 @@
 #endif
 
 #include <workerd/util/use-perfetto-categories.h>
+
+// since kj installs their global signal handlers
+// and exits with 1 Fuzzilli doesn't realize that an application crashed due to the signo.
+// Therefore, we install a handler before and just raise the signo
+#ifdef WORKERD_FUZZILLI
+
+void signalHandler(int signo, siginfo_t* info, void* context) noexcept {
+  // inform reprl - remove debug output for clean testing
+  struct sigaction sa = {};
+  sa.sa_handler = SIG_DFL;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = 0;
+  sigaction(signo, &sa, nullptr);
+  raise(signo);
+}
+
+void initSignalHandlers() {
+  struct sigaction action {};
+  action.sa_flags = SA_SIGINFO;
+  action.sa_sigaction = &signalHandler;
+
+  for (auto signo: {SIGBUS, SIGFPE, SIGABRT, SIGILL, SIGTRAP, SIGSEGV}) {
+    KJ_SYSCALL(sigaction(signo, &action, nullptr));
+  }
+}
+#endif
 
 namespace workerd::server {
 namespace {
@@ -713,6 +745,9 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
           .addSubCommand("serve", KJ_BIND_METHOD(*this, getServe), "run the server")
           .addSubCommand(
               "compile", KJ_BIND_METHOD(*this, getCompile), "create a self-contained binary")
+#ifdef WORKERD_FUZZILLI
+          .addSubCommand("fuzzilli", KJ_BIND_METHOD(*this, getFuzz), "run reprl for fuzzing")
+#endif
           .addSubCommand("test", KJ_BIND_METHOD(*this, getTest), "run unit tests")
           .addSubCommand("pyodide-lock", KJ_BIND_METHOD(*this, getPyodideLock),
               "outputs the package lock file used by Pyodide")
@@ -898,6 +933,15 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
             "Enable predictable mode. This makes workerd behave more deterministically by using "
             "pre-set values instead of random data or timestamps to facilitate testing.")
         .expectOptionalArg("<filter>", CLI_METHOD(setTestFilter))
+        .callAfterParsing(CLI_METHOD(test))
+        .build();
+  }
+
+  kj::MainFunc getFuzz() {
+    auto builder = kj::MainBuilder(context, getVersionString(),
+        "Creates a custom signal handler and depending on the config leverages Stdin.reprl() to communicate with fuzzilli.");
+
+    return addServeOrTestOptions(addConfigParsingOptionsNoConstName(builder))
         .callAfterParsing(CLI_METHOD(test))
         .build();
   }
@@ -1662,11 +1706,16 @@ class CliMain final: public SchemaFileImpl::ErrorReporter {
 
 int main(int argc, char* argv[]) {
   workerd::server::StructuredLoggingProcessContext context(argv[0]);
+
 #if !_WIN32
   kj::UnixEventPort::captureSignal(SIGTERM);
 #endif
   workerd::rust::cxx_integration::init();
   workerd::server::CliMain mainObject(context, argv);
+
+#if defined(WORKERD_FUZZILLI) && defined(__linux__)
+  initSignalHandlers();
+#endif
 
   return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv);
 }

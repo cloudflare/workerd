@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_cc_binary.bzl", "wd_cc_binary")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
 
@@ -136,4 +137,30 @@ filegroup(
         ":bench-util",
     ],
     visibility = ["//visibility:public"],
+)
+
+# REPRL tests using KJ test framework
+wd_cc_library(
+    name = "libreprl",
+    srcs = ["libreprl/libreprl.c"],
+    hdrs = ["libreprl/libreprl.h"],
+    copts = [
+        "-Ilibreprl",
+        "-std=c23",
+    ],
+    includes = ["libreprl"],
+)
+
+kj_test(
+    src = "test-reprl.c++",
+    data = [
+        "//fuzzilli:config.capnp",
+        "//fuzzilli:worker.js",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["requires-fuzzilli"],
+    deps = [
+        ":libreprl",
+        "@bazel_tools//tools/cpp/runfiles",
+    ],
 )
