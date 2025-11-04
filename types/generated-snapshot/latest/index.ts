@@ -3861,6 +3861,7 @@ export interface WorkerLoaderModule {
   data?: ArrayBuffer;
   json?: any;
   py?: string;
+  wasm?: ArrayBuffer;
 }
 export interface WorkerLoaderWorkerCode {
   compatibilityDate: string;
