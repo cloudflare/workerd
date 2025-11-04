@@ -105,4 +105,9 @@ LocalValue wrap_resource(Isolate* isolate, size_t resource, LocalFunctionTemplat
 
 size_t unwrap_resource(Isolate* isolate, LocalValue value);
 
+LocalObject new_local_object(Isolate* isolate);
+
+void set_local_object_property(
+    Isolate* isolate, LocalObject object, const char* key, LocalValue value);
+
 }  // namespace workerd::rust::jsg

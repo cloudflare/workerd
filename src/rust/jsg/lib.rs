@@ -277,4 +277,6 @@ pub trait ResourceWrapper {
     fn get_constructor(&self, isolate: &mut v8::Lock) -> v8::LocalFunctionTemplate;
 }
 
-pub trait Struct: Type {}
+pub trait Struct: Type {
+    fn wrap(&self, lock: &mut v8::Lock) -> v8::LocalValue;
+}

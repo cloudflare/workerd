@@ -108,4 +108,16 @@ size_t unwrap_resource(Isolate* isolate, LocalValue value) {
       ::workerd::jsg::Wrappable::WRAPPED_OBJECT_FIELD_INDEX));
 }
 
+LocalObject new_local_object(Isolate* isolate) {
+  v8::Local<v8::Object> object = v8::Object::New(isolate);
+  return to_ffi(kj::mv(object));
+}
+
+void set_local_object_property(
+    Isolate* isolate, LocalObject object, const char* key, LocalValue value) {
+  auto v8_obj = local_from_ffi<v8::Object>(object);
+  v8_obj->Set(isolate->GetCurrentContext(), v8::String::NewFromUtf8(isolate, key).ToLocalChecked(),
+      local_from_ffi<v8::Value>(value));
+}
+
 }  // namespace workerd::rust::jsg
