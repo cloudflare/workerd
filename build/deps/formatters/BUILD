@@ -98,3 +98,8 @@ format_multirun(
     starlark = ":buildifier@rule",
     visibility = ["//:__pkg__"],
 )
+
+alias(
+    name = "run_clang_format",
+    actual = ":format_C++_with_clang-format",
+)
