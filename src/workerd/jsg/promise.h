@@ -648,7 +648,8 @@ class PromiseWrapper {
       if (config.unwrapCustomThenables && isThenable(context, handle)) {
         auto paf = check(v8::Promise::Resolver::New(context));
         check(paf->Resolve(context, handle));
-        return tryUnwrap(js, context, paf->GetPromise(), (Promise<T>*)nullptr, parentObject);
+        return tryUnwrap(
+            js, context, paf->GetPromise(), static_cast<Promise<T>*>(nullptr), parentObject);
       }
 
       if constexpr (isVoid<T>()) {

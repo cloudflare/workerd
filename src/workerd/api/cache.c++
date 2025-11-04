@@ -96,8 +96,8 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
     jsRequest->shallowCopyHeadersTo(requestHeaders);
     requestHeaders.setPtr(context.getHeaderIds().cacheControl, "only-if-cached");
-    auto nativeRequest = httpClient->request(
-        kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
+    auto nativeRequest = httpClient->request(kj::HttpMethod::GET, validateUrl(jsRequest->getUrl()),
+        requestHeaders, static_cast<uint64_t>(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
         [httpClient = kj::mv(httpClient), &context](jsg::Lock& js,
@@ -508,8 +508,8 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     //   origin's cache is not a security flaw (that's what this very API is implementing after
     //   all) so it all lines up nicely.
     requestHeaders.addPtrPtr("X-Real-IP"_kj, "127.0.0.1"_kj);
-    auto nativeRequest = httpClient->request(
-        kj::HttpMethod::PURGE, validateUrl(jsRequest->getUrl()), requestHeaders, uint64_t(0));
+    auto nativeRequest = httpClient->request(kj::HttpMethod::PURGE,
+        validateUrl(jsRequest->getUrl()), requestHeaders, static_cast<uint64_t>(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
         [httpClient = kj::mv(httpClient)](jsg::Lock&, kj::HttpClient::Response&& response) -> bool {

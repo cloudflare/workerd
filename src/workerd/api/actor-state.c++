@@ -370,7 +370,7 @@ kj::Maybe<DurableObjectStorageOperations::CompiledListOptions> DurableObjectStor
         // Calculate the first key that sorts after all keys with the given prefix.
         kj::Vector<char> keyAfterPrefix(prefix.size());
         keyAfterPrefix.addAll(prefix);
-        while (!keyAfterPrefix.empty() && (byte)keyAfterPrefix.back() == 0xff) {
+        while (!keyAfterPrefix.empty() && static_cast<byte>(keyAfterPrefix.back()) == 0xff) {
           keyAfterPrefix.removeLast();
         }
         if (keyAfterPrefix.empty()) {
@@ -1207,7 +1207,7 @@ void DurableObjectState::setHibernatableWebSocketEventTimeout(jsg::Optional<uint
     return;
   }
 
-  auto t = timeoutMs.orDefault((uint32_t)0);
+  auto t = timeoutMs.orDefault(static_cast<uint32_t>(0));
 
   // We want to limit the duration of an event to a maximum of 7 days (604800 * 1000 millis).
   JSG_REQUIRE(t <= 604800 * 1000, Error, "Event timeout should not exceed 604800000 ms.");

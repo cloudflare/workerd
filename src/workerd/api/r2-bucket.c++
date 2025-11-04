@@ -1209,10 +1209,10 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
           KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
-      traceContext.userSpan.setTag(
-          "cloudflare.r2.response.returned_objects"_kjc, int64_t(result.objects.size()));
+      traceContext.userSpan.setTag("cloudflare.r2.response.returned_objects"_kjc,
+          static_cast<int64_t>(result.objects.size()));
       traceContext.userSpan.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
-          int64_t(result.delimitedPrefixes.size()));
+          static_cast<int64_t>(result.delimitedPrefixes.size()));
       traceContext.userSpan.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
       KJ_IF_SOME(cursor, result.cursor) {
         traceContext.userSpan.setTag("cloudflare.r2.response.cursor"_kjc, kj::str(cursor));

@@ -1841,7 +1841,7 @@ class StdioFile final: public File {
       buffer = buffer.first(MAX_WRITE_SIZE);
     }
 
-    if (buffer.size() == 0) return uint32_t(0);
+    if (buffer.size() == 0) return static_cast<uint32_t>(0);
 
     // We ignore the offset here. All writes are assumed to be appends.
     if (type != VirtualFileSystem::Stdio::IN) {

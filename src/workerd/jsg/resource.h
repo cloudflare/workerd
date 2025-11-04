@@ -872,7 +872,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method, isConte
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -898,7 +898,7 @@ struct SetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), method, 
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -935,7 +935,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Arg), method,
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -983,7 +983,7 @@ struct PropertySetterCallback<TypeWrapper, methodName, void (T::*)(Lock&, Arg), 
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
       // V8 no longer supports AccessorSignature, so we must manually verify `this`'s type.
-      if (!isContext && !wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!isContext && !wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, isContext>(context, obj);
@@ -1187,7 +1187,7 @@ struct WildcardPropertyCallbacks<TypeWrapper,
       auto context = isolate->GetCurrentContext();
       auto obj = info.This();
       auto& wrapper = TypeWrapper::from(isolate);
-      if (!wrapper.getTemplate(isolate, (T*)nullptr)->HasInstance(obj)) {
+      if (!wrapper.getTemplate(isolate, static_cast<T*>(nullptr))->HasInstance(obj)) {
         throwTypeError(isolate, kIllegalInvocation);
       }
       auto& self = extractInternalPointer<T, false>(context, obj);
@@ -1241,7 +1241,8 @@ struct ResourceTypeBuilder {
 
   template <typename Type>
   inline void registerInherit() {
-    constructor->Inherit(typeWrapper.template getTemplate<isContext>(isolate, (Type*)nullptr));
+    constructor->Inherit(
+        typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
   }
 
   template <const char* name>
@@ -1517,7 +1518,7 @@ struct ResourceTypeBuilder {
     static_assert(
         hasGetTemplate, "Type must be listed in JSG_DECLARE_ISOLATE_TYPE to be declared nested.");
 
-    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, (Type*)nullptr));
+    prototype->Set(isolate, name, typeWrapper.getTemplate(isolate, static_cast<Type*>(nullptr)));
   }
 
   inline void registerTypeScriptRoot() { /* only needed for RTTI */ }
@@ -1656,7 +1657,7 @@ class ResourceWrapper {
           static_cast<T&>(object).jsgInitReflection(wrapper);
         };
       }
-      return {wrapper.getTemplate(isolate, (T*)nullptr), rinit};
+      return {wrapper.getTemplate(isolate, static_cast<T*>(nullptr)), rinit};
     });
 
     if constexpr (static_cast<uint>(T::jsgSerializeTag) !=
@@ -1859,7 +1860,7 @@ class ResourceWrapper {
       v8::EscapableHandleScope scope(isolate);
 
       v8::Local<v8::FunctionTemplate> constructor;
-      if constexpr (!isContext && hasConstructorMethod((T*)nullptr)) {
+      if constexpr (!isContext && hasConstructorMethod(static_cast<T*>(nullptr))) {
         constructor =
             v8::FunctionTemplate::New(isolate, &ConstructorCallback<TypeWrapper, T>::callback);
       } else {

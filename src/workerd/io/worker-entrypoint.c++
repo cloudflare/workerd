@@ -474,7 +474,7 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
         }
         if (!wrappedResponse->isSent()) {
           kj::HttpHeaders headers(threadContext.getHeaderTable());
-          wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+          wrappedResponse->send(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
           KJ_IF_SOME(t, workerTracer) {
             t.setReturn(kj::none, tracing::FetchResponseInfo(500));
           }
@@ -497,9 +497,9 @@ kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
       if (!wrappedResponse->isSent()) {
         kj::HttpHeaders headers(threadContext.getHeaderTable());
         if (exception.getType() == kj::Exception::Type::OVERLOADED) {
-          wrappedResponse->send(503, "Service Unavailable", headers, uint64_t(0));
+          wrappedResponse->send(503, "Service Unavailable", headers, static_cast<uint64_t>(0));
         } else {
-          wrappedResponse->send(500, "Internal Server Error", headers, uint64_t(0));
+          wrappedResponse->send(500, "Internal Server Error", headers, static_cast<uint64_t>(0));
         }
         KJ_IF_SOME(t, workerTracer) {
           t.setReturn(

@@ -617,7 +617,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::setHibernatableEventTimeout(
     kj::Promise<void> event, kj::Maybe<uint32_t> eventTimeoutMs) {
   // If we have a maximum event duration timeout set, we should prevent the actor from running
   // for more than the user selected duration.
-  auto timeoutMs = eventTimeoutMs.orDefault((uint32_t)0);
+  auto timeoutMs = eventTimeoutMs.orDefault(static_cast<uint32_t>(0));
   if (timeoutMs > 0) {
     return event.exclusiveJoin(eventTimeoutPromise(timeoutMs));
   }
