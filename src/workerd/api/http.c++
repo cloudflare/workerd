@@ -715,10 +715,21 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
     }
   }
 
-  auto bodyStream = kj::heap<BodyBufferInputStream>(buffer.clone(js));
+  auto buf = buffer.clone(js);
 
-  return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)), kj::mv(buffer),
-    kj::mv(contentType)};
+  if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
+    auto memStream = newMemoryInputStream(buf.view, kj::heap(kj::mv(buf.ownBytes)));
+    auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+
+    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs)), kj::mv(buffer),
+      kj::mv(contentType)};
+  } else {
+    // TODO(cleanup): Remove once the Autogate is removed.
+    auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(buf));
+
+    return {js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream)), kj::mv(buffer),
+      kj::mv(contentType)};
+  }
 }
 
 Body::Body(jsg::Lock& js, kj::Maybe<ExtractedBody> init, Headers& headers)
@@ -765,8 +776,15 @@ void Body::rewindBody(jsg::Lock& js) {
 
   KJ_IF_SOME(i, impl) {
     auto bufferCopy = KJ_ASSERT_NONNULL(i.buffer).clone(js);
-    auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(bufferCopy));
-    i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream));
+    if (util::Autogate::isEnabled(util::AutogateKey::BODY_BUFFER_INPUT_STREAM_REPLACEMENT)) {
+      auto memStream = newMemoryInputStream(bufferCopy.view, kj::heap(kj::mv(bufferCopy.ownBytes)));
+      auto rs = newSystemStream(kj::mv(memStream), StreamEncoding::IDENTITY);
+      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(rs));
+    } else {
+      // TODO(cleanup): Remove once the Autogate is removed.
+      auto bodyStream = kj::heap<BodyBufferInputStream>(kj::mv(bufferCopy));
+      i.stream = js.alloc<ReadableStream>(IoContext::current(), kj::mv(bodyStream));
+    }
   }
 }
 
