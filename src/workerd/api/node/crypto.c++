@@ -1142,7 +1142,46 @@ jsg::Optional<CryptoImpl::CipherInfo> CryptoImpl::getCipherInfo(
     };
   }
 
+  // If the cipher can't be found it might be an AEAD, which is handled using a different BoringSSL
+  // interface
+  KJ_SWITCH_ONEOF(nameOrNid) {
+    KJ_CASE_ONEOF(nid, int) {
+      // Can't safely find an AEAD by nid in boringssl
+      return kj::none;
+    }
+
+    KJ_CASE_ONEOF(name, kj::String) {
+      if (auto aead = ncrypto::Aead::FromName(std::string_view(name.begin(), name.size()))) {
+        auto modeView = aead.getModeLabel();
+        // The copy is strictly necessary
+        kj::String mode = kj::str(kj::heapArray<char>(modeView.data(), modeView.size()));
+
+        return CipherInfo{.name = kj::mv(name),
+          .nid = aead.getNid(),
+          .blockSize = aead.getBlockSize(),
+          .ivLength = aead.getNonceLength(),
+          .keyLength = aead.getKeyLength(),
+          .mode = kj::mv(mode)};
+      }
+    }
+  }
+
   return kj::none;
+}
+
+kj::ArrayPtr<kj::StringPtr> CryptoImpl::getCiphers() {
+  // Cipher names are stored as string literals either within boringssl or ncrypto, so we can
+  // safely return pointers to them.
+  static kj::Array<kj::StringPtr> allCiphers = []() {
+    kj::Vector<kj::StringPtr> allCiphers;
+    ncrypto::Cipher::ForEach([&](const auto& name) { allCiphers.add(kj::StringPtr(name)); });
+
+    ncrypto::Aead::ForEach(
+        [&](const auto& name) { allCiphers.add(kj::StringPtr(name.data(), name.size())); });
+    return allCiphers.releaseAsArray();
+  }();
+
+  return allCiphers;
 }
 
 #pragma endregion  // Cipher/Decipher

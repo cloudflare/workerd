@@ -406,6 +406,8 @@ class CryptoImpl final: public jsg::Object {
   jsg::Optional<CipherInfo> getCipherInfo(
       kj::OneOf<kj::String, int> nameOrNid, GetCipherInfoOptions options);
 
+  kj::ArrayPtr<kj::StringPtr> getCiphers();
+
   // SPKAC
   bool verifySpkac(kj::Array<const kj::byte> input);
   kj::Maybe<jsg::BufferSource> exportPublicKey(jsg::Lock& js, kj::Array<const kj::byte> input);
@@ -491,6 +493,7 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(privateEncrypt);
     JSG_METHOD(privateDecrypt);
     JSG_METHOD(getCipherInfo);
+    JSG_METHOD(getCiphers);
   }
 };
 

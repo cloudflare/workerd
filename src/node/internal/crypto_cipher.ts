@@ -702,3 +702,5 @@ export function getCipherInfo(
 
   return cryptoImpl.getCipherInfo(nameOrId, options);
 }
+
+export const getCiphers = cryptoImpl.getCiphers.bind(cryptoImpl);

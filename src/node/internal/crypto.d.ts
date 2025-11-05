@@ -179,6 +179,8 @@ export function getCipherInfo(
   options: GetCipherInfoOptions
 ): CipherInfo | undefined;
 
+export function getCiphers(): string[];
+
 export type ArrayLike = ArrayBuffer | string | Buffer | ArrayBufferView;
 
 export class HmacHandle {
