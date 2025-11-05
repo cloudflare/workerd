@@ -11,6 +11,7 @@
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/io/io-timers.h>
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace.h>
@@ -747,6 +748,9 @@ class Worker::Lock {
 
   // Get the C++ object representing the global scope.
   api::ServiceWorkerGlobalScope& getGlobalScope();
+
+  // Get the timeout ID generator from this worker's ServiceWorkerGlobalScope.
+  TimeoutId::Generator& getTimeoutIdGenerator();
 
   // Get the opaque storage key to use for recording trace information in async contexts.
   jsg::AsyncContextFrame::StorageKey& getTraceAsyncContextKey();
