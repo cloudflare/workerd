@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
     unsafe extern "C++" {
@@ -19,13 +21,31 @@ pub mod ffi {
             value: usize, /* GlobalFunctionTemplate */
         ) -> usize /* LocalFunctionTemplate */;
 
+        pub unsafe fn new_local_number(isolate: *mut Isolate, value: f64) -> usize /* LocalValue */;
+
+        pub unsafe fn new_local_string(isolate: *mut Isolate, value: &str) -> usize /* LocalValue */;
+
         pub unsafe fn new_local_object(isolate: *mut Isolate) -> usize /* LocalObject */;
         pub unsafe fn set_local_object_property(
             isolate: *mut Isolate,
             object: usize, /* LocalObject */
-            key: *const u8,
+            key: &str,
             value: usize, /* LocalValue */
         );
+
+        pub unsafe fn set_return_value(
+            args: *mut FunctionCallbackInfo,
+            value: usize, /* LocalValue */
+        );
+
+        pub unsafe fn local_to_global_value(
+            isolate: *mut Isolate,
+            value: usize, /* LocalValue */
+        ) -> usize /* GlobalValue */;
+        pub unsafe fn global_to_local_value(
+            isolate: *mut Isolate,
+            value: usize, /* GlobalValue */
+        ) -> usize /* LocalValue */;
     }
 }
 
@@ -35,39 +55,62 @@ trait IsolateMember: Drop {
     fn init(&mut self, isolate: &mut Lock);
 }
 
-pub struct LocalValue(usize);
+pub struct LocalValue<'a>(usize, PhantomData<&'a ()>);
 
-impl LocalValue {
-    pub unsafe fn from_ffi(value: usize) -> Self {
-        LocalValue(value)
+impl<'a> LocalValue<'a> {
+    pub unsafe fn from_ffi(lock: &'a mut Lock, value: usize) -> Self {
+        LocalValue(value, PhantomData)
     }
 
     pub unsafe fn to_ffi(self) -> usize {
         self.0
     }
 
-    pub fn from_string(s: String) -> Self {
-        todo!()
+    pub fn from_string(lock: &'a mut Lock, value: &str) -> Self {
+        unsafe { Self::from_ffi(lock, ffi::new_local_string(lock.get_isolate(), value)) }
     }
 
-    pub fn from_u8(u: u8) -> Self {
-        todo!()
+    pub fn from_f64(lock: &'a mut Lock, value: f64) -> Self {
+        unsafe { Self::from_ffi(lock, ffi::new_local_number(lock.get_isolate(), value)) }
     }
 
-    pub fn from_u32(u: u32) -> Self {
-        todo!()
+    pub fn to_global(&self, lock: &'a mut Lock) -> GlobalValue {
+        unsafe { GlobalValue::from_ffi(ffi::local_to_global_value(lock.get_isolate(), self.0)) }
     }
 }
 
-pub struct LocalObject(usize);
+impl<'a> From<LocalObject<'a>> for LocalValue<'a> {
+    fn from(value: LocalObject<'a>) -> Self {
+        LocalValue(value.0, PhantomData)
+    }
+}
 
-impl LocalObject {
-    pub unsafe fn new(lock: &Lock) -> Self {
-        LocalObject(unsafe { ffi::new_local_object(lock.get_isolate()) })
+pub struct LocalObject<'a>(usize, PhantomData<&'a ()>);
+
+impl<'a> LocalObject<'a> {
+    pub unsafe fn new(lock: &'a Lock) -> Self {
+        LocalObject(
+            unsafe { ffi::new_local_object(lock.get_isolate()) },
+            PhantomData,
+        )
     }
 
-    pub unsafe fn set(&mut self, lock: &Lock, key: &str, value: LocalValue) {
-        unsafe { ffi::set_local_object_property(lock.get_isolate(), self.0, key.as_ptr(), value.0) }
+    pub unsafe fn set(&mut self, lock: &'a Lock, key: &str, value: LocalValue) {
+        unsafe { ffi::set_local_object_property(lock.get_isolate(), self.0, key, value.0) }
+    }
+}
+
+pub struct GlobalValue(usize);
+
+impl GlobalValue {
+    pub unsafe fn from_ffi(value: usize) -> Self {
+        GlobalValue(value)
+    }
+
+    pub fn to_local<'a>(&self, lock: &'a mut Lock) -> LocalValue<'a> {
+        unsafe {
+            LocalValue::from_ffi(lock, ffi::global_to_local_value(lock.get_isolate(), self.0))
+        }
     }
 }
 
@@ -129,7 +172,13 @@ impl FunctionCallbackInfo {
         FunctionCallbackInfo(info)
     }
 
-    pub fn get_this(&self) -> LocalValue {
-        unsafe { LocalValue::from_ffi(ffi::get_this(self.0)) }
+    pub fn get_this<'a>(&self, lock: &'a mut Lock) -> LocalValue<'a> {
+        unsafe { LocalValue::from_ffi(lock, ffi::get_this(self.0)) }
+    }
+
+    pub fn set_return_value(&self, value: LocalValue) {
+        unsafe {
+            ffi::set_return_value(self.0, value.0);
+        }
     }
 }

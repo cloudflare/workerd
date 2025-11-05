@@ -112,21 +112,26 @@ pub fn create_resource_constructor<R: Resource>(lock: &mut v8::Lock) -> v8::Glob
 }
 
 // TODO: R needs to be a non-empty struct.
-pub fn wrap_resource<R: Resource, W: ResourceWrapper>(
-    lock: &mut v8::Lock,
-    resource: R,
+pub unsafe fn wrap_resource<'a, R: Resource + 'a, W: ResourceWrapper>(
+    lock: &'a mut v8::Lock,
+    resource: *mut R,
     wrapper: &W,
-) -> v8::LocalValue {
-    let constructor = wrapper.get_constructor(lock);
-    let resource = Box::new(resource);
-    let resource = Box::into_raw(resource);
-    dbg!(resource);
-    unsafe {
-        v8::LocalValue::from_ffi(ffi::wrap_resource(
-            lock.get_isolate(),
-            resource as usize,
-            constructor.to_ffi(),
-        ))
+) -> v8::LocalValue<'a> {
+    let r = unsafe { &mut *resource };
+    let instance = r.js_instance(lock);
+    match instance {
+        Some(val) => val,
+        None => {
+            let constructor = wrapper.get_constructor(lock);
+            let instance = unsafe {
+                v8::LocalValue::from_ffi(
+                    lock,
+                    ffi::wrap_resource(lock.get_isolate(), resource as usize, constructor.to_ffi()),
+                )
+            };
+            r.set_js_instance(lock, &instance);
+            instance
+        }
     }
 }
 
@@ -271,12 +276,14 @@ pub trait Resource: Type {
     fn members() -> Vec<Member<Self>>
     where
         Self: Sized;
+    fn js_instance<'a>(&self, lock: &'a mut v8::Lock) -> Option<v8::LocalValue<'a>>;
+    fn set_js_instance<'a>(&mut self, lock: &'a mut v8::Lock, instance: &v8::LocalValue<'a>);
 }
 
 pub trait ResourceWrapper {
-    fn get_constructor(&self, isolate: &mut v8::Lock) -> v8::LocalFunctionTemplate;
+    fn get_constructor<'a>(&self, isolate: &'a mut v8::Lock) -> v8::LocalFunctionTemplate;
 }
 
 pub trait Struct: Type {
-    fn wrap(&self, lock: &mut v8::Lock) -> v8::LocalValue;
+    fn wrap(&self, lock: &v8::Lock) -> v8::LocalValue;
 }

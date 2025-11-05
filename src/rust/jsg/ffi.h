@@ -108,6 +108,16 @@ size_t unwrap_resource(Isolate* isolate, LocalValue value);
 LocalObject new_local_object(Isolate* isolate);
 
 void set_local_object_property(
-    Isolate* isolate, LocalObject object, const char* key, LocalValue value);
+    Isolate* isolate, LocalObject object, ::rust::Str key, LocalValue value);
+
+void set_return_value(FunctionCallbackInfo* args, LocalValue value);
+
+LocalValue new_local_number(Isolate* isolate, double value);
+
+LocalValue new_local_string(Isolate* isolate, ::rust::Str value);
+
+GlobalValue local_to_global_value(Isolate* isolate, LocalValue value);
+
+LocalValue global_to_local_value(Isolate* isolate, GlobalValue value);
 
 }  // namespace workerd::rust::jsg

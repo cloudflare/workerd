@@ -114,10 +114,39 @@ LocalObject new_local_object(Isolate* isolate) {
 }
 
 void set_local_object_property(
-    Isolate* isolate, LocalObject object, const char* key, LocalValue value) {
+    Isolate* isolate, LocalObject object, ::rust::Str key, LocalValue value) {
   auto v8_obj = local_from_ffi<v8::Object>(object);
-  v8_obj->Set(isolate->GetCurrentContext(), v8::String::NewFromUtf8(isolate, key).ToLocalChecked(),
+  [[maybe_unused]] auto result = v8_obj->Set(isolate->GetCurrentContext(),
+      v8::String::NewFromUtf8(isolate, key.cbegin(), v8::NewStringType::kInternalized, key.size())
+          .ToLocalChecked(),
       local_from_ffi<v8::Value>(value));
+}
+
+void set_return_value(FunctionCallbackInfo* args, LocalValue value) {
+  args->GetReturnValue().Set(local_from_ffi<v8::Value>(value));
+}
+
+LocalValue new_local_number(Isolate* isolate, double value) {
+  v8::Local<v8::Number> val = v8::Number::New(isolate, value);
+  return to_ffi(kj::mv(val));
+}
+
+LocalValue new_local_string(Isolate* isolate, ::rust::Str value) {
+  v8::Local<v8::String> val =
+      v8::String::NewFromUtf8(isolate, value.cbegin(), v8::NewStringType::kNormal, value.size())
+          .ToLocalChecked();
+  return to_ffi(kj::mv(val));
+}
+
+GlobalValue local_to_global_value(Isolate* isolate, LocalValue value) {
+  v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(value));
+  return to_ffi(kj::mv(global));
+}
+
+LocalValue global_to_local_value(Isolate* isolate, GlobalValue value) {
+  v8::Global<v8::Value> glbl = global_from_ffi<v8::Value>(value);
+  v8::Local<v8::Value> local = v8::Local<v8::Value>::New(isolate, glbl);
+  return to_ffi(kj::mv(local));
 }
 
 }  // namespace workerd::rust::jsg

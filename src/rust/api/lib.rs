@@ -30,13 +30,15 @@ mod ffi {
 pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(registry, "node-internal:dns", |isolate| unsafe {
         let mut isolate = jsg::v8::Lock::from_isolate(isolate);
-        let dns_util = DnsUtil { foo: 'a' };
+        let dns_util = DnsUtil { js: None };
+        let dns_util = Box::new(dns_util);
+        let dns_util = Box::into_raw(dns_util);
         let dns_util_wrapper = DnsUtilWrapper {
             constructor: jsg::create_resource_constructor::<DnsUtil>(&mut isolate),
         };
-        let x = Box::new(DnsUtil { foo: 'a' });
-        let x = Box::into_raw(x);
-        dbg!(x);
-        jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).to_ffi()
+        let lhs = jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).to_ffi();
+        let rhs = jsg::wrap_resource(&mut isolate, dns_util, &dns_util_wrapper).to_ffi();
+        assert_eq!(lhs, rhs);
+        rhs
     });
 }
