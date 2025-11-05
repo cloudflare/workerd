@@ -5,6 +5,7 @@
 #include "container.h"
 
 #include <workerd/api/http.h>
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 
 namespace workerd::api {
@@ -17,6 +18,7 @@ Container::Container(rpc::Container::Client rpcClient, bool running)
       running(running) {}
 
 void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions) {
+  auto flags = FeatureFlags::get(js);
   JSG_REQUIRE(!running, Error, "start() cannot be called on a container that is already running.");
 
   StartupOptions options = kj::mv(maybeOptions).orDefault({});
@@ -50,6 +52,13 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
   IoContext::current().addTask(req.sendIgnoringResult());
 
   running = true;
+
+  if (flags.getWorkerdExperimental()) {
+    KJ_IF_SOME(hardTimeoutMs, options.hardTimeout) {
+      JSG_REQUIRE(hardTimeoutMs > 0, RangeError, "Hard timeout must be greater than 0");
+      req.setHardTimeoutMs(hardTimeoutMs);
+    }
+  }
 }
 
 jsg::Promise<void> Container::setInactivityTimeout(jsg::Lock& js, int64_t durationMs) {

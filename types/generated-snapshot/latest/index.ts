@@ -3747,6 +3747,7 @@ export interface ContainerStartupOptions {
   entrypoint?: string[];
   enableInternet: boolean;
   env?: Record<string, string>;
+  hardTimeout?: number | bigint;
 }
 /**
  * The **`MessagePort`** interface of the Channel Messaging API represents one of the two ports of a MessageChannel, allowing messages to be sent from one port and listening out for them arriving at the other.
