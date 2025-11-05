@@ -4,15 +4,15 @@
   "scripts": {},
   "dependencies": {
     "prettier": "^3.6.2",
-    "typescript": "5.9.2"
+    "typescript": "5.9.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.37.0",
-    "@types/node": "^24.7.2",
+    "@eslint/js": "^9.38.0",
+    "@types/node": "^24.8.1",
     "capnp-es": "0.0.11",
     "chrome-remote-interface": "^0.33.3",
-    "esbuild": "^0.25.10",
-    "eslint": "^9.37.0",
+    "esbuild": "^0.25.11",
+    "eslint": "^9.38.0",
     "expect-type": "^1.2.2",
     "typescript-eslint": "^8.46.1"
   },
