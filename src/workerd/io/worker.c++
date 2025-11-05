@@ -2292,12 +2292,11 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
       // Walk the prototype chain.
       jsg::JsValue proto = startProto;
       for (;;) {
-        if (proto.tryCast<jsg::JsObject>() == kj::none) {
+        auto protoObj = KJ_UNWRAP_OR(proto.tryCast<jsg::JsObject>(), {
           errorReporter.addError(
               kj::str("Exported value's prototype chain does not end in Object."));
           return;
-        }
-        auto protoObj = KJ_ASSERT_NONNULL(proto.tryCast<jsg::JsObject>());
+        });
         if (protoObj == prototypeOfObject) {
           // Reached the prototype for `Object`. Stop here.
           break;
